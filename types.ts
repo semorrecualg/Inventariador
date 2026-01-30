@@ -1,4 +1,12 @@
 
+export interface User {
+  username: string;
+  email: string;
+  password?: string;
+  isAdmin?: boolean;
+  mustChangePassword?: boolean;
+}
+
 export interface Asset {
   [key: string]: any;
   id: string | number;
@@ -17,11 +25,6 @@ export interface Asset {
   TAG_ADOCAO?: string; // "ADOTADO" ou vazio
 }
 
-export interface User {
-  username: string;
-  email: string;
-}
-
 export enum AppScreen {
   LOGIN = 'LOGIN',
   REGISTER = 'REGISTER',
@@ -32,7 +35,9 @@ export enum AppScreen {
   SETTINGS = 'SETTINGS',
   INVENTORY = 'INVENTORY',
   CONSULTATION = 'CONSULTATION',
-  COMPANY_SELECTION = 'COMPANY_SELECTION'
+  COMPANY_SELECTION = 'COMPANY_SELECTION',
+  USER_MANAGEMENT = 'USER_MANAGEMENT',
+  CHANGE_PASSWORD = 'CHANGE_PASSWORD'
 }
 
 export interface InventoryState {

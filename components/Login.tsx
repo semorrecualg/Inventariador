@@ -1,21 +1,29 @@
 
 import React, { useState } from 'react';
 import { User } from '../types';
-import { LogIn, UserPlus } from 'lucide-react';
+import { LogIn, UserPlus, AlertCircle } from 'lucide-react';
 
 interface LoginProps {
+  users: User[];
   onLogin: (user: User) => void;
   onGoToRegister: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
+const Login: React.FC<LoginProps> = ({ users, onLogin, onGoToRegister }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && password) {
-      onLogin({ username: email.split('@')[0].toUpperCase(), email: email.toUpperCase() });
+    setError(null);
+    
+    const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (foundUser && foundUser.password === password) {
+      onLogin(foundUser);
+    } else {
+      setError("E-mail ou senha incorretos.");
     }
   };
 
@@ -25,20 +33,27 @@ const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
         <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg rotate-3">
           <LogIn className="text-white" size={40} />
         </div>
-        <h1 className="text-3xl font-bold text-gray-900">Bem-vindo</h1>
+        <h1 className="text-3xl font-bold text-gray-900">GBR Patrimônio</h1>
         <p className="text-gray-500 mt-2">Acesse seu inventário de ativos</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="bg-red-50 text-red-600 p-4 rounded-xl text-xs font-bold flex items-center mb-4">
+            <AlertCircle size={16} className="mr-2 shrink-0" />
+            {error}
+          </div>
+        )}
+        
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
           <input 
             type="email" 
             required
             value={email}
-            onChange={(e) => setEmail(e.target.value.toUpperCase())}
-            className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 uppercase"
-            placeholder="SEU@EMAIL.COM"
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900"
+            placeholder="seu@email.com"
           />
         </div>
         <div>
@@ -61,13 +76,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
       </form>
 
       <div className="mt-8 text-center">
-        <button 
-          onClick={onGoToRegister}
-          className="text-blue-600 font-black text-xs uppercase tracking-widest hover:underline flex items-center justify-center mx-auto"
-        >
-          <UserPlus size={18} className="mr-2" />
-          Não tem conta? Cadastre-se
-        </button>
+        <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest">
+          Consulte o administrador para acesso
+        </p>
       </div>
     </div>
   );
