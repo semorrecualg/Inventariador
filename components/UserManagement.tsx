@@ -9,8 +9,11 @@ import {
   X, 
   Shield, 
   UserCircle,
-  Key,
-  Check
+  Edit3,
+  Lock,
+  Mail,
+  User as UserIcon,
+  Save
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -20,10 +23,19 @@ interface UserManagementProps {
 }
 
 const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  
+  // States para Novo Usuário
   const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+
+  // States para Edição
+  const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
 
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,26 +43,61 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     const newUser: User = {
       username: newUsername.toUpperCase(),
-      email: newEmail,
+      email: newEmail.toLowerCase(),
       password: newPassword,
       isAdmin: false,
       mustChangePassword: true
     };
 
-    setUsers(prev => [...prev, newUser]);
+    setUsers(prev => {
+      const updated = [...prev, newUser];
+      localStorage.setItem('app_users', JSON.stringify(updated));
+      return updated;
+    });
+    
     setNewUsername('');
     setNewEmail('');
     setNewPassword('');
-    setIsModalOpen(false);
+    setIsAddModalOpen(false);
+  };
+
+  const handleOpenEdit = (user: User) => {
+    setSelectedUser(user);
+    setEditUsername(user.username);
+    setEditEmail(user.email);
+    setEditPassword(user.password || '');
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser || !editUsername || !editEmail || !editPassword) return;
+
+    setUsers(prev => {
+      const updated = prev.map(u => 
+        u.email === selectedUser.email 
+          ? { ...u, username: editUsername.toUpperCase(), email: editEmail.toLowerCase(), password: editPassword } 
+          : u
+      );
+      localStorage.setItem('app_users', JSON.stringify(updated));
+      return updated;
+    });
+
+    setIsEditModalOpen(false);
+    setSelectedUser(null);
   };
 
   const removeUser = (email: string) => {
     if (email.toLowerCase() === "semorr@gmail.com") {
-      alert("Não é possível remover o administrador mestre.");
+      alert("Operação negada: O administrador mestre não pode ser excluído.");
       return;
     }
     if (confirm("Deseja realmente remover este acesso?")) {
-      setUsers(prev => prev.filter(u => u.email !== email));
+      setUsers(prev => {
+        const updated = prev.filter(u => u.email !== email);
+        localStorage.setItem('app_users', JSON.stringify(updated));
+        return updated;
+      });
     }
   };
 
@@ -63,124 +110,137 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             <ArrowLeft size={20} />
           </button>
           <div>
-            <h2 className="text-xl font-black text-gray-900 uppercase leading-none">Usuários</h2>
-            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">Gestão de Acessos</p>
+            <h2 className="text-xl font-black text-gray-900 uppercase leading-none">Gestão de Usuários</h2>
+            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">Clique duplo para editar dados</p>
           </div>
         </div>
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => setIsAddModalOpen(true)}
           className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-90"
         >
           <Plus size={24} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-3 pb-32">
+      <div className="flex-1 overflow-y-auto p-6 space-y-3 pb-32 no-scrollbar">
         {users.map((u) => (
           <div 
             key={u.email} 
-            className="bg-white p-4 rounded-[2rem] border border-gray-100 shadow-sm flex items-center justify-between group"
+            onDoubleClick={() => handleOpenEdit(u)}
+            className="bg-white p-5 rounded-[2.5rem] border border-gray-100 shadow-sm flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer hover:border-blue-200"
           >
-            <div className="flex items-center space-x-4">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${u.isAdmin ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-400'}`}>
-                {u.isAdmin ? <Shield size={24} /> : <UserCircle size={24} />}
+            <div className="flex items-center space-x-4 flex-1 min-w-0">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${u.isAdmin ? 'bg-amber-50 text-amber-500' : 'bg-blue-50 text-blue-500'}`}>
+                {u.isAdmin ? <Shield size={28} /> : <UserCircle size={28} />}
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center space-x-2">
-                  <span className="font-black text-xs uppercase text-gray-900 tracking-tight">{u.username}</span>
-                  {u.mustChangePassword && (
-                    <span className="bg-amber-100 text-amber-600 text-[6px] font-black px-1.5 py-0.5 rounded-full uppercase">Senha Temp.</span>
-                  )}
+                  <span className="font-black text-sm uppercase text-gray-900 tracking-tight truncate">{u.username}</span>
+                  <span className="bg-gray-100 text-gray-400 text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">LOGIN ID</span>
                 </div>
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{u.email}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate">{u.email}</p>
               </div>
             </div>
             
-            {!u.isAdmin && (
-              <button 
-                onClick={() => removeUser(u.email)}
-                className="w-10 h-10 flex items-center justify-center text-gray-300 hover:text-red-500 transition-colors"
-              >
-                <Trash2 size={18} />
-              </button>
-            )}
+            <div className="flex items-center space-x-2 ml-4">
+              <div className="hidden group-hover:flex items-center space-x-1">
+                 <button onClick={() => handleOpenEdit(u)} className="w-10 h-10 flex items-center justify-center text-blue-500 bg-blue-50 rounded-xl transition-all">
+                  <Edit3 size={18} />
+                </button>
+                {!u.isAdmin && (
+                  <button onClick={(e) => { e.stopPropagation(); removeUser(u.email); }} className="w-10 h-10 flex items-center justify-center text-red-500 bg-red-50 rounded-xl transition-all">
+                    <Trash2 size={18} />
+                  </button>
+                )}
+              </div>
+              <ChevronRight size={16} className="text-gray-200 group-hover:hidden" />
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Modal Novo Usuário */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white w-full rounded-[2.5rem] p-8 shadow-2xl relative animate-bounceIn">
-            <button 
-              onClick={() => setIsModalOpen(false)}
-              className="absolute top-6 right-6 text-gray-400"
-            >
-              <X size={24} />
-            </button>
-            
+      {/* Modal de Edição */}
+      {isEditModalOpen && selectedUser && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-bounceIn overflow-hidden">
+            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-8 right-8 text-gray-400 hover:text-black transition-colors"><X size={24} /></button>
             <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 mx-auto mb-4">
-                <Plus size={32} />
-              </div>
-              <h3 className="text-xl font-black text-gray-900 uppercase">Novo Acesso</h3>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Defina as credenciais iniciais</p>
+              <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">Editar Credenciais</h3>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Username e Senha de Acesso</p>
             </div>
-
-            <form onSubmit={handleAddUser} className="space-y-4">
+            <form onSubmit={handleSaveEdit} className="space-y-5">
               <div>
-                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-2">Username</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="EX: JOAO.SILVA"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value.toUpperCase())}
-                  className="w-full px-4 py-3.5 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
-                />
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">Username de Login</label>
+                <div className="relative">
+                  <input type="text" required value={editUsername} onChange={(e) => setEditUsername(e.target.value.toUpperCase())} className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm uppercase transition-all" />
+                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                </div>
               </div>
               <div>
-                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-2">E-mail</label>
-                <input 
-                  type="email" 
-                  required
-                  placeholder="usuario@empresa.com"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
-                />
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">Senha</label>
+                <div className="relative">
+                  <input type="text" required value={editPassword} onChange={(e) => setEditPassword(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm transition-all" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                </div>
               </div>
               <div>
-                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-2">Senha Inicial</label>
-                <input 
-                  type="password" 
-                  required
-                  placeholder="••••••••"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
-                />
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">E-mail</label>
+                <div className="relative">
+                  <input type="email" required value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm transition-all" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                </div>
               </div>
-              
-              <div className="bg-blue-50 p-4 rounded-2xl flex items-start space-x-3 mb-6">
-                <Key size={16} className="text-blue-600 shrink-0 mt-0.5" />
-                <p className="text-[9px] font-bold text-blue-700 uppercase leading-relaxed">
-                  O usuário será obrigado a alterar esta senha no primeiro login para maior segurança.
-                </p>
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-blue-100 active:scale-95 transition-all"
-              >
-                Criar Acesso
+              <button type="submit" className="w-full py-5 bg-gray-900 text-white rounded-[1.8rem] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all mt-4 flex items-center justify-center space-x-2">
+                <Save size={18} />
+                <span>Atualizar Acesso</span>
               </button>
             </form>
           </div>
         </div>
       )}
+
+      {/* Modal Novo Usuário */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-bounceIn overflow-hidden">
+            <button onClick={() => setIsAddModalOpen(false)} className="absolute top-8 right-8 text-gray-400 hover:text-black transition-colors"><X size={24} /></button>
+            <div className="text-center mb-8">
+              <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">Novo Inventariante</h3>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Criação de Username de Acesso</p>
+            </div>
+            <form onSubmit={handleAddUser} className="space-y-5">
+              <div>
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">Username</label>
+                <input type="text" required placeholder="EX: PEDRO.GBR" value={newUsername} onChange={(e) => setNewUsername(e.target.value.toUpperCase())} className="w-full px-5 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm transition-all" />
+              </div>
+              <div>
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">E-mail</label>
+                <input type="email" required placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-5 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm transition-all" />
+              </div>
+              <div>
+                <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-2">Senha</label>
+                <input type="password" required placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-5 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm transition-all" />
+              </div>
+              <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[1.8rem] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-100 active:scale-95 transition-all mt-4">
+                Confirmar Cadastro
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div className="p-8 bg-white border-t border-gray-100 flex flex-col items-center">
+        <p className="text-[9px] font-black text-gray-200 uppercase tracking-[0.5em] mb-1">GBR Inteligência Patrimonial</p>
+      </div>
     </div>
   );
 };
+
+// Reutilização do componente de seta para o menu
+const ChevronRight = ({ size, className }: { size: number, className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="m9 18 6-6-6-6"/>
+  </svg>
+);
 
 export default UserManagement;
