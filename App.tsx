@@ -17,8 +17,22 @@ import * as XLSX from 'xlsx';
 const ADMIN_EMAIL = "semorr@gmail.com";
 
 const App: React.FC = () => {
-  const [history, setHistory] = useState<AppScreen[]>([AppScreen.LOGIN]);
-  const [user, setUser] = useState<User | null>(null);
+  // Recuperação de Histórico e Sessão
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('app_current_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [history, setHistory] = useState<AppScreen[]>(() => {
+    const saved = localStorage.getItem('app_screen_history');
+    const recovered = saved ? JSON.parse(saved) : [AppScreen.LOGIN];
+    // Se não tiver usuário, força login, exceto se estiver registrando
+    if (!localStorage.getItem('app_current_user') && recovered[recovered.length-1] !== AppScreen.REGISTER) {
+      return [AppScreen.LOGIN];
+    }
+    return recovered;
+  });
+
   const [selectedCompany, setSelectedCompany] = useState<string | null>(() => {
     return localStorage.getItem('app_selected_company');
   });
@@ -26,20 +40,10 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('app_users');
     let userList: User[] = saved ? JSON.parse(saved) : [];
-    
-    // Inicialização ou Garantia do usuário MASTER
     const adminIndex = userList.findIndex(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
     if (adminIndex === -1) {
-      userList.push({ 
-        username: "ADMIN GBR", 
-        email: ADMIN_EMAIL, 
-        password: "admin", 
-        isAdmin: true, 
-        mustChangePassword: false 
-      });
+      userList.push({ username: "ADMIN GBR", email: ADMIN_EMAIL, password: "admin", isAdmin: true, mustChangePassword: false });
       localStorage.setItem('app_users', JSON.stringify(userList));
-    } else {
-      userList[adminIndex].isAdmin = true;
     }
     return userList;
   });
@@ -49,17 +53,26 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : { assets: [], companies: [], lastUpdated: null };
   });
 
-  const [inventoryLocation, setInventoryLocation] = useState<string | null>(null);
-  const [isInventorying, setIsInventorying] = useState(false);
+  const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
+    return localStorage.getItem('app_inventory_location');
+  });
+
+  const [isInventorying, setIsInventorying] = useState<boolean>(() => {
+    return localStorage.getItem('app_is_inventorying') === 'true';
+  });
+
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
 
   const screen = history[history.length - 1];
 
+  // Persistência de Navegação
   useEffect(() => {
-    if (!user && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER) {
-      setHistory([AppScreen.LOGIN]);
-    }
-  }, [user, screen]);
+    localStorage.setItem('app_screen_history', JSON.stringify(history));
+  }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem('app_current_user', JSON.stringify(user));
+  }, [user]);
 
   const pushScreen = useCallback((s: AppScreen) => {
     const mainScreens = [AppScreen.MAIN_MENU, AppScreen.INVENTORY, AppScreen.CONSULTATION, AppScreen.LOAD_DATABASE, AppScreen.COMPANY_SELECTION, AppScreen.DASHBOARD, AppScreen.USER_MANAGEMENT];
@@ -72,19 +85,23 @@ const App: React.FC = () => {
     else setHistory([AppScreen.MAIN_MENU]);
   }, [history.length]);
 
-  // Sincronização constante com LocalStorage
   useEffect(() => {
     localStorage.setItem('inventory_data', JSON.stringify(inventory));
   }, [inventory]);
 
   useEffect(() => {
-    localStorage.setItem('app_users', JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
     if (selectedCompany) localStorage.setItem('app_selected_company', selectedCompany);
     else localStorage.removeItem('app_selected_company');
   }, [selectedCompany]);
+
+  useEffect(() => {
+    if (inventoryLocation) localStorage.setItem('app_inventory_location', inventoryLocation);
+    else localStorage.removeItem('app_inventory_location');
+  }, [inventoryLocation]);
+
+  useEffect(() => {
+    localStorage.setItem('app_is_inventorying', String(isInventorying));
+  }, [isInventorying]);
 
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return [];
@@ -102,14 +119,12 @@ const App: React.FC = () => {
     setInventory(prev => {
       const index = prev.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
       if (index === -1) return prev;
-      
       const newAssets = [...prev.assets];
       newAssets[index] = {
         ...updatedAsset,
         _conferido: !!updatedAsset._conferido,
         TAG_INVENTARIO: updatedAsset._conferido ? "CONFERIDO" : "PENDENTE",
       };
-      
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString() };
     });
   }, []);
@@ -117,15 +132,10 @@ const App: React.FC = () => {
   const bulkUpdateAssets = useCallback((idsToUpdate: string[]) => {
     if (!idsToUpdate || idsToUpdate.length === 0) return;
     const idSet = new Set(idsToUpdate);
-    
     setInventory(prev => {
       const nextAssets = prev.assets.map(asset => {
         if (idSet.has(String(asset.id))) {
-          return {
-            ...asset,
-            _conferido: true,
-            TAG_INVENTARIO: "CONFERIDO"
-          };
+          return { ...asset, _conferido: true, TAG_INVENTARIO: "CONFERIDO" };
         }
         return asset;
       });
@@ -138,9 +148,22 @@ const App: React.FC = () => {
     if (foundUser.mustChangePassword) {
       pushScreen(AppScreen.CHANGE_PASSWORD);
     } else {
-      if (inventory.companies.length > 0) pushScreen(AppScreen.COMPANY_SELECTION);
+      if (inventory.companies.length > 0 && !selectedCompany) pushScreen(AppScreen.COMPANY_SELECTION);
       else pushScreen(AppScreen.MAIN_MENU);
     }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setSelectedCompany(null);
+    setInventoryLocation(null);
+    setIsInventorying(false);
+    setHistory([AppScreen.LOGIN]);
+    localStorage.removeItem('app_current_user');
+    localStorage.removeItem('app_screen_history');
+    localStorage.removeItem('app_selected_company');
+    localStorage.removeItem('app_inventory_location');
+    localStorage.removeItem('app_is_inventorying');
   };
 
   const handleExportDatabase = () => {
@@ -149,13 +172,15 @@ const App: React.FC = () => {
       const dataToExport = inventory.assets.map(({id, ...rest}) => rest);
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Inventario_Finalizado");
+      XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      XLSX.writeFile(wb, `DESCARGA_${selectedCompany || 'GERAL'}_${timestamp}.xlsx`);
+      XLSX.writeFile(wb, `GBR_EXPORT_${selectedCompany || 'GERAL'}_${timestamp}.xlsx`);
       
-      if (confirm("Download concluído com sucesso. Deseja limpar a base de dados local para um novo inventário?")) {
+      if (confirm("Download concluído. Limpar base local para novo ciclo?")) {
         setInventory({ assets: [], companies: [], lastUpdated: null });
         setSelectedCompany(null);
+        setInventoryLocation(null);
+        setIsInventorying(false);
         pushScreen(AppScreen.MAIN_MENU);
       }
     } catch (e) { alert("Erro ao exportar."); }
@@ -171,7 +196,7 @@ const App: React.FC = () => {
         setUser(upd.find(u => u.email.toLowerCase() === user?.email.toLowerCase())!);
         inventory.companies.length > 0 ? pushScreen(AppScreen.COMPANY_SELECTION) : pushScreen(AppScreen.MAIN_MENU);
       }} />;
-      case AppScreen.MAIN_MENU: return <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); setHistory([AppScreen.LOGIN]); }} onExport={handleExportDatabase} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />;
+      case AppScreen.MAIN_MENU: return <MainMenu onNavigate={pushScreen} onLogout={handleLogout} onExport={handleExportDatabase} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />;
       case AppScreen.USER_MANAGEMENT: return <UserManagement users={users} setUsers={setUsers} onBack={() => popScreen()} />;
       case AppScreen.DASHBOARD: return <Dashboard assets={filteredAssetsByCompany} onBack={() => popScreen()} />;
       case AppScreen.LOAD_DATABASE: return <DatabaseLoader onBack={() => popScreen()} onDataLoaded={(a, c) => { setInventory({ assets: a, companies: c, lastUpdated: new Date().toISOString() }); pushScreen(AppScreen.COMPANY_SELECTION); }} />;

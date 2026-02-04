@@ -18,7 +18,8 @@ import {
   Settings,
   Lock,
   ChevronRight,
-  Info
+  Info,
+  Shield
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -99,44 +100,55 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
 
   return (
     <div className="p-6 pb-10 h-full flex flex-col bg-white relative overflow-hidden">
-      {/* HEADER SUPERIOR - LOGO E BOTÃO ADMIN */}
-      <div className="flex items-center justify-between mb-8 pt-2">
-        <div>
-          <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">
-            {isAdmin ? "ADMIN MASTER" : "OPERADOR"}
-          </h2>
-          <h1 className="text-xl font-black text-gray-900 uppercase tracking-tighter">
-            {user?.username || 'USUÁRIO'}
-          </h1>
+      {/* BRANDING HEADER - GBR Inteligência Patrimonial */}
+      <div className="flex flex-col mb-8 pt-2">
+        <div className="flex items-center space-x-2 mb-1">
+          <div className="w-5 h-5 bg-blue-600 rounded-md flex items-center justify-center">
+            <Shield size={10} className="text-white" fill="currentColor" />
+          </div>
+          <span className="text-[11px] font-black text-blue-600 uppercase tracking-[0.25em]">
+            GBR Inteligência Patrimonial
+          </span>
         </div>
+        
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em]">
+              {isAdmin ? "SISTEMA MASTER" : "OPERADOR LOGADO"}
+            </h2>
+            <h1 className="text-2xl font-black text-black uppercase tracking-tighter">
+              {user?.username || 'USUÁRIO'}
+            </h1>
+          </div>
 
-        {isAdmin && (
-          <button 
-            onClick={() => setShowAdminPanel(true)}
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all active:scale-90 relative
-              ${!hasData ? 'bg-red-50 text-red-500 shadow-lg shadow-red-100 ring-2 ring-red-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-          >
-            <Settings size={22} className={!hasData ? "animate-pulse" : ""} />
-            {!hasData && (
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-              </span>
-            )}
-          </button>
-        )}
+          {isAdmin && (
+            <button 
+              onClick={() => setShowAdminPanel(true)}
+              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90 relative
+                ${!hasData ? 'bg-red-50 text-red-500 shadow-lg shadow-red-100 ring-2 ring-red-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              <Settings size={26} className={!hasData ? "animate-pulse" : ""} />
+              {!hasData && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {!hasData && !isAdmin && (
-        <div className="mb-6 p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-start space-x-3 animate-fadeIn">
-          <Info className="text-amber-500 shrink-0 mt-0.5" size={16} />
+        <div className="mb-6 p-5 bg-amber-50 rounded-[2rem] border border-amber-100 flex items-start space-x-3 animate-fadeIn">
+          <Info className="text-amber-500 shrink-0 mt-0.5" size={18} />
           <p className="text-[9px] font-black text-amber-700 uppercase leading-relaxed tracking-wider">
             Aguardando carga inicial de dados pelo administrador para liberar as funções de operação.
           </p>
         </div>
       )}
 
-      {/* GRID DE OPERAÇÃO PADRÃO - EXTREMAMENTE LIMPO */}
+      {/* GRID DE OPERAÇÃO PADRÃO */}
       <div className="grid grid-cols-1 gap-4 flex-1 overflow-y-auto no-scrollbar pr-1">
         {coreOptions.map((opt) => (
           <button
@@ -167,13 +179,20 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
       </div>
 
       {/* RODAPÉ LOGOUT */}
-      <button 
-        onClick={onLogout}
-        className="mt-8 w-full flex items-center justify-center space-x-2 p-5 text-gray-400 font-black text-[10px] uppercase tracking-[0.2em] border border-gray-100 rounded-[1.8rem] hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all"
-      >
-        <LogOut size={16} />
-        <span>Encerrar Sessão</span>
-      </button>
+      <div className="mt-8 space-y-4">
+        <button 
+          onClick={onLogout}
+          className="w-full flex items-center justify-center space-x-2 p-5 text-gray-400 font-black text-[10px] uppercase tracking-[0.2em] border border-gray-100 rounded-[1.8rem] hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all"
+        >
+          <LogOut size={16} />
+          <span>Encerrar Sessão</span>
+        </button>
+        <div className="text-center">
+          <p className="text-[8px] font-black text-gray-200 uppercase tracking-[0.4em]">
+            Tecnologia de Gestão GBR
+          </p>
+        </div>
+      </div>
 
       {/* PAINEL DE GESTÃO (OVERLAY) */}
       {showAdminPanel && (
@@ -185,7 +204,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
               </div>
               <div>
                 <h2 className="text-xl font-black uppercase tracking-tight">Gestão Master</h2>
-                <p className="text-[8px] font-bold text-amber-400 uppercase tracking-[0.3em]">Controle de Infraestrutura</p>
+                <p className="text-[8px] font-bold text-amber-400 uppercase tracking-[0.3em]">GBR Inteligência Patrimonial</p>
               </div>
             </div>
             <button 
@@ -196,7 +215,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
             </button>
           </div>
 
-          {/* STATUS DA BASE DENTRO DO PAINEL ADMIN */}
+          {/* STATUS DA BASE */}
           <div className={`mb-8 p-6 rounded-[2rem] border-2 transition-all
             ${hasData ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20 animate-pulse'}`}>
             <div className="flex items-center justify-between mb-4">
@@ -226,7 +245,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
             </div>
           </div>
 
-          <div className="space-y-3 flex-1">
+          <div className="space-y-3 flex-1 overflow-y-auto no-scrollbar">
             <p className="text-[8px] font-black text-gray-500 uppercase tracking-[0.3em] ml-2 mb-2">Ferramentas de Dados</p>
             {adminOptions.map((opt) => (
               <button

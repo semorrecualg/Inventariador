@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Asset } from '../types';
 import { speakText } from '../services/geminiService';
-import { ChevronLeft, Edit2, Volume2, Save, X, Info, Calendar, CheckCircle, MapPin, Type, AlertTriangle, FileWarning, Clock, Layers } from 'lucide-react';
+import { ChevronLeft, Edit2, Volume2, Save, X, Info, Calendar, CheckCircle, MapPin, Type, AlertTriangle, FileWarning, Clock, Layers, Database } from 'lucide-react';
 
 interface AssetDetailProps {
   asset: Asset;
@@ -16,14 +16,11 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
   const [editValue, setEditValue] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  // Termos para identificação visual dinâmica
   const ADDRESS_TERMS = ['ENDERECO', 'ENDEREÇO', 'LOCALIZACAO', 'LOCALIZAÇÃO', 'SETOR', 'COD_END'];
   const DESC_TERMS = ['DESC_SINTETICA', 'SINTETICA', 'DESCRICAO', 'DESCRIÇÃO', 'DESC_ITEM', 'NOME'];
   const PLAQUETA_TERMS = ['PLAQUETA', 'PATRIMONIO', 'REGISTRO', 'CODIGO'];
   const INDICE_TERMS = ['INDICE', 'ÍNDICE'];
-
-  const isAddressKey = (key: string) => ADDRESS_TERMS.includes(key.toUpperCase());
-  const isDescKey = (key: string) => DESC_TERMS.includes(key.toUpperCase());
-  const isEditable = (key: string) => isAddressKey(key) || isDescKey(key);
 
   const getRobustValue = (terms: string[]) => {
     const keys = Object.keys(asset);
@@ -41,7 +38,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
   const indice = getRobustValue(INDICE_TERMS);
 
   const startEditing = (key: string, value: any) => {
-    if (!isEditable(key)) return;
+    // Agora todos os campos são editáveis, exceto sistema/ids
+    if (key === 'id' || key.startsWith('_')) return;
     setEditingField(key);
     setEditValue(String(value || '').toUpperCase());
   };
@@ -55,7 +53,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
         _corrigido: true
       });
       setEditingField(null);
-      onBack();
+      // Mantemos o usuário na tela para que ele possa editar outros campos se desejar organizar o cadastro
     }
   };
 
@@ -80,22 +78,32 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
     if (key === 'id' || key.startsWith('_')) return null;
     
     const isEditing = editingField === key;
-    const canEdit = isEditable(key);
-    const isAddress = isAddressKey(key);
+    const isAddress = ADDRESS_TERMS.includes(key.toUpperCase());
     const isIndice = INDICE_TERMS.includes(key.toUpperCase());
+    const isDesc = DESC_TERMS.includes(key.toUpperCase());
 
     return (
-      <div key={key} onDoubleClick={() => canEdit && !isEditing && startEditing(key, value)} className={`p-4 rounded-2xl border transition-all relative group h-full ${isEditing ? 'border-blue-500 bg-blue-50/30' : 'border-gray-100 bg-gray-50/50'} ${canEdit && !isEditing ? 'hover:bg-white hover:border-blue-200 cursor-pointer shadow-sm' : ''} ${isIndice && (isIntDup || isExtDup) ? 'border-red-200 bg-red-50/40 ring-1 ring-red-100' : ''}`}>
+      <div 
+        key={key} 
+        onDoubleClick={() => !isEditing && startEditing(key, value)} 
+        className={`p-4 rounded-2xl border transition-all relative group h-full 
+          ${isEditing ? 'border-blue-500 bg-blue-50/30 ring-4 ring-blue-50' : 'border-gray-100 bg-gray-50/50'} 
+          ${!isEditing ? 'hover:bg-white hover:border-blue-200 cursor-pointer shadow-sm' : ''} 
+          ${isIndice && (isIntDup || isExtDup) ? 'border-red-200 bg-red-50/40 ring-1 ring-red-100' : ''}`}
+      >
         <div className="flex items-center justify-between mb-1">
           <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center">
-            {isIndice && <Layers size={10} className="mr-1 text-blue-500" />}
-            {key.toUpperCase()}
+            {isIndice ? <Layers size={10} className="mr-1 text-blue-500" /> : 
+             isAddress ? <MapPin size={10} className="mr-1 text-emerald-500" /> :
+             <Database size={10} className="mr-1 text-gray-300" />}
+            {key.replace(/_/g, ' ').toUpperCase()}
           </label>
-          {canEdit && !isEditing && <Edit2 size={10} className="text-blue-500 opacity-40 group-hover:opacity-100" />}
+          {!isEditing && <Edit2 size={10} className="text-blue-500 opacity-20 group-hover:opacity-100" />}
         </div>
+
         {isEditing ? (
           <div className="flex flex-col space-y-3">
-            {isAddress ? (
+            {isAddress && availableAddresses.length > 0 ? (
               <div className="max-h-64 overflow-y-auto no-scrollbar flex flex-col space-y-1.5 p-2 bg-white rounded-xl border border-blue-100">
                 {availableAddresses.map(addr => (
                   <button key={addr} onClick={() => setEditValue(addr.toUpperCase())} className={`w-full p-4 rounded-xl text-xs font-black uppercase text-left transition-all border ${editValue === addr.toUpperCase() ? 'bg-blue-600 text-white border-blue-700' : 'bg-gray-50 text-gray-600 border-gray-100'}`}>
@@ -104,11 +112,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
                 ))}
               </div>
             ) : (
-              <textarea autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value.toUpperCase())} className="w-full bg-white p-3 rounded-xl border border-blue-200 outline-none font-black text-xs min-h-[80px] uppercase" />
+              <textarea 
+                autoFocus 
+                value={editValue} 
+                onChange={(e) => setEditValue(e.target.value.toUpperCase())} 
+                className="w-full bg-white p-3 rounded-xl border border-blue-200 outline-none font-black text-xs min-h-[80px] uppercase shadow-inner" 
+                onBlur={() => !editValue && setEditingField(null)}
+              />
             )}
             <div className="flex space-x-2">
-              <button onClick={handleSave} className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 flex items-center justify-center"><Save size={16} className="mr-2"/>Salvar</button>
-              <button onClick={() => setEditingField(null)} className="px-5 py-4 bg-gray-200 text-gray-600 rounded-xl font-black text-[10px] uppercase">Cancelar</button>
+              <button onClick={handleSave} className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 flex items-center justify-center active:scale-95 transition-all">
+                <Save size={16} className="mr-2"/>Salvar Alteração
+              </button>
+              <button onClick={() => setEditingField(null)} className="px-5 py-4 bg-gray-200 text-gray-600 rounded-xl font-black text-[10px] uppercase active:scale-95 transition-all">
+                <X size={16}/>
+              </button>
             </div>
           </div>
         ) : (
@@ -131,39 +149,44 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, avai
         
         <div className="text-white relative z-10">
           <div className="flex flex-wrap gap-2 mb-4">
-            {asset._conferido ? <span className="bg-emerald-600 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-emerald-500/50 flex items-center"><CheckCircle size={10} className="mr-1"/>INVENTARIADO</span> : <span className="bg-amber-500 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-amber-400/50 flex items-center"><Clock size={10} className="mr-1"/>PENDENTE</span>}
+            {asset._conferido ? <span className="bg-emerald-600 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-emerald-500/50 flex items-center shadow-lg"><CheckCircle size={10} className="mr-1"/>CONFERIDO</span> : <span className="bg-amber-500 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-amber-400/50 flex items-center shadow-lg"><Clock size={10} className="mr-1"/>AGUARDANDO</span>}
+            {asset._corrigido && <span className="bg-blue-500 text-white text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-blue-400/50 flex items-center shadow-lg"><Edit2 size={10} className="mr-1"/>DADO HIGIENIZADO</span>}
             {isIntDup && <span className="bg-white text-red-700 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-red-500/50 flex items-center shadow-lg"><AlertTriangle size={10} className="mr-1"/>DUPLICIDADE INTERNA</span>}
-            {isExtDup && <span className="bg-orange-500 text-white text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-orange-400/50 flex items-center shadow-lg"><AlertTriangle size={10} className="mr-1"/>DUPLICIDADE EXTERNA</span>}
-            {!hasPlaqueta && <span className="bg-purple-600 text-[9px] px-2.5 py-1 rounded-full font-black uppercase border border-purple-500/50 flex items-center"><FileWarning size={10} className="mr-1"/>SEM PLAQUETA</span>}
           </div>
           <h2 className="text-2xl font-black uppercase tracking-tight leading-tight mb-2 line-clamp-2">{currentDesc.text}</h2>
-          <div className="flex items-center space-x-6 opacity-80 bg-black/10 p-3 rounded-2xl w-fit backdrop-blur-sm">
+          <div className="flex items-center space-x-6 opacity-80 bg-black/20 p-3 rounded-2xl w-fit backdrop-blur-md border border-white/10">
             <div className="flex flex-col">
-              <span className="text-[7px] font-bold uppercase tracking-widest text-white/60">Plaqueta</span>
+              <span className="text-[7px] font-bold uppercase tracking-widest text-white/60">Plaqueta Principal</span>
               <span className="text-[12px] font-black uppercase">{plaqueta || 'S/P'}</span>
             </div>
             <div className="w-px h-6 bg-white/20"></div>
             <div className="flex flex-col">
-              <span className="text-[7px] font-bold uppercase tracking-widest text-white/60">Índice</span>
+              <span className="text-[7px] font-bold uppercase tracking-widest text-white/60">Controle Índice</span>
               <span className="text-[12px] font-black uppercase text-blue-200">{indice || '---'}</span>
             </div>
           </div>
         </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none"></div>
       </div>
 
       <div className="p-6 -mt-8 bg-white rounded-t-[3rem] flex-1 shadow-2xl overflow-y-auto no-scrollbar pb-10 relative z-20">
         <div className="space-y-4">
+          <div className="flex items-center justify-between px-2 mb-2">
+            <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Dicionário de Dados</h4>
+            <div className="flex items-center space-x-1 text-[8px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-full">
+              <Edit2 size={8}/> <span>Duplo clique p/ Editar</span>
+            </div>
+          </div>
+
           {(isIntDup || isExtDup) && (
             <div className="bg-red-50 p-5 rounded-[2rem] border-2 border-red-100 flex items-start space-x-4 animate-fadeIn">
               <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-red-600 shrink-0">
                 <AlertTriangle size={24} />
               </div>
               <div className="flex flex-col">
-                <p className="text-[11px] font-black text-red-700 uppercase mb-1">Alerta de Integridade do Índice</p>
+                <p className="text-[11px] font-black text-red-700 uppercase mb-1">Atenção ao higienizar</p>
                 <p className="text-[10px] font-bold text-red-500 uppercase leading-relaxed">
-                  {isIntDup && "⚠️ Este índice já está cadastrado em outro ativo desta mesma unidade."}
-                  {isExtDup && "🌍 Este índice foi detectado em outra empresa/unidade da base."}
+                  {isIntDup && "⚠️ Conflito de índice na unidade. Corrija o campo 'ÍNDICE' ou 'CONTROLE' para remover a duplicidade."}
                 </p>
               </div>
             </div>
