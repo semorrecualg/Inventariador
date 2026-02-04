@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Asset } from '../types';
+import Scanner from './Scanner';
 import { 
   Search, 
   ChevronRight, 
@@ -26,7 +27,8 @@ import {
   Box,
   Clipboard,
   Tag,
-  FileText
+  FileText,
+  Scan
 } from 'lucide-react';
 
 interface AssetCardProps {
@@ -59,7 +61,6 @@ const AssetCard = React.memo(({
     const normTerms = terms.map(normalizeStr);
     const normKeywords = keywords.map(normalizeStr);
     
-    // Tenta primeiro o match exato
     for (const k of keys) {
       const nk = normalizeStr(k);
       if (normTerms.includes(nk)) {
@@ -68,7 +69,6 @@ const AssetCard = React.memo(({
       }
     }
 
-    // Tenta por palavra-chave contida no nome da coluna
     for (const k of keys) {
       const nk = normalizeStr(k);
       if (normKeywords.some(kw => nk.includes(kw))) {
@@ -99,7 +99,6 @@ const AssetCard = React.memo(({
   const rawDate = getVal(asset, ['DT_AQUISICAO', 'DATA_AQUISICAO', 'DT_AQ', 'DATA'], ['AQUIS', 'CADASTRO', 'INICIO']);
   const dtAq = formatDate(rawDate);
   
-  // CORREÇÃO: Ampliando busca por Razão Social
   const razao = getVal(
     asset, 
     ['RAZAO_SOCIAL', 'RAZAO', 'NOME_EMPRESA', 'RAZAO SOCIAL'], 
@@ -214,6 +213,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
   const [selectedInBatch, setSelectedInBatch] = useState<Set<string>>(new Set());
   const [conflictAsset, setConflictAsset] = useState<Asset | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -224,11 +224,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const descTerms = useMemo(() => ['DESC_SINTETICA', 'DESC SINTETICA', 'SINTETICA', 'DESCRICAO', 'DESCRIÇÃO', 'DESC_ITEM', 'NOME', 'ITEM'], []);
 
   useEffect(() => {
-    if (isInventorying) {
+    if (isInventorying && !isScannerOpen) {
       const timer = setTimeout(() => searchInputRef.current?.focus(), 150);
       return () => clearTimeout(timer);
     }
-  }, [isInventorying, selectedLocation]);
+  }, [isInventorying, selectedLocation, isScannerOpen]);
 
   const getItemLocation = useCallback((asset: Asset): string => {
     const keys = Object.keys(asset);
@@ -285,7 +285,6 @@ const Inventory: React.FC<InventoryProps> = ({
       });
     }
 
-    // Ordenação Numérica Estrita por Plaqueta
     return rawResults.sort((a, b) => {
       const getP = (item: Asset) => {
         const pk = Object.keys(item).find(k => plaquetaTerms.includes(k.toUpperCase()));
@@ -309,7 +308,6 @@ const Inventory: React.FC<InventoryProps> = ({
   }, []);
 
   const handleAssetSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Máscara 000000 com Shift Left
     const rawValue = e.target.value.replace(/\D/g, ''); 
     if (rawValue === '') {
       setAssetSearch('');
@@ -318,6 +316,17 @@ const Inventory: React.FC<InventoryProps> = ({
       setAssetSearch(padded);
     }
     setSelectedInBatch(new Set()); 
+  };
+
+  const handleScanSuccess = (decodedText: string) => {
+    setIsScannerOpen(false);
+    // Limpa caracteres não numéricos e pega os últimos 6 dígitos (máscara 000000)
+    const cleaned = decodedText.replace(/\D/g, '').slice(-6).padStart(6, '0');
+    if (cleaned.length > 0) {
+      setAssetSearch(cleaned);
+      // Foca no input após leitura para feedback visual
+      setTimeout(() => searchInputRef.current?.focus(), 300);
+    }
   };
 
   const processToggleUpdate = (asset: Asset) => {
@@ -434,17 +443,33 @@ const Inventory: React.FC<InventoryProps> = ({
              <span className="text-[9px] font-black text-blue-900 uppercase truncate max-w-[150px]">{selectedLocation}</span>
           </div>
         </div>
+        
+        {/* Campo de Pesquisa com Botão de Scanner Integrado */}
         <div className="relative mb-5" onClick={() => searchInputRef.current?.focus()}>
           <div className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col items-start pointer-events-none">
              <span className="text-[7px] font-black text-blue-300 uppercase leading-none">Nº ATIVO</span>
              <span className="text-[6px] font-black text-blue-200 uppercase mt-0.5 tracking-tighter">LEITURA</span>
           </div>
+          
           <input 
             ref={searchInputRef} type="text" inputMode="numeric" placeholder="000000" 
             value={assetSearch} onChange={handleAssetSearchChange} 
-            className="w-full pl-20 pr-12 py-7 text-4xl font-black uppercase outline-none border-2 border-blue-100 bg-blue-50/20 rounded-[2.2rem] focus:border-blue-500 focus:bg-white transition-all tracking-tighter text-blue-950 placeholder:text-blue-100/50 shadow-inner" 
+            className="w-full pl-20 pr-32 py-7 text-4xl font-black uppercase outline-none border-2 border-blue-100 bg-blue-50/20 rounded-[2.2rem] focus:border-blue-500 focus:bg-white transition-all tracking-tighter text-blue-900 placeholder:text-blue-100/50 shadow-inner" 
           />
-          {assetSearch && <button onClick={(e) => { e.stopPropagation(); setAssetSearch(''); }} className="absolute right-6 top-1/2 -translate-y-1/2 text-blue-200"><X size={28} /></button>}
+          
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
+            {assetSearch && (
+              <button onClick={(e) => { e.stopPropagation(); setAssetSearch(''); }} className="w-10 h-10 flex items-center justify-center text-blue-200 active:text-blue-500">
+                <X size={24} />
+              </button>
+            )}
+            <button 
+              onClick={(e) => { e.stopPropagation(); setIsScannerOpen(true); }}
+              className="w-16 h-16 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 active:scale-95 transition-all"
+            >
+              <Scan size={28} strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
 
         <div className="flex space-x-6 px-2">
@@ -559,6 +584,13 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {isScannerOpen && (
+        <Scanner 
+          onBack={() => setIsScannerOpen(false)} 
+          onScanSuccess={handleScanSuccess} 
+        />
       )}
     </div>
   );
