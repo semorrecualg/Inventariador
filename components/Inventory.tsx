@@ -4,197 +4,151 @@ import { Asset } from '../types';
 import Scanner from './Scanner';
 import { 
   Search, 
-  ChevronRight, 
   ArrowLeft, 
-  Hash, 
-  Check,
-  CheckCheck,
-  MapPin,
-  X,
-  Plus,
-  Filter,
+  MapPin, 
   AlertCircle,
-  ArrowUp,
-  Lock,
-  Zap,
-  Square,
-  CheckSquare,
   AlertTriangle,
-  Info,
-  RefreshCw,
   Calendar,
   Building2,
-  Box,
-  Clipboard,
-  Tag,
-  FileText,
-  Scan
+  CheckCircle2,
+  Save,
+  Check,
+  X,
+  PlusCircle,
+  FilePlus,
+  Keyboard,
+  Zap,
+  Info
 } from 'lucide-react';
 
 interface AssetCardProps {
   asset: Asset;
   onSelect: (a: Asset) => void;
-  onToggle: (e: React.MouseEvent, a: Asset) => void;
   plaquetaTerms: string[];
   descTerms: string[];
-  isSelectableMode?: boolean;
-  isSelected?: boolean;
-  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+  decision: 'YES' | 'NO' | null;
+  onMakeDecision: (id: string, decision: 'YES' | 'NO') => void;
+  yesButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  isConferidoTab: boolean;
 }
 
-const AssetCard = React.memo(({ 
-  asset, 
-  onSelect, 
-  onToggle, 
-  plaquetaTerms, 
-  descTerms, 
-  isSelectableMode,
-  isSelected,
-  buttonRef
-}: AssetCardProps) => {
-  
-  const normalizeStr = (s: string) => 
-    s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-
-  const getVal = (a: Asset, terms: string[], keywords: string[] = []) => {
-    const keys = Object.keys(a);
-    const normTerms = terms.map(normalizeStr);
-    const normKeywords = keywords.map(normalizeStr);
-    
-    for (const k of keys) {
-      const nk = normalizeStr(k);
-      if (normTerms.includes(nk)) {
-        const val = a[k];
-        if (val !== undefined && val !== null && val !== "") return String(val).trim().toUpperCase();
-      }
-    }
-
-    for (const k of keys) {
-      const nk = normalizeStr(k);
-      if (normKeywords.some(kw => nk.includes(kw))) {
-        const val = a[k];
-        if (val !== undefined && val !== null && val !== "") return String(val).trim().toUpperCase();
-      }
-    }
-    return "";
-  };
-
-  const formatDate = (val: string) => {
-    if (!val || val === "" || val === "0") return "--/--/----";
-    if (/^\d{2}[/.]\d{2}[/.]\d{4}/.test(val)) return val.split(' ')[0].replace(/\./g, '/');
-    const isoMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
-    if (/^\d{5}$/.test(val)) {
-        const date = new Date(Math.round((Number(val) - 25569) * 86400 * 1000));
-        return date.toLocaleDateString('pt-BR');
-    }
-    return val;
-  };
-
-  const plaqueta = getVal(asset, plaquetaTerms, ['PLAQUETA', 'PATR', 'BEM', 'TAG']) || "S/P";
-  const desc = getVal(asset, descTerms, ['DESC', 'NOME', 'ITEM', 'SINTETICA', 'PRODUTO']) || "DESCRIÇÃO NÃO ENCONTRADA";
-  const qtde = getVal(asset, ['QTDE', 'QUANTIDADE', 'QTD'], ['QUANT']) || "1";
-  const registro = getVal(asset, ['REGISTRO', 'REG', 'NUMERO'], ['NR_REG', 'REGIST']) || "N/A";
-  const sItem = getVal(asset, ['S_ITEM', 'SUBITEM', 'SUB_ITEM'], ['SUB']) || "000";
-  const rawDate = getVal(asset, ['DT_AQUISICAO', 'DATA_AQUISICAO', 'DT_AQ', 'DATA'], ['AQUIS', 'CADASTRO', 'INICIO']);
-  const dtAq = formatDate(rawDate);
-  
-  const razao = getVal(
-    asset, 
-    ['RAZAO_SOCIAL', 'RAZAO', 'NOME_EMPRESA', 'RAZAO SOCIAL'], 
-    ['RAZAO', 'SOCIAL', 'EMPRESA', 'NOME_EMP', 'FORNEC', 'CLIENTE', 'PROPRIETARIO', 'NOME']
-  ) || "NÃO IDENTIFICADO";
-
-  const isConferido = isSelectableMode ? isSelected : !!asset._conferido;
-
-  return (
-    <div 
-      onClick={() => onSelect(asset)} 
-      className={`flex flex-col p-5 border-b border-gray-100 transition-all active:bg-gray-50 group mb-2
-        ${isConferido ? 'bg-emerald-50/40' : 'bg-white'}`}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border-2 transition-all
-            ${isConferido ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-            <span className="text-[8px] font-black uppercase opacity-60 tracking-tighter leading-none whitespace-nowrap">Nº ATIVO</span>
-            <span className="text-[15px] font-black tracking-tighter leading-none">{plaqueta}</span>
-          </div>
-          {asset.TAG_ADOCAO === "ADOTADO" && (
-            <span className="text-[7px] font-black bg-blue-600 text-white px-2 py-1 rounded-lg uppercase tracking-[0.2em]">ADOTADO</span>
-          )}
-        </div>
-        <button 
-          ref={buttonRef}
-          onClick={(e) => onToggle(e, asset)} 
-          className={`w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center transition-all shadow-sm active:scale-90 focus:ring-4 focus:ring-blue-500 focus:outline-none focus:scale-110
-            ${isConferido 
-              ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200 ring-2 ring-emerald-400' 
-              : 'bg-gray-50 text-gray-200 border border-gray-200 hover:border-blue-400 hover:text-blue-500 focus:bg-blue-600 focus:text-white'}`}
-        >
-          {isSelectableMode ? (
-            isConferido ? <CheckSquare size={24} strokeWidth={3} /> : <Square size={24} strokeWidth={2.5} />
-          ) : (
-            <Check size={26} strokeWidth={4} />
-          )}
-        </button>
-      </div>
-
-      <h3 className={`text-[13px] font-black uppercase leading-snug tracking-tight mb-4 px-1
-        ${isConferido ? 'text-emerald-950' : 'text-gray-900'}`}>
-        {desc}
-      </h3>
-
-      <div className={`rounded-2xl border-2 transition-all duration-300 overflow-hidden shadow-sm
-        ${isConferido ? 'bg-emerald-100/30 border-emerald-200/40' : 'bg-slate-50 border-slate-200/60'}`}>
-        <div className="grid grid-cols-3 divide-x divide-gray-200/50 border-b border-gray-200/40">
-          <div className="p-3 flex flex-col items-center">
-            <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Qtd</span>
-            <span className={`text-[11px] font-mono font-black ${isConferido ? 'text-emerald-800' : 'text-slate-700'}`}>{qtde}</span>
-          </div>
-          <div className="p-3 flex flex-col items-center">
-            <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Registro</span>
-            <span className={`text-[11px] font-mono font-black ${isConferido ? 'text-emerald-800' : 'text-slate-700'}`}>{registro}</span>
-          </div>
-          <div className="p-3 flex flex-col items-center">
-            <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">S_Item</span>
-            <span className={`text-[11px] font-mono font-black ${isConferido ? 'text-emerald-800' : 'text-slate-700'}`}>{sItem}</span>
-          </div>
-        </div>
-        <div className={`p-3 flex items-center justify-between px-5 ${isConferido ? 'bg-emerald-500/5' : 'bg-white/40'}`}>
-          <div className="flex items-center space-x-2">
-            <Calendar size={12} className={isConferido ? 'text-emerald-500' : 'text-slate-400'} />
-            <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Aquisição</span>
-          </div>
-          <span className={`text-[11px] font-black ${isConferido ? 'text-emerald-900' : 'text-slate-800'}`}>{dtAq}</span>
-        </div>
-        <div className={`p-4 border-t border-gray-200/40 flex items-start space-x-3
-          ${isConferido ? 'bg-emerald-600/10' : 'bg-blue-600/5'}`}>
-          <Building2 size={14} className={isConferido ? 'text-emerald-600 shrink-0 mt-0.5' : 'text-blue-500 shrink-0 mt-0.5'} />
-          <div className="min-w-0 flex-1">
-            <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest block mb-1">Razão Social / Identificação</span>
-            <span className={`text-[11px] font-black uppercase tracking-tight leading-snug block break-words
-              ${isConferido ? 'text-emerald-950' : 'text-blue-950'}`}>{razao}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
-
+// Fix: Defining the missing InventoryProps interface
 interface InventoryProps {
   assets: Asset[];
   allAssets: Asset[];
   onBack: () => void;
   onUpdateAsset: (asset: Asset) => void;
-  onBulkUpdateAssets: (ids: string[]) => void;
+  onBulkUpdateAssets: (idsToUpdate: string[]) => void;
   onSelectAsset: (asset: Asset) => void;
   selectedLocation: string | null;
-  setSelectedLocation: (loc: string | null) => void;
+  setSelectedLocation: (location: string | null) => void;
   isInventorying: boolean;
-  setIsInventorying: (val: boolean) => void;
+  setIsInventorying: (isInventorying: boolean) => void;
   selectedCompany: string | null;
 }
+
+const AssetCard = React.memo(({ 
+  asset, 
+  onSelect, 
+  plaquetaTerms, 
+  descTerms,
+  decision,
+  onMakeDecision,
+  yesButtonRef,
+  isConferidoTab
+}: AssetCardProps) => {
+  
+  const getVal = (a: Asset, terms: string[]) => {
+    const keys = Object.keys(a);
+    const normTerms = terms.map(t => t.toUpperCase());
+    for (const k of keys) {
+      if (normTerms.includes(k.toUpperCase())) {
+        const val = a[k];
+        if (val !== undefined && val !== null && String(val).trim() !== "" && String(val).trim() !== "0") {
+          return String(val).trim().toUpperCase();
+        }
+      }
+    }
+    return "";
+  };
+
+  const plaqueta = getVal(asset, plaquetaTerms) || "S/P";
+  const desc = getVal(asset, descTerms) || "DESCRIÇÃO NÃO ENCONTRADA";
+  const isConferido = !!asset._conferido;
+  const isDuplicate = !!asset._isDuplicate || !!asset._isInternalDuplicate || !!asset._isExternalDuplicate;
+  const isNew = !!asset._isNew;
+
+  return (
+    <div 
+      onClick={() => onSelect(asset)} 
+      className={`flex flex-col p-5 border transition-all active:bg-white group mb-4 rounded-[2.2rem] shadow-sm
+        ${decision === 'YES' ? 'bg-emerald-100 border-emerald-500 ring-4 ring-emerald-500/10' : 
+          decision === 'NO' ? 'bg-gray-100 border-gray-300 opacity-60' : 
+          isConferido ? 'bg-emerald-50/40 border-emerald-200' : 'bg-red-50/30 border-red-100'}`}
+    >
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex flex-col space-y-1">
+          <div className="flex items-center space-x-2">
+            <div className={`flex items-center space-x-3 px-4 py-2 rounded-full border-2 transition-all
+              ${isConferido || decision === 'YES' ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-red-100 border-red-200 text-red-800'}`}>
+              <span className="text-[9px] font-black uppercase opacity-60 tracking-tighter">ATIVO</span>
+              <span className="text-xl font-black tracking-tighter leading-none">{plaqueta}</span>
+            </div>
+            {isNew && <span className="text-[8px] font-black bg-purple-600 text-white px-3 py-1.5 rounded-xl uppercase tracking-widest shadow-lg shadow-purple-100 animate-pulse">INCLUSÃO</span>}
+          </div>
+          {isDuplicate && (
+            <div className="flex items-center space-x-1 px-3 py-1 bg-white text-amber-600 rounded-full w-fit border border-amber-100 mt-1">
+               <AlertTriangle size={10} />
+               <span className="text-[7px] font-black uppercase tracking-widest">Duplicidade</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-2">
+          {!isConferidoTab && (
+            <>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'NO'); }}
+                className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-90
+                  ${decision === 'NO' ? 'bg-gray-800 text-white' : 'bg-white text-gray-400 border border-gray-200'}`}
+              >
+                <X size={24} strokeWidth={3} />
+              </button>
+              <button 
+                ref={yesButtonRef}
+                onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }}
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-xl active:scale-90 focus:ring-4 focus:ring-emerald-200
+                  ${decision === 'YES' ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-500 border-2 border-emerald-100'}`}
+              >
+                <Check size={32} strokeWidth={4} />
+              </button>
+            </>
+          )}
+          {isConferidoTab && (
+            <div className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-lg">
+              <Check size={24} strokeWidth={4} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <h3 className={`text-[14px] font-black uppercase leading-snug mb-4 px-1 ${isConferido ? 'text-emerald-950' : 'text-red-950'}`}>
+        {desc}
+      </h3>
+
+      <div className={`p-4 rounded-2xl border transition-all duration-300 flex items-start space-x-3
+        ${isConferido ? 'bg-emerald-600/5 border-emerald-200/40' : 'bg-red-600/5 border-red-200/40'}`}>
+        <Building2 size={14} className={isConferido ? 'text-emerald-600 shrink-0 mt-0.5' : 'text-red-500 shrink-0 mt-0.5'} />
+        <div className="min-w-0 flex-1">
+          <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest block mb-1">Unidade / Razão</span>
+          <span className={`text-[11px] font-black uppercase tracking-tight leading-snug block truncate ${isConferido ? 'text-emerald-900' : 'text-red-900'}`}>
+             {getVal(asset, ['EMPRESA', 'RAZAO_SOCIAL', 'UNIDADE', 'RAZAO', 'CLIENTE']) || 'NÃO IDENTIFICADA'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const Inventory: React.FC<InventoryProps> = ({ 
   assets, 
@@ -206,34 +160,51 @@ const Inventory: React.FC<InventoryProps> = ({
   selectedLocation, 
   setSelectedLocation, 
   isInventorying, 
-  setIsInventorying 
+  setIsInventorying,
+  selectedCompany
 }) => {
-  const [assetSearch, setAssetSearch] = useState('');
+  const [displayValue, setDisplayValue] = useState('000000');
+  const [committedSearch, setCommittedSearch] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
-  const [selectedInBatch, setSelectedInBatch] = useState<Set<string>>(new Set());
-  const [conflictAsset, setConflictAsset] = useState<Asset | null>(null);
+  const [inputMethod, setInputMethod] = useState<'keyboard' | 'scanner'>(() => {
+    return (localStorage.getItem('app_input_method') as 'keyboard' | 'scanner') || 'keyboard';
+  });
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const firstMatchButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [showNewAssetDialog, setShowNewAssetDialog] = useState(false);
+  const [isCreatingNewAsset, setIsCreatingNewAsset] = useState(false);
+  const [newAssetData, setNewAssetData] = useState({ description: '', plaqueta: '' });
   
-  const locationTerms = useMemo(() => ['ENDERECO', 'LOCALIZACAO', 'SETOR', 'COD_END', 'LOCALIZAÇÃO'], []);
-  const plaquetaTerms = useMemo(() => ['PLAQUETA', 'PATRIMONIO', 'BEM', 'TAG', 'PATRIMÔNIO', 'ETIQUETA'], []);
-  const descTerms = useMemo(() => ['DESC_SINTETICA', 'DESC SINTETICA', 'SINTETICA', 'DESCRICAO', 'DESCRIÇÃO', 'DESC_ITEM', 'NOME', 'ITEM'], []);
+  const [localDecisions, setLocalDecisions] = useState<Record<string, 'YES' | 'NO'>>({});
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const firstYesButtonRef = useRef<HTMLButtonElement>(null);
+  
+  const plaquetaTerms = useMemo(() => ['PLAQUETA', 'PATRIMONIO', 'BEM', 'TAG'], []);
+  const locationTerms = useMemo(() => ['ENDERECO', 'LOCALIZACAO', 'SETOR', 'COD_END'], []);
+  const descTerms = useMemo(() => ['DESC_SINTETICA', 'SINTETICA', 'DESCRICAO', 'DESCRIÇÃO', 'DESC_ITEM', 'NOME'], []);
 
   useEffect(() => {
-    if (isInventorying && !isScannerOpen) {
-      const timer = setTimeout(() => searchInputRef.current?.focus(), 150);
-      return () => clearTimeout(timer);
+    localStorage.setItem('app_input_method', inputMethod);
+  }, [inputMethod]);
+
+  const forceCursorRight = useCallback(() => {
+    if (searchInputRef.current) {
+      const len = searchInputRef.current.value.length;
+      searchInputRef.current.setSelectionRange(len, len);
     }
-  }, [isInventorying, selectedLocation, isScannerOpen]);
+  }, []);
+
+  const getPlaqueta = useCallback((asset: Asset): string => {
+    const pKey = Object.keys(asset).find(k => plaquetaTerms.includes(k.toUpperCase()));
+    return pKey ? String(asset[pKey]).trim() : "";
+  }, [plaquetaTerms]);
 
   const getItemLocation = useCallback((asset: Asset): string => {
     const keys = Object.keys(asset);
     for (const term of locationTerms) {
-      const match = keys.find(k => k.trim().toUpperCase() === term.toUpperCase());
+      const match = keys.find(k => k.toUpperCase() === term.toUpperCase());
       if (match && asset[match]) return String(asset[match]).trim().toUpperCase();
     }
     return "SEM ENDEREÇO";
@@ -250,179 +221,142 @@ const Inventory: React.FC<InventoryProps> = ({
     return stats;
   }, [assets, getItemLocation]);
 
-  const allLocations = useMemo(() => Object.keys(locationStats).sort(), [locationStats]);
-
   const filteredAssetsInLocation = useMemo(() => {
     if (!selectedLocation) return [];
-
-    let rawResults: Asset[] = [];
-
-    if (assetSearch.length > 0) {
-      rawResults = allAssets.filter(asset => {
-        const pKey = Object.keys(asset).find(k => plaquetaTerms.includes(k.toUpperCase()));
-        if (!pKey) return false;
-        
-        const pVal = String(asset[pKey]).toUpperCase().trim();
-        const sVal = assetSearch.toUpperCase().trim();
-        
-        return pVal === sVal || 
-               pVal.padStart(6, '0') === sVal.padStart(6, '0') ||
-               pVal.includes(sVal);
-      }).filter(asset => {
-        if (activeFilter === 'pending' && asset._conferido) return false;
-        if (activeFilter === 'checked' && !asset._conferido) return false;
-        return true;
+    let results: Asset[] = [];
+    if (committedSearch) {
+      results = allAssets.filter(asset => {
+        const pVal = getPlaqueta(asset).toUpperCase();
+        const sVal = committedSearch.toUpperCase().trim();
+        return pVal === sVal || pVal.padStart(6, '0') === sVal.padStart(6, '0');
       });
     } else {
-      rawResults = assets.filter(asset => {
-        const loc = getItemLocation(asset);
-        if (loc !== selectedLocation && asset.TAG_ADOCAO !== "ADOTADO") return false;
-        
-        if (activeFilter === 'pending' && asset._conferido) return false;
-        if (activeFilter === 'checked' && !asset._conferido) return false;
-        
-        return true;
-      });
+      results = assets.filter(asset => getItemLocation(asset) === selectedLocation || asset.TAG_ADOCAO === "ADOTADO");
     }
 
-    return rawResults.sort((a, b) => {
-      const getP = (item: Asset) => {
-        const pk = Object.keys(item).find(k => plaquetaTerms.includes(k.toUpperCase()));
-        return pk ? String(item[pk]) : "";
-      };
-      return getP(a).localeCompare(getP(b), undefined, { numeric: true });
-    });
-  }, [assets, allAssets, selectedLocation, assetSearch, activeFilter, getItemLocation, plaquetaTerms]);
+    return results
+      .filter(asset => activeFilter === 'pending' ? !asset._conferido : !!asset._conferido)
+      .sort((a, b) => getPlaqueta(a).localeCompare(getPlaqueta(b), undefined, { numeric: true }));
+  }, [allAssets, assets, selectedLocation, committedSearch, activeFilter, getItemLocation, getPlaqueta]);
 
-  const isBatchMode = assetSearch.length === 6 && filteredAssetsInLocation.length > 1;
+  // Lógica de Redirecionamento Automático
+  const triggerSearch = (val: string) => {
+    const searchedInAll = allAssets.find(a => {
+        const p = getPlaqueta(a).toUpperCase();
+        const s = val.toUpperCase().trim();
+        return p === s || p.padStart(6, '0') === s.padStart(6, '0');
+    });
+
+    if (searchedInAll && searchedInAll._conferido && activeFilter === 'pending') {
+        if (confirm(`Atenção: Ativo ${val} já está CONFERIDO!\n\nDeseja visualizar na aba de conferidos?`)) {
+            setActiveFilter('checked');
+            setCommittedSearch(val);
+            setLocalDecisions({});
+            searchInputRef.current?.blur();
+            return;
+        }
+    }
+
+    setCommittedSearch(val);
+    setLocalDecisions({});
+    searchInputRef.current?.blur();
+  };
+
+  const handleMakeDecision = useCallback((id: string, decision: 'YES' | 'NO') => {
+    // Se for registro único e marcar SIM, processa imediatamente
+    if (filteredAssetsInLocation.length === 1 && decision === 'YES') {
+        const assetId = String(filteredAssetsInLocation[0].id);
+        onBulkUpdateAssets([assetId]);
+        resetSearchAndFocus();
+        return;
+    }
+    setLocalDecisions(prev => ({ ...prev, [id]: decision }));
+  }, [filteredAssetsInLocation, onBulkUpdateAssets]);
+
+  useEffect(() => {
+    if (committedSearch && filteredAssetsInLocation.length > 0) {
+      setTimeout(() => firstYesButtonRef.current?.focus(), 300);
+    } else if (committedSearch && filteredAssetsInLocation.length === 0) {
+      const existsAtAll = allAssets.some(a => {
+        const p = getPlaqueta(a).toUpperCase();
+        const s = committedSearch.toUpperCase().trim();
+        return p === s || p.padStart(6, '0') === s.padStart(6, '0');
+      });
+      if (!existsAtAll) setShowNewAssetDialog(true);
+    }
+  }, [committedSearch, filteredAssetsInLocation.length, allAssets, getPlaqueta]);
+
+  const handleSaveConferencia = () => {
+    const yesIds = Object.entries(localDecisions).filter(([_, d]) => d === 'YES').map(([id]) => id);
+    if (yesIds.length > 0) onBulkUpdateAssets(yesIds);
+    resetSearchAndFocus();
+  };
 
   const resetSearchAndFocus = useCallback(() => {
-    setAssetSearch('');
-    setSelectedInBatch(new Set());
-    setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-        searchInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 150);
-  }, []);
+    setDisplayValue('000000');
+    setCommittedSearch('');
+    setLocalDecisions({});
+    setShowNewAssetDialog(false);
+    setIsCreatingNewAsset(false);
+    
+    if (inputMethod === 'scanner') {
+        setIsScannerOpen(true);
+    } else {
+        setTimeout(() => {
+            searchInputRef.current?.focus();
+            forceCursorRight();
+        }, 150);
+    }
+  }, [forceCursorRight, inputMethod]);
 
   const handleAssetSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value.replace(/\D/g, ''); 
-    if (rawValue === '') {
-      setAssetSearch('');
-    } else {
-      const padded = rawValue.slice(-6).padStart(6, '0');
-      setAssetSearch(padded);
-    }
-    setSelectedInBatch(new Set()); 
+    const raw = e.target.value.replace(/\D/g, '');
+    let formatted = raw.length > 6 ? raw.slice(-6) : raw.padStart(6, '0');
+    setDisplayValue(formatted);
+    if (committedSearch !== "") { setCommittedSearch(""); setLocalDecisions({}); }
+    setTimeout(forceCursorRight, 0);
   };
 
-  const handleScanSuccess = (decodedText: string) => {
-    setIsScannerOpen(false);
-    // Limpa caracteres não numéricos e pega os últimos 6 dígitos (máscara 000000)
-    const cleaned = decodedText.replace(/\D/g, '').slice(-6).padStart(6, '0');
-    if (cleaned.length > 0) {
-      setAssetSearch(cleaned);
-      // Foca no input após leitura para feedback visual
-      setTimeout(() => searchInputRef.current?.focus(), 300);
-    }
-  };
-
-  const processToggleUpdate = (asset: Asset) => {
-    const updated = { ...asset, _conferido: !asset._conferido };
-    if (updated._conferido && getItemLocation(asset) !== selectedLocation) {
-       const locKey = Object.keys(updated).find(k => locationTerms.includes(k.toUpperCase())) || 'LOCALIZACAO';
-       updated[locKey] = selectedLocation?.toUpperCase();
-       updated.TAG_ADOCAO = "ADOTADO";
-    }
-    onUpdateAsset(updated);
+  const handleSaveNewAsset = () => {
+    if (!newAssetData.description) return alert("Informe uma descrição.");
+    const newAsset: Asset = {
+      id: `new_${Date.now()}`,
+      PLAQUETA: newAssetData.plaqueta,
+      DESCRIÇÃO: newAssetData.description.toUpperCase(),
+      EMPRESA: selectedCompany?.toUpperCase() || "",
+      LOCALIZACAO: selectedLocation?.toUpperCase() || "",
+      TAG_INVENTARIO: "INCLUSAO",
+      _isNew: true, _conferido: true
+    };
+    onUpdateAsset(newAsset);
     resetSearchAndFocus();
   };
 
-  const handleToggle = useCallback((e: React.MouseEvent, asset: Asset) => {
-    e.stopPropagation();
-    if (isBatchMode) {
-      setSelectedInBatch(prev => {
-        const next = new Set(prev);
-        if (next.has(String(asset.id))) next.delete(String(asset.id));
-        else next.add(String(asset.id));
-        return next;
-      });
-      return;
-    }
-    if (asset._conferido) {
-      setConflictAsset(asset);
-      return;
-    }
-    processToggleUpdate(asset);
-  }, [onUpdateAsset, selectedLocation, locationTerms, getItemLocation, assetSearch, isBatchMode, processToggleUpdate]);
-
-  const handleConfirmBatch = () => {
-    if (selectedInBatch.size > 0) {
-      onBulkUpdateAssets(Array.from(selectedInBatch));
-    }
-    resetSearchAndFocus();
-  };
+  // Se houver mais de 1 registro encontrado na busca, o botão salvar aparece
+  const showSaveButton = filteredAssetsInLocation.length > 1 && Object.keys(localDecisions).length > 0;
 
   if (!isInventorying) {
     return (
       <div className="flex flex-col h-full bg-white animate-fadeIn">
         <div className="p-6 pb-2">
-          <button onClick={onBack} className="mb-4 text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] flex items-center space-x-1">
-            <ArrowLeft size={10} /> <span>Menu Principal</span>
-          </button>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-black text-black uppercase tracking-tight">Setores Operacionais</h2>
-          </div>
+          <button onClick={onBack} className="mb-4 text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] flex items-center space-x-1"><ArrowLeft size={10} /> <span>Menu Principal</span></button>
+          <h2 className="text-2xl font-black text-black uppercase mb-6">Setores Operacionais</h2>
           <div className="relative mb-6">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={16} />
-            <input 
-              type="text" 
-              placeholder="PESQUISAR SETOR..." 
-              value={locationSearch} 
-              onChange={(e) => setLocationSearch(e.target.value.toUpperCase())} 
-              className="w-full pl-10 pr-4 py-3.5 bg-gray-50 rounded-2xl text-[10px] font-black uppercase outline-none border-2 border-transparent focus:border-blue-100 transition-all shadow-inner" 
-            />
+            <input type="text" placeholder="FILTRAR SETOR..." value={locationSearch} onChange={(e) => setLocationSearch(e.target.value.toUpperCase())} className="w-full pl-10 pr-4 py-3.5 bg-gray-50 rounded-2xl text-[10px] font-black uppercase outline-none border-2 border-transparent focus:border-blue-100 shadow-inner" />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 no-scrollbar pb-10 space-y-4">
-          {allLocations.filter(l => l.includes(locationSearch)).map(loc => {
+          {Object.keys(locationStats).sort().filter(l => l.includes(locationSearch)).map(loc => {
             const stats = locationStats[loc];
             const percent = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
-            const isStarted = stats.checked > 0;
-            const isDone = percent === 100;
-
             return (
-              <button 
-                key={loc} 
-                disabled={isDone}
-                onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} 
-                className={`w-full flex items-center justify-between p-6 rounded-[2.2rem] border transition-all relative overflow-hidden active:scale-[0.98] 
-                  ${isDone ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed' : 
-                    isStarted ? 'bg-gray-900 border-gray-800 shadow-xl' : 'bg-white border-gray-100 shadow-sm'}`}
-              >
-                <div className="flex items-center space-x-4 min-w-0 pr-4 text-left relative z-10">
-                  <div className={`p-3 rounded-2xl ${isDone ? 'bg-emerald-100 text-emerald-600' : isStarted ? 'bg-white/10 text-blue-400' : 'bg-gray-50 text-gray-400'}`}>
-                    {isDone ? <Lock size={20} /> : <MapPin size={20} />}
-                  </div>
-                  <div className="min-w-0">
-                    <span className={`text-[13px] font-black uppercase truncate block ${isStarted ? 'text-white' : 'text-gray-900'}`}>{loc}</span>
-                    <div className="flex items-center space-x-2 mt-0.5">
-                      <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">{stats.checked}/{stats.total} ITENS</span>
-                    </div>
-                  </div>
+              <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className={`w-full flex items-center justify-between p-6 rounded-[2.2rem] border transition-all active:scale-[0.98] ${percent === 100 ? 'bg-gray-50 border-gray-100 opacity-60' : stats.checked > 0 ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100 shadow-sm'}`}>
+                <div className="flex items-center space-x-4 text-left">
+                  <div className={`p-3 rounded-2xl ${stats.checked > 0 ? 'bg-white/10 text-blue-400' : 'bg-gray-50 text-gray-400'}`}><MapPin size={20} /></div>
+                  <div><span className={`text-[13px] font-black uppercase truncate block ${stats.checked > 0 ? 'text-white' : 'text-gray-900'}`}>{loc}</span><span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">{stats.checked}/{stats.total} ITENS</span></div>
                 </div>
-                <div className="flex flex-col items-end relative z-10">
-                  {isDone ? (
-                    <div className="bg-emerald-500 text-white px-3 py-1.5 rounded-xl flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20">
-                      <span className="text-[10px] font-black">100%</span>
-                      <CheckCheck size={12} strokeWidth={4} />
-                    </div>
-                  ) : (
-                    <span className={`text-[11px] font-black ${isStarted ? 'text-blue-400' : 'text-blue-600'}`}>{percent}%</span>
-                  )}
-                </div>
+                <span className={`text-[11px] font-black ${stats.checked > 0 ? 'text-blue-400' : 'text-blue-600'}`}>{percent}%</span>
               </button>
             );
           })}
@@ -433,56 +367,42 @@ const Inventory: React.FC<InventoryProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-white animate-fadeIn relative">
-      <div className="p-6 pb-2 shadow-sm relative z-10 bg-white">
+      <div className={`p-6 pb-2 shadow-sm relative z-10 transition-colors duration-500 ${activeFilter === 'pending' ? 'bg-white' : 'bg-emerald-50'}`}>
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => { setIsInventorying(false); setAssetSearch(''); }} className="text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] flex items-center space-x-1">
-            <ArrowLeft size={10} /> <span>Trocar Setor</span>
-          </button>
-          <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">
-             <MapPin size={10} className="text-blue-600" />
-             <span className="text-[9px] font-black text-blue-900 uppercase truncate max-w-[150px]">{selectedLocation}</span>
+          <button onClick={() => { setIsInventorying(false); resetSearchAndFocus(); }} className="text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] flex items-center space-x-1"><ArrowLeft size={10} /> <span>Setores</span></button>
+          
+          {/* SELETOR DE ENTRADA */}
+          <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-inner">
+             <button onClick={() => setInputMethod('keyboard')} className={`px-4 py-1.5 rounded-lg flex items-center space-x-2 transition-all ${inputMethod === 'keyboard' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-400'}`}>
+                <Keyboard size={12} />
+                <span className="text-[8px] font-black uppercase">Manual</span>
+             </button>
+             <button onClick={() => { setInputMethod('scanner'); setIsScannerOpen(true); }} className={`px-4 py-1.5 rounded-lg flex items-center space-x-2 transition-all ${inputMethod === 'scanner' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400'}`}>
+                <Zap size={12} />
+                <span className="text-[8px] font-black uppercase">Scanner</span>
+             </button>
           </div>
         </div>
         
-        {/* Campo de Pesquisa com Botão de Scanner Integrado */}
-        <div className="relative mb-5" onClick={() => searchInputRef.current?.focus()}>
-          <div className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col items-start pointer-events-none">
-             <span className="text-[7px] font-black text-blue-300 uppercase leading-none">Nº ATIVO</span>
-             <span className="text-[6px] font-black text-blue-200 uppercase mt-0.5 tracking-tighter">LEITURA</span>
-          </div>
-          
-          <input 
-            ref={searchInputRef} type="text" inputMode="numeric" placeholder="000000" 
-            value={assetSearch} onChange={handleAssetSearchChange} 
-            className="w-full pl-20 pr-32 py-7 text-4xl font-black uppercase outline-none border-2 border-blue-100 bg-blue-50/20 rounded-[2.2rem] focus:border-blue-500 focus:bg-white transition-all tracking-tighter text-blue-900 placeholder:text-blue-100/50 shadow-inner" 
-          />
-          
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
-            {assetSearch && (
-              <button onClick={(e) => { e.stopPropagation(); setAssetSearch(''); }} className="w-10 h-10 flex items-center justify-center text-blue-200 active:text-blue-500">
-                <X size={24} />
-              </button>
-            )}
-            <button 
-              onClick={(e) => { e.stopPropagation(); setIsScannerOpen(true); }}
-              className="w-16 h-16 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 active:scale-95 transition-all"
-            >
-              <Scan size={28} strokeWidth={2.5} />
-            </button>
+        <div className="relative mb-5">
+          <input ref={searchInputRef} type="text" inputMode="numeric" value={displayValue} onChange={handleAssetSearchChange} onFocus={() => setTimeout(forceCursorRight, 0)} onSelect={forceCursorRight} onKeyDown={(e) => e.key === 'Enter' && triggerSearch(displayValue)} className="w-full pl-20 pr-32 py-7 text-4xl font-black uppercase outline-none border-2 border-blue-100 bg-white/50 rounded-[2.2rem] focus:border-blue-500 focus:bg-white transition-all tracking-tighter text-blue-950 caret-blue-600 shadow-inner" />
+          <div className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col items-start pointer-events-none"><span className="text-[7px] font-black text-blue-300 uppercase leading-none">Nº ATIVO</span></div>
+          <div className="absolute right-4 top-1/2 -translate-y-1/2">
+            <button onClick={() => triggerSearch(displayValue)} className="w-16 h-16 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-95 transition-all"><Search size={28} strokeWidth={3} /></button>
           </div>
         </div>
 
-        <div className="flex space-x-6 px-2">
-          <button onClick={() => setActiveFilter('pending')} className={`flex-1 flex flex-col items-center pb-3 border-b-2 transition-all ${activeFilter === 'pending' ? 'border-blue-600 text-blue-900' : 'border-transparent text-gray-300'}`}>
+        <div className="flex space-x-4 px-2">
+          <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); }} className={`flex-1 flex flex-col items-center py-4 rounded-2xl transition-all border-b-4 ${activeFilter === 'pending' ? 'bg-red-50 border-red-600 text-red-900 shadow-inner' : 'bg-transparent border-transparent text-gray-300'}`}>
             <span className="text-[10px] font-black uppercase tracking-widest">Pendentes ({locationStats[selectedLocation!] ? locationStats[selectedLocation!].total - locationStats[selectedLocation!].checked : 0})</span>
           </button>
-          <button onClick={() => setActiveFilter('checked')} className={`flex-1 flex flex-col items-center pb-3 border-b-2 transition-all ${activeFilter === 'checked' ? 'border-emerald-600 text-emerald-900' : 'border-transparent text-gray-300'}`}>
+          <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); }} className={`flex-1 flex flex-col items-center py-4 rounded-2xl transition-all border-b-4 ${activeFilter === 'checked' ? 'bg-emerald-50 border-emerald-600 text-emerald-900 shadow-inner' : 'bg-transparent border-transparent text-gray-300'}`}>
             <span className="text-[10px] font-black uppercase tracking-widest">Conferidos ({locationStats[selectedLocation!]?.checked || 0})</span>
           </button>
         </div>
       </div>
 
-      <div ref={listRef} className="flex-1 overflow-y-auto px-6 no-scrollbar pb-40">
+      <div className={`flex-1 overflow-y-auto px-6 no-scrollbar pb-40 transition-colors duration-500 ${activeFilter === 'pending' ? 'bg-white' : 'bg-emerald-50/20'}`}>
         {filteredAssetsInLocation.length > 0 ? (
           <div className="mt-4 space-y-4">
             {filteredAssetsInLocation.map((asset, index) => (
@@ -490,108 +410,69 @@ const Inventory: React.FC<InventoryProps> = ({
                 key={asset.id} 
                 asset={asset} 
                 onSelect={onSelectAsset} 
-                onToggle={handleToggle} 
                 plaquetaTerms={plaquetaTerms} 
-                descTerms={descTerms} 
-                isSelectableMode={isBatchMode}
-                isSelected={selectedInBatch.has(String(asset.id))}
-                buttonRef={index === 0 ? firstMatchButtonRef : undefined}
+                descTerms={descTerms}
+                decision={localDecisions[String(asset.id)] || null}
+                onMakeDecision={handleMakeDecision}
+                yesButtonRef={index === 0 ? firstYesButtonRef : undefined}
+                isConferidoTab={activeFilter === 'checked'}
               />
             ))}
           </div>
         ) : (
-          <div className="py-24 text-center flex flex-col items-center">
-            {assetSearch ? (
-               <>
-                 <AlertCircle size={40} className="text-gray-100 mb-4" />
-                 <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest leading-relaxed px-10">
-                    O item {assetSearch} não consta nesta lista de {activeFilter === 'pending' ? 'PENDENTES' : 'CONFERIDOS'}
-                 </p>
-                 <button 
-                  onClick={() => setActiveFilter(activeFilter === 'pending' ? 'checked' : 'pending')}
-                  className="mt-6 text-[9px] font-black text-blue-600 uppercase border-b border-blue-600 pb-1"
-                 >
-                    Alternar para {activeFilter === 'pending' ? 'CONFERIDOS' : 'PENDENTES'}
-                 </button>
-               </>
-            ) : (
-               <>
-                 <CheckCheck size={40} className="text-emerald-50 mb-4" />
-                 <p className="text-[10px] font-black text-gray-200 uppercase tracking-[0.3em]">
-                    {activeFilter === 'pending' ? 'Área Limpa' : 'Nada conferido ainda'}
-                 </p>
-               </>
-            )}
+          <div className="py-24 text-center flex flex-col items-center opacity-30">
+            {committedSearch ? <AlertCircle size={40} className="mb-4" /> : activeFilter === 'pending' ? <Info size={40} className="mb-4" /> : <CheckCircle2 size={40} className="mb-4" />}
+            <p className="text-[10px] font-black uppercase tracking-widest">
+                {committedSearch ? `Ativo ${committedSearch} não nesta aba` : activeFilter === 'pending' ? 'Setor concluído ou limpo' : 'Aguardando Conferências'}
+            </p>
           </div>
         )}
       </div>
 
-      {isBatchMode && (
-        <div className="absolute bottom-6 left-6 right-6 flex flex-col space-y-3 z-30">
-          <button 
-            onClick={handleConfirmBatch}
-            disabled={selectedInBatch.size === 0}
-            className={`w-full py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95 flex items-center justify-center space-x-3
-              ${selectedInBatch.size > 0 ? 'bg-emerald-600 text-white shadow-emerald-200' : 'bg-gray-200 text-gray-400 cursor-not-allowed grayscale'}`}
-          >
-             <CheckCheck size={20} strokeWidth={3} />
-             <span>Confirmar Seleção ({selectedInBatch.size})</span>
-          </button>
+      {showSaveButton && (
+        <div className="fixed bottom-6 left-6 right-6 z-40 animate-slideUp">
+           <button onClick={handleSaveConferencia} className="w-full py-5 bg-emerald-600 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-2xl flex items-center justify-center space-x-3 active:scale-95 transition-all">
+             <Save size={24} /><span>Salvar Conferência ({Object.keys(localDecisions).length})</span>
+           </button>
         </div>
       )}
 
-      {conflictAsset && (
+      {/* MODAL INCLUSÃO */}
+      {showNewAssetDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-bounceIn overflow-hidden">
-            <div className="flex items-center space-x-3 mb-6">
-               <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
-                  <AlertTriangle size={28} />
-               </div>
-               <div>
-                  <h3 className="text-xl font-black text-gray-900 uppercase tracking-tighter leading-none">Aviso de Registro</h3>
-                  <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest mt-1">Item já inventariado anteriormente</p>
-               </div>
-            </div>
-
-            <div className="bg-gray-50 rounded-3xl p-5 border border-gray-100 space-y-4 mb-8">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                 <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Local Registrado</span>
-                 <div className="flex items-center space-x-1.5 text-blue-600">
-                    <MapPin size={10} />
-                    <span className="text-[10px] font-black uppercase truncate max-w-[140px]">{getItemLocation(conflictAsset)}</span>
-                 </div>
-              </div>
-              <div className="p-3 bg-amber-50 rounded-2xl flex items-start space-x-2">
-                  <RefreshCw size={14} className="text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-[9px] font-bold text-amber-700 uppercase leading-relaxed">Deseja re-registrar no local atual ({selectedLocation})?</p>
-              </div>
-            </div>
-
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-bounceIn text-center">
+            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><AlertCircle size={32} /></div>
+            <h3 className="text-xl font-black text-gray-900 uppercase leading-tight mb-2">Plaqueta Inexistente</h3>
+            <p className="text-[10px] font-bold text-gray-400 uppercase leading-relaxed mb-8">O ativo <span className="text-red-600 font-black">{committedSearch}</span> não existe na base. Deseja incluir?</p>
             <div className="space-y-3">
-               <button 
-                onClick={() => { processToggleUpdate(conflictAsset); setConflictAsset(null); }}
-                className="w-full py-5 bg-emerald-600 text-white rounded-[1.8rem] font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-100 active:scale-95 transition-all flex items-center justify-center space-x-2"
-               >
-                 <CheckCheck size={18} />
-                 <span>Sim, Registrar Aqui</span>
-               </button>
-               <button 
-                onClick={() => { setConflictAsset(null); resetSearchAndFocus(); }}
-                className="w-full py-4 bg-gray-100 text-gray-500 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
-               >
-                 Manter Original
-               </button>
+              <button onClick={() => { setNewAssetData({ description: '', plaqueta: committedSearch }); setShowNewAssetDialog(false); setIsCreatingNewAsset(true); }} className="w-full py-5 bg-blue-600 text-white rounded-[1.8rem] font-black uppercase tracking-widest shadow-xl flex items-center justify-center space-x-2"><PlusCircle size={18} /><span>Sim, Incluir Novo</span></button>
+              <button onClick={resetSearchAndFocus} className="w-full py-4 bg-gray-100 text-gray-500 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest">Não, Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
-      {isScannerOpen && (
-        <Scanner 
-          onBack={() => setIsScannerOpen(false)} 
-          onScanSuccess={handleScanSuccess} 
-        />
+      {/* FORM INCLUSÃO */}
+      {isCreatingNewAsset && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-bounceIn overflow-hidden">
+             <div className="flex items-center space-x-3 mb-6">
+                <div className="w-12 h-12 bg-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg"><FilePlus size={24} /></div>
+                <div><h3 className="text-xl font-black text-gray-900 uppercase leading-none">Inclusão</h3><p className="text-[8px] font-black text-purple-600 uppercase tracking-widest mt-1">Novo Ativo Manual</p></div>
+             </div>
+             <div className="space-y-5">
+                <div><label className="block text-[8px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1.5 ml-2">Etiqueta Lida</label><div className="px-5 py-4 bg-gray-50 rounded-2xl font-black text-blue-600 text-lg">{newAssetData.plaqueta}</div></div>
+                <div><label className="block text-[8px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1.5 ml-2">Descrição Completa</label><textarea autoFocus rows={3} placeholder="EX: CADEIRA..." value={newAssetData.description} onChange={(e) => setNewAssetData({...newAssetData, description: e.target.value})} className="w-full px-5 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-purple-500 focus:bg-white outline-none font-bold text-xs uppercase shadow-inner" /></div>
+                <div className="flex space-x-3 pt-2">
+                   <button onClick={resetSearchAndFocus} className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-xl font-black uppercase text-[10px] tracking-widest">Sair</button>
+                   <button onClick={handleSaveNewAsset} className="flex-[2] py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center justify-center space-x-2"><Save size={14} /><span>Salvar Ativo</span></button>
+                </div>
+             </div>
+          </div>
+        </div>
       )}
+
+      {isScannerOpen && <Scanner onBack={() => setIsScannerOpen(false)} onScanSuccess={(val) => { setIsScannerOpen(false); triggerSearch(val.replace(/\D/g, '').slice(-6)); }} />}
     </div>
   );
 };

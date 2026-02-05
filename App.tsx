@@ -17,7 +17,6 @@ import * as XLSX from 'xlsx';
 const ADMIN_EMAIL = "semorr@gmail.com";
 
 const App: React.FC = () => {
-  // Recuperação de Histórico e Sessão
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('app_current_user');
     return saved ? JSON.parse(saved) : null;
@@ -26,7 +25,6 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<AppScreen[]>(() => {
     const saved = localStorage.getItem('app_screen_history');
     const recovered = saved ? JSON.parse(saved) : [AppScreen.LOGIN];
-    // Se não tiver usuário, força login, exceto se estiver registrando
     if (!localStorage.getItem('app_current_user') && recovered[recovered.length-1] !== AppScreen.REGISTER) {
       return [AppScreen.LOGIN];
     }
@@ -65,7 +63,6 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1];
 
-  // Persistência de Navegação
   useEffect(() => {
     localStorage.setItem('app_screen_history', JSON.stringify(history));
   }, [history]);
@@ -105,7 +102,7 @@ const App: React.FC = () => {
 
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return [];
-    const companyTerms = ['EMPRESA', 'UNIDADE', 'UNID', 'COMPANHIA'];
+    const companyTerms = ['EMPRESA', 'UNIDADE', 'UNID', 'COMPANHIA', 'FILIAL', 'NOME'];
     const selComp = selectedCompany.trim().toUpperCase();
     return inventory.assets.filter(asset => {
       return Object.entries(asset).some(([key, val]) => 
@@ -118,13 +115,24 @@ const App: React.FC = () => {
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
       const index = prev.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
-      if (index === -1) return prev;
-      const newAssets = [...prev.assets];
-      newAssets[index] = {
-        ...updatedAsset,
-        _conferido: !!updatedAsset._conferido,
-        TAG_INVENTARIO: updatedAsset._conferido ? "CONFERIDO" : "PENDENTE",
-      };
+      
+      let newAssets;
+      if (index === -1) {
+        // Se for um novo registro (Inclusão)
+        newAssets = [...prev.assets, {
+          ...updatedAsset,
+          _conferido: true,
+          TAG_INVENTARIO: "INCLUSAO"
+        }];
+      } else {
+        // Atualização de registro existente
+        newAssets = [...prev.assets];
+        newAssets[index] = {
+          ...updatedAsset,
+          _conferido: !!updatedAsset._conferido,
+          TAG_INVENTARIO: updatedAsset._conferido ? (updatedAsset._isNew ? "INCLUSAO" : "CONFERIDO") : "PENDENTE",
+        };
+      }
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString() };
     });
   }, []);
@@ -135,7 +143,11 @@ const App: React.FC = () => {
     setInventory(prev => {
       const nextAssets = prev.assets.map(asset => {
         if (idSet.has(String(asset.id))) {
-          return { ...asset, _conferido: true, TAG_INVENTARIO: "CONFERIDO" };
+          return { 
+            ...asset, 
+            _conferido: true, 
+            TAG_INVENTARIO: asset._isNew ? "INCLUSAO" : "CONFERIDO" 
+          };
         }
         return asset;
       });
@@ -169,7 +181,14 @@ const App: React.FC = () => {
   const handleExportDatabase = () => {
     if (inventory.assets.length === 0) return;
     try {
-      const dataToExport = inventory.assets.map(({id, ...rest}) => rest);
+      const dataToExport = inventory.assets.map(({id, ...rest}) => {
+        // Remover campos internos do export
+        const clean: any = {};
+        Object.keys(rest).forEach(k => {
+          if (!k.startsWith('_')) clean[k] = rest[k];
+        });
+        return clean;
+      });
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");

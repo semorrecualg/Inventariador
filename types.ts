@@ -18,6 +18,7 @@ export interface Asset {
   _hasPlaqueta?: boolean;
   _corrigido?: boolean;
   _transferido?: boolean;
+  _isNew?: boolean; // Flag para novo registro (Inclusão Manual)
   // Colunas de Registro (Banco de Dados)
   TAG_INVENTARIO?: string;
   TAG_PLAQUETA?: string;
