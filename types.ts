@@ -7,10 +7,15 @@ export interface User {
   mustChangePassword?: boolean;
 }
 
+export enum DatabaseStatus {
+  EMPTY = 'EMPTY',
+  LOADED = 'LOADED',
+  IN_USE = 'IN_USE'
+}
+
 export interface Asset {
   [key: string]: any;
   id: string | number;
-  // Controle Interno
   _conferido?: boolean;
   _isInternalDuplicate?: boolean;
   _isExternalDuplicate?: boolean;
@@ -18,12 +23,11 @@ export interface Asset {
   _hasPlaqueta?: boolean;
   _corrigido?: boolean;
   _transferido?: boolean;
-  _isNew?: boolean; // Flag para novo registro (Inclusão Manual)
-  // Colunas de Registro (Banco de Dados)
+  _isNew?: boolean;
   TAG_INVENTARIO?: string;
   TAG_PLAQUETA?: string;
   TAG_DUPLICIDADE?: string;
-  TAG_ADOCAO?: string; // "ADOTADO" ou vazio
+  TAG_ADOCAO?: string;
 }
 
 export enum AppScreen {
@@ -45,4 +49,5 @@ export interface InventoryState {
   assets: Asset[];
   companies: string[];
   lastUpdated: string | null;
+  status: DatabaseStatus;
 }

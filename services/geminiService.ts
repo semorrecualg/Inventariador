@@ -1,7 +1,6 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// Manual base64 decoding implementation as required by guidelines
 function decode(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -13,9 +12,14 @@ function decode(base64: string) {
 }
 
 export async function speakText(text: string): Promise<void> {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") {
+    console.warn("API Key não configurada. Sintetização de voz desativada.");
+    return;
+  }
+
   try {
-    // Correct initialization using named parameter and process.env.API_KEY exclusively
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: `Diga de forma clara e profissional: ${text}` }] }],
@@ -30,13 +34,10 @@ export async function speakText(text: string): Promise<void> {
     });
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("Audio content not found");
+    if (!base64Audio) return;
 
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    
-    // Decode base64 string manually to raw PCM bytes
     const bytes = decode(base64Audio);
-
     const audioBuffer = await decodeAudioData(bytes, outputAudioContext, 24000, 1);
     const source = outputAudioContext.createBufferSource();
     source.buffer = audioBuffer;
@@ -44,11 +45,9 @@ export async function speakText(text: string): Promise<void> {
     source.start();
   } catch (error) {
     console.error("Erro ao gerar áudio:", error);
-    alert("Falha ao sintetizar voz. Verifique sua chave de API.");
   }
 }
 
-// Manual decoding logic for raw PCM data from the Gemini API
 async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
