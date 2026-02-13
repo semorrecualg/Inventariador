@@ -12,14 +12,9 @@ function decode(base64: string) {
 }
 
 export async function speakText(text: string): Promise<void> {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "undefined") {
-    console.warn("API Key não configurada. Sintetização de voz desativada.");
-    return;
-  }
-
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    // Re-initialize for each call to ensure the latest API key is used
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: `Diga de forma clara e profissional: ${text}` }] }],

@@ -23,7 +23,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
     if (typeof serial !== 'number' || serial < 1 || serial > 100000) return serial;
     try {
       const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
-      return date.toLocaleDateString('pt-BR');
+      const d = String(date.getDate()).padStart(2, '0');
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const y = date.getFullYear();
+      return `${d}/${m}/${y}`;
     } catch (e) {
       return serial;
     }
@@ -55,7 +58,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       const indiceColName = assetHeaders.find(h => indiceTerms.includes(h.toUpperCase()));
       const companyColName = assetHeaders.find(h => companyTerms.includes(h.toUpperCase()));
 
-      // Mapas para detecção de duplicidade granular
       const globalIndiceToCompanies = new Map<string, Set<string>>();
       const companyToIndices = new Map<string, Map<string, number>>();
       
