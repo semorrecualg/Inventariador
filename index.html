@@ -29,6 +29,15 @@
         .scan-beam {
             animation: scan-beam 2s infinite linear;
         }
+        @keyframes loadingBar {
+            0% { width: 0%; }
+            30% { width: 45%; }
+            60% { width: 85%; }
+            100% { width: 100%; }
+        }
+        .animate-loadingBar {
+            animation: loadingBar 3s ease-in-out infinite;
+        }
     </style>
     <script type="importmap">
 {

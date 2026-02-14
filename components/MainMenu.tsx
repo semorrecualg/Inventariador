@@ -36,10 +36,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
-  // Opções principais da operação - Grid Limpo
+  // Opções principais da operação - Fluxo otimizado conforme pedido
   const coreOptions = [
     { 
-      id: AppScreen.INVENTORY, 
+      id: AppScreen.COMPANY_SELECTION, // Alterado: Inventário agora começa pela seleção de empresa
       title: 'Inventário', 
       desc: 'Conferência física', 
       icon: <ClipboardList className="text-orange-600" />,
@@ -55,14 +55,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
       disabled: !hasData
     },
     { 
-      id: AppScreen.COMPANY_SELECTION, 
-      title: 'Empresas', 
-      desc: 'Alternar Unidade', 
-      icon: <Building2 className="text-indigo-600" />,
-      color: 'bg-indigo-100',
-      disabled: !hasData
-    },
-    { 
       id: AppScreen.DASHBOARD, 
       title: 'Relatórios', 
       desc: 'Status patrimonial', 
@@ -72,11 +64,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
     }
   ];
 
-  // Opções do submenu administrativo
   const adminOptions = [
     { 
       id: AppScreen.LOAD_DATABASE, 
-      title: 'Carga', 
+      title: 'Carga Expert', 
       desc: 'Importar Banco Excel', 
       icon: <UploadCloud className="text-blue-400" />,
       action: () => { setShowAdminPanel(false); onNavigate(AppScreen.LOAD_DATABASE); }
@@ -100,7 +91,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
 
   return (
     <div className="p-6 pb-10 h-full flex flex-col bg-white relative overflow-hidden">
-      {/* BRANDING HEADER - GBR Inteligência Patrimonial */}
+      {/* BRANDING HEADER */}
       <div className="flex flex-col mb-8 pt-2">
         <div className="flex items-center space-x-2 mb-1">
           <div className="w-5 h-5 bg-blue-600 rounded-md flex items-center justify-center">
@@ -148,7 +139,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
         </div>
       )}
 
-      {/* GRID DE OPERAÇÃO PADRÃO */}
+      {/* GRID DE OPERAÇÃO */}
       <div className="grid grid-cols-1 gap-4 flex-1 overflow-y-auto no-scrollbar pr-1">
         {coreOptions.map((opt) => (
           <button
@@ -194,7 +185,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
         </div>
       </div>
 
-      {/* PAINEL DE GESTÃO (OVERLAY) */}
+      {/* PAINEL DE GESTÃO */}
       {showAdminPanel && (
         <div className="absolute inset-0 z-50 bg-gray-900/95 backdrop-blur-xl animate-fadeIn flex flex-col p-8">
           <div className="flex items-center justify-between mb-8">
@@ -215,7 +206,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
             </button>
           </div>
 
-          {/* STATUS DA BASE */}
           <div className={`mb-8 p-6 rounded-[2rem] border-2 transition-all
             ${hasData ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20 animate-pulse'}`}>
             <div className="flex items-center justify-between mb-4">
@@ -264,10 +254,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
                 </div>
               </button>
             ))}
-          </div>
-
-          <div className="text-center pt-6 border-t border-white/5">
-            <p className="text-[8px] font-black text-white/20 uppercase tracking-[0.5em]">GBR Inteligência Patrimonial</p>
           </div>
         </div>
       )}

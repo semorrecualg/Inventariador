@@ -1,13 +1,30 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
-  Upload, 
-  CheckCircle2, 
   Loader2, 
-  Layers, 
-  AlertCircle
+  AlertCircle,
+  HardDrive,
+  BarChart3,
+  Building2,
+  ArrowRight,
+  ChevronRight,
+  ArrowLeft,
+  X,
+  Database,
+  TableProperties,
+  ShieldCheck,
+  Info,
+  FileSpreadsheet
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+interface LoadSummary {
+  rows: number;
+  cols: number;
+  companies: Record<string, number>;
+  status: Record<string, number>;
+  headers: string[];
+}
 
 interface DatabaseLoaderProps {
   onBack: () => void;
@@ -15,174 +32,151 @@ interface DatabaseLoaderProps {
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded }) => {
+  const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'SUMMARY'>('SOURCE');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<{rows: number, cos: number} | null>(null);
+  const [summary, setSummary] = useState<LoadSummary | null>(null);
+  
+  const processedDataRef = useRef<any[]>([]);
+  const processedCompaniesRef = useRef<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const formatExcelDate = (serial: any) => {
-    if (typeof serial !== 'number' || serial < 1 || serial > 100000) return serial;
-    try {
-      const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
-      const d = String(date.getDate()).padStart(2, '0');
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const y = date.getFullYear();
-      return `${d}/${m}/${y}`;
-    } catch (e) {
-      return serial;
-    }
+  const normalizeHeader = (h: string) => {
+    return h.toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, '_')
+      .trim();
   };
 
-  const processWorkbook = (dataBuffer: any) => {
+  const processFile = async (dataBuffer: any) => {
     try {
+      setStep('LOADING');
+      setLoading(true);
+      setError(null);
+      
       const wb = XLSX.read(dataBuffer, { type: 'array' });
-      const assetSheetName = wb.SheetNames[0];
-      const assetWs = wb.Sheets[assetSheetName];
-      const assetRows = XLSX.utils.sheet_to_json(assetWs, { header: 1, defval: "" }) as any[][];
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
 
-      if (!assetRows || assetRows.length === 0) throw new Error("Planilha de ativos inválida.");
+      if (!rows || rows.length < 2) throw new Error("Planilha vazia ou formato inválido.");
 
-      let assetHeaderIndex = -1;
-      for (let i = 0; i < assetRows.length; i++) {
-        if (assetRows[i].some(cell => String(cell).trim() !== "")) {
-          assetHeaderIndex = i;
+      let headerRowIndex = 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].some(c => String(c).trim() !== "")) {
+          headerRowIndex = i;
           break;
         }
       }
 
-      const assetHeaders = assetRows[assetHeaderIndex].map((h, i) => String(h).trim() || `Col_${i + 1}`);
-      const plaquetaTerms = ['PLAQUETA', 'PATRIMONIO', 'PATRIMÔNIO', 'REGISTRO', 'CODIGO', 'CÓDIGO', 'ETIQUETA', 'TAG', 'BEM', 'NUMERO', 'NÚMERO'];
-      const indiceTerms = ['INDICE', 'ÍNDICE', 'ID', 'ID_ATIVO', 'CONTROLE'];
-      const companyTerms = ['EMPRESA', 'UNIDADE', 'UNID', 'COMPANHIA'];
-      
-      const plaquetaColName = assetHeaders.find(h => plaquetaTerms.includes(h.toUpperCase()));
-      const indiceColName = assetHeaders.find(h => indiceTerms.includes(h.toUpperCase()));
-      const companyColName = assetHeaders.find(h => companyTerms.includes(h.toUpperCase()));
+      const rawHeaders = rows[headerRowIndex].map(h => String(h).trim());
+      const normalizedHeaders = rawHeaders.map(h => normalizeHeader(h));
 
-      const globalIndiceToCompanies = new Map<string, Set<string>>();
-      const companyToIndices = new Map<string, Map<string, number>>();
-      
-      const rawData = assetRows.slice(assetHeaderIndex + 1)
-        .filter(row => row.some(cell => String(cell).trim() !== ""))
-        .map((row, rowIndex) => {
-          const item: any = {};
-          assetHeaders.forEach((header, colIndex) => {
-            let val = row[colIndex];
-            if (header.toUpperCase().match(/DATA|AQUISICAO|DT_/) && typeof val === 'number') val = formatExcelDate(val);
-            item[header] = val !== undefined ? String(val).toUpperCase() : "";
+      const mapping = {
+        PLAQUETA: normalizedHeaders.findIndex(h => h.match(/PLAQUETA|PATRIMONIO|TAG|COD_BEM|REGISTRO/)),
+        EMPRESA: normalizedHeaders.findIndex(h => h.match(/EMPRESA|UNIDADE|RAZAO/)),
+        DESCRICAO: normalizedHeaders.findIndex(h => h.match(/DESCRICAO_DO_ATIVO_IMOBILIZADO|DESCRICAO_DO_ATIVO_INTANGIVEL|DESCRICAO|DESC_SINTETICA/))
+      };
+
+      const companyStats: Record<string, number> = {};
+      const assetData = rows.slice(headerRowIndex + 1)
+        .filter(row => row.some(c => String(c).trim() !== ""))
+        .map((row, idx) => {
+          const item: any = { id: `db_${Date.now()}_${idx}` };
+          normalizedHeaders.forEach((header, colIdx) => {
+            item[header] = row[colIdx] !== undefined ? String(row[colIdx]).toUpperCase().trim() : "";
           });
-          
-          const idxVal = indiceColName ? String(item[indiceColName]).trim().toUpperCase() : "";
-          const cmpVal = companyColName ? String(item[companyColName]).trim().toUpperCase() : "EMPRESA PADRÃO";
 
-          if (idxVal) {
-            if (!globalIndiceToCompanies.has(idxVal)) globalIndiceToCompanies.set(idxVal, new Set());
-            globalIndiceToCompanies.get(idxVal)!.add(cmpVal);
+          const empresa = mapping.EMPRESA !== -1 ? item[normalizedHeaders[mapping.EMPRESA]] : "GERAL";
+          companyStats[empresa] = (companyStats[empresa] || 0) + 1;
 
-            if (!companyToIndices.has(cmpVal)) companyToIndices.set(cmpVal, new Map());
-            const cmpMap = companyToIndices.get(cmpVal)!;
-            cmpMap.set(idxVal, (cmpMap.get(idxVal) || 0) + 1);
-          }
-
-          return { ...item, _tempCompany: cmpVal, _tempIndice: idxVal };
+          return { ...item, _empresaNormalizada: empresa, _conferido: false, TAG_INVENTARIO: "PENDENTE" };
         });
 
-      const assetData = rawData.map((item, rowIndex) => {
-        item.id = item.id || `at_${rowIndex}_${Date.now()}`;
-        
-        const plaquetaVal = plaquetaColName ? String(item[plaquetaColName]).trim() : "";
-        item._hasPlaqueta = plaquetaVal.length > 0;
-        
-        const idx = item._tempIndice;
-        const cmp = item._tempCompany;
+      processedDataRef.current = assetData;
+      processedCompaniesRef.current = Object.keys(companyStats).sort();
 
-        const countInCompany = companyToIndices.get(cmp)?.get(idx) || 0;
-        const companiesWithIndice = globalIndiceToCompanies.get(idx)?.size || 0;
-
-        item._isInternalDuplicate = countInCompany > 1;
-        item._isExternalDuplicate = companiesWithIndice > 1;
-        item._isDuplicate = item._isInternalDuplicate || item._isExternalDuplicate;
-        item._conferido = false;
-
-        item.TAG_INVENTARIO = "PENDENTE";
-        item.TAG_PLAQUETA = item._hasPlaqueta ? "COM PLAQUETA" : "SEM PLAQUETA";
-        
-        if (item._isInternalDuplicate && item._isExternalDuplicate) {
-          item.TAG_DUPLICIDADE = "DUPLICIDADE MÚLTIPLA";
-        } else if (item._isInternalDuplicate) {
-          item.TAG_DUPLICIDADE = "DUPLICIDADE INTERNA";
-        } else if (item._isExternalDuplicate) {
-          item.TAG_DUPLICIDADE = "DUPLICIDADE EXTERNA";
-        } else {
-          item.TAG_DUPLICIDADE = "ÚNICO";
-        }
-
-        delete item._tempCompany;
-        delete item._tempIndice;
-        
-        return item;
+      setSummary({
+        rows: assetData.length,
+        cols: normalizedHeaders.length,
+        companies: companyStats,
+        status: {},
+        headers: normalizedHeaders
       });
 
-      let companies: string[] = Array.from(companyToIndices.keys()).sort();
-      if (companies.length === 0) companies = ["EMPRESA PADRÃO"];
-
-      setSuccess({ rows: assetData.length, cos: assetHeaders.length });
-      setTimeout(() => onDataLoaded(assetData, companies), 1500);
+      setStep('SUMMARY');
+      setLoading(false);
     } catch (err: any) {
-      setError(err.message || "Erro no processamento.");
+      setError(err.message);
+      setStep('SOURCE');
       setLoading(false);
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setLoading(true);
-      setError(null);
-      const r = new FileReader();
-      r.onload = (evt) => processWorkbook(evt.target?.result);
-      r.readAsArrayBuffer(file);
+      const reader = new FileReader();
+      reader.onload = (evt) => processFile(evt.target?.result);
+      reader.readAsArrayBuffer(file);
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 animate-fadeIn">
-      <div className="p-6 bg-white border-b border-gray-100 shadow-sm">
-        <h2 className="text-2xl font-black text-gray-900 uppercase leading-none">Carga de Dados</h2>
-        <p className="text-gray-400 text-[10px] mt-2 font-black uppercase tracking-widest">Identificando duplicidades internas e externas</p>
+    <div className="flex flex-col h-full bg-slate-50 animate-fadeIn w-full overflow-hidden">
+      <div className="p-4 bg-white border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <button onClick={onBack} className="p-1.5 hover:bg-gray-100 rounded-lg"><ArrowLeft size={16} className="text-gray-400"/></button>
+          <div>
+            <h2 className="text-sm font-black text-slate-900 uppercase leading-none tracking-tight">Carga Expert</h2>
+            <p className="text-emerald-500 text-[6px] font-black uppercase tracking-widest mt-0.5">Base Local Ativa</p>
+          </div>
+        </div>
+        <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white"><Database size={16} /></div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col justify-center">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center text-center">
-            <Loader2 className="text-blue-500 animate-spin mb-6" size={80} />
-            <h3 className="text-xl font-black text-gray-900 mb-2 uppercase">Mapeando Índices...</h3>
-            <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest">Cruzando dados entre unidades</p>
-          </div>
-        ) : success ? (
-          <div className="text-center animate-bounceIn">
-            <div className="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl shadow-green-100">
-              <CheckCircle2 className="text-white" size={48} />
-            </div>
-            <h3 className="text-2xl font-black text-gray-900 mb-2 uppercase">Pronto!</h3>
-            <p className="text-gray-500 font-bold uppercase text-[10px] tracking-widest">{success.rows} Itens Cruzados com Sucesso</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <label className="group relative w-full aspect-square rounded-[3rem] border-4 border-dashed border-blue-100 flex flex-col items-center justify-center p-8 cursor-pointer bg-white hover:border-blue-300 hover:bg-blue-50/10 transition-all duration-300">
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
-              <div className="w-24 h-24 bg-blue-50 rounded-[2rem] flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 shadow-inner">
-                <Upload className="text-blue-600" size={40} />
+      <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
+        {step === 'SOURCE' && (
+          <div className="space-y-4">
+            <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-6 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center space-y-3 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><HardDrive size={24} /></div>
+              <div className="text-center">
+                <h3 className="text-xs font-black text-slate-900 uppercase">Selecionar Planilha</h3>
+                <p className="text-[7px] font-bold text-gray-400 uppercase mt-0.5">.XLSX OU .XLS</p>
               </div>
-              <p className="font-black text-gray-800 text-xl uppercase">Upload Excel</p>
-              {error && <p className="mt-4 text-red-500 text-[10px] font-black uppercase bg-red-50 px-3 py-1 rounded-lg">{error}</p>}
-            </label>
+            </button>
+            <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileUpload} />
           </div>
         )}
-      </div>
 
-      <div className="p-6 bg-white border-t border-gray-100 flex items-center justify-between">
-         <button onClick={onBack} className="px-6 py-3 text-gray-400 font-black text-[10px] uppercase border rounded-xl">Cancelar</button>
-         <div className="flex items-center text-[10px] text-gray-300 font-black uppercase"><Layers size={12} className="mr-1" /> V6.2 Robust_DB</div>
+        {step === 'LOADING' && (
+          <div className="py-20 flex flex-col items-center justify-center space-y-4">
+            <Loader2 className="text-blue-600 animate-spin" size={32} strokeWidth={3} />
+            <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Processando...</p>
+          </div>
+        )}
+
+        {step === 'SUMMARY' && summary && (
+          <div className="space-y-3 animate-slideUp">
+            <div className="bg-slate-900 p-5 rounded-3xl text-white shadow-xl">
+               <span className="text-[7px] font-black uppercase text-emerald-400 block mb-1">Carga Concluída</span>
+               <h3 className="text-3xl font-black italic tracking-tighter">{summary.rows}</h3>
+               <p className="text-[8px] font-bold text-slate-400 uppercase">Ativos Detectados</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm max-h-[300px] overflow-y-auto no-scrollbar">
+              <h4 className="text-[8px] font-black text-slate-900 uppercase mb-3 flex items-center"><ChevronRight size={10} className="mr-1 text-blue-500"/> Unidades</h4>
+              {Object.entries(summary.companies).map(([name, count]) => (
+                <div key={name} className="flex justify-between items-center py-1.5 border-b border-gray-50 last:border-0">
+                  <span className="text-[8px] font-black uppercase text-gray-600 truncate max-w-[140px]">{name}</span>
+                  <span className="text-[8px] font-black text-blue-600">{count}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => onDataLoaded(processedDataRef.current, processedCompaniesRef.current)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl flex items-center justify-center space-x-2">
+              <span>Finalizar Carga</span> <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
