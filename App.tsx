@@ -75,7 +75,6 @@ const App: React.FC = () => {
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Função para ativar modo imersivo (Fullscreen)
   const enterImmersiveMode = useCallback(() => {
     const doc = document.documentElement;
     if (!document.fullscreenElement) {
@@ -87,9 +86,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Efeito para capturar qualquer clique e tentar ativar o Fullscreen (Immersive Mode)
-  // Isso atende à exigência técnica de que Fullscreen deve ser iniciado por gesto do usuário,
-  // mas remove a tela de bloqueio manual, tornando o processo "automático" ao primeiro toque.
   useEffect(() => {
     const handleFirstTouch = () => {
       enterImmersiveMode();
@@ -204,9 +200,30 @@ const App: React.FC = () => {
     if (inventory.assets.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(inventory.assets.map(a => {
       const res: any = {};
-      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
+      
+      // Mapeamento de Plaqueta Original
+      let plaquetaOrig = '';
+      for(const k of PLAQUETA_KEYS) { if(a[k]) { plaquetaOrig = a[k]; break; } }
+
+      Object.keys(a).forEach(k => { 
+        if (!k.startsWith('_') && k !== 'id') {
+           // Formatação de data na exportação
+           let val = a[k];
+           const isDateField = k.toUpperCase().includes('DATA') || k.toUpperCase().includes('DT_');
+           if (isDateField && !isNaN(Number(val)) && Number(val) > 30000 && Number(val) < 60000) {
+              const d = new Date((Number(val) - 25569) * 86400 * 1000);
+              val = d.toLocaleDateString('pt-BR');
+           }
+           res[k] = val; 
+        }
+      });
+
+      res['PLAQUETA_ORIGINAL'] = plaquetaOrig;
+      res['PLAQUETA_INVENTARIO'] = a.PLAQUETA_INVENTARIO || plaquetaOrig;
+      res['DIVERGENCIA_PLAQUETA'] = (a.PLAQUETA_INVENTARIO && a.PLAQUETA_INVENTARIO !== plaquetaOrig) ? 'SIM' : 'NAO';
       res['STATUS_INV'] = a.TAG_INVENTARIO || 'PENDENTE';
       res['CONFERIDO'] = a._conferido ? 'SIM' : 'NAO';
+      
       return res;
     }));
     const wb = XLSX.utils.book_new();

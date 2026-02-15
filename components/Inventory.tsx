@@ -186,7 +186,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const locationStats = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
     assets.forEach(a => {
-      if (checkIsBaixado(a)) return;
+      if (checkIsBaixado(a) && !a._conferido) return;
       const loc = getItemLocation(a);
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       stats[loc].total++;
@@ -230,8 +230,19 @@ const Inventory: React.FC<InventoryProps> = ({
     else {
       baseList = assets
         .filter(a => getItemLocation(a) === currentLoc)
-        .filter(a => !checkIsBaixado(a))
-        .filter(a => activeFilter === 'checked' ? !!a._conferido : !a._conferido);
+        .filter(a => {
+          const isConfirmed = !!a._conferido;
+          const isRetired = checkIsBaixado(a);
+          
+          // Lógica de Filtro v3.1: 
+          // Se aba for 'Conferido', mostrar tudo que foi tivado, incluindo baixados encontrados.
+          if (activeFilter === 'checked') {
+            return isConfirmed;
+          }
+          
+          // Se aba for 'Pendente', mostrar apenas não conferidos que NÃO sejam baixados contábeis.
+          return !isConfirmed && !isRetired;
+        });
     }
 
     return baseList.sort((a, b) => {
