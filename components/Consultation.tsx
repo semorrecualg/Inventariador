@@ -5,16 +5,10 @@ import Scanner from './Scanner';
 import { 
   Search, 
   ChevronRight, 
-  Hash, 
-  X, 
   ArrowLeft, 
-  Database,
-  Scan,
   Barcode,
   Keyboard,
-  Filter,
   AlertCircle,
-  Globe,
   Building2
 } from 'lucide-react';
 
@@ -25,11 +19,10 @@ interface ConsultationProps {
   allAssets?: Asset[]; 
 }
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, allAssets = [] }) => {
+const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset }) => {
   const [displayValue, setDisplayValue] = useState('000000');
   const [committedSearch, setCommittedSearch] = useState('');
-  const [searchKey, setSearchKey] = useState<string>('PLAQUETA');
-  const [isGlobalSearch, setIsGlobalSearch] = useState(false);
+  const searchKey = 'PLAQUETA';
   
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -40,21 +33,20 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
     }
   }, []);
 
-  const dataToSearch = useMemo(() => isGlobalSearch && allAssets.length > 0 ? allAssets : assets, [isGlobalSearch, allAssets, assets]);
-
   const filteredAssets = useMemo(() => {
     if (!committedSearch) return [];
     const term = committedSearch.toUpperCase().trim();
     
-    return dataToSearch.filter(asset => {
-      const val = String(asset[searchKey] || '').toUpperCase().trim();
+    // Busca restrita estritamente aos ativos da unidade primária selecionada (prop assets)
+    return assets.filter(asset => {
+      const val = String(asset['PLAQUETA'] || asset['ETIQUETA'] || asset['PATRIMONIO'] || '').toUpperCase().trim();
       return val === term || val.padStart(6, '0') === term.padStart(6, '0') || val.includes(term);
     }).sort((a, b) => {
-      const vA = String(a[searchKey] || '');
-      const vB = String(b[searchKey] || '');
+      const vA = String(a['PLAQUETA'] || '');
+      const vB = String(b['PLAQUETA'] || '');
       return vA.localeCompare(vB, undefined, { numeric: true });
     }).slice(0, 30);
-  }, [dataToSearch, committedSearch, searchKey]);
+  }, [assets, committedSearch]);
 
   const triggerSearch = (val: string) => {
     setCommittedSearch(val);
@@ -69,19 +61,16 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
             <ArrowLeft size={14} /> <span>Voltar</span>
           </button>
           
-          <button 
-            onClick={() => setIsGlobalSearch(!isGlobalSearch)}
-            className={`flex items-center space-x-1.5 px-3 py-1 rounded-full border transition-all ${isGlobalSearch ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-gray-50 text-gray-500 border-gray-100'}`}
-          >
-            <Globe size={10} />
-            <span className="text-[7px] font-black uppercase tracking-widest">{isGlobalSearch ? 'Global' : 'Local'}</span>
-          </button>
+          <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+            <Building2 size={10} />
+            <span className="text-[7px] font-black uppercase tracking-widest">Unidade Blindada</span>
+          </div>
         </div>
 
         <div className="flex items-end justify-between mb-4">
           <div>
             <h1 className="text-xl font-black text-black uppercase tracking-tighter leading-none">Consulta</h1>
-            <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mt-1">Pesquisa {isGlobalSearch ? 'em toda a base' : 'no setor atual'}</p>
+            <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mt-1">Pesquisa restrita à Unidade Primária</p>
           </div>
         </div>
 
@@ -113,10 +102,10 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
                   <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-blue-500 mr-3 shrink-0"><Barcode size={20} /></div>
                   <div className="flex-1 min-w-0 pr-2">
                     <div className="flex items-center space-x-1.5 mb-0.5">
-                      <span className="text-[14px] font-black text-black leading-none">{String(asset[searchKey] || '---')}</span>
+                      <span className="text-[14px] font-black text-black leading-none">{String(asset['PLAQUETA'] || asset['ETIQUETA'] || asset['PATRIMONIO'] || '---')}</span>
                     </div>
                     <p className="text-[9px] font-bold text-gray-400 uppercase truncate">
-                      {String(asset['DESCRICAO'] || asset['DESC_SINTETICA'] || 'SEM DESCRIÇÃO')}
+                      {String(asset['DESCRICAO_DO_ATIVO_IMOBILIZADO'] || asset['DESCRICAO'] || asset['DESC_SINTETICA'] || 'SEM DESCRIÇÃO')}
                     </p>
                   </div>
                   <ChevronRight size={14} className="text-gray-200" />
@@ -126,13 +115,13 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
           ) : (
             <div className="h-full flex flex-col items-center justify-center opacity-40 text-center py-20">
               <AlertCircle size={36} className="text-gray-200 mb-2" />
-              <p className="text-[9px] font-black text-gray-400 uppercase">Não encontrado</p>
+              <p className="text-[9px] font-black text-gray-400 uppercase">Não encontrado nesta Unidade</p>
             </div>
           )
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center py-20 opacity-30">
             <Keyboard size={32} className="text-gray-200 mb-3" />
-            <p className="text-[8px] font-black text-gray-300 uppercase tracking-[0.2em]">Insira os 6 dígitos para buscar</p>
+            <p className="text-[8px] font-black text-gray-300 uppercase tracking-[0.2em]">Insira os 6 dígitos para buscar nesta Unidade</p>
           </div>
         )}
       </div>

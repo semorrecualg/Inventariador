@@ -98,7 +98,7 @@ const App: React.FC = () => {
 
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return [];
-    const sel = selectedCompany.toUpperCase();
+    const sel = selectedCompany.toUpperCase().trim();
     return inventory.assets.filter(a => a._empresaNormalizada === sel);
   }, [inventory.assets, selectedCompany]);
 
@@ -110,6 +110,11 @@ const App: React.FC = () => {
       
       const updates: any = { ...updatedAsset };
       let originalLocation = "";
+
+      // GARANTIA DE INTEGRIDADE: Se for novo ou atualizado, precisa ter a empresa normalizada para não sumir do filtro
+      if (!updates._empresaNormalizada && (updates.EMPRESA || selectedCompany)) {
+          updates._empresaNormalizada = (updates.EMPRESA || selectedCompany || "").toUpperCase().trim();
+      }
       
       // Identifica localização original para determinar se é adoção
       if (index !== -1) {
@@ -148,7 +153,7 @@ const App: React.FC = () => {
       
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventoryLocation]);
+  }, [inventoryLocation, selectedCompany]);
 
   const bulkUpdateAssets = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
