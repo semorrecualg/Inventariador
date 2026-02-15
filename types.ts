@@ -28,6 +28,8 @@ export interface Asset {
   TAG_PLAQUETA?: string;
   TAG_DUPLICIDADE?: string;
   TAG_ADOCAO?: string;
+  // Fix: Explicitly define PLAQUETA_INVENTARIO as it's a core property used across the app
+  PLAQUETA_INVENTARIO?: string;
 }
 
 export enum AppScreen {

@@ -75,6 +75,19 @@ const App: React.FC = () => {
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const databaseHeaders = useMemo(() => {
+    if (inventory.assets.length === 0) return [];
+    const keys = new Set<string>();
+    inventory.assets.slice(0, 100).forEach(a => {
+      Object.keys(a).forEach(k => {
+        if (!k.startsWith('_') && k !== 'id' && k !== 'PLAQUETA_INVENTARIO' && k !== 'TAG_INVENTARIO') {
+          keys.add(k);
+        }
+      });
+    });
+    return Array.from(keys).sort();
+  }, [inventory.assets]);
+
   const enterImmersiveMode = useCallback(() => {
     const doc = document.documentElement;
     if (!document.fullscreenElement) {
@@ -87,13 +100,9 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const handleFirstTouch = () => {
-      enterImmersiveMode();
-    };
-    
+    const handleFirstTouch = () => enterImmersiveMode();
     window.addEventListener('click', handleFirstTouch);
     window.addEventListener('touchstart', handleFirstTouch);
-    
     return () => {
       window.removeEventListener('click', handleFirstTouch);
       window.removeEventListener('touchstart', handleFirstTouch);
@@ -102,7 +111,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    
     saveTimeoutRef.current = setTimeout(() => {
       try {
         localStorage.setItem('inventory_data', JSON.stringify(inventory));
@@ -112,11 +120,8 @@ const App: React.FC = () => {
         localStorage.setItem('app_selected_company', selectedCompany || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
-      } catch (e) {
-        console.warn("Storage cap reached");
-      }
+      } catch (e) { console.warn("Storage cap reached"); }
     }, 1500);
-
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying]);
 
@@ -130,63 +135,94 @@ const App: React.FC = () => {
     setHistory(prev => prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU]);
   };
 
-  const filteredAssetsByCompany = useMemo(() => {
-    if (!selectedCompany) return [];
-    const sel = String(selectedCompany).toUpperCase().trim();
-    return inventory.assets.filter(a => String(a._empresaNormalizada || '').toUpperCase().trim() === sel);
-  }, [inventory.assets, selectedCompany]);
+  const formatDateValue = (val: any): string => {
+    if (!val || val === '---' || val === '0' || val === 'NULL') return '---';
+    const strVal = String(val).trim();
+    if (!isNaN(Number(strVal)) && Number(strVal) > 30000 && Number(strVal) < 60000) {
+      const date = new Date((Number(strVal) - 25569) * 86400 * 1000);
+      return date.toLocaleDateString('pt-BR');
+    }
+    const d = new Date(strVal);
+    if (!isNaN(d.getTime()) && (strVal.includes('-') || strVal.includes('/'))) {
+      return d.toLocaleDateString('pt-BR');
+    }
+    return strVal;
+  };
+
+  const checkIsBaixado = useCallback((item: any) => {
+    const terms = ['DATA_BAIXA', 'DT_BAIXA', 'DATA_DA_BAIXA', 'BAIXA', 'DATA_DE_BAIXA'];
+    for (const term of terms) {
+      const val = String(item[term] || '').trim();
+      if (val !== "" && val !== "---" && val !== "0" && val.toUpperCase() !== "NULL") return true;
+    }
+    return false;
+  }, []);
+
+  const determineTag = (asset: Asset, targetLocation: string): string => {
+    if (asset._isNew) return "NOVO ITEM INCLUÍDO";
+    if (checkIsBaixado(asset)) return "RE-ADOTADO NO INVENTARIO";
+    
+    let originalLoc = '';
+    for(const k of LOC_KEYS) { 
+      const found = Object.keys(asset).find(ak => ak.toUpperCase() === k);
+      if (found && asset[found]) { originalLoc = String(asset[found]).toUpperCase().trim(); break; }
+    }
+
+    let originalPlaqueta = '';
+    for(const k of PLAQUETA_KEYS) {
+      if(asset[k]) { originalPlaqueta = String(asset[k]).trim(); break; }
+    }
+
+    if (asset.PLAQUETA_INVENTARIO && originalPlaqueta && asset.PLAQUETA_INVENTARIO !== originalPlaqueta) {
+      return "DIVERGENCIA";
+    }
+
+    if (originalLoc && originalLoc !== targetLocation.toUpperCase().trim()) {
+      return "ADOTADO";
+    }
+    return "CONFERIDO";
+  };
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
-      const index = prev.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
       const newAssets = [...prev.assets];
-      const targetLocation = (inventoryLocation || "").toUpperCase().trim();
-      const updates: any = { ...updatedAsset };
+      const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
+      const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
       
-      const currentComp = (selectedCompany || "GERAL").toUpperCase().trim();
-      updates._empresaNormalizada = currentComp;
+      const updates: any = { ...updatedAsset };
+      updates._conferido = true;
+      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
 
-      if (!updates.PLAQUETA) {
-          for(const k of PLAQUETA_KEYS) {
-              const match = Object.keys(updates).find(uk => uk.toUpperCase() === k);
-              if (match) { updates.PLAQUETA = String(updates[match]).toUpperCase().trim(); break; }
-          }
-      }
+      // Normalização de Localização
+      LOC_KEYS.forEach(k => {
+        const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
+        if (found) updates[found] = targetLoc;
+      });
+      updates['LOCALIZACAO'] = targetLoc;
 
       if (index === -1) {
-          updates.TAG_INVENTARIO = "INCLUSAO";
-          updates._isNew = true;
-          updates._conferido = true;
-          LOC_KEYS.forEach(k => updates[k] = targetLocation);
-          updates['LOCALIZACAO'] = targetLocation;
-          newAssets.push(updates);
+        newAssets.push(updates);
       } else {
-          updates.TAG_INVENTARIO = "CONFERIDO";
-          updates._conferido = true;
-          LOC_KEYS.forEach(k => {
-            const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
-            if (found) updates[found] = targetLocation;
-          });
-          updates['LOCALIZACAO'] = targetLocation;
-          newAssets[index] = updates;
+        newAssets[index] = updates;
       }
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventoryLocation, selectedCompany]);
+  }, [inventoryLocation, determineTag]);
 
   const bulkUpdateAssets = useCallback((ids: string[]) => {
     const idSet = new Set(ids.map(id => String(id)));
-    const targetLocation = (inventoryLocation || "").toUpperCase().trim();
+    const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
-          const updates = { ...a, _conferido: true, TAG_INVENTARIO: "CONFERIDO" };
+          const updates = { ...a, _conferido: true };
+          updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           LOC_KEYS.forEach(k => {
             const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
-            if (found) (updates as any)[found] = targetLocation;
+            if (found) (updates as any)[found] = targetLoc;
           });
-          updates['LOCALIZACAO'] = targetLocation;
+          updates['LOCALIZACAO'] = targetLoc;
           return updates;
         }
         return a;
@@ -194,88 +230,59 @@ const App: React.FC = () => {
       lastUpdated: new Date().toISOString(),
       status: DatabaseStatus.IN_USE
     }));
-  }, [inventoryLocation]);
+  }, [inventoryLocation, determineTag]);
 
   const handleExport = () => {
     if (inventory.assets.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(inventory.assets.map(a => {
+    const wsData = inventory.assets.map(a => {
       const res: any = {};
-      
-      // Mapeamento de Plaqueta Original
       let plaquetaOrig = '';
-      for(const k of PLAQUETA_KEYS) { if(a[k]) { plaquetaOrig = a[k]; break; } }
+      for(const k of PLAQUETA_KEYS) { if(a[k]) { plaquetaOrig = String(a[k]).trim(); break; } }
 
       Object.keys(a).forEach(k => { 
         if (!k.startsWith('_') && k !== 'id') {
-           // Formatação de data na exportação
            let val = a[k];
            const isDateField = k.toUpperCase().includes('DATA') || k.toUpperCase().includes('DT_');
-           if (isDateField && !isNaN(Number(val)) && Number(val) > 30000 && Number(val) < 60000) {
-              const d = new Date((Number(val) - 25569) * 86400 * 1000);
-              val = d.toLocaleDateString('pt-BR');
-           }
+           if (isDateField) val = formatDateValue(val);
            res[k] = val; 
         }
       });
 
-      res['PLAQUETA_ORIGINAL'] = plaquetaOrig;
+      res['PLAQUETA_MASTER'] = plaquetaOrig;
       res['PLAQUETA_INVENTARIO'] = a.PLAQUETA_INVENTARIO || plaquetaOrig;
-      res['DIVERGENCIA_PLAQUETA'] = (a.PLAQUETA_INVENTARIO && a.PLAQUETA_INVENTARIO !== plaquetaOrig) ? 'SIM' : 'NAO';
-      res['STATUS_INV'] = a.TAG_INVENTARIO || 'PENDENTE';
       res['CONFERIDO'] = a._conferido ? 'SIM' : 'NAO';
+      res['STATUS_POLITICA'] = a.TAG_INVENTARIO || 'PENDENTE';
+      res['DIVERGENCIA_IDENTIFICACAO'] = (a.PLAQUETA_INVENTARIO && a.PLAQUETA_INVENTARIO !== plaquetaOrig) ? 'SIM' : 'NAO';
       
       return res;
-    }));
+    });
+
+    const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");
-    XLSX.writeFile(wb, `INVENTARIO_GBR_${new Date().getTime()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT_DATA");
+    XLSX.writeFile(wb, `GBR_AUDITORIA_${new Date().getTime()}.xlsx`);
   };
 
-  const handleClearDatabase = () => {
-    if (confirm("ATENÇÃO: Deseja realmente APAGAR permanentemente todos os ativos?")) {
-        setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY });
-        setSelectedCompany(null);
-        setInventoryLocation(null);
-        setIsInventorying(false);
-        pushScreen(AppScreen.MAIN_MENU);
-    }
-  };
-
-  const handleDataCommit = (assets: any[], companies: string[]) => {
-    setIsSaving(true);
-    setTimeout(() => {
-      setInventory({ assets, companies, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); 
-      setIsSaving(false);
-      pushScreen(AppScreen.MAIN_MENU); 
-    }, 300);
-  };
+  const filteredAssetsByCompany = useMemo(() => {
+    if (!selectedCompany) return [];
+    const sel = String(selectedCompany).toUpperCase().trim();
+    return inventory.assets.filter(a => String(a._empresaNormalizada || '').toUpperCase().trim() === sel);
+  }, [inventory.assets, selectedCompany]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
-  if (isSaving) {
-    return (
-      <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
-        <Loader2 className="text-indigo-500 animate-spin" size={32} />
-        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Otimizando Dados</p>
-      </div>
-    );
-  }
+  if (isSaving) return <div className="w-full h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="text-indigo-500 animate-spin" /></div>;
 
   return (
-    <div 
-      className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full safe-padding-bottom"
-    >
-      {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); enterImmersiveMode(); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
-      {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); enterImmersiveMode(); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
-      {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { 
-        const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u);
-        setUsers(upd); setUser(upd.find(u => u.email === user?.email)!); pushScreen(AppScreen.MAIN_MENU); 
-      }} />}
-      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={handleClearDatabase} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
-      {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={handleDataCommit} />}
-      {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} />}
-      {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} allAssets={inventory.assets} />}
-      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} />}
+    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full">
+      {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
+      {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
+      {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
+      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+      {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
+      {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} databaseHeaders={databaseHeaders} />}
+      {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} />}
+      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} databaseHeaders={databaseHeaders} />}
       {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
       {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
       {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
