@@ -112,9 +112,7 @@ const App: React.FC = () => {
   }, [inventory.assets, selectedCompany]);
 
   const getOriginalLocation = (asset: Asset): string => {
-    // Tenta encontrar a localização original salva antes de qualquer alteração
     if (asset._localizacaoOriginal) return asset._localizacaoOriginal.toUpperCase().trim();
-    
     for (const key of LOC_KEYS) {
       const matchKey = Object.keys(asset).find(k => k.toUpperCase() === key);
       if (matchKey && asset[matchKey]) return String(asset[matchKey]).toUpperCase().trim();
@@ -152,19 +150,15 @@ const App: React.FC = () => {
       } else {
           const alreadyConferido = !!prev.assets[index]._conferido;
           const currentAsset = prev.assets[index];
-          
-          // Preserva a localização original se ainda não foi salva
           if (!currentAsset._localizacaoOriginal) {
             updates._localizacaoOriginal = originalLoc;
           }
-
           if (originalLoc && originalLoc !== targetLocation) {
               updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
               updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
           } else {
               updates.TAG_INVENTARIO = "CONFERIDO";
           }
-          
           updates._conferido = true;
           LOC_KEYS.forEach(k => {
             const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
@@ -173,7 +167,6 @@ const App: React.FC = () => {
           updates['LOCALIZACAO'] = targetLocation;
           newAssets[index] = updates;
       }
-      
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
   }, [inventoryLocation, selectedCompany]);
@@ -181,7 +174,6 @@ const App: React.FC = () => {
   const bulkUpdateAssets = useCallback((ids: string[]) => {
     const idSet = new Set(ids.map(id => String(id)));
     const targetLocation = (inventoryLocation || "").toUpperCase().trim();
-    
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
@@ -189,18 +181,13 @@ const App: React.FC = () => {
           const updates = { ...a };
           const originalLoc = getOriginalLocation(a);
           const alreadyConferido = !!a._conferido;
-
-          if (!updates._localizacaoOriginal) {
-            updates._localizacaoOriginal = originalLoc;
-          }
-
+          if (!updates._localizacaoOriginal) updates._localizacaoOriginal = originalLoc;
           if (originalLoc && originalLoc !== targetLocation) {
             updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
             updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
           } else {
             updates.TAG_INVENTARIO = "CONFERIDO";
           }
-
           updates._conferido = true;
           LOC_KEYS.forEach(k => {
             const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
@@ -227,11 +214,18 @@ const App: React.FC = () => {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");
+    // O navegador direcionará automaticamente para a pasta de Downloads
     XLSX.writeFile(wb, `INVENTARIO_GBR_${new Date().getTime()}.xlsx`);
-    if (confirm("Exportação concluída. Deseja limpar a base local?")) {
-      setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY });
-      setSelectedCompany(null);
-      pushScreen(AppScreen.MAIN_MENU);
+  };
+
+  const handleClearDatabase = () => {
+    if (confirm("ATENÇÃO: Deseja realmente APAGAR permanentemente todos os ativos do aplicativo? Esta ação não pode ser desfeita.")) {
+        setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY });
+        setSelectedCompany(null);
+        setInventoryLocation(null);
+        setIsInventorying(false);
+        pushScreen(AppScreen.MAIN_MENU);
+        alert("Base de dados limpa com sucesso.");
     }
   };
 
@@ -263,7 +257,7 @@ const App: React.FC = () => {
         const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u);
         setUsers(upd); setUser(upd.find(u => u.email === user?.email)!); pushScreen(AppScreen.MAIN_MENU); 
       }} />}
-      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={handleClearDatabase} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
       {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={handleDataCommit} />}
       {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} />}
       {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} allAssets={inventory.assets} />}

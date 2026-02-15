@@ -25,14 +25,14 @@ interface AssetCardProps {
   yesButtonRef?: React.RefObject<HTMLButtonElement | null>;
   isConferidoTab: boolean;
   highlighted?: boolean;
+  showLocation?: boolean; // Nova prop para exibir localização em modo lote
 }
 
 const AssetCard = React.memo(({ 
-  asset, onSelect, decision, onMakeDecision, yesButtonRef, isConferidoTab, highlighted
+  asset, onSelect, decision, onMakeDecision, yesButtonRef, isConferidoTab, highlighted, showLocation
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
   
-  // Lógica de Baixado sincronizada
   const checkIsBaixado = (item: any) => {
     const terms = ['DATA_BAIXA', 'DT_BAIXA', 'DATA_DA_BAIXA', 'BAIXA', 'DATA_DE_BAIXA'];
     for (const term of terms) {
@@ -46,6 +46,7 @@ const AssetCard = React.memo(({
   const etiqueta = asset['PLAQUETA'] || asset['ETIQUETA'] || asset['PATRIMONIO'] || '';
   const displayEtiqueta = etiqueta || 'S/ PLAQUETA';
   const descricao = asset['DESCRICAO_DO_ATIVO_IMOBILIZADO'] || asset['DESCRICAO'] || 'SEM DESCRIÇÃO';
+  const localizacao = asset['LOCALIZACAO'] || asset['SETOR'] || 'N/A';
   const tagInv = asset.TAG_INVENTARIO;
 
   return (
@@ -65,6 +66,13 @@ const AssetCard = React.memo(({
                 {displayEtiqueta}
               </h3>
             </div>
+
+            {showLocation && (
+              <div className="flex items-center space-x-1 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                <MapPin size={8} className="text-indigo-400" />
+                <span className="text-[7px] font-black text-indigo-300 uppercase truncate max-w-[80px]">{localizacao}</span>
+              </div>
+            )}
 
             {!isConferido && (
               <span className="bg-amber-900/30 text-amber-500 text-[8px] font-black px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-widest">
@@ -166,13 +174,10 @@ const Inventory: React.FC<InventoryProps> = ({
     return false;
   }, []);
 
-  // Cálculo de progresso por setor - IGNORANDO BAIXADOS
   const locationStats = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
     assets.forEach(a => {
-      // REGRA: Baixados não contam para o progresso esperado do setor
       if (checkIsBaixado(a)) return;
-
       const loc = getItemLocation(a);
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       stats[loc].total++;
@@ -190,34 +195,45 @@ const Inventory: React.FC<InventoryProps> = ({
     const currentLoc = selectedLocation.toUpperCase();
     
     let baseList = [];
-    if (committedSearch) {
+
+    // Prioridade 1: Lote Ativo (Visualização Cross-Location e Ordenada)
+    if (activeBatch) {
+      const idSet = new Set(activeBatch.ids);
+      baseList = assets.filter(a => idSet.has(String(a.id)));
+    } 
+    // Prioridade 2: Busca por Plaqueta
+    else if (committedSearch) {
       const term = committedSearch.toUpperCase().trim();
-      // REGRA: Na busca, trazemos TUDO, inclusive os baixados em standby
       baseList = assets.filter(a => {
           const p = getPlaqueta(a);
           return p === term || p.padStart(6, '0') === term.padStart(6, '0');
       });
-    } else {
-      // REGRA: Na listagem geral do setor, OCULTAMOS os baixados
+    } 
+    // Prioridade 3: Listagem do Setor
+    else {
       baseList = assets
         .filter(a => getItemLocation(a) === currentLoc)
-        .filter(a => !checkIsBaixado(a)) // Oculta itens baixados
+        .filter(a => !checkIsBaixado(a))
         .filter(a => activeFilter === 'checked' ? !!a._conferido : !a._conferido);
     }
 
+    // Algoritmo de Ordenação Natural (Crescente) para Hierarquia de Ativos
     return baseList.sort((a, b) => {
-      const pA = getPlaqueta(a).padStart(6, '0');
-      const pB = getPlaqueta(b).padStart(6, '0');
-      if (!pA && !pB) return 0;
-      if (!pA) return 1;
-      if (!pB) return -1;
+      const pA = getPlaqueta(a).padStart(12, '0'); // Pad maior para garantir ordenação de números longos
+      const pB = getPlaqueta(b).padStart(12, '0');
+      
+      // Se as plaquetas forem iguais, ordena por ID ou sub-item (se existir campo específico)
+      if (pA === pB) {
+        return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+      }
+      
       return pA.localeCompare(pB, undefined, { numeric: true, sensitivity: 'base' });
     });
-  }, [assets, selectedLocation, committedSearch, activeFilter, getItemLocation, getPlaqueta, checkIsBaixado]);
+  }, [assets, selectedLocation, committedSearch, activeFilter, activeBatch, getItemLocation, getPlaqueta, checkIsBaixado]);
 
   const triggerSearch = (val: string) => {
     setCommittedSearch(val);
-    searchInputRef.current?.blur();
+    if (searchInputRef.current) searchInputRef.current.blur();
   };
 
   const resetSearchAndFocus = useCallback(() => {
@@ -227,7 +243,6 @@ const Inventory: React.FC<InventoryProps> = ({
     setShowNewAssetDialog(false); 
     setIsCreatingNewAsset(false);
     
-    // Blur manual para garantir que o teclado suma
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -239,16 +254,13 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleBulkConfirm = () => {
     if (activeBatch && activeBatch.ids.length > 0) {
-      // Esconder teclado antes de processar
       if (searchInputRef.current) searchInputRef.current.blur();
-      
       onBulkUpdateAssets(activeBatch.ids);
       resetSearchAndFocus();
     }
   };
 
   const handleIndividualDecision = (id: string, decision: 'YES' | 'NO') => {
-    // Esconder teclado imediatamente ao tocar no botão de decisão
     if (searchInputRef.current) searchInputRef.current.blur();
 
     if (decision === 'NO') return;
@@ -263,6 +275,7 @@ const Inventory: React.FC<InventoryProps> = ({
       return;
     }
 
+    // REGRA CROSS-LOCATION: Busca irmãos em TODOS os setores da empresa
     const siblings = assets.filter(a => 
       !a._conferido && 
       getPlaqueta(a) === plaqueta
@@ -380,7 +393,7 @@ const Inventory: React.FC<InventoryProps> = ({
     <div className="flex flex-col h-full bg-slate-950 animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-4 bg-slate-900 text-white shadow-none relative z-30">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => { setIsInventorying(false); setActiveBatch(null); }} className="flex items-center text-slate-500 text-[9px] font-bold uppercase tracking-widest">
+          <button onClick={() => { setIsInventorying(false); resetSearchAndFocus(); }} className="flex items-center text-slate-500 text-[9px] font-bold uppercase tracking-widest">
             <ArrowLeft size={14} className="mr-1" /> {selectedLocation}
           </button>
           <div className="flex space-x-2">
@@ -412,14 +425,14 @@ const Inventory: React.FC<InventoryProps> = ({
       </div>
 
       {activeBatch && (
-         <div className="px-6 py-4 bg-indigo-900/50 border-b border-indigo-500/30 animate-slideUp flex items-center justify-between shadow-2xl">
+         <div className="px-6 py-4 bg-indigo-900/50 border-b border-indigo-500/30 animate-slideUp flex items-center justify-between shadow-2xl relative z-20">
             <div className="flex items-center space-x-3">
                <div className="p-2 bg-indigo-500 rounded-lg text-white">
                   <Layers size={18} />
                </div>
                <div className="flex flex-col">
                   <span className="text-[10px] font-black text-indigo-100 uppercase tracking-widest leading-none mb-1">Validação em Lote</span>
-                  <span className="text-[11px] font-black text-white uppercase tracking-tight">Etiqueta {activeBatch.plaqueta} possui {activeBatch.ids.length} registros</span>
+                  <span className="text-[11px] font-black text-white uppercase tracking-tight">Etiqueta {activeBatch.plaqueta} • {activeBatch.ids.length} itens</span>
                </div>
             </div>
             <div className="flex space-x-2">
@@ -453,6 +466,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 yesButtonRef={index === 0 ? firstYesButtonRef : undefined} 
                 isConferidoTab={activeFilter === 'checked'}
                 highlighted={isHighlighted}
+                showLocation={!!activeBatch} // Mostra local apenas em modo lote
               />
             );
           })

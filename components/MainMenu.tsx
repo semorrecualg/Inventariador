@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AppScreen, User } from '../types';
 import { 
   Search, 
@@ -10,23 +10,30 @@ import {
   Users,
   Settings,
   Shield,
-  Database
+  Database,
+  X,
+  ShieldCheck,
+  ChevronRight,
+  DatabaseZap,
+  Trash2
 } from 'lucide-react';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen) => void;
   onLogout: () => void;
   onExport: () => void;
+  onClearDatabase: () => void;
   user: User | null;
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, user, inventoryInfo }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo }) => {
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 animate-fadeIn">
+    <div className="flex flex-col h-full bg-slate-950 animate-fadeIn relative">
       {/* Top Bar Minimalista */}
       <div className="px-6 pt-12 pb-6 border-b border-slate-900 flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -41,7 +48,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
           </div>
         </div>
         {isAdmin && (
-          <button onClick={() => onNavigate(AppScreen.LOAD_DATABASE)} className="p-2 text-slate-500">
+          <button 
+            onClick={() => setIsAdminMenuOpen(true)} 
+            className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 active:scale-90 transition-all shadow-lg"
+          >
             <Settings size={22} />
           </button>
         )}
@@ -61,66 +71,137 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, use
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.COMPANY_SELECTION)}
-          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20"
+          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20 transition-all"
         >
           <div className="w-10 h-10 bg-indigo-900/30 text-indigo-400 rounded-lg flex items-center justify-center mr-4">
             <ClipboardList size={20} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-sm font-bold text-slate-100">Inventário</h3>
-            <p className="text-[10px] text-slate-500 uppercase font-medium">Conferência Física</p>
+            <p className="text-[10px] text-slate-500 uppercase font-medium tracking-widest">Conferência Física</p>
           </div>
+          <ChevronRight size={14} className="text-slate-700" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20"
+          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20 transition-all"
         >
           <div className="w-10 h-10 bg-emerald-900/30 text-emerald-400 rounded-lg flex items-center justify-center mr-4">
             <Search size={20} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-sm font-bold text-slate-100">Consulta</h3>
-            <p className="text-[10px] text-slate-500 uppercase font-medium">Busca de Ativo</p>
+            <p className="text-[10px] text-slate-500 uppercase font-medium tracking-widest">Busca de Ativo</p>
           </div>
+          <ChevronRight size={14} className="text-slate-700" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.DASHBOARD)}
-          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20"
+          className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-xl active:scale-95 disabled:opacity-20 transition-all"
         >
           <div className="w-10 h-10 bg-purple-900/30 text-purple-400 rounded-lg flex items-center justify-center mr-4">
             <BarChart3 size={20} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-sm font-bold text-slate-100">Painel</h3>
-            <p className="text-[10px] text-slate-500 uppercase font-medium">Progresso Unitário</p>
+            <p className="text-[10px] text-slate-500 uppercase font-medium tracking-widest">Progresso Unitário</p>
           </div>
+          <ChevronRight size={14} className="text-slate-700" />
         </button>
-
-        {isAdmin && (
-          <div className="pt-8 space-y-2">
-            <button onClick={() => onNavigate(AppScreen.USER_MANAGEMENT)} className="w-full flex items-center p-3 text-slate-400">
-              <Users size={16} className="mr-3" />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Acessos</span>
-            </button>
-            <button onClick={onExport} disabled={!hasData} className="w-full flex items-center p-3 text-slate-400 disabled:opacity-20">
-              <Download size={16} className="mr-3" />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Sincronizar</span>
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="p-8 border-t border-slate-900 flex items-center justify-between">
-        <button onClick={onLogout} className="flex items-center text-slate-600 hover:text-red-500">
+        <button onClick={onLogout} className="flex items-center text-slate-600 hover:text-red-500 transition-colors">
           <LogOut size={16} className="mr-2" />
           <span className="text-[10px] font-bold uppercase tracking-widest">Logout</span>
         </button>
         <span className="text-[8px] font-bold text-slate-800 uppercase tracking-widest">OLED Saving Mode</span>
       </div>
+
+      {/* SUBMENU ADMINISTRATIVO (Modal) */}
+      {isAdminMenuOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/95 flex flex-col items-center justify-center p-6 animate-fadeIn">
+          <button 
+            onClick={() => setIsAdminMenuOpen(false)}
+            className="absolute top-12 right-6 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 active:scale-90"
+          >
+            <X size={24} />
+          </button>
+
+          <div className="w-full max-w-xs space-y-4">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-amber-600/20 text-amber-500 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+                <ShieldCheck size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-white uppercase tracking-tighter italic">Painel Admin GBR</h2>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Gestão Estrutural e Dados</p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }}
+                className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left group"
+              >
+                <div className="w-9 h-9 bg-blue-900/20 text-blue-500 rounded-xl flex items-center justify-center mr-4 border border-blue-500/20">
+                  <Users size={18} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Acessos</h4>
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Gerir Usuários</p>
+                </div>
+              </button>
+
+              <button
+                disabled={!hasData}
+                onClick={() => { setIsAdminMenuOpen(false); onExport(); }}
+                className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 disabled:opacity-20 transition-all text-left"
+              >
+                <div className="w-9 h-9 bg-emerald-900/20 text-emerald-500 rounded-xl flex items-center justify-center mr-4 border border-emerald-500/20">
+                  <Download size={18} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Baixar base de dados</h4>
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Exportar XLS</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }}
+                className="w-full flex items-center p-4 bg-indigo-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left"
+              >
+                <div className="w-9 h-9 bg-white/20 text-white rounded-xl flex items-center justify-center mr-4">
+                  <DatabaseZap size={18} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black uppercase tracking-tighter">Carga Expert</h4>
+                  <p className="text-[8px] font-bold text-indigo-100 uppercase tracking-widest">Importar Base Master</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setIsAdminMenuOpen(false); onClearDatabase(); }}
+                className="w-full flex items-center p-4 bg-red-950/30 border border-red-900/50 rounded-[1.8rem] active:scale-95 transition-all text-left group"
+              >
+                <div className="w-9 h-9 bg-red-600 text-white rounded-xl flex items-center justify-center mr-4 shadow-lg shadow-red-900/20">
+                  <Trash2 size={18} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-red-500 uppercase tracking-tighter">Limpar Banco de Dados</h4>
+                  <p className="text-[8px] font-bold text-red-900 uppercase tracking-widest">Apagar Ativos do App</p>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-6 text-center">
+               <p className="text-[8px] font-black text-slate-700 uppercase tracking-[0.4em]">GBR Security Protocol</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
