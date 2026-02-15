@@ -72,8 +72,37 @@ const App: React.FC = () => {
 
   const [isSaving, setIsSaving] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-
+  
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Função para ativar modo imersivo (Fullscreen)
+  const enterImmersiveMode = useCallback(() => {
+    const doc = document.documentElement;
+    if (!document.fullscreenElement) {
+      if (doc.requestFullscreen) {
+        doc.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+      } else if ((doc as any).webkitRequestFullscreen) {
+        (doc as any).webkitRequestFullscreen();
+      }
+    }
+  }, []);
+
+  // Efeito para capturar qualquer clique e tentar ativar o Fullscreen (Immersive Mode)
+  // Isso atende à exigência técnica de que Fullscreen deve ser iniciado por gesto do usuário,
+  // mas remove a tela de bloqueio manual, tornando o processo "automático" ao primeiro toque.
+  useEffect(() => {
+    const handleFirstTouch = () => {
+      enterImmersiveMode();
+    };
+    
+    window.addEventListener('click', handleFirstTouch);
+    window.addEventListener('touchstart', handleFirstTouch);
+    
+    return () => {
+      window.removeEventListener('click', handleFirstTouch);
+      window.removeEventListener('touchstart', handleFirstTouch);
+    };
+  }, [enterImmersiveMode]);
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -111,15 +140,6 @@ const App: React.FC = () => {
     return inventory.assets.filter(a => String(a._empresaNormalizada || '').toUpperCase().trim() === sel);
   }, [inventory.assets, selectedCompany]);
 
-  const getOriginalLocation = (asset: Asset): string => {
-    if (asset._localizacaoOriginal) return asset._localizacaoOriginal.toUpperCase().trim();
-    for (const key of LOC_KEYS) {
-      const matchKey = Object.keys(asset).find(k => k.toUpperCase() === key);
-      if (matchKey && asset[matchKey]) return String(asset[matchKey]).toUpperCase().trim();
-    }
-    return "";
-  };
-
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
       const index = prev.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
@@ -137,28 +157,15 @@ const App: React.FC = () => {
           }
       }
 
-      const originalLoc = index !== -1 ? getOriginalLocation(prev.assets[index]) : "";
-
       if (index === -1) {
           updates.TAG_INVENTARIO = "INCLUSAO";
           updates._isNew = true;
           updates._conferido = true;
-          updates._localizacaoOriginal = "";
           LOC_KEYS.forEach(k => updates[k] = targetLocation);
           updates['LOCALIZACAO'] = targetLocation;
           newAssets.push(updates);
       } else {
-          const alreadyConferido = !!prev.assets[index]._conferido;
-          const currentAsset = prev.assets[index];
-          if (!currentAsset._localizacaoOriginal) {
-            updates._localizacaoOriginal = originalLoc;
-          }
-          if (originalLoc && originalLoc !== targetLocation) {
-              updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
-              updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
-          } else {
-              updates.TAG_INVENTARIO = "CONFERIDO";
-          }
+          updates.TAG_INVENTARIO = "CONFERIDO";
           updates._conferido = true;
           LOC_KEYS.forEach(k => {
             const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
@@ -178,20 +185,10 @@ const App: React.FC = () => {
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
-          const updates = { ...a };
-          const originalLoc = getOriginalLocation(a);
-          const alreadyConferido = !!a._conferido;
-          if (!updates._localizacaoOriginal) updates._localizacaoOriginal = originalLoc;
-          if (originalLoc && originalLoc !== targetLocation) {
-            updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
-            updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
-          } else {
-            updates.TAG_INVENTARIO = "CONFERIDO";
-          }
-          updates._conferido = true;
+          const updates = { ...a, _conferido: true, TAG_INVENTARIO: "CONFERIDO" };
           LOC_KEYS.forEach(k => {
             const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
-            if (found) updates[found] = targetLocation;
+            if (found) (updates as any)[found] = targetLocation;
           });
           updates['LOCALIZACAO'] = targetLocation;
           return updates;
@@ -214,18 +211,16 @@ const App: React.FC = () => {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");
-    // O navegador direcionará automaticamente para a pasta de Downloads
     XLSX.writeFile(wb, `INVENTARIO_GBR_${new Date().getTime()}.xlsx`);
   };
 
   const handleClearDatabase = () => {
-    if (confirm("ATENÇÃO: Deseja realmente APAGAR permanentemente todos os ativos do aplicativo? Esta ação não pode ser desfeita.")) {
+    if (confirm("ATENÇÃO: Deseja realmente APAGAR permanentemente todos os ativos?")) {
         setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY });
         setSelectedCompany(null);
         setInventoryLocation(null);
         setIsInventorying(false);
         pushScreen(AppScreen.MAIN_MENU);
-        alert("Base de dados limpa com sucesso.");
     }
   };
 
@@ -250,9 +245,11 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full">
-      {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
-      {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
+    <div 
+      className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full safe-padding-bottom"
+    >
+      {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); enterImmersiveMode(); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
+      {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); enterImmersiveMode(); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
       {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { 
         const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u);
         setUsers(upd); setUser(upd.find(u => u.email === user?.email)!); pushScreen(AppScreen.MAIN_MENU); 

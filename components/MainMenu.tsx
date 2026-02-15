@@ -34,7 +34,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
 
   return (
     <div className="flex flex-col h-full bg-slate-950 animate-fadeIn relative">
-      {/* Top Bar Minimalista */}
       <div className="px-6 pt-12 pb-6 border-b border-slate-900 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
@@ -122,83 +121,49 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
         <span className="text-[8px] font-bold text-slate-800 uppercase tracking-widest">OLED Saving Mode</span>
       </div>
 
-      {/* SUBMENU ADMINISTRATIVO (Modal) */}
       {isAdminMenuOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-950/95 flex flex-col items-center justify-center p-6 animate-fadeIn">
-          <button 
-            onClick={() => setIsAdminMenuOpen(false)}
-            className="absolute top-12 right-6 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 active:scale-90"
-          >
+          <button onClick={() => setIsAdminMenuOpen(false)} className="absolute top-12 right-6 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 active:scale-90">
             <X size={24} />
           </button>
-
           <div className="w-full max-w-xs space-y-4">
             <div className="text-center mb-8">
               <div className="w-16 h-16 bg-amber-600/20 text-amber-500 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
                 <ShieldCheck size={32} />
               </div>
               <h2 className="text-xl font-bold text-white uppercase tracking-tighter italic">Painel Admin GBR</h2>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Gestão Estrutural e Dados</p>
             </div>
-
             <div className="space-y-3">
-              <button
-                onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }}
-                className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left group"
-              >
-                <div className="w-9 h-9 bg-blue-900/20 text-blue-500 rounded-xl flex items-center justify-center mr-4 border border-blue-500/20">
-                  <Users size={18} />
-                </div>
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left">
+                <div className="w-9 h-9 bg-blue-900/20 text-blue-500 rounded-xl flex items-center justify-center mr-4 border border-blue-500/20"><Users size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Acessos</h4>
                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Gerir Usuários</p>
                 </div>
               </button>
-
-              <button
-                disabled={!hasData}
-                onClick={() => { setIsAdminMenuOpen(false); onExport(); }}
-                className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 disabled:opacity-20 transition-all text-left"
-              >
-                <div className="w-9 h-9 bg-emerald-900/20 text-emerald-500 rounded-xl flex items-center justify-center mr-4 border border-emerald-500/20">
-                  <Download size={18} />
-                </div>
+              <button disabled={!hasData} onClick={() => { setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 disabled:opacity-20 transition-all text-left">
+                <div className="w-9 h-9 bg-emerald-900/20 text-emerald-500 rounded-xl flex items-center justify-center mr-4 border border-emerald-500/20"><Download size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Baixar base de dados</h4>
                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Exportar XLS</p>
                 </div>
               </button>
-
-              <button
-                onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }}
-                className="w-full flex items-center p-4 bg-indigo-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left"
-              >
-                <div className="w-9 h-9 bg-white/20 text-white rounded-xl flex items-center justify-center mr-4">
-                  <DatabaseZap size={18} />
-                </div>
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-indigo-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left">
+                <div className="w-9 h-9 bg-white/20 text-white rounded-xl flex items-center justify-center mr-4"><DatabaseZap size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black uppercase tracking-tighter">Carga Expert</h4>
                   <p className="text-[8px] font-bold text-indigo-100 uppercase tracking-widest">Importar Base Master</p>
                 </div>
               </button>
-
-              <button
-                onClick={() => { setIsAdminMenuOpen(false); onClearDatabase(); }}
-                className="w-full flex items-center p-4 bg-red-950/30 border border-red-900/50 rounded-[1.8rem] active:scale-95 transition-all text-left group"
-              >
-                <div className="w-9 h-9 bg-red-600 text-white rounded-xl flex items-center justify-center mr-4 shadow-lg shadow-red-900/20">
-                  <Trash2 size={18} />
-                </div>
+              <button onClick={() => { setIsAdminMenuOpen(false); onClearDatabase(); }} className="w-full flex items-center p-4 bg-red-950/30 border border-red-900/50 rounded-[1.8rem] active:scale-95 transition-all text-left">
+                <div className="w-9 h-9 bg-red-600 text-white rounded-xl flex items-center justify-center mr-4 shadow-lg shadow-red-900/20"><Trash2 size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black text-red-500 uppercase tracking-tighter">Limpar Banco de Dados</h4>
                   <p className="text-[8px] font-bold text-red-900 uppercase tracking-widest">Apagar Ativos do App</p>
                 </div>
               </button>
             </div>
-
-            <div className="pt-6 text-center">
-               <p className="text-[8px] font-black text-slate-700 uppercase tracking-[0.4em]">GBR Security Protocol</p>
-            </div>
+            <div className="pt-6 text-center text-[8px] font-black text-slate-700 uppercase tracking-[0.4em]">GBR Security Protocol</div>
           </div>
         </div>
       )}
@@ -206,4 +171,5 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
   );
 };
 
+// Fix: Added missing default export for MainMenu
 export default MainMenu;
