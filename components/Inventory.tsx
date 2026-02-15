@@ -32,7 +32,7 @@ const AssetCard = React.memo(({
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
   
-  // Lógica de Baixado sincronizada com DatabaseLoader
+  // Lógica de Baixado sincronizada
   const checkIsBaixado = (item: any) => {
     const terms = ['DATA_BAIXA', 'DT_BAIXA', 'DATA_DA_BAIXA', 'BAIXA', 'DATA_DE_BAIXA'];
     for (const term of terms) {
@@ -157,17 +157,29 @@ const Inventory: React.FC<InventoryProps> = ({
     return String(asset['LOCALIZACAO'] || asset['SETOR'] || asset['LOCAL'] || 'SEM LOCAL').trim().toUpperCase();
   }, []);
 
-  // Cálculo de progresso por setor
+  const checkIsBaixado = useCallback((item: any) => {
+    const terms = ['DATA_BAIXA', 'DT_BAIXA', 'DATA_DA_BAIXA', 'BAIXA', 'DATA_DE_BAIXA'];
+    for (const term of terms) {
+      const val = String(item[term] || '').trim();
+      if (val !== "" && val !== "---" && val !== "0" && val.toUpperCase() !== "NULL") return true;
+    }
+    return false;
+  }, []);
+
+  // Cálculo de progresso por setor - IGNORANDO BAIXADOS
   const locationStats = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
     assets.forEach(a => {
+      // REGRA: Baixados não contam para o progresso esperado do setor
+      if (checkIsBaixado(a)) return;
+
       const loc = getItemLocation(a);
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       stats[loc].total++;
       if (a._conferido) stats[loc].checked++;
     });
     return stats;
-  }, [assets, getItemLocation]);
+  }, [assets, getItemLocation, checkIsBaixado]);
 
   const sortedLocations = useMemo(() => {
     return Object.keys(locationStats).sort();
@@ -180,13 +192,16 @@ const Inventory: React.FC<InventoryProps> = ({
     let baseList = [];
     if (committedSearch) {
       const term = committedSearch.toUpperCase().trim();
+      // REGRA: Na busca, trazemos TUDO, inclusive os baixados em standby
       baseList = assets.filter(a => {
           const p = getPlaqueta(a);
           return p === term || p.padStart(6, '0') === term.padStart(6, '0');
       });
     } else {
+      // REGRA: Na listagem geral do setor, OCULTAMOS os baixados
       baseList = assets
         .filter(a => getItemLocation(a) === currentLoc)
+        .filter(a => !checkIsBaixado(a)) // Oculta itens baixados
         .filter(a => activeFilter === 'checked' ? !!a._conferido : !a._conferido);
     }
 
@@ -198,7 +213,7 @@ const Inventory: React.FC<InventoryProps> = ({
       if (!pB) return -1;
       return pA.localeCompare(pB, undefined, { numeric: true, sensitivity: 'base' });
     });
-  }, [assets, selectedLocation, committedSearch, activeFilter, getItemLocation, getPlaqueta]);
+  }, [assets, selectedLocation, committedSearch, activeFilter, getItemLocation, getPlaqueta, checkIsBaixado]);
 
   const triggerSearch = (val: string) => {
     setCommittedSearch(val);
@@ -206,21 +221,36 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const resetSearchAndFocus = useCallback(() => {
-    setDisplayValue('000000'); setCommittedSearch('');
+    setDisplayValue('000000'); 
+    setCommittedSearch('');
     setActiveBatch(null);
-    setShowNewAssetDialog(false); setIsCreatingNewAsset(false);
-    if (inputMethod === 'scanner') setIsScannerOpen(true);
-    else setTimeout(() => searchInputRef.current?.focus(), 150);
+    setShowNewAssetDialog(false); 
+    setIsCreatingNewAsset(false);
+    
+    // Blur manual para garantir que o teclado suma
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    
+    if (inputMethod === 'scanner') {
+      setIsScannerOpen(true);
+    }
   }, [inputMethod]);
 
   const handleBulkConfirm = () => {
     if (activeBatch && activeBatch.ids.length > 0) {
+      // Esconder teclado antes de processar
+      if (searchInputRef.current) searchInputRef.current.blur();
+      
       onBulkUpdateAssets(activeBatch.ids);
       resetSearchAndFocus();
     }
   };
 
   const handleIndividualDecision = (id: string, decision: 'YES' | 'NO') => {
+    // Esconder teclado imediatamente ao tocar no botão de decisão
+    if (searchInputRef.current) searchInputRef.current.blur();
+
     if (decision === 'NO') return;
 
     const clickedAsset = assets.find(a => String(a.id) === id);
@@ -306,7 +336,6 @@ const Inventory: React.FC<InventoryProps> = ({
                 onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} 
                 className="group w-full relative overflow-hidden bg-slate-900 border border-slate-800 rounded-2xl active:scale-[0.98] transition-all flex flex-col"
               >
-                {/* Barra de Progresso de Fundo (Sutil) */}
                 <div 
                   className={`absolute bottom-0 left-0 h-1 transition-all duration-700 ease-out
                     ${isCompleted ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
