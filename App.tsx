@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AppScreen, User, Asset, InventoryState, DatabaseStatus } from './types';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -12,11 +12,12 @@ import CompanySelector from './components/CompanySelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
 import ChangePassword from './components/ChangePassword';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
-const LOC_KEYS = ['ENDERECO', 'LOCALIZACAO', 'SETOR', 'COD_END', 'ENDEREÇO', 'LOCALIZAÇÃO', 'LOCAL'];
+const LOC_KEYS = ['ENDERECO', 'LOCALIZACAO', 'SETOR', 'COD_END', 'LOCAL'];
+const PLAQUETA_KEYS = ['PLAQUETA', 'ETIQUETA', 'PATRIMONIO', 'TAG', 'BEM'];
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -72,18 +73,26 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
 
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    try {
-      localStorage.setItem('inventory_data', JSON.stringify(inventory));
-    } catch (e) {
-      console.warn("Cota de Armazenamento Excedida.");
-    }
-    localStorage.setItem('app_screen_history', JSON.stringify(history));
-    localStorage.setItem('app_current_user', JSON.stringify(user));
-    localStorage.setItem('app_users', JSON.stringify(users));
-    localStorage.setItem('app_selected_company', selectedCompany || '');
-    localStorage.setItem('app_inventory_location', inventoryLocation || '');
-    localStorage.setItem('app_is_inventorying', String(isInventorying));
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem('inventory_data', JSON.stringify(inventory));
+        localStorage.setItem('app_screen_history', JSON.stringify(history));
+        localStorage.setItem('app_current_user', JSON.stringify(user));
+        localStorage.setItem('app_users', JSON.stringify(users));
+        localStorage.setItem('app_selected_company', selectedCompany || '');
+        localStorage.setItem('app_inventory_location', inventoryLocation || '');
+        localStorage.setItem('app_is_inventorying', String(isInventorying));
+      } catch (e) {
+        console.warn("Storage cap reached");
+      }
+    }, 1500);
+
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying]);
 
   const pushScreen = (s: AppScreen) => {
@@ -98,56 +107,70 @@ const App: React.FC = () => {
 
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return [];
-    const sel = selectedCompany.toUpperCase().trim();
-    return inventory.assets.filter(a => a._empresaNormalizada === sel);
+    const sel = String(selectedCompany).toUpperCase().trim();
+    return inventory.assets.filter(a => String(a._empresaNormalizada || '').toUpperCase().trim() === sel);
   }, [inventory.assets, selectedCompany]);
+
+  const getOriginalLocation = (asset: Asset): string => {
+    // Tenta encontrar a localização original salva antes de qualquer alteração
+    if (asset._localizacaoOriginal) return asset._localizacaoOriginal.toUpperCase().trim();
+    
+    for (const key of LOC_KEYS) {
+      const matchKey = Object.keys(asset).find(k => k.toUpperCase() === key);
+      if (matchKey && asset[matchKey]) return String(asset[matchKey]).toUpperCase().trim();
+    }
+    return "";
+  };
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
       const index = prev.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
       const newAssets = [...prev.assets];
-      const targetLocation = inventoryLocation ? inventoryLocation.toUpperCase().trim() : "";
-      
+      const targetLocation = (inventoryLocation || "").toUpperCase().trim();
       const updates: any = { ...updatedAsset };
-      let originalLocation = "";
-
-      // GARANTIA DE INTEGRIDADE: Se for novo ou atualizado, precisa ter a empresa normalizada para não sumir do filtro
-      if (!updates._empresaNormalizada && (updates.EMPRESA || selectedCompany)) {
-          updates._empresaNormalizada = (updates.EMPRESA || selectedCompany || "").toUpperCase().trim();
-      }
       
-      // Identifica localização original para determinar se é adoção
-      if (index !== -1) {
-        const oldAsset = prev.assets[index];
-        for(const k of LOC_KEYS) {
-            const match = Object.keys(oldAsset).find(ak => ak.toUpperCase() === k.toUpperCase());
-            if (match) { originalLocation = String(oldAsset[match]).toUpperCase().trim(); break; }
-        }
+      const currentComp = (selectedCompany || "GERAL").toUpperCase().trim();
+      updates._empresaNormalizada = currentComp;
+
+      if (!updates.PLAQUETA) {
+          for(const k of PLAQUETA_KEYS) {
+              const match = Object.keys(updates).find(uk => uk.toUpperCase() === k);
+              if (match) { updates.PLAQUETA = String(updates[match]).toUpperCase().trim(); break; }
+          }
       }
 
-      // Aplica novas localizações nos campos mapeados
-      LOC_KEYS.forEach(k => {
-        const found = Object.keys(updates).find(ak => ak.toUpperCase() === k.toUpperCase());
-        if (found) updates[found] = targetLocation;
-      });
-      updates['LOCALIZACAO'] = targetLocation;
+      const originalLoc = index !== -1 ? getOriginalLocation(prev.assets[index]) : "";
 
-      // Lógica de Tags para Inventário Perfeito
       if (index === -1) {
           updates.TAG_INVENTARIO = "INCLUSAO";
           updates._isNew = true;
           updates._conferido = true;
+          updates._localizacaoOriginal = "";
+          LOC_KEYS.forEach(k => updates[k] = targetLocation);
+          updates['LOCALIZACAO'] = targetLocation;
           newAssets.push(updates);
       } else {
-          const wasConferido = !!prev.assets[index]._conferido;
-          // Se mudou de local, aplicamos adoção ou re-adoção
-          if (originalLocation && originalLocation !== targetLocation) {
-              updates.TAG_INVENTARIO = wasConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
-              updates.TAG_ADOCAO = wasConferido ? "RE-ADOTADO" : "ADOTADO";
+          const alreadyConferido = !!prev.assets[index]._conferido;
+          const currentAsset = prev.assets[index];
+          
+          // Preserva a localização original se ainda não foi salva
+          if (!currentAsset._localizacaoOriginal) {
+            updates._localizacaoOriginal = originalLoc;
+          }
+
+          if (originalLoc && originalLoc !== targetLocation) {
+              updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
+              updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
           } else {
               updates.TAG_INVENTARIO = "CONFERIDO";
           }
+          
           updates._conferido = true;
+          LOC_KEYS.forEach(k => {
+            const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
+            if (found) updates[found] = targetLocation;
+          });
+          updates['LOCALIZACAO'] = targetLocation;
           newAssets[index] = updates;
       }
       
@@ -156,34 +179,34 @@ const App: React.FC = () => {
   }, [inventoryLocation, selectedCompany]);
 
   const bulkUpdateAssets = useCallback((ids: string[]) => {
-    const idSet = new Set(ids);
-    const targetLocation = inventoryLocation ? inventoryLocation.toUpperCase().trim() : "";
+    const idSet = new Set(ids.map(id => String(id)));
+    const targetLocation = (inventoryLocation || "").toUpperCase().trim();
+    
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
           const updates = { ...a };
-          let originalLocation = "";
-          
-          for(const k of LOC_KEYS) {
-            const match = Object.keys(updates).find(ak => ak.toUpperCase() === k.toUpperCase());
-            if (match) { originalLocation = String(updates[match]).toUpperCase().trim(); break; }
+          const originalLoc = getOriginalLocation(a);
+          const alreadyConferido = !!a._conferido;
+
+          if (!updates._localizacaoOriginal) {
+            updates._localizacaoOriginal = originalLoc;
           }
 
-          LOC_KEYS.forEach(k => {
-            const found = Object.keys(updates).find(ak => ak.toUpperCase() === k.toUpperCase());
-            if (found) updates[found] = targetLocation;
-          });
-          updates['LOCALIZACAO'] = targetLocation;
-
-          const wasConferido = !!a._conferido;
-          if (originalLocation && originalLocation !== targetLocation) {
-            updates.TAG_INVENTARIO = wasConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
-            updates.TAG_ADOCAO = wasConferido ? "RE-ADOTADO" : "ADOTADO";
+          if (originalLoc && originalLoc !== targetLocation) {
+            updates.TAG_INVENTARIO = alreadyConferido ? "RE-ADOTADO NO INVENTARIO" : "ADOTADO";
+            updates.TAG_ADOCAO = alreadyConferido ? "RE-ADOTADO" : "ADOTADO";
           } else {
             updates.TAG_INVENTARIO = "CONFERIDO";
           }
+
           updates._conferido = true;
+          LOC_KEYS.forEach(k => {
+            const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
+            if (found) updates[found] = targetLocation;
+          });
+          updates['LOCALIZACAO'] = targetLocation;
           return updates;
         }
         return a;
@@ -205,7 +228,7 @@ const App: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Inventario_GBR");
     XLSX.writeFile(wb, `INVENTARIO_GBR_${new Date().getTime()}.xlsx`);
-    if (confirm("Exportação concluída. Deseja descarregar e limpar a base local para um novo projeto?")) {
+    if (confirm("Exportação concluída. Deseja limpar a base local?")) {
       setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY });
       setSelectedCompany(null);
       pushScreen(AppScreen.MAIN_MENU);
@@ -225,18 +248,15 @@ const App: React.FC = () => {
 
   if (isSaving) {
     return (
-      <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center space-y-4 animate-fadeIn">
-        <Loader2 className="text-blue-500 animate-spin" size={40} strokeWidth={3} />
-        <div className="text-center">
-          <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Salvando Dados</h2>
-          <p className="text-[7px] font-black text-blue-400 uppercase tracking-widest mt-1 animate-pulse">Base de Conhecimento Local</p>
-        </div>
+      <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="text-indigo-500 animate-spin" size={32} />
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Otimizando Dados</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-screen bg-white shadow-2xl overflow-hidden relative font-sans max-w-full">
+    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full">
       {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
       {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
       {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { 
