@@ -16,19 +16,23 @@ export enum DatabaseStatus {
 export interface Asset {
   [key: string]: any;
   id: string | number;
+  // Campos Unificados v16
+  PLAQUETA?: string; 
+  _plaquetaMaster?: string;
+  _hasPlaqueta?: boolean;
   _conferido?: boolean;
+  _localMaster?: string;
+  _empresaNormalizada?: string;
+  _descricaoMaster?: string;
+  
+  // Tags de Auditoria
+  TAG_DUPLICIDADE?: 'ÚNICO' | 'DUPLICIDADE INTERNA' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
+  TAG_INVENTARIO?: string;
+  
+  // Flags de Controle
   _isInternalDuplicate?: boolean;
   _isExternalDuplicate?: boolean;
-  _isDuplicate?: boolean; 
-  _hasPlaqueta?: boolean;
-  _corrigido?: boolean;
-  _transferido?: boolean;
   _isNew?: boolean;
-  TAG_INVENTARIO?: string;
-  TAG_PLAQUETA?: string;
-  TAG_DUPLICIDADE?: string;
-  TAG_ADOCAO?: string;
-  // Fix: Explicitly define PLAQUETA_INVENTARIO as it's a core property used across the app
   PLAQUETA_INVENTARIO?: string;
 }
 

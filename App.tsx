@@ -16,8 +16,6 @@ import { Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
-const LOC_KEYS = ['ENDERECO', 'LOCALIZACAO', 'SETOR', 'COD_END', 'LOCAL'];
-const PLAQUETA_KEYS = ['PLAQUETA', 'ETIQUETA', 'PATRIMONIO', 'TAG', 'BEM'];
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -75,39 +73,13 @@ const App: React.FC = () => {
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const databaseHeaders = useMemo(() => {
-    if (inventory.assets.length === 0) return [];
-    const keys = new Set<string>();
-    inventory.assets.slice(0, 100).forEach(a => {
-      Object.keys(a).forEach(k => {
-        if (!k.startsWith('_') && k !== 'id' && k !== 'PLAQUETA_INVENTARIO' && k !== 'TAG_INVENTARIO') {
-          keys.add(k);
-        }
-      });
-    });
-    return Array.from(keys).sort();
-  }, [inventory.assets]);
-
-  const enterImmersiveMode = useCallback(() => {
-    const doc = document.documentElement;
-    if (!document.fullscreenElement) {
-      if (doc.requestFullscreen) {
-        doc.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
-      } else if ((doc as any).webkitRequestFullscreen) {
-        (doc as any).webkitRequestFullscreen();
-      }
-    }
+  const normalizeKey = useCallback((s: string) => {
+    return s.toString().toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Z0-9]/g, '')
+      .trim();
   }, []);
-
-  useEffect(() => {
-    const handleFirstTouch = () => enterImmersiveMode();
-    window.addEventListener('click', handleFirstTouch);
-    window.addEventListener('touchstart', handleFirstTouch);
-    return () => {
-      window.removeEventListener('click', handleFirstTouch);
-      window.removeEventListener('touchstart', handleFirstTouch);
-    };
-  }, [enterImmersiveMode]);
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -135,53 +107,20 @@ const App: React.FC = () => {
     setHistory(prev => prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU]);
   };
 
-  const formatDateValue = (val: any): string => {
-    if (!val || val === '---' || val === '0' || val === 'NULL') return '---';
-    const strVal = String(val).trim();
-    if (!isNaN(Number(strVal)) && Number(strVal) > 30000 && Number(strVal) < 60000) {
-      const date = new Date((Number(strVal) - 25569) * 86400 * 1000);
-      return date.toLocaleDateString('pt-BR');
-    }
-    const d = new Date(strVal);
-    if (!isNaN(d.getTime()) && (strVal.includes('-') || strVal.includes('/'))) {
-      return d.toLocaleDateString('pt-BR');
-    }
-    return strVal;
-  };
-
-  const checkIsBaixado = useCallback((item: any) => {
-    const terms = ['DATA_BAIXA', 'DT_BAIXA', 'DATA_DA_BAIXA', 'BAIXA', 'DATA_DE_BAIXA'];
-    for (const term of terms) {
-      const val = String(item[term] || '').trim();
-      if (val !== "" && val !== "---" && val !== "0" && val.toUpperCase() !== "NULL") return true;
-    }
-    return false;
-  }, []);
-
-  const determineTag = (asset: Asset, targetLocation: string): string => {
+  const determineTag = useCallback((asset: Asset, targetLocation: string): string => {
     if (asset._isNew) return "NOVO ITEM INCLUÍDO";
-    if (checkIsBaixado(asset)) return "RE-ADOTADO NO INVENTARIO";
-    
-    let originalLoc = '';
-    for(const k of LOC_KEYS) { 
-      const found = Object.keys(asset).find(ak => ak.toUpperCase() === k);
-      if (found && asset[found]) { originalLoc = String(asset[found]).toUpperCase().trim(); break; }
-    }
+    const originalLocKey = normalizeKey(asset._localMaster || "");
+    const targetLocKey = normalizeKey(targetLocation);
+    const originalPlaqueta = String(asset._plaquetaMaster || "").trim();
 
-    let originalPlaqueta = '';
-    for(const k of PLAQUETA_KEYS) {
-      if(asset[k]) { originalPlaqueta = String(asset[k]).trim(); break; }
-    }
-
-    if (asset.PLAQUETA_INVENTARIO && originalPlaqueta && asset.PLAQUETA_INVENTARIO !== originalPlaqueta) {
+    if (asset.PLAQUETA_INVENTARIO && originalPlaqueta && asset.PLAQUETA_INVENTARIO !== originalPlaqueta && originalPlaqueta !== "S/ PLACA") {
       return "DIVERGENCIA";
     }
-
-    if (originalLoc && originalLoc !== targetLocation.toUpperCase().trim()) {
+    if (originalLocKey !== targetLocKey) {
       return "ADOTADO";
     }
     return "CONFERIDO";
-  };
+  }, [normalizeKey]);
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
@@ -192,14 +131,8 @@ const App: React.FC = () => {
       const updates: any = { ...updatedAsset };
       updates._conferido = true;
       updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
-
-      // Normalização de Localização
-      LOC_KEYS.forEach(k => {
-        const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
-        if (found) updates[found] = targetLoc;
-      });
-      updates['LOCALIZACAO'] = targetLoc;
-
+      updates._localMaster = targetLoc;
+      
       if (index === -1) {
         newAssets.push(updates);
       } else {
@@ -218,11 +151,7 @@ const App: React.FC = () => {
         if (idSet.has(String(a.id))) {
           const updates = { ...a, _conferido: true };
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
-          LOC_KEYS.forEach(k => {
-            const found = Object.keys(updates).find(ak => ak.toUpperCase() === k);
-            if (found) (updates as any)[found] = targetLoc;
-          });
-          updates['LOCALIZACAO'] = targetLoc;
+          updates._localMaster = targetLoc;
           return updates;
         }
         return a;
@@ -236,42 +165,30 @@ const App: React.FC = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
       const res: any = {};
-      let plaquetaOrig = '';
-      for(const k of PLAQUETA_KEYS) { if(a[k]) { plaquetaOrig = String(a[k]).trim(); break; } }
-
+      const plaquetaOrig = a._plaquetaMaster || '';
       Object.keys(a).forEach(k => { 
-        if (!k.startsWith('_') && k !== 'id') {
-           let val = a[k];
-           const isDateField = k.toUpperCase().includes('DATA') || k.toUpperCase().includes('DT_');
-           if (isDateField) val = formatDateValue(val);
-           res[k] = val; 
-        }
+        if (!k.startsWith('_') && k !== 'id') res[k] = a[k];
       });
-
       res['PLAQUETA_MASTER'] = plaquetaOrig;
       res['PLAQUETA_INVENTARIO'] = a.PLAQUETA_INVENTARIO || plaquetaOrig;
-      res['CONFERIDO'] = a._conferido ? 'SIM' : 'NAO';
-      res['STATUS_POLITICA'] = a.TAG_INVENTARIO || 'PENDENTE';
-      res['DIVERGENCIA_IDENTIFICACAO'] = (a.PLAQUETA_INVENTARIO && a.PLAQUETA_INVENTARIO !== plaquetaOrig) ? 'SIM' : 'NAO';
-      
+      res['ENDERECO_FISICO_AUDITADO'] = a._localMaster;
+      res['STATUS_AUDITORIA'] = a._conferido ? 'SIM' : 'NAO';
+      res['POLITICA_INVENTARIO'] = a.TAG_INVENTARIO || 'PENDENTE';
       return res;
     });
-
     const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT_DATA");
-    XLSX.writeFile(wb, `GBR_AUDITORIA_${new Date().getTime()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
+    XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
   };
 
   const filteredAssetsByCompany = useMemo(() => {
-    if (!selectedCompany) return [];
-    const sel = String(selectedCompany).toUpperCase().trim();
-    return inventory.assets.filter(a => String(a._empresaNormalizada || '').toUpperCase().trim() === sel);
-  }, [inventory.assets, selectedCompany]);
+    if (!selectedCompany) return inventory.assets; // VISÃO CONSOLIDADA REAL
+    const selKey = normalizeKey(selectedCompany);
+    return inventory.assets.filter(a => normalizeKey(a._empresaNormalizada || '') === selKey);
+  }, [inventory.assets, selectedCompany, normalizeKey]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
-
-  if (isSaving) return <div className="w-full h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="text-indigo-500 animate-spin" /></div>;
 
   return (
     <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full">
@@ -280,9 +197,9 @@ const App: React.FC = () => {
       {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
       {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
       {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
-      {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} databaseHeaders={databaseHeaders} />}
+      {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} />}
       {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} />}
-      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} databaseHeaders={databaseHeaders} />}
+      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} />}
       {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
       {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
       {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
