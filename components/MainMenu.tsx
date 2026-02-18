@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   ChevronRight,
   DatabaseZap,
-  Trash2
+  Trash2,
+  SlidersHorizontal
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -126,14 +127,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
           <button onClick={() => setIsAdminMenuOpen(false)} className="absolute top-12 right-6 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 active:scale-90">
             <X size={24} />
           </button>
-          <div className="w-full max-w-xs space-y-4">
+          <div className="w-full max-w-xs space-y-3">
             <div className="text-center mb-8">
               <div className="w-16 h-16 bg-amber-600/20 text-amber-500 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
                 <ShieldCheck size={32} />
               </div>
               <h2 className="text-xl font-bold text-white uppercase tracking-tighter italic">Painel Admin GBR</h2>
             </div>
-            <div className="space-y-3">
+            
+            <div className="space-y-2">
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left">
                 <div className="w-9 h-9 bg-blue-900/20 text-blue-500 rounded-xl flex items-center justify-center mr-4 border border-blue-500/20"><Users size={18} /></div>
                 <div className="flex-1">
@@ -141,6 +143,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Gerir Usuários</p>
                 </div>
               </button>
+
+              {/* NOVA OPÇÃO: CONFIGURADOR DE CAMPOS v24.19 */}
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left">
+                <div className="w-9 h-9 bg-purple-900/20 text-purple-400 rounded-xl flex items-center justify-center mr-4 border border-purple-500/20"><SlidersHorizontal size={18} /></div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Configurar Campos</h4>
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Controle de Edição</p>
+                </div>
+              </button>
+
               <button disabled={!hasData} onClick={() => { setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 disabled:opacity-20 transition-all text-left">
                 <div className="w-9 h-9 bg-emerald-900/20 text-emerald-500 rounded-xl flex items-center justify-center mr-4 border border-emerald-500/20"><Download size={18} /></div>
                 <div className="flex-1">
@@ -148,13 +160,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Exportar XLS</p>
                 </div>
               </button>
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-indigo-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left">
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-indigo-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left shadow-lg shadow-indigo-900/20">
                 <div className="w-9 h-9 bg-white/20 text-white rounded-xl flex items-center justify-center mr-4"><DatabaseZap size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black uppercase tracking-tighter">Carga Expert</h4>
                   <p className="text-[8px] font-bold text-indigo-100 uppercase tracking-widest">Importar Base Master</p>
                 </div>
               </button>
+
               <button onClick={() => { setIsAdminMenuOpen(false); onClearDatabase(); }} className="w-full flex items-center p-4 bg-red-950/30 border border-red-900/50 rounded-[1.8rem] active:scale-95 transition-all text-left">
                 <div className="w-9 h-9 bg-red-600 text-white rounded-xl flex items-center justify-center mr-4 shadow-lg shadow-red-900/20"><Trash2 size={18} /></div>
                 <div className="flex-1">
@@ -171,5 +185,4 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
   );
 };
 
-// Fix: Added missing default export for MainMenu
 export default MainMenu;

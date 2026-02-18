@@ -12,6 +12,7 @@ import CompanySelector from './components/CompanySelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
 import ChangePassword from './components/ChangePassword';
+import FieldConfigurator from './components/FieldConfigurator';
 import { Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -43,9 +44,21 @@ const App: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryState>(() => {
     try {
       const saved = localStorage.getItem('inventory_data');
-      return saved ? JSON.parse(saved) : { assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY };
+      return saved ? JSON.parse(saved) : { 
+        assets: [], 
+        companies: [], 
+        lastUpdated: null, 
+        status: DatabaseStatus.EMPTY,
+        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'] // Default v24.19
+      };
     } catch { 
-      return { assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY }; 
+      return { 
+        assets: [], 
+        companies: [], 
+        lastUpdated: null, 
+        status: DatabaseStatus.EMPTY,
+        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']
+      }; 
     }
   });
 
@@ -68,9 +81,7 @@ const App: React.FC = () => {
     return localStorage.getItem('app_is_inventorying') === 'true';
   });
 
-  const [isSaving, setIsSaving] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const normalizeKey = useCallback((s: string) => {
@@ -80,6 +91,27 @@ const App: React.FC = () => {
       .replace(/[^A-Z0-9]/g, '')
       .trim();
   }, []);
+
+  const determineTag = useCallback((asset: Asset, targetLocation: string): string => {
+    const isBaixado = String(asset.STATUS || '').toUpperCase().includes('BAIXADO');
+    if (isBaixado) return "BAIXADO";
+    
+    if (asset._isNew || asset.TAG_INVENTARIO === "NOVO ITEM") return "NOVO ITEM";
+
+    const targetLocKey = normalizeKey(targetLocation);
+    const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
+    const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
+
+    if (asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
+      return "RE-ADOTADO";
+    }
+
+    if (!asset._conferido && originalLocKey !== "" && originalLocKey !== targetLocKey) {
+      return "ADOTADO";
+    }
+
+    return "CONFERIDO";
+  }, [normalizeKey]);
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -107,51 +139,61 @@ const App: React.FC = () => {
     setHistory(prev => prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU]);
   };
 
-  const determineTag = useCallback((asset: Asset, targetLocation: string): string => {
-    if (asset._isNew) return "NOVO ITEM INCLUÍDO";
-    const originalLocKey = normalizeKey(asset._localMaster || "");
-    const targetLocKey = normalizeKey(targetLocation);
-    const originalPlaqueta = String(asset._plaquetaMaster || "").trim();
-
-    if (asset.PLAQUETA_INVENTARIO && originalPlaqueta && asset.PLAQUETA_INVENTARIO !== originalPlaqueta && originalPlaqueta !== "S/ PLACA") {
-      return "DIVERGENCIA";
-    }
-    if (originalLocKey !== targetLocKey) {
-      return "ADOTADO";
-    }
-    return "CONFERIDO";
-  }, [normalizeKey]);
-
   const updateAsset = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
       const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
       
-      const updates: any = { ...updatedAsset };
-      updates._conferido = true;
-      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
-      updates._localMaster = targetLoc;
+      const existingAsset = index !== -1 ? newAssets[index] : null;
+      const updates = { ...updatedAsset };
+      const alteredFields = new Set<string>(updates._camposAlterados || []);
       
-      if (index === -1) {
-        newAssets.push(updates);
-      } else {
-        newAssets[index] = updates;
+      if (existingAsset) {
+        Object.keys(updates).forEach(key => {
+          if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+          if (String(updates[key]) !== String(existingAsset[key])) {
+            alteredFields.add(key);
+          }
+        });
       }
+
+      const oldLoc = existingAsset ? existingAsset.ENDERECO : "";
+      if (normalizeKey(String(oldLoc)) !== normalizeKey(targetLoc)) {
+        alteredFields.add('ENDERECO');
+      }
+
+      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
+      updates._conferido = true;
+      updates._localMaster = targetLoc;
+      updates.ENDERECO = targetLoc;
+      updates._camposAlterados = Array.from(alteredFields);
+      
+      if (index === -1) newAssets.push(updates);
+      else newAssets[index] = updates;
+      
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventoryLocation, determineTag]);
+  }, [inventoryLocation, determineTag, normalizeKey]);
 
   const bulkUpdateAssets = useCallback((ids: string[]) => {
     const idSet = new Set(ids.map(id => String(id)));
     const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
+    
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
-          const updates = { ...a, _conferido: true };
+          const updates = { ...a };
+          const alteredFields = new Set<string>(updates._camposAlterados || []);
+          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) {
+            alteredFields.add('ENDERECO');
+          }
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
+          updates._conferido = true;
           updates._localMaster = targetLoc;
+          updates.ENDERECO = targetLoc; 
+          updates._camposAlterados = Array.from(alteredFields);
           return updates;
         }
         return a;
@@ -159,33 +201,33 @@ const App: React.FC = () => {
       lastUpdated: new Date().toISOString(),
       status: DatabaseStatus.IN_USE
     }));
-  }, [inventoryLocation, determineTag]);
+  }, [inventoryLocation, determineTag, normalizeKey]);
 
   const handleExport = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
       const res: any = {};
-      const plaquetaOrig = a._plaquetaMaster || '';
-      Object.keys(a).forEach(k => { 
-        if (!k.startsWith('_') && k !== 'id') res[k] = a[k];
-      });
-      res['PLAQUETA_MASTER'] = plaquetaOrig;
-      res['PLAQUETA_INVENTARIO'] = a.PLAQUETA_INVENTARIO || plaquetaOrig;
-      res['ENDERECO_FISICO_AUDITADO'] = a._localMaster;
-      res['STATUS_AUDITORIA'] = a._conferido ? 'SIM' : 'NAO';
-      res['POLITICA_INVENTARIO'] = a.TAG_INVENTARIO || 'PENDENTE';
+      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
+      res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
+      res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+      res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
+      res['AUDITOR_CAMPOS_ALTERADOS'] = (a._camposAlterados || []).join(', ');
       return res;
     });
     const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
-    XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT_v24.16");
+    XLSX.writeFile(wb, `GBR_AUDIT_v24_${new Date().getTime()}.xlsx`);
+  };
+
+  const updateEditableFields = (fields: string[]) => {
+    setInventory(prev => ({ ...prev, editableFields: fields }));
   };
 
   const filteredAssetsByCompany = useMemo(() => {
-    if (!selectedCompany) return inventory.assets; // VISÃO CONSOLIDADA REAL
+    if (!selectedCompany) return inventory.assets; 
     const selKey = normalizeKey(selectedCompany);
-    return inventory.assets.filter(a => normalizeKey(a._empresaNormalizada || '') === selKey);
+    return inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === selKey);
   }, [inventory.assets, selectedCompany, normalizeKey]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
@@ -195,14 +237,15 @@ const App: React.FC = () => {
       {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
       {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
       {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
-      {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
+      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+      {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
       {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} />}
       {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} />}
-      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} />}
+      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} editableFields={inventory.editableFields || []} />}
       {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
       {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
       {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
+      {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={updateEditableFields} onBack={popScreen} />}
     </div>
   );
 };

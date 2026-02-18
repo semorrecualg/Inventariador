@@ -5,12 +5,11 @@ import {
   ArrowRight, 
   ArrowLeft, 
   FileSpreadsheet, 
-  CheckCircle2, 
   Activity,
   Trash2,
-  Filter,
   ShieldCheck,
-  Zap
+  MapPin,
+  CheckCircle2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
@@ -23,6 +22,7 @@ interface LoadSummary {
   companies: Record<string, number>;
   headers: string[];
   withPlaqueta: number;
+  locationsMasterCount: number;
 }
 
 interface DatabaseLoaderProps {
@@ -52,22 +52,29 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
     if (val === undefined || val === null) return "";
     let s = String(val).trim().replace(/\s+/g, ' '); 
     const upper = s.toUpperCase();
-    if (upper === "" || upper === "NULL" || upper === "0" || upper.includes("#N/D") || upper.includes("#REF") || upper.includes("#VALOR")) return "";
+    if (upper === "" || upper === "NULL" || upper === "0" || upper.includes("#N/D") || upper.includes("#REF")) return "";
     return s.toUpperCase();
   };
 
-  const findBestColumnV20 = (headers: string[], dataRows: any[][], keywords: string[]) => {
+  const findBestColumnV23 = (headers: string[], keywords: string[]) => {
     let bestIdx = -1;
     let maxScore = -1;
     headers.forEach((h, idx) => {
-      const normH = String(h || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      // Fix: Declare score variable locally for each header
       let score = 0;
+      const normH = String(h || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z]/g, '').trim();
       keywords.forEach(kw => {
-        if (normH === kw.toUpperCase()) score += 1000;
-        else if (normH.includes(kw.toUpperCase())) score += 100;
+        const normKw = kw.toUpperCase().replace(/[^A-Z]/g, '');
+        if (normH === normKw) score += 1000;
+        else if (normH.includes(normKw)) score += 100;
       });
-      if (score > maxScore) { maxScore = score; bestIdx = idx; }
+      // Fix: Update maxScore and bestIdx if a better match is found
+      if (score > maxScore && score > 0) {
+        maxScore = score;
+        bestIdx = idx;
+      }
     });
+    // Fallback manual para o schema v23 específico
     return bestIdx;
   };
 
@@ -82,137 +89,128 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       const rawRows = XLSX.utils.sheet_to_json(aws, { header: 1, defval: "" }) as any[][];
       
       let headerIdx = 0;
-      for (let i = 0; i < Math.min(rawRows.length, 60); i++) {
+      for (let i = 0; i < Math.min(rawRows.length, 50); i++) {
         const rowStr = rawRows[i].join('|').toUpperCase();
-        if (['PLAQUETA', 'PATRIMONIO', 'ETIQUETA', 'STATUS', 'CONTA', 'SITUACAO'].some(t => rowStr.includes(t))) {
+        if (['ETIQUETA', 'STATUS', 'EMPRESA', 'ENDERECO', 'DESCRICAO'].some(t => rowStr.includes(t))) {
           headerIdx = i; break;
         }
       }
 
-      const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim());
-      const sampleData = rawRows.slice(headerIdx + 1, headerIdx + 301);
-
-      const mapping = {
-        PLAQUETA: findBestColumnV20(rawHeaders, sampleData, ['ETIQUETA', 'PLAQUETA', 'PATRIMONIO', 'TAG']),
-        EMPRESA: findBestColumnV20(rawHeaders, sampleData, ['EMPRESA', 'UNIDADE', 'ESTAB']),
-        LOCAL: findBestColumnV20(rawHeaders, sampleData, ['LOCALIZACAO FISICA', 'ENDERECO FISICO', 'SETOR']),
-        DESC: findBestColumnV20(rawHeaders, sampleData, ['DESCRICAO', 'ITEM', 'NOME']),
-        STATUS: findBestColumnV20(rawHeaders, sampleData, ['STATUS', 'SITUACAO', 'ESTADO']),
-        CONTA: findBestColumnV20(rawHeaders, sampleData, ['CONTA_CONTABIL', 'CONTA', 'CONTABIL', 'COD_CONTA']),
+      const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
+      
+      // Mapeamento Estrito Schema v23
+      const m = {
+        EMPRESA: rawHeaders.indexOf('EMPRESA'),
+        STATUS: rawHeaders.indexOf('STATUS'),
+        ETIQUETA: rawHeaders.indexOf('ETIQUETA'),
+        QT: rawHeaders.indexOf('QT'),
+        DESCRICAO: rawHeaders.indexOf('DESCRICAODOATIVO'),
+        SERIAL: rawHeaders.indexOf('SERIAL'),
+        DATA_AQ: rawHeaders.indexOf('DATAAQUSIC'),
+        CNPJ: rawHeaders.indexOf('CNPJ'),
+        FORNECEDOR: rawHeaders.indexOf('NOMEFORNECEDOR'),
+        NF: rawHeaders.indexOf('NOTAFISCAL'),
+        ENDERECO: rawHeaders.indexOf('ENDERECO'),
+        REGISTRO: rawHeaders.indexOf('REGISTRO'),
+        SUBREG: rawHeaders.indexOf('SUBREG'),
+        DATA_BAIXA: rawHeaders.indexOf('DATABAIXA'),
+        CONTA: rawHeaders.indexOf('CONTACONTABIL'),
+        PK: rawHeaders.indexOf('PRIMARYKEY')
       };
 
-      // 1. SCAN GLOBAL DE VITALIDADE (Mapear etiquetas Ativas)
+      // BASE_SINTETICA_LOC
+      const baseSinteticaLoc = new Set<string>();
       const activeTagsGlobal = new Set<string>();
-      if (mapping.PLAQUETA !== -1 && mapping.STATUS !== -1) {
-        rawRows.slice(headerIdx + 1).forEach(row => {
-          const s = cleanDisplayValue(row[mapping.STATUS]);
-          const p = cleanDisplayValue(row[mapping.PLAQUETA]);
-          if (s.includes('ATIVO') && p && p !== "0") {
-            activeTagsGlobal.add(normalizeKey(p));
-          }
-        });
-      }
 
-      let totalPurged = 0;
-      const filteredRows = rawRows.slice(headerIdx + 1).filter(row => {
-        if (!row.some(c => String(c).trim() !== "")) return false;
+      rawRows.slice(headerIdx + 1).forEach(row => {
+        const status = cleanDisplayValue(row[m.STATUS]);
+        const etiqueta = cleanDisplayValue(row[m.ETIQUETA]);
+        const endereco = cleanDisplayValue(row[m.ENDERECO]);
 
-        const status = mapping.STATUS !== -1 ? cleanDisplayValue(row[mapping.STATUS]) : '';
-        const conta = mapping.CONTA !== -1 ? cleanDisplayValue(row[mapping.CONTA]) : '';
-        const plaqueta = mapping.PLAQUETA !== -1 ? cleanDisplayValue(row[mapping.PLAQUETA]) : '';
-        const pkNorm = normalizeKey(plaqueta);
+        if (status.includes('ATIVO') && etiqueta) activeTagsGlobal.add(normalizeKey(etiqueta));
+        if (endereco) baseSinteticaLoc.add(endereco.toUpperCase().trim());
+      });
+
+      let purgedCount = 0;
+      const finalAssets: Asset[] = [];
+
+      rawRows.slice(headerIdx + 1).forEach((row, idx) => {
+        if (!row.some(c => String(c).trim() !== "")) return;
+
+        const status = cleanDisplayValue(row[m.STATUS]);
+        const etiqueta = cleanDisplayValue(row[m.ETIQUETA]);
+        const conta = cleanDisplayValue(row[m.CONTA]);
+        const pkNorm = normalizeKey(etiqueta);
         
         const isAtivo = status.includes('ATIVO');
         const isBaixado = status.includes('BAIXADO');
 
-        // REGRA FUNDAMENTAL A: Registro ATIVO nunca é eliminado
-        if (isAtivo) return true;
-
-        // REGRA FUNDAMENTAL B: Tratamento de registros BAIXADOS
+        // Lógica de Higiene v23
         if (isBaixado) {
-          // b.1: Conta Contábil bloqueada
-          if (conta.includes('131105001') || conta.includes('131105002')) {
-            totalPurged++; return false;
-          }
-
-          // b.2: Sem Etiqueta
-          if (!plaqueta || plaqueta === "" || plaqueta === "0") {
-            totalPurged++; return false;
-          }
-
-          // b.3.1: Existe um ATIVO correspondente para esta etiqueta?
-          if (activeTagsGlobal.has(pkNorm)) {
-            totalPurged++; return false;
-          }
-
-          // b.3.2: NÃO existe nenhum ATIVO para esta etiqueta? -> PRESERVAR (retorna true abaixo)
+          if (conta.includes('131105001') || conta.includes('131105002')) { purgedCount++; return; }
+          if (!etiqueta) { purgedCount++; return; }
+          if (activeTagsGlobal.has(pkNorm)) { purgedCount++; return; }
         }
 
-        return true;
-      });
-
-      // 2. MAPEAMENTO FINAL V20
-      const finalAssets: Asset[] = filteredRows.map((row, idx) => {
-        const item: Asset = { id: `v20_${idx}_${Date.now()}` };
-        rawHeaders.forEach((h, i) => { 
-          if (h) {
-            const val = cleanDisplayValue(row[i]);
-            item[h.toUpperCase().replace(/\s/g, '_')] = val;
-            // Garantia extra de mapeamento para o Dashboard encontrar os campos dinamicamente
-            if (i === mapping.STATUS) item.STATUS = val;
-            if (i === mapping.CONTA) item.CONTA_CONTABIL = val;
-          }
-        });
-
-        const p = mapping.PLAQUETA !== -1 ? cleanDisplayValue(row[mapping.PLAQUETA]) : '';
-        const loc = mapping.LOCAL !== -1 ? cleanDisplayValue(row[mapping.LOCAL]) : '';
-        const emp = mapping.EMPRESA !== -1 ? cleanDisplayValue(row[mapping.EMPRESA]) : 'GERAL';
-        const desc = mapping.DESC !== -1 ? cleanDisplayValue(row[mapping.DESC]) : 'SEM DESCRIÇÃO';
-
-        item.PLAQUETA = p;
-        item._plaquetaMaster = p || "S/ PLACA";
-        item._hasPlaqueta = p !== "" && p !== "0" && p !== "S/ PLACA";
-        item._localMaster = loc || "SETOR NÃO CADASTRADO";
-        item._empresaNormalizada = emp;
-        item._descricaoMaster = desc;
-        item._empresaCleanKey = normalizeKey(emp);
-        item._plaquetaCleanKey = normalizeKey(p);
+        const asset: Asset = { id: `gbr_v23_${idx}_${Date.now()}` };
         
-        return item;
+        // Atribuição de Colunas Mestre
+        asset.EMPRESA = cleanDisplayValue(row[m.EMPRESA]) || "GERAL";
+        asset.STATUS = status || "ATIVO";
+        asset.ETIQUETA = etiqueta;
+        asset.QT = cleanDisplayValue(row[m.QT]) || "1";
+        asset.DESCRICAODOATIVO = cleanDisplayValue(row[m.DESCRICAO]);
+        asset.SERIAL = cleanDisplayValue(row[m.SERIAL]);
+        asset.DATAAQUSIC = cleanDisplayValue(row[m.DATA_AQ]);
+        asset.CNPJ = cleanDisplayValue(row[m.CNPJ]);
+        asset.NOMEFORNECEDOR = cleanDisplayValue(row[m.FORNECEDOR]);
+        asset.NOTAFISCAL = cleanDisplayValue(row[m.NF]);
+        asset.ENDERECO = cleanDisplayValue(row[m.ENDERECO]) || "ENDERECO NAO INFORMADO";
+        asset.REGISTRO = cleanDisplayValue(row[m.REGISTRO]);
+        asset.SUBREG = cleanDisplayValue(row[m.SUBREG]);
+        asset.DATABAIXA = cleanDisplayValue(row[m.DATA_BAIXA]);
+        asset.CONTACONTABIL = conta;
+        asset.PRIMARYKEY = cleanDisplayValue(row[m.PK]);
+
+        // Mapeamento de Controle GBR
+        asset._plaquetaMaster = asset.ETIQUETA || "S/ ETQ";
+        asset._localMaster = asset.ENDERECO;
+        asset._descricaoMaster = asset.DESCRICAODOATIVO || "SEM DESCRICAO";
+        asset._empresaNormalizada = asset.EMPRESA;
+        asset._baseSinteticaLoc = Array.from(baseSinteticaLoc);
+
+        finalAssets.push(asset);
       });
 
-      // 3. TAGS DE DUPLICIDADE (Dashboard)
       const counts = new Map<string, number>();
-      finalAssets.forEach(a => { if(a._hasPlaqueta) counts.set(a._plaquetaCleanKey!, (counts.get(a._plaquetaCleanKey!) || 0) + 1); });
+      finalAssets.forEach(a => { if(a.ETIQUETA) counts.set(normalizeKey(a.ETIQUETA), (counts.get(normalizeKey(a.ETIQUETA)) || 0) + 1); });
       
-      let withPlaquetaCount = 0;
       finalAssets.forEach(a => {
-        if (!a._hasPlaqueta) { a.TAG_DUPLICIDADE = 'SEM IDENTIFICAÇÃO'; return; }
-        withPlaquetaCount++;
-        a.TAG_DUPLICIDADE = (counts.get(a._plaquetaCleanKey!) || 0) > 1 ? 'DUPLICIDADE INTERNA' : 'ÚNICO';
+        if (!a.ETIQUETA) a.TAG_DUPLICIDADE = 'SEM IDENTIFICAÇÃO';
+        else a.TAG_DUPLICIDADE = (counts.get(normalizeKey(a.ETIQUETA)) || 0) > 1 ? 'DUPLICIDADE INTERNA' : 'ÚNICO';
       });
 
-      const stats: Record<string, number> = {};
-      finalAssets.forEach(i => { stats[i._empresaNormalizada!] = (stats[i._empresaNormalizada!] || 0) + 1; });
+      const companyStats: Record<string, number> = {};
+      finalAssets.forEach(i => { companyStats[i.EMPRESA!] = (companyStats[i.EMPRESA!] || 0) + 1; });
 
       processedDataRef.current = finalAssets;
-      processedCompaniesRef.current = Object.keys(stats).sort();
+      processedCompaniesRef.current = Object.keys(companyStats).sort();
 
       setSummary({
         rows: finalAssets.length,
-        purgedRows: totalPurged,
+        purgedRows: purgedCount,
         originalRows: rawRows.length - (headerIdx + 1),
         cols: rawHeaders.length,
-        companies: stats,
+        companies: companyStats,
         headers: rawHeaders,
-        withPlaqueta: withPlaquetaCount
+        withPlaqueta: finalAssets.filter(a => !!a.ETIQUETA).length,
+        locationsMasterCount: baseSinteticaLoc.size
       });
 
       setStep('SUMMARY');
       setLoading(false);
     } catch (err: any) {
-      setError(`Erro no Motor v20: ${err.message}`);
-      setStep('SOURCE');
+      setError(`Erro Schema v23: ${err.message}`);
       setLoading(false);
     }
   };
@@ -232,28 +230,28 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         <div className="flex items-center space-x-4">
           <button onClick={onBack} className="p-2 bg-slate-800 rounded-xl text-slate-500 active:scale-90"><ArrowLeft size={18} /></button>
           <div>
-            <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Motor Auditor v20</h2>
-            <p className="text-indigo-400 text-[7px] font-black uppercase tracking-[0.2em] mt-0.5">Hygiene & Analytics Active</p>
+            <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Protocolo v23</h2>
+            <p className="text-indigo-400 text-[7px] font-black uppercase tracking-[0.2em] mt-0.5">High-Density Asset Mapping</p>
           </div>
         </div>
-        <div className="w-10 h-10 bg-slate-800 border border-slate-700 rounded-xl flex items-center justify-center text-emerald-400 shadow-lg"><Activity size={20} /></div>
+        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg"><Activity size={20} /></div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
+      <div className="flex-1 overflow-y-auto p-6 no-scrollbar pb-24">
         {step === 'SOURCE' && (
           <div className="space-y-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl">
-               <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500">Regras de Vitalidade v20</span>
-               <h3 className="text-lg font-black uppercase text-white tracking-tighter mt-1 mb-2">Higienização Precision</h3>
+               <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500">Configuração de Tabela v23</span>
+               <h3 className="text-lg font-black uppercase text-white tracking-tighter mt-1 mb-2">Mapeamento Dinâmico</h3>
                <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">
-                Preservação 100% de registros ATIVOS. Limpeza cirúrgica de BAIXADOS conforme protocolo Expert GBR.
+                Importação otimizada para campos: Empresa, Status, Etiqueta, QT, Descrição, Endereço e Auditoria.
                </p>
             </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-slate-900/40 p-10 rounded-3xl border-2 border-dashed border-slate-800 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all">
-              <div className="w-14 h-14 bg-slate-800 text-indigo-400 rounded-2xl flex items-center justify-center border border-slate-700 shadow-[0_0_20px_rgba(79,70,229,0.1)]"><FileSpreadsheet size={28} /></div>
+              <div className="w-14 h-14 bg-slate-800 text-indigo-400 rounded-2xl flex items-center justify-center border border-slate-700 shadow-xl"><FileSpreadsheet size={28} /></div>
               <div className="text-center">
-                <h3 className="text-xs font-black text-slate-100 uppercase tracking-widest">Iniciar Carga Expert</h3>
-                <p className="text-[7px] font-black text-slate-600 uppercase mt-1 tracking-widest">Protocolo de Vitalidade Ativa</p>
+                <h3 className="text-xs font-black text-slate-100 uppercase tracking-widest">Carregar Base GBR v23</h3>
+                <p className="text-[7px] font-black text-slate-600 uppercase mt-1 tracking-widest">Excel / CSV Autodetect</p>
               </div>
             </button>
             <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
@@ -262,13 +260,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
 
         {step === 'LOADING' && (
           <div className="py-32 flex flex-col items-center justify-center space-y-4 text-center">
-            <div className="relative">
-                <Loader2 className="text-indigo-500 animate-spin" size={64} strokeWidth={2.5} />
-                <Filter className="text-emerald-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" size={24} />
-            </div>
+            <Loader2 className="text-indigo-500 animate-spin" size={64} strokeWidth={2.5} />
             <div>
-                <p className="text-[10px] font-black text-white uppercase tracking-[0.4em]">Executando Higienização v20...</p>
-                <p className="text-[7px] font-bold text-slate-600 uppercase mt-2 tracking-widest italic">Filtrando contas, etiquetas e vitalidade</p>
+                <p className="text-[10px] font-black text-white uppercase tracking-[0.4em]">Indexando Ativos v23...</p>
+                <p className="text-[7px] font-bold text-slate-600 uppercase mt-2 tracking-widest italic">Construindo BASE_SINTETICA_LOC</p>
             </div>
           </div>
         )}
@@ -276,43 +271,38 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         {step === 'SUMMARY' && summary && (
           <div className="space-y-5 animate-slideUp">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl">
-               <span className="text-[8px] font-black uppercase text-emerald-500 tracking-[0.3em]">Carga Otimizada v20 Concluída</span>
+               <span className="text-[8px] font-black uppercase text-emerald-500 tracking-[0.3em]">Carga de Dados Finalizada</span>
                <div className="flex items-baseline space-x-2 mt-2">
                   <h3 className="text-4xl font-black font-mono tracking-tighter text-white">{summary.rows}</h3>
-                  <span className="text-[9px] font-black text-slate-600 uppercase">Patrimônios Reais</span>
+                  <span className="text-[9px] font-black text-slate-600 uppercase">Itens Únicos</span>
                </div>
                
                <div className="mt-6 space-y-3">
-                  <div className="bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20 flex justify-between items-center">
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex justify-between items-center">
                     <div className="flex items-center space-x-2">
-                        <ShieldCheck size={14} className="text-emerald-500" />
-                        <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Ativos Preservados</span>
+                        <MapPin size={14} className="text-indigo-400" />
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Endereços (LOC_SINT)</span>
                     </div>
-                    <span className="text-[14px] font-black text-emerald-400">100% OK</span>
+                    <span className="text-[12px] font-black text-indigo-400">{summary.locationsMasterCount}</span>
                   </div>
-
-                  <div className="bg-red-950/20 p-4 rounded-2xl border border-red-500/20 flex justify-between items-center">
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex justify-between items-center">
+                    <div className="flex items-center space-x-2">
+                        <CheckCircle2 size={14} className="text-emerald-500" />
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Etiquetas Válidas</span>
+                    </div>
+                    <span className="text-[12px] font-black text-emerald-400">{summary.withPlaqueta}</span>
+                  </div>
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex justify-between items-center">
                     <div className="flex items-center space-x-2">
                         <Trash2 size={14} className="text-red-500" />
-                        <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">Baixados Expurgados</span>
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Registros Expurgados</span>
                     </div>
-                    <span className="text-[14px] font-black text-red-400">-{summary.purgedRows}</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mt-4">
-                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                      <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest block mb-1">C/ Etiqueta</span>
-                      <span className="text-[14px] font-black text-indigo-400">{summary.withPlaqueta}</span>
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                      <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest block mb-1">S/ Etiqueta</span>
-                      <span className="text-[14px] font-black text-slate-200">{summary.rows - summary.withPlaqueta}</span>
-                    </div>
+                    <span className="text-[12px] font-black text-red-500">-{summary.purgedRows}</span>
                   </div>
                </div>
             </div>
             <button onClick={() => onDataLoaded(processedDataRef.current, processedCompaniesRef.current)} className="w-full bg-indigo-600 text-white py-5 rounded-3xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center space-x-3">
-              <span>EFETIVAR BASE ANALYTICS</span> <ArrowRight size={18} />
+              <span>EFETIVAR BASE DE DADOS</span> <ArrowRight size={18} />
             </button>
           </div>
         )}

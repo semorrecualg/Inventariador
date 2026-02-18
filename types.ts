@@ -16,24 +16,38 @@ export enum DatabaseStatus {
 export interface Asset {
   [key: string]: any;
   id: string | number;
-  // Campos Unificados v16
-  PLAQUETA?: string; 
-  _plaquetaMaster?: string;
-  _hasPlaqueta?: boolean;
+  
+  // Estrutura Mestre v23 (Ordem de Coluna)
+  EMPRESA?: string;
+  STATUS?: string;
+  ETIQUETA?: string;
+  QT?: string | number;
+  DESCRICAODOATIVO?: string;
+  SERIAL?: string;
+  DATAAQUSIC?: string;
+  CNPJ?: string;
+  NOMEFORNECEDOR?: string;
+  NOTAFISCAL?: string;
+  ENDERECO?: string;
+  REGISTRO?: string;
+  SUBREG?: string;
+  DATABAIXA?: string;
+  CONTACONTABIL?: string;
+  PRIMARYKEY?: string;
+
+  // Campos de Controle Interno (Auditor GBR)
   _conferido?: boolean;
-  _localMaster?: string;
+  _plaquetaMaster?: string; // Mapeado para ETIQUETA
+  _localMaster?: string;    // Mapeado para ENDERECO
   _empresaNormalizada?: string;
   _descricaoMaster?: string;
+  _baseSinteticaLoc?: string[];
+  _camposAlterados?: string[]; // Rastreamento de Auditoria v24.16
   
   // Tags de Auditoria
   TAG_DUPLICIDADE?: 'ÚNICO' | 'DUPLICIDADE INTERNA' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
   TAG_INVENTARIO?: string;
-  
-  // Flags de Controle
-  _isInternalDuplicate?: boolean;
-  _isExternalDuplicate?: boolean;
   _isNew?: boolean;
-  PLAQUETA_INVENTARIO?: string;
 }
 
 export enum AppScreen {
@@ -48,7 +62,8 @@ export enum AppScreen {
   CONSULTATION = 'CONSULTATION',
   COMPANY_SELECTION = 'COMPANY_SELECTION',
   USER_MANAGEMENT = 'USER_MANAGEMENT',
-  CHANGE_PASSWORD = 'CHANGE_PASSWORD'
+  CHANGE_PASSWORD = 'CHANGE_PASSWORD',
+  FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR'
 }
 
 export interface InventoryState {
@@ -56,4 +71,5 @@ export interface InventoryState {
   companies: string[];
   lastUpdated: string | null;
   status: DatabaseStatus;
+  editableFields?: string[]; // Protocolo v24.19
 }
