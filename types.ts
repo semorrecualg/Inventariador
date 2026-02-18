@@ -17,7 +17,7 @@ export interface Asset {
   [key: string]: any;
   id: string | number;
   
-  // Estrutura Mestre v23 (Ordem de Coluna)
+  // Estrutura Mestre v24 (Ordem de Coluna Oficial)
   EMPRESA?: string;
   STATUS?: string;
   ETIQUETA?: string;
@@ -34,18 +34,20 @@ export interface Asset {
   DATABAIXA?: string;
   CONTACONTABIL?: string;
   PRIMARYKEY?: string;
+  CENTRODECUSTO?: string; // Novo Campo v24.40
+  VLRAQUISIC?: string | number; // Novo Campo v24.40
 
   // Campos de Controle Interno (Auditor GBR)
   _conferido?: boolean;
-  _plaquetaMaster?: string; // Mapeado para ETIQUETA
-  _localMaster?: string;    // Mapeado para ENDERECO
+  _plaquetaMaster?: string; 
+  _localMaster?: string;    
   _empresaNormalizada?: string;
   _descricaoMaster?: string;
   _baseSinteticaLoc?: string[];
-  _camposAlterados?: string[]; // Rastreamento de Auditoria v24.16
+  _camposAlterados?: string[]; 
   
   // Tags de Auditoria
-  TAG_DUPLICIDADE?: 'ÚNICO' | 'DUPLICIDADE INTERNA' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
+  TAG_DUPLICIDADE?: 'ÚNICO' | 'ETIQUETA+1REGISTRO' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
   TAG_INVENTARIO?: string;
   _isNew?: boolean;
 }
@@ -71,5 +73,5 @@ export interface InventoryState {
   companies: string[];
   lastUpdated: string | null;
   status: DatabaseStatus;
-  editableFields?: string[]; // Protocolo v24.19
+  editableFields?: string[]; 
 }
