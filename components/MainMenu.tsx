@@ -17,8 +17,7 @@ import {
   DatabaseZap,
   Trash2,
   SlidersHorizontal,
-  Tag,
-  AlertTriangle
+  Tag
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -85,15 +84,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
           <ChevronRight size={14} className="text-slate-700" />
         </button>
 
-        {/* MÓDULO EMPLAQUETAR v24.41 PRO */}
+        {/* NOVA FUNÇÃO EMPLAQUETAR - COMEÇANDO DO ZERO */}
         <button
           disabled={!hasData}
-          onClick={() => {
-            // v24.41: Pula o mapeamento geográfico e entra direto no modo de plaqueteamento
-            localStorage.setItem('app_inventory_location', 'BENS A SEREM ETIQUETADOS');
-            localStorage.setItem('app_is_inventorying', 'true');
-            onNavigate(AppScreen.INVENTORY);
-          }}
+          onClick={() => onNavigate(AppScreen.LABELING)}
           className="w-full flex items-center p-4 bg-amber-900/10 border border-amber-900/40 rounded-2xl active:scale-95 disabled:opacity-20 transition-all shadow-lg"
         >
           <div className="w-10 h-10 bg-amber-600 text-white rounded-lg flex items-center justify-center mr-4 shadow-xl">
@@ -101,7 +95,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-sm font-bold text-amber-500 uppercase tracking-tight">EMPLAQUETAR</h3>
-            <p className="text-[9px] text-amber-600 font-black uppercase tracking-widest italic">ETIQUETAR ITENS SEM PLAQUETA</p>
+            <p className="text-[9px] text-amber-600 font-black uppercase tracking-widest italic leading-tight">ETIQUETAR ITENS SEM PLAQUETA</p>
           </div>
           <ChevronRight size={14} className="text-amber-900/40" />
         </button>

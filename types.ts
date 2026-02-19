@@ -17,7 +17,7 @@ export interface Asset {
   [key: string]: any;
   id: string | number;
   
-  // Estrutura Mestre v24 (Ordem de Coluna Oficial)
+  // Estrutura Mestre v24
   EMPRESA?: string;
   STATUS?: string;
   ETIQUETA?: string;
@@ -34,11 +34,12 @@ export interface Asset {
   DATABAIXA?: string;
   CONTACONTABIL?: string;
   PRIMARYKEY?: string;
-  CENTRODECUSTO?: string; // Novo Campo v24.40
-  VLRAQUISIC?: string | number; // Novo Campo v24.40
+  CENTRODECUSTO?: string;
+  VLRAQUISIC?: string | number;
 
-  // Campos de Controle Interno (Auditor GBR)
+  // Campos de Controle Interno
   _conferido?: boolean;
+  _plaquetado?: boolean; // Novo campo para separar do inventário físico
   _plaquetaMaster?: string; 
   _localMaster?: string;    
   _empresaNormalizada?: string;
@@ -61,6 +62,7 @@ export enum AppScreen {
   DASHBOARD = 'DASHBOARD',
   SETTINGS = 'SETTINGS',
   INVENTORY = 'INVENTORY',
+  LABELING = 'LABELING', // Nova tela independente
   CONSULTATION = 'CONSULTATION',
   COMPANY_SELECTION = 'COMPANY_SELECTION',
   USER_MANAGEMENT = 'USER_MANAGEMENT',

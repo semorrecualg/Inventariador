@@ -7,13 +7,14 @@ import MainMenu from './components/MainMenu';
 import DatabaseLoader from './components/DatabaseLoader';
 import AssetDetail from './components/AssetDetail';
 import Inventory from './components/Inventory';
+import Labeling from './components/Labeling'; 
 import Consultation from './components/Consultation';
 import CompanySelector from './components/CompanySelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
 import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
-import { Loader2 } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
@@ -49,7 +50,7 @@ const App: React.FC = () => {
         companies: [], 
         lastUpdated: null, 
         status: DatabaseStatus.EMPTY,
-        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'] // Default v24.19
+        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']
       };
     } catch { 
       return { 
@@ -92,7 +93,6 @@ const App: React.FC = () => {
       .trim();
   }, []);
 
-  // Seletores para Sugestões Inteligentes v24.40
   const uniqueEnderecos = useMemo(() => {
     const set = new Set<string>();
     inventory.assets.forEach(a => { if (a.ENDERECO) set.add(String(a.ENDERECO).trim().toUpperCase()); });
@@ -105,29 +105,36 @@ const App: React.FC = () => {
     return Array.from(set).sort();
   }, [inventory.assets]);
 
+  // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
   const determineTag = useCallback((asset: Asset, targetLocation: string): string => {
-    const isBaixado = String(asset.STATUS || '').toUpperCase().includes('BAIXADO');
+    const statusUpper = String(asset.STATUS || '').toUpperCase();
+    const isBaixado = statusUpper.includes('BAIXADO');
+    
+    // Se o item está baixado no sistema mas foi encontrado fisicamente, é uma discrepância grave
     if (isBaixado) return "BAIXADO";
     
+    // Se o item for marcado para etiquetar na base mestre
     const needsLabel = normalizeKey(asset.ETIQUETA || '') === 'ETIQUETAR';
+    if (needsLabel) return asset._conferido ? "ETIQUETADO" : "FALTA ETIQUETAR";
     
-    // Transição Automática v24.41: FALTA ETIQUETAR -> ETIQUETADO
-    if (needsLabel) {
-      return asset._conferido ? "ETIQUETADO" : "FALTA ETIQUETAR";
-    }
-    
+    // Itens novos inseridos manualmente
     if (asset._isNew || asset.TAG_INVENTARIO === "NOVO ITEM") return "NOVO ITEM";
 
     const targetLocKey = normalizeKey(targetLocation);
     const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
     const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
 
-    if (asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey && targetLocation !== "BENS A SEREM ETIQUETADOS") {
-      return "RE-ADOTADO";
+    // Se o local de auditoria é "BENS A SEREM ETIQUETADOS", a regra muda
+    if (targetLocation === "BENS A SEREM ETIQUETADOS") {
+      return asset._conferido ? "ETIQUETADO" : "FALTA ETIQUETAR";
     }
 
-    if (!asset._conferido && originalLocKey !== "" && originalLocKey !== targetLocKey && targetLocation !== "BENS A SEREM ETIQUETADOS") {
-      return "ADOTADO";
+    // ADOTADO: Item encontrado em local diferente do ENDERECO original
+    // RE-ADOTADO: Item já conferido anteriormente em um local e agora encontrado em outro local durante a mesma auditoria
+    if (originalLocKey !== "" && originalLocKey !== targetLocKey) {
+       return asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey 
+              ? "RE-ADOTADO" 
+              : "ADOTADO";
     }
 
     return "CONFERIDO";
@@ -165,35 +172,26 @@ const App: React.FC = () => {
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
       const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
       
-      const existingAsset = index !== -1 ? newAssets[index] : null;
       const updates = { ...updatedAsset };
-      
-      // Forçar _conferido ANTES de determineTag para v24.41
       updates._conferido = true;
       
       const alteredFields = new Set<string>(updates._camposAlterados || []);
       
+      const existingAsset = index !== -1 ? newAssets[index] : null;
       if (existingAsset) {
         Object.keys(updates).forEach(key => {
           if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-          if (String(updates[key]) !== String(existingAsset[key])) {
-            alteredFields.add(key);
-          }
+          if (String(updates[key]) !== String(existingAsset[key])) alteredFields.add(key);
         });
       }
 
-      const oldLoc = existingAsset ? existingAsset.ENDERECO : "";
-      if (normalizeKey(String(oldLoc)) !== normalizeKey(targetLoc) && targetLoc !== "BENS A SEREM ETIQUETADOS") {
-        alteredFields.add('ENDERECO');
-      }
-
-      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
-      
       if (targetLoc !== "BENS A SEREM ETIQUETADOS") {
+        if (normalizeKey(String(existingAsset?.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
         updates._localMaster = targetLoc;
         updates.ENDERECO = targetLoc;
       }
       
+      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
       updates._camposAlterados = Array.from(alteredFields);
       
       if (index === -1) newAssets.push(updates);
@@ -212,19 +210,16 @@ const App: React.FC = () => {
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
           const updates = { ...a };
-          updates._conferido = true; // Set first for determineTag v24.41
-          
+          updates._conferido = true;
           const alteredFields = new Set<string>(updates._camposAlterados || []);
-          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc) && targetLoc !== "BENS A SEREM ETIQUETADOS") {
-            alteredFields.add('ENDERECO');
-          }
-          updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           
           if (targetLoc !== "BENS A SEREM ETIQUETADOS") {
+            if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
             updates._localMaster = targetLoc;
             updates.ENDERECO = targetLoc; 
           }
           
+          updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           updates._camposAlterados = Array.from(alteredFields);
           return updates;
         }
@@ -243,17 +238,12 @@ const App: React.FC = () => {
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
-      res['AUDITOR_CAMPOS_ALTERADOS'] = (a._camposAlterados || []).join(', ');
       return res;
     });
     const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT_v24.16");
-    XLSX.writeFile(wb, `GBR_AUDIT_v24_${new Date().getTime()}.xlsx`);
-  };
-
-  const updateEditableFields = (fields: string[]) => {
-    setInventory(prev => ({ ...prev, editableFields: fields }));
+    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
+    XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
   };
 
   const filteredAssetsByCompany = useMemo(() => {
@@ -264,20 +254,38 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
+  const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
+
   return (
-    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full">
-      {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
-      {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
-      {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-      {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
-      {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
-      {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
-      {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} />}
-      {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} editableFields={inventory.editableFields || []} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
-      {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
-      {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
-      {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
-      {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={updateEditableFields} onBack={popScreen} />}
+    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full flex flex-col">
+      {showCompanyHeader && (
+        <div className="bg-sky-600 px-6 py-2.5 flex items-center space-x-3 shadow-lg z-[200]">
+           <Building2 size={16} className="text-white shrink-0" />
+           <div className="flex-1 min-w-0">
+             <p className="text-[7px] font-black text-white/60 uppercase tracking-widest leading-none mb-0.5">Empresa em Auditoria</p>
+             <h2 className="text-[11px] font-black text-white uppercase truncate tracking-tight">{selectedCompany}</h2>
+           </div>
+           <div className="px-2 py-0.5 rounded bg-white/20 border border-white/20">
+             <span className="text-[7px] font-black text-white uppercase tracking-widest">v24.41 PRO</span>
+           </div>
+        </div>
+      )}
+      
+      <div className="flex-1 relative overflow-hidden">
+        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
+        {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
+        {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
+        {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+        {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
+        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+        {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
+        {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={(a) => { setSelectedAsset(a); pushScreen(AppScreen.ASSET_DETAIL); }} />}
+        {screen === AppScreen.ASSET_DETAIL && selectedAsset && <AssetDetail asset={selectedAsset} onBack={popScreen} onUpdate={updateAsset} editableFields={inventory.editableFields || []} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+        {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
+        {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
+        {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
+        {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
+      </div>
     </div>
   );
 };
