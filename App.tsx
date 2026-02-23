@@ -14,6 +14,7 @@ import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
 import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
+import QrConfigurator from './components/QrConfigurator';
 import { Building2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -43,23 +44,30 @@ const App: React.FC = () => {
   });
 
   const [inventory, setInventory] = useState<InventoryState>(() => {
+    const defaultState: InventoryState = { 
+      assets: [], 
+      companies: [], 
+      lastUpdated: null, 
+      status: DatabaseStatus.EMPTY,
+      editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
+      qrCodeFields: ['ETIQUETA']
+    };
+
     try {
       const saved = localStorage.getItem('inventory_data');
-      return saved ? JSON.parse(saved) : { 
-        assets: [], 
-        companies: [], 
-        lastUpdated: null, 
-        status: DatabaseStatus.EMPTY,
-        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']
-      };
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...defaultState,
+          ...parsed,
+          // Garante que campos de configuração existam mesmo em migrações de versão
+          editableFields: parsed.editableFields || defaultState.editableFields,
+          qrCodeFields: parsed.qrCodeFields || defaultState.qrCodeFields
+        };
+      }
+      return defaultState;
     } catch { 
-      return { 
-        assets: [], 
-        companies: [], 
-        lastUpdated: null, 
-        status: DatabaseStatus.EMPTY,
-        editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']
-      }; 
+      return defaultState; 
     }
   });
 
@@ -281,7 +289,7 @@ const App: React.FC = () => {
              <h2 className="text-[11px] font-black text-white uppercase truncate tracking-tight">{selectedCompany}</h2>
            </div>
            <div className="px-2 py-0.5 rounded bg-white/20 border border-white/20">
-             <span className="text-[7px] font-black text-white uppercase tracking-widest">v24.41 PRO</span>
+             <span className="text-[7px] font-black text-white uppercase tracking-widest">v24.50 PRO</span>
            </div>
         </div>
       )}
@@ -295,11 +303,12 @@ const App: React.FC = () => {
         {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
         {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
         {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} />}
-        {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+        {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
         {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
         {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
         {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
         {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
+        {screen === AppScreen.QR_CONFIGURATOR && <QrConfigurator assets={inventory.assets} currentFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
       </div>
     </div>
   );

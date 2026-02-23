@@ -249,8 +249,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     // 2. Se não encontrou ou se quer varrer geral (Regra C)
     let globalMatches = allAssets.filter(a => {
         const etq = normalizeKey(a.ETIQUETA || '');
-        // Busca exata ou parcial dependendo do tamanho do termo
-        return term.length > 3 ? etq.includes(term) : etq === term;
+        const statusUpper = String(a.STATUS || '').toUpperCase();
+        const isNotBaixado = !statusUpper.includes('BAIXADO');
+        
+        // Busca exata ou parcial dependendo do tamanho do termo, apenas para ativos
+        const matchesTerm = term.length > 3 ? etq.includes(term) : etq === term;
+        return matchesTerm && isNotBaixado;
     }).filter(a => normalizeKey(a.EMPRESA || '') !== currentCompKey);
 
     return [...companyMatches, ...globalMatches];
@@ -281,9 +285,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
+    const currentCompKey = normalizeKey(selectedCompany || '');
     
     if (isBatch && etq && etq !== "ETIQUETAR") {
-      const related = allAssets.filter(a => normalizeKey(a.ETIQUETA || "") === etq && !a._conferido);
+      // Restrito à EMPRESA ATUAL e STATUS ATIVO
+      const related = allAssets.filter(a => {
+        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
+        const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
+        const statusUpper = String(a.STATUS || '').toUpperCase();
+        const isNotBaixado = !statusUpper.includes('BAIXADO');
+        return sameEtq && sameComp && isNotBaixado && !a._conferido;
+      });
+
       if (related.length > 1) {
         setBatchModalData(related);
         return;
@@ -291,21 +304,30 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     }
     
     onBulkUpdateAssets([id]);
-  }, [allAssets, onBulkUpdateAssets, normalizeKey]);
+  }, [allAssets, onBulkUpdateAssets, normalizeKey, selectedCompany]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
+    const currentCompKey = normalizeKey(selectedCompany || '');
     
     if (isBatch && etq && etq !== "ETIQUETAR") {
-      const related = allAssets.filter(a => normalizeKey(a.ETIQUETA || "") === etq);
+      // Restrito à EMPRESA ATUAL e STATUS ATIVO
+      const related = allAssets.filter(a => {
+        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
+        const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
+        const statusUpper = String(a.STATUS || '').toUpperCase();
+        const isNotBaixado = !statusUpper.includes('BAIXADO');
+        return sameEtq && sameComp && isNotBaixado;
+      });
+
       if (related.length > 1) {
         setBatchModalData(related);
         return;
       }
     }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, normalizeKey]);
+  }, [allAssets, onSelectAsset, normalizeKey, selectedCompany]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -348,9 +370,13 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const locationsList = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
     assets.forEach(a => {
+      const statusUpper = String(a.STATUS || '').toUpperCase();
+      if (statusUpper.includes('BAIXADO')) return; // Ignorar baixados no progresso por localidade
+
       let loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
-      stats[loc].total++; if (a._conferido) stats[loc].checked++;
+      stats[loc].total++; 
+      if (a._conferido) stats[loc].checked++;
     });
     return stats;
   }, [assets]);

@@ -67,7 +67,8 @@ export enum AppScreen {
   COMPANY_SELECTION = 'COMPANY_SELECTION',
   USER_MANAGEMENT = 'USER_MANAGEMENT',
   CHANGE_PASSWORD = 'CHANGE_PASSWORD',
-  FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR'
+  FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR',
+  QR_CONFIGURATOR = 'QR_CONFIGURATOR'
 }
 
 export interface InventoryState {
@@ -76,4 +77,5 @@ export interface InventoryState {
   lastUpdated: string | null;
   status: DatabaseStatus;
   editableFields?: string[]; 
+  qrCodeFields?: string[];
 }

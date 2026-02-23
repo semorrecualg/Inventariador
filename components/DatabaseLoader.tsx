@@ -82,6 +82,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
 
       const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
       
+      // Mapeamento v24.50 - Ordem Estrita: EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;
       const m = {
         EMPRESA: rawHeaders.indexOf('EMPRESA'),
         STATUS: rawHeaders.indexOf('STATUS'),
@@ -102,6 +103,26 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         CUSTO: rawHeaders.indexOf('CENTRODECUSTO'),
         VALOR: rawHeaders.indexOf('VLRAQUISIC')
       };
+
+      // Fallback para mapeamento por índice se os cabeçalhos não forem localizados corretamente
+      if (m.EMPRESA === -1) m.EMPRESA = 0;
+      if (m.STATUS === -1) m.STATUS = 1;
+      if (m.ETIQUETA === -1) m.ETIQUETA = 2;
+      if (m.QT === -1) m.QT = 3;
+      if (m.DESCRICAO === -1) m.DESCRICAO = 4;
+      if (m.SERIAL === -1) m.SERIAL = 5;
+      if (m.DATA_AQ === -1) m.DATA_AQ = 6;
+      if (m.CNPJ === -1) m.CNPJ = 7;
+      if (m.FORNECEDOR === -1) m.FORNECEDOR = 8;
+      if (m.NF === -1) m.NF = 9;
+      if (m.ENDERECO === -1) m.ENDERECO = 10;
+      if (m.REGISTRO === -1) m.REGISTRO = 11;
+      if (m.SUBREG === -1) m.SUBREG = 12;
+      if (m.DATA_BAIXA === -1) m.DATA_BAIXA = 13;
+      if (m.CONTA === -1) m.CONTA = 14;
+      if (m.PK === -1) m.PK = 15;
+      if (m.CUSTO === -1) m.CUSTO = 16;
+      if (m.VALOR === -1) m.VALOR = 17;
 
       const baseSinteticaLoc = new Set<string>();
       const activeTagsGlobal = new Set<string>();
@@ -159,7 +180,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         asset.ENDERECO = cleanDisplayValue(row[m.ENDERECO]) || "ENDERECO NAO INFORMADO";
         asset.REGISTRO = cleanDisplayValue(row[m.REGISTRO]);
         asset.SUBREG = cleanDisplayValue(row[m.SUBREG]);
-        // Fix: Changed m.DATABAIXA to m.DATA_BAIXA to correctly access the mapping index
         asset.DATABAIXA = cleanDisplayValue(row[m.DATA_BAIXA]);
         asset.CONTACONTABIL = conta;
         asset.PRIMARYKEY = cleanDisplayValue(row[m.PK]);
@@ -189,19 +209,36 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
   };
 
   const finalizeLoading = () => {
-    const filteredAssets = rawExtractedAssetsRef.current.filter(a => selectedCompanies.has(a.EMPRESA || "GERAL"));
-    const counts = new Map<string, number>();
-    filteredAssets.forEach(a => { 
-      if(a.ETIQUETA) {
-        const key = normalizeKey(a.ETIQUETA);
-        if (key !== "ETIQUETAR") counts.set(key, (counts.get(key) || 0) + 1); 
+    // Contagem de duplicidades por EMPRESA e STATUS ATIVO
+    const companyTagCounts = new Map<string, number>();
+    
+    rawExtractedAssetsRef.current.forEach(a => {
+      if (a.ETIQUETA) {
+        const etqKey = normalizeKey(a.ETIQUETA);
+        if (etqKey !== "ETIQUETAR") {
+          const statusUpper = String(a.STATUS || '').toUpperCase();
+          if (!statusUpper.includes('BAIXADO')) {
+            const compKey = normalizeKey(a.EMPRESA || "GERAL");
+            const compositeKey = `${compKey}_${etqKey}`;
+            companyTagCounts.set(compositeKey, (companyTagCounts.get(compositeKey) || 0) + 1);
+          }
+        }
       }
     });
+
+    const filteredAssets = rawExtractedAssetsRef.current.filter(a => selectedCompanies.has(a.EMPRESA || "GERAL"));
     
     filteredAssets.forEach(a => {
       const etqKey = a.ETIQUETA ? normalizeKey(a.ETIQUETA) : "";
-      if (!a.ETIQUETA || etqKey === "ETIQUETAR") a.TAG_DUPLICIDADE = 'SEM IDENTIFICAÇÃO';
-      else a.TAG_DUPLICIDADE = (counts.get(etqKey) || 0) > 1 ? 'ETIQUETA+1REGISTRO' : 'ÚNICO';
+      const compKey = normalizeKey(a.EMPRESA || "GERAL");
+      const compositeKey = `${compKey}_${etqKey}`;
+
+      if (!a.ETIQUETA || etqKey === "ETIQUETAR") {
+        a.TAG_DUPLICIDADE = 'SEM IDENTIFICAÇÃO';
+      } else {
+        const count = companyTagCounts.get(compositeKey) || 0;
+        a.TAG_DUPLICIDADE = count > 1 ? 'ETIQUETA+1REGISTRO' : 'ÚNICO';
+      }
     });
 
     const companyStats: Record<string, number> = {};
@@ -239,8 +276,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         <div className="flex items-center space-x-4">
           <button onClick={onBack} className="p-2 bg-slate-800 rounded-xl text-slate-500 active:scale-90"><ArrowLeft size={18} /></button>
           <div>
-            <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Protocolo v24.40</h2>
-            <p className="text-indigo-400 text-[7px] font-black uppercase tracking-[0.2em] mt-0.5">Base de Dados Expandida</p>
+            <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Protocolo v24.50</h2>
+            <p className="text-indigo-400 text-[7px] font-black uppercase tracking-[0.2em] mt-0.5">Base de Dados Reestruturada</p>
           </div>
         </div>
         <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg"><Activity size={20} /></div>
@@ -250,10 +287,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         {step === 'SOURCE' && (
           <div className="space-y-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl">
-               <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500">Mapeamento v24.40</span>
-               <h3 className="text-lg font-black uppercase text-white tracking-tighter mt-1 mb-2">Restruturação de Banco</h3>
+               <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500">Mapeamento v24.50</span>
+               <h3 className="text-lg font-black uppercase text-white tracking-tighter mt-1 mb-2">Reestruturação de Banco</h3>
                <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">
-                Suporte nativo para Centro de Custo e Valor de Aquisição. Índices de busca otimizados para 18 colunas mestres.
+                Suporte nativo para Centro de Custo, Valor de Aquisição e Dados de Fornecedor. Índices de busca otimizados para 18 colunas mestres.
                </p>
             </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-slate-900/40 p-10 rounded-3xl border-2 border-dashed border-slate-800 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all">
@@ -327,7 +364,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         {step === 'SUMMARY' && summary && (
           <div className="space-y-5 animate-slideUp">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl">
-               <span className="text-[8px] font-black uppercase text-emerald-500 tracking-[0.3em]">Carga v24.40 Finalizada</span>
+               <span className="text-[8px] font-black uppercase text-emerald-500 tracking-[0.3em]">Carga v24.50 Finalizada</span>
                <div className="flex items-baseline space-x-2 mt-2">
                   <h3 className="text-4xl font-black font-mono tracking-tighter text-white">{summary.rows}</h3>
                   <span className="text-[9px] font-black text-slate-600 uppercase">Itens Registrados</span>

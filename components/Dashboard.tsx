@@ -42,12 +42,15 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
 
   const stats = useMemo(() => {
-    const total = assets.length;
-    const conferido = assets.filter(a => !!a._conferido).length;
+    const getStatus = (a: Asset) => String(a.STATUS || a.SITUACAO || '').toUpperCase();
+    
+    // Filtrar ativos para o progresso principal (ignorar baixados)
+    const activeAssets = assets.filter(a => !getStatus(a).includes('BAIXADO'));
+    
+    const total = activeAssets.length;
+    const conferido = activeAssets.filter(a => !!a._conferido).length;
     const pendente = total - conferido;
     const percConferido = total > 0 ? Math.round((conferido / total) * 100) : 0;
-
-    const getStatus = (a: Asset) => String(a.STATUS || a.SITUACAO || '').toUpperCase();
 
     const countAtivos = assets.filter(a => getStatus(a).includes('ATIVO')).length;
     const countBaixados = assets.filter(a => getStatus(a).includes('BAIXADO')).length;
