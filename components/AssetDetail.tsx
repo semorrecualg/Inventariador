@@ -40,21 +40,23 @@ const formatCurrency = (val: any): string => {
 };
 
 interface AssetDetailProps {
-  asset: Asset;
+  assets: Asset[];
   onBack: () => void;
   onUpdate: (asset: Asset) => void;
+  onBulkUpdate: (ids: string[]) => void;
   editableFields: string[];
   uniqueEnderecos: string[];
   uniqueCentrosDeCusto: string[];
 }
 
-const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, editableFields, uniqueEnderecos, uniqueCentrosDeCusto }) => {
-  const [workingAsset, setWorkingAsset] = useState<Asset>({ ...asset });
+const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onBulkUpdate, editableFields, uniqueEnderecos, uniqueCentrosDeCusto }) => {
+  const isBatch = assets.length > 1;
+  const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [activeHint, setActiveHint] = useState<string | null>(null);
 
-  useEffect(() => { setWorkingAsset({ ...asset }); }, [asset]);
+  useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
 
   const displayFields = [
     { key: 'EMPRESA', label: 'Empresa', icon: Building2 },
@@ -96,19 +98,49 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, edit
     }
   };
 
+  const handleFinalize = () => {
+    if (isBatch) {
+      onBulkUpdate(assets.map(a => String(a.id)));
+    } else {
+      onUpdate({ ...workingAsset, _conferido: true });
+    }
+    onBack();
+  };
+
+  const headerBg = isBatch 
+    ? 'bg-amber-600' 
+    : String(workingAsset.STATUS).includes('BAIXADO') 
+      ? 'bg-red-900' 
+      : !!workingAsset._conferido 
+        ? 'bg-emerald-900' 
+        : 'bg-slate-900';
+
   return (
     <div className="flex flex-col h-full bg-slate-950 animate-fadeIn overflow-hidden" onClick={() => setActiveHint(null)}>
-      <div className={`px-6 pt-12 pb-8 ${String(workingAsset.STATUS).includes('BAIXADO') ? 'bg-red-900' : !!workingAsset._conferido ? 'bg-emerald-900' : 'bg-slate-900'} text-white relative shadow-2xl z-20`}>
+      <div className={`px-6 pt-12 pb-8 ${headerBg} text-white relative shadow-2xl z-20 transition-colors duration-500`}>
         <div className="flex items-center justify-between mb-6">
           <button onClick={onBack} className="p-3 bg-white/10 rounded-2xl active:scale-90 transition-all"><X size={20} /></button>
           <div className="flex items-center space-x-2 bg-white/10 px-4 py-2 rounded-full border border-white/10">
-            <span className="text-[9px] font-black uppercase tracking-widest text-white/90">Protocolo v24.40</span>
+            <span className="text-[9px] font-black uppercase tracking-widest text-white/90">
+              {isBatch ? 'MODO INVENTÁRIO EM LOTE' : 'Protocolo v24.40'}
+            </span>
           </div>
         </div>
-        <h2 className="text-2xl font-black uppercase tracking-tight leading-tight mb-6 text-white italic">{workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO'}</h2>
+        
+        {isBatch && (
+          <div className="mb-4 flex items-center space-x-2 bg-black/30 px-4 py-2 rounded-xl border border-white/20 self-start animate-pulse">
+            <AlertCircle size={14} className="text-amber-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">Atenção: {assets.length} Itens Detectados</span>
+          </div>
+        )}
+
+        <h2 className="text-2xl font-black uppercase tracking-tight leading-tight mb-6 text-white italic">
+          {isBatch ? `LOTE: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
+        </h2>
+
         <div className="bg-black/20 border border-white/10 p-5 rounded-[2rem] backdrop-blur-md flex items-center justify-between">
            <div>
-              <p className="text-[8px] font-black text-white/40 uppercase tracking-widest mb-1">Identificador</p>
+              <p className="text-[8px] font-black text-white/40 uppercase tracking-widest mb-1">Identificador Principal</p>
               <div className="flex items-center space-x-2">
                 <Hash size={20} className="text-white/60" />
                 <p className="text-2xl font-black font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
@@ -120,7 +152,34 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, edit
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-3 no-scrollbar pb-40 relative z-10">
+      <div className="flex-1 overflow-y-auto p-6 space-y-3 no-scrollbar pb-44 relative z-10">
+          {isBatch && (
+            <div className="mb-6 space-y-2">
+              <div className="flex items-center justify-between px-2">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Registros Vinculados ao Lote</p>
+                <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">{assets.length} ITENS</span>
+              </div>
+              <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar pr-1">
+                {assets.map((a, idx) => (
+                  <div key={a.id} className="bg-slate-900/50 border border-slate-800 p-4 rounded-2xl flex items-center justify-between group active:bg-slate-800 transition-all">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-black text-white truncate uppercase leading-tight">{a.DESCRICAODOATIVO}</p>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">REG: {a.REGISTRO}</span>
+                        <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">SUB: {a.SUBREG}</span>
+                        {a._conferido && <Check size={8} className="text-emerald-500" />}
+                      </div>
+                    </div>
+                    <div className="ml-4 px-3 py-1 bg-slate-800 rounded-lg border border-white/5">
+                      <span className="text-[9px] font-black text-amber-500 font-mono">#{idx + 1}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="h-px bg-slate-800 my-4 mx-2" />
+            </div>
+          )}
+
           {displayFields.map(({ key, label, icon: Icon }) => {
             const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
             const isCurrency = key === 'VLRAQUISIC';
@@ -170,9 +229,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ asset, onBack, onUpdate, edit
       
       <div className="fixed bottom-0 left-0 right-0 p-6 bg-slate-950/95 backdrop-blur-md border-t border-slate-900 flex items-center justify-between z-30">
          <div className="text-[8px] font-black text-slate-700 uppercase tracking-[0.4em]">Audit Authority v24.40</div>
-         <button onClick={() => { onUpdate({ ...workingAsset, _conferido: true }); onBack(); }} className="bg-sky-600 text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-2 transition-all">
+         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600' : 'bg-sky-600'} text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-2 transition-all`}>
             <Save size={18} />
-            <span>Efetivar Auditoria</span>
+            <span>{isBatch ? 'Efetivar Lote' : 'Efetivar Auditoria'}</span>
          </button>
       </div>
     </div>

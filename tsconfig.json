@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react- Carroll",
+    "jsx": "react",
     "types": ["vite/client"]
   },
   "include": ["src", "index.tsx", "App.tsx", "types.ts", "services", "components"],

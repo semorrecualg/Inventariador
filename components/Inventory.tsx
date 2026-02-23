@@ -106,6 +106,7 @@ const AssetCard = React.memo(({
   };
 
   const colors = getColors();
+  const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
 
   const fullDescription = [
     asset.QT || '1',
@@ -131,11 +132,19 @@ const AssetCard = React.memo(({
       </div>
       
       <div className="pt-6 pr-12 flex flex-col space-y-2.5">
-        <div className="flex items-center space-x-1.5 mb-0.5">
-          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Patrimônio:</span>
-          <span className="text-lg font-black font-data tracking-tighter text-white">
-            {formatEtiqueta(asset.ETIQUETA)}
-          </span>
+        <div className="flex items-center justify-between mb-0.5">
+          <div className="flex items-center space-x-1.5">
+            <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Patrimônio:</span>
+            <span className="text-lg font-black font-data tracking-tighter text-white">
+              {formatEtiqueta(asset.ETIQUETA)}
+            </span>
+          </div>
+          {isBatch && (
+            <div className="px-2 py-0.5 bg-amber-500 rounded-md flex items-center space-x-1 shadow-lg shadow-amber-900/20">
+              <Zap size={8} className="text-black fill-black" />
+              <span className="text-[7px] font-black text-black uppercase tracking-widest">LOTE</span>
+            </div>
+          )}
         </div>
 
         <p className="text-[10px] font-bold text-slate-200 uppercase italic leading-tight tracking-tight line-clamp-3">
@@ -204,14 +213,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchModalData, setBatchModalData] = useState<Asset[] | null>(null);
 
-  const normalizeKey = (s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
+  const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
     const term = normalizeKey(committedSearch);
     const currentLocKey = normalizeKey(selectedLocation);
-    // Fix: Changed 'normalize' to 'normalizeKey' as 'normalize' was not defined in this scope.
     const currentCompKey = normalizeKey(selectedCompany || '');
 
     // Se NÃO tem termo de busca, aplicamos Regra A: Esconde Baixados
@@ -242,11 +251,61 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         const etq = normalizeKey(a.ETIQUETA || '');
         // Busca exata ou parcial dependendo do tamanho do termo
         return term.length > 3 ? etq.includes(term) : etq === term;
-        // Fix: Changed 'normalize' to 'normalizeKey' as 'normalize' was not defined in this scope.
     }).filter(a => normalizeKey(a.EMPRESA || '') !== currentCompKey);
 
     return [...companyMatches, ...globalMatches];
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany]);
+  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany, normalizeKey]);
+
+  const isSearchResultBatch = useMemo(() => {
+    if (!committedSearch || filteredAssets.length <= 1) return false;
+    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    if (pendingInSearch.length <= 1) return false;
+    
+    const firstEtq = normalizeKey(pendingInSearch[0].ETIQUETA || "");
+    if (!firstEtq || firstEtq === "ETIQUETAR") return false;
+    
+    return pendingInSearch.every(a => normalizeKey(a.ETIQUETA || "") === firstEtq);
+  }, [committedSearch, filteredAssets, normalizeKey]);
+
+  const handleConfirmSearchBatch = () => {
+    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    if (pendingInSearch.length === 0) return;
+    setBatchModalData(pendingInSearch);
+  };
+
+  const handleMakeDecision = useCallback((id: string, decision: 'YES' | 'NO') => {
+    if (decision === 'NO') return;
+
+    const asset = allAssets.find(a => String(a.id) === id);
+    if (!asset) return;
+    
+    const etq = normalizeKey(asset.ETIQUETA || "");
+    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
+    
+    if (isBatch && etq && etq !== "ETIQUETAR") {
+      const related = allAssets.filter(a => normalizeKey(a.ETIQUETA || "") === etq && !a._conferido);
+      if (related.length > 1) {
+        setBatchModalData(related);
+        return;
+      }
+    }
+    
+    onBulkUpdateAssets([id]);
+  }, [allAssets, onBulkUpdateAssets, normalizeKey]);
+
+  const handleAssetClick = useCallback((asset: Asset) => {
+    const etq = normalizeKey(asset.ETIQUETA || "");
+    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
+    
+    if (isBatch && etq && etq !== "ETIQUETAR") {
+      const related = allAssets.filter(a => normalizeKey(a.ETIQUETA || "") === etq);
+      if (related.length > 1) {
+        setBatchModalData(related);
+        return;
+      }
+    }
+    onSelectAsset(asset);
+  }, [allAssets, onSelectAsset, normalizeKey]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -362,9 +421,29 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-4 no-scrollbar pb-44 bg-slate-950">
+            {isSearchResultBatch && (
+              <button 
+                onClick={handleConfirmSearchBatch} 
+                className="w-full mb-4 bg-amber-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center space-x-3 border-b-4 border-amber-800"
+              >
+                <Zap size={16} className="fill-white" />
+                <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
+              </button>
+            )}
+
             {filteredAssets.length > 0 ? (
                 filteredAssets.map(asset => (
-                <AssetCard key={asset.id} asset={asset} selectedLocation={selectedLocation} onSelect={onSelectAsset} onMakeDecision={(id) => onBulkUpdateAssets([id])} selectedCompany={selectedCompany} isBatchMode={isBatchMode} isSelected={selectedIds.has(String(asset.id))} onToggleSelect={toggleSelect} />
+                <AssetCard 
+                  key={asset.id} 
+                  asset={asset} 
+                  selectedLocation={selectedLocation} 
+                  onSelect={() => handleAssetClick(asset)} 
+                  onMakeDecision={handleMakeDecision} 
+                  selectedCompany={selectedCompany} 
+                  isBatchMode={isBatchMode} 
+                  isSelected={selectedIds.has(String(asset.id))} 
+                  onToggleSelect={toggleSelect} 
+                />
                 ))
             ) : committedSearch ? (
                 <div className="py-20 flex flex-col items-center justify-center text-center animate-fadeIn">
@@ -405,7 +484,67 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
            </div>
         </div>
       )}
-      
+
+      {batchModalData && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 animate-fadeIn">
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm" onClick={() => setBatchModalData(null)} />
+          <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-amber-500/30 shadow-[0_0_100px_rgba(245,158,11,0.15)] overflow-hidden relative z-10 animate-scaleIn">
+            <div className="bg-amber-600 px-8 py-10 text-white relative">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-2 bg-black/20 px-4 py-2 rounded-full border border-white/10">
+                  <Zap size={14} className="fill-white" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Inventário em Lote</span>
+                </div>
+                <button onClick={() => setBatchModalData(null)} className="p-2 bg-white/10 rounded-xl active:scale-90"><X size={20} /></button>
+              </div>
+              <h3 className="text-3xl font-black uppercase tracking-tighter italic leading-none mb-2">LOTE: {batchModalData[0]?.ETIQUETA}</h3>
+              <p className="text-[10px] font-black text-white/60 uppercase tracking-widest">Detectamos {batchModalData.length} registros vinculados</p>
+            </div>
+
+            <div className="p-8 space-y-4">
+              <div className="bg-black/20 border border-white/5 p-5 rounded-3xl">
+                <div className="flex items-center space-x-3 mb-4">
+                  <MapPin size={16} className="text-amber-500" />
+                  <div>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Destino da Auditoria</p>
+                    <p className="text-[11px] font-black text-white uppercase italic">{selectedLocation}</p>
+                  </div>
+                </div>
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                  <p className="text-[9px] font-bold text-amber-500 leading-tight">
+                    Atenção: Todos os registros serão realocados para este local no ato da confirmação.
+                  </p>
+                </div>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto no-scrollbar space-y-2 pr-1">
+                {batchModalData.map((a, idx) => (
+                  <div key={a.id} className="bg-slate-800/50 border border-slate-700/50 p-4 rounded-2xl flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-black text-white truncate uppercase">{a.DESCRICAODOATIVO}</p>
+                      <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest mt-1">Reg: {a.REGISTRO} / Sub: {a.SUBREG}</p>
+                    </div>
+                    <span className="text-[10px] font-black text-amber-500 font-mono ml-4">#{idx + 1}</span>
+                  </div>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => {
+                  onBulkUpdateAssets(batchModalData.map(a => String(a.id)));
+                  setBatchModalData(null);
+                  setCommittedSearch('');
+                  setDisplayValue('');
+                }}
+                className="w-full bg-amber-600 text-white py-6 rounded-[2rem] text-sm font-black uppercase tracking-widest shadow-2xl shadow-amber-900/40 active:scale-95 transition-all border-b-4 border-amber-800"
+              >
+                Confirmar Tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isScannerOpen && <Scanner onBack={() => setIsScannerOpen(false)} onScanSuccess={(text) => { setDisplayValue(text.toUpperCase()); setCommittedSearch(text.toUpperCase()); setIsScannerOpen(false); }} />}
     </div>
   );

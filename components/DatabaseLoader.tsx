@@ -126,12 +126,24 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         const pkNorm = normalizeKey(etiqueta);
         
         const isBaixado = status.includes('BAIXADO');
+        const isAtivo = status.includes('ATIVO');
 
+        // REGRA FUNDAMENTAL DE ELIMINAÇÃO (GBR Protocol v24)
         if (isBaixado) {
+          // b.1) Eliminar se CONTA_CONTABIL contém 131105001 ou 131105002
           if (conta.includes('131105001') || conta.includes('131105002')) return;
-          if (!etiqueta) return;
+          
+          // b.2) Eliminar se ETIQUETA está vazia
+          if (!etiqueta || etiqueta.trim() === "") return;
+          
+          // b.3.1) Eliminar se ETIQUETA existe em algum registro ATIVO
           if (activeTagsGlobal.has(pkNorm)) return;
+          
+          // b.3.2) Se ETIQUETA preenchida e NÃO existe em registros ATIVO, NÃO ELIMINAR (segue para criação)
+        } else if (!isAtivo) {
+          // Se não é BAIXADO nem ATIVO, por segurança mantemos (Regra a.1 estendida)
         }
+        // Se for ATIVO, nunca elimina (Regra a.1)
 
         const asset: Asset = { id: `gbr_v24_${idx}_${Date.now()}` };
         asset.EMPRESA = cleanDisplayValue(row[m.EMPRESA]) || "GERAL";

@@ -21,7 +21,7 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
 
     const startScanner = async () => {
       try {
-        setInitializing(false);
+        setInitializing(true);
         setError(null);
 
         if (scannerRef.current) {
