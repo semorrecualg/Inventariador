@@ -6,10 +6,9 @@ import { LogIn, UserCircle, AlertCircle } from 'lucide-react';
 interface LoginProps {
   users: User[];
   onLogin: (user: User) => void;
-  onGoToRegister: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ users, onLogin, onGoToRegister }) => {
+const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

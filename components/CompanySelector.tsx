@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Building2, Search, MapPin, ArrowLeft, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building } from 'lucide-react';
+import { Building2, Search, ArrowLeft, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building } from 'lucide-react';
 
 interface CompanySelectorProps {
   companies: string[];

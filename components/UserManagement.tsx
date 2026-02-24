@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { 
-  Users, 
   ArrowLeft, 
   Plus, 
   Trash2, 
@@ -13,7 +12,8 @@ import {
   Lock,
   Mail,
   User as UserIcon,
-  Save
+  Save,
+  ChevronRight
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -236,11 +236,6 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   );
 };
 
-// Reutilização do componente de seta para o menu
-const ChevronRight = ({ size, className }: { size: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="m9 18 6-6-6-6"/>
-  </svg>
-);
+
 
 export default UserManagement;

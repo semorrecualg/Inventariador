@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { User } from '../types';
-import { UserPlus, ChevronLeft } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 
 interface RegisterProps {
   onRegister: (user: User) => void;

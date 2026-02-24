@@ -74,7 +74,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem('app_users');
-      let userList: User[] = saved ? JSON.parse(saved) : [];
+      const userList: User[] = saved ? JSON.parse(saved) : [];
       if (!userList.find(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
         userList.push({ username: "ADMIN GBR", email: ADMIN_EMAIL, password: "admin", isAdmin: true, mustChangePassword: false });
       }
@@ -159,7 +159,7 @@ const App: React.FC = () => {
         localStorage.setItem('app_selected_company', selectedCompany || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
-      } catch (e) { console.warn("Storage cap reached"); }
+      } catch { console.warn("Storage cap reached"); }
     }, 1500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying]);
@@ -193,11 +193,9 @@ const App: React.FC = () => {
         });
       }
 
-      if (targetLoc !== "BENS A SEREM ETIQUETADOS") {
-        if (normalizeKey(String(existingAsset?.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
-        updates._localMaster = targetLoc;
-        updates.ENDERECO = targetLoc;
-      }
+      if (normalizeKey(String(existingAsset?.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
+      updates._localMaster = targetLoc;
+      updates.ENDERECO = targetLoc;
       
       updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
       updates._camposAlterados = Array.from(alteredFields);
@@ -221,11 +219,9 @@ const App: React.FC = () => {
           updates._conferido = true;
           const alteredFields = new Set<string>(updates._camposAlterados || []);
           
-          if (targetLoc !== "BENS A SEREM ETIQUETADOS") {
-            if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
-            updates._localMaster = targetLoc;
-            updates.ENDERECO = targetLoc; 
-          }
+          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
+          updates._localMaster = targetLoc;
+          updates.ENDERECO = targetLoc; 
           
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           updates._camposAlterados = Array.from(alteredFields);
@@ -256,7 +252,7 @@ const App: React.FC = () => {
   const handleExport = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
-      const res: any = {};
+      const res: { [key: string]: string | number | boolean | null | undefined } = {};
       Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
@@ -295,7 +291,7 @@ const App: React.FC = () => {
       )}
       
       <div className="flex-1 relative overflow-hidden">
-        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); u.mustChangePassword ? pushScreen(AppScreen.CHANGE_PASSWORD) : pushScreen(AppScreen.MAIN_MENU); }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
+        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
         {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
         {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
         {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}

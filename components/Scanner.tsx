@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Camera, Zap, Loader2, CameraOff } from 'lucide-react';
+import { X, Zap, Loader2, CameraOff } from 'lucide-react';
 
 interface ScannerProps {
   onBack: () => void;
@@ -25,7 +25,9 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
         setError(null);
 
         if (scannerRef.current) {
-          try { await scannerRef.current.stop(); } catch (e) {}
+          try { await scannerRef.current.stop(); } catch (e: any) {
+            // Do nothing
+          }
         }
 
         const html5QrCode = new Html5Qrcode(scannerId);
@@ -58,7 +60,9 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
               }).catch(() => onScanSuccess(decodedText));
             }
           },
-          () => {} 
+          () => {
+            // Do nothing
+          } 
         );
         
         setInitializing(false);
@@ -71,7 +75,9 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
     return () => {
       clearTimeout(timer);
       if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current.stop().catch(e => {});
+        scannerRef.current.stop().catch(() => {
+            // Do nothing
+          });
       }
     };
   }, [onScanSuccess]);

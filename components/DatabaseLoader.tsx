@@ -6,12 +6,6 @@ import {
   ArrowLeft, 
   FileSpreadsheet, 
   Activity,
-  Trash2,
-  ShieldCheck,
-  MapPin,
-  CheckCircle2,
-  Building2,
-  Filter,
   CheckSquare,
   Square
 } from 'lucide-react';
@@ -36,8 +30,6 @@ interface DatabaseLoaderProps {
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   
   const [availableCompanies, setAvailableCompanies] = useState<{name: string, count: number}[]>([]);
@@ -54,23 +46,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       .trim();
   };
 
-  const cleanDisplayValue = (val: any): string => {
+  const cleanDisplayValue = (val: unknown): string => {
     if (val === undefined || val === null) return "";
-    let s = String(val).trim().replace(/\s+/g, ' '); 
+    const s = String(val).trim().replace(/\s+/g, ' ');
     const upper = s.toUpperCase();
     if (upper === "" || upper === "NULL" || upper === "0" || upper.includes("#N/D") || upper.includes("#REF")) return "";
     return s.toUpperCase();
   };
 
-  const processFile = async (dataBuffer: any) => {
+  const processFile = async (dataBuffer: ArrayBuffer) => {
     try {
       setStep('LOADING');
-      setLoading(true);
-      setError(null);
       
       const wb = XLSX.read(dataBuffer, { type: 'array' });
       const aws = wb.Sheets[wb.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json(aws, { header: 1, defval: "" }) as any[][];
+      const rawRows = XLSX.utils.sheet_to_json(aws, { header: 1, defval: "" }) as (string | number)[][];
       
       let headerIdx = 0;
       for (let i = 0; i < Math.min(rawRows.length, 50); i++) {
@@ -201,10 +191,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       setAvailableCompanies(companiesList);
       setSelectedCompanies(new Set(companiesList.map(c => c.name)));
       setStep('COMPANY_SELECTION');
-      setLoading(false);
-    } catch (err: any) {
-      setError(`Erro Protocolo v24: ${err.message}`);
-      setLoading(false);
+    } catch (err) {
+      console.error(`Erro Protocolo v24: ${err instanceof Error ? err.message : String(err)}`);
+      setStep('SOURCE'); // Reset on error
     }
   };
 

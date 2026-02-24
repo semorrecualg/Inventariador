@@ -7,11 +7,11 @@ import {
   Check,
   Keyboard, 
   Zap, 
-  ChevronRight,
-  Hash,
-  Tag,
+
+
+
   Filter,
-  Building2,
+
   Briefcase,
   MapPin,
   Trash2,
@@ -19,10 +19,10 @@ import {
   Square,
   CheckSquare,
   X,
-  Search
+
 } from 'lucide-react';
 
-const parseAssetDate = (val: any): Date | null => {
+const parseAssetDate = (val: string | number | null | undefined): Date | null => {
   if (!val) return null;
   const s = String(val).trim();
   if (s === "" || s.toUpperCase() === "NULL") return null;
@@ -38,7 +38,7 @@ const parseAssetDate = (val: any): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
-const formatMonthYearBR = (val: any): string => {
+const formatMonthYearBR = (val: string | number | null | undefined): string => {
   const date = parseAssetDate(val);
   if (date) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -48,7 +48,7 @@ const formatMonthYearBR = (val: any): string => {
   return String(val || '').toUpperCase();
 };
 
-const formatEtiqueta = (val: any): string => {
+const formatEtiqueta = (val: string | number | null | undefined): string => {
   const s = String(val || '').trim();
   if (!s || s.toUpperCase() === 'ETIQUETAR') return s.toUpperCase();
   return s.padStart(6, '0');
@@ -64,7 +64,7 @@ interface LabelingProps {
   selectedCompany: string | null;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedCompany }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets, onSelectAsset }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [inputMethod, setInputMethod] = useState<'keyboard' | 'scanner'>('keyboard');

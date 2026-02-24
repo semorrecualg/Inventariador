@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Asset, AppScreen } from '../types';
+import { Asset } from '../types';
 import Scanner from './Scanner';
 import { 
   ArrowLeft, 
@@ -17,15 +17,15 @@ import {
   CheckSquare,
   ListChecks,
   Plus,
-  Trash2,
+
   Search,
   X,
   AlertTriangle,
   FilePlus2,
-  Calendar
+
 } from 'lucide-react';
 
-const parseAssetDate = (val: any): Date | null => {
+const parseAssetDate = (val: string | number | null | undefined): Date | null => {
   if (!val) return null;
   const s = String(val).trim();
   if (s === "" || s.toUpperCase() === "NULL") return null;
@@ -41,7 +41,7 @@ const parseAssetDate = (val: any): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
-const formatMonthYearBR = (val: any): string => {
+const formatMonthYearBR = (val: string | number | null | undefined): string => {
   const date = parseAssetDate(val);
   if (date) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -51,7 +51,7 @@ const formatMonthYearBR = (val: any): string => {
   return String(val || '').toUpperCase();
 };
 
-const formatEtiqueta = (val: any): string => {
+const formatEtiqueta = (val: string | number | null | undefined): string => {
   const s = String(val || '').trim();
   if (!s || s.toUpperCase() === 'ETIQUETAR') return s.toUpperCase();
   return s.padStart(6, '0');
@@ -72,12 +72,12 @@ const AssetCard = React.memo(({
   asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
-  const normalize = (s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
+  const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
   const locAuditado = normalize(asset._localMaster || asset.ENDERECO || "");
   const locAtual = normalize(selectedLocation || "");
   
-  const isDivergentLoc = locAuditado !== "" && locAtual !== "" && locAuditado !== locAtual;
+  
   const companyKey = normalize(selectedCompany || '');
   const assetCompanyKey = normalize(asset.EMPRESA || '');
   const isDifferentCompany = selectedCompany && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
@@ -85,22 +85,52 @@ const AssetCard = React.memo(({
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   const isBaixado = statusUpper.includes('BAIXADO');
 
-  // Determinar flag visual
-  let visualStatus = asset.TAG_INVENTARIO || 'PENDENTE';
-  if (isBaixado) visualStatus = 'BAIXADO';
-  else if (isDifferentCompany) visualStatus = 'ADOTADO EXTERNO';
-  else if (isConferido) visualStatus = isDivergentLoc ? 'RE-ADOTADO' : 'CONFERIDO';
+  const visualStatus = useMemo(() => {
+    // Primeiro, checar casos que não dependem do status de conferido
+    if (isDifferentCompany) return 'ADOTADO EXTERNO';
+    if (isBaixado) return 'BAIXADO';
+
+    // Se não conferido, verificar se precisa de etiqueta ou está pendente
+    if (!asset._conferido) {
+      const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
+      if (needsLabel) return 'FALTA ETIQUETAR';
+      return 'PENDENTE';
+    }
+
+    // A partir daqui, o item está _conferido = true
+    const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
+    if (needsLabel) return 'ETIQUETADO';
+    
+    if (asset._isNew || asset.TAG_INVENTARIO === "NOVO ITEM") return "NOVO ITEM";
+
+    const targetLocKey = normalize(selectedLocation || "");
+    const originalLocKey = normalize(asset.ENDERECO || ""); 
+    const currentAuditLocKey = asset._localMaster ? normalize(asset._localMaster) : "";
+
+    // RE-ADOTADO: Já foi adotado antes e agora está em outro lugar
+    if (asset.TAG_INVENTARIO === 'ADOTADO' && currentAuditLocKey !== targetLocKey) {
+      return 'RE-ADOTADO';
+    }
+    
+    // ADOTADO: Encontrado em local diferente do original
+    if (originalLocKey !== "" && originalLocKey !== targetLocKey) {
+      return 'ADOTADO';
+    }
+
+    return 'CONFERIDO';
+
+  }, [asset, selectedLocation, isDifferentCompany, isBaixado, normalize]);
 
   const getColors = () => {
     switch (visualStatus) {
-      case 'BAIXADO': return { bg: 'bg-red-950/40', border: 'border-red-500/50', badge: 'bg-red-600 text-white animate-pulse', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
-      case 'ADOTADO EXTERNO': return { bg: 'bg-sky-950/20', border: 'border-sky-400/60', badge: 'bg-sky-500 text-white font-black', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
-      case 'ADOTADO': return { bg: 'bg-blue-950/20', border: 'border-blue-400/40', badge: 'bg-blue-500 text-white', btn: 'bg-blue-600 shadow-blue-900/40', icon: MapPin };
-      case 'RE-ADOTADO': return { bg: 'bg-indigo-950/20', border: 'border-indigo-400/40', badge: 'bg-indigo-500 text-white', btn: 'bg-indigo-600 shadow-indigo-900/40', icon: MapPin };
+      case 'BAIXADO': return { bg: 'bg-red-950/60', border: 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]', badge: 'bg-red-600 text-white animate-pulse font-black', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
+      case 'ADOTADO EXTERNO': return { bg: 'bg-sky-900/40', border: 'border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.4)]', badge: 'bg-sky-500 text-white font-black animate-bounce', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
+      case 'ADOTADO': return { bg: 'bg-blue-950/20', border: 'border-blue-400/40', badge: 'bg-blue-600 text-white', btn: 'bg-blue-600 shadow-blue-900/40', icon: MapPin };
+      case 'RE-ADOTADO': return { bg: 'bg-violet-950/20', border: 'border-violet-400/40', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600 shadow-violet-900/40', icon: MapPin };
       case 'CONFERIDO': return { bg: 'bg-emerald-950/20', border: 'border-emerald-500/30', badge: 'bg-emerald-600 text-white', btn: 'bg-emerald-600 shadow-emerald-900/40', icon: Check };
       case 'FALTA ETIQUETAR': return { bg: 'bg-amber-950/20', border: 'border-amber-500/40', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600 shadow-amber-900/40', icon: Hash };
       case 'ETIQUETADO': return { bg: 'bg-violet-950/20', border: 'border-violet-500/40', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600 shadow-violet-900/40', icon: Check };
-      case 'NOVO ITEM': return { bg: 'bg-orange-900/20', border: 'border-orange-500/40', badge: 'bg-orange-500 text-black font-black', btn: 'bg-orange-600 shadow-orange-900/40', icon: Plus };
+      case 'NOVO ITEM': return { bg: 'bg-orange-900/40', border: 'border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)]', badge: 'bg-orange-500 text-black font-black', btn: 'bg-orange-600 shadow-orange-900/40', icon: Plus };
       default: return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-800 text-white', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
     }
   };
@@ -188,6 +218,8 @@ const AssetCard = React.memo(({
   );
 });
 
+AssetCard.displayName = 'AssetCard';
+
 interface InventoryProps {
   assets: Asset[];
   allAssets: Asset[];
@@ -214,6 +246,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchModalData, setBatchModalData] = useState<Asset[] | null>(null);
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
@@ -230,34 +264,54 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXADO');
         
-        if (isBaixado) return false; // REGRA A: Baixado não aparece na lista um clique
+        if (isBaixado) return false; // REGRA A: Baixado não aparece na listagem um clique
 
         if (activeFilter === 'checked') return !!a._conferido && locKey === currentLocKey;
         return !a._conferido && locKey === currentLocKey;
-      }).sort((a, b) => normalizeKey(a.CENTRODECUSTO || '').localeCompare(normalizeKey(b.CENTRODECUSTO || ''), undefined, { numeric: true }));
+      }).sort((a, b) => {
+        const etqA = String(a.ETIQUETA || '').padStart(10, '0');
+        const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+        return etqA.localeCompare(etqB, undefined, { numeric: true });
+      });
     }
 
     // REGRA B e C: Quando há termo de busca
     // 1. Tentar buscar na empresa atual (incluindo baixados agora que houve busca manual)
-    let companyMatches = assets.filter(a => 
-      normalizeKey(a.ETIQUETA || '').includes(term) || 
-      normalizeKey(a.NOTAFISCAL || '').includes(term) ||
-      normalizeKey(a.REGISTRO || '').includes(term) ||
-      normalizeKey(a.DESCRICAODOATIVO || '').includes(term)
+    const companyMatches = assets.filter(a => 
+      normalizeKey(a.ETIQUETA || '') === term || // Busca exata por etiqueta tem prioridade
+      normalizeKey(a.ETIQUETA || '').includes(term)
     );
 
-    // 2. Se não encontrou ou se quer varrer geral (Regra C)
-    let globalMatches = allAssets.filter(a => {
+    // 2. REGRA C: Buscar em outras empresas se o número de ETIQUETA for idêntico
+    // Mesmo que tenha encontrado na empresa atual, se o usuário digitou uma etiqueta, 
+    // devemos mostrar se ela existe em outro lugar para análise de duplicidade/transferência.
+    let globalMatches: Asset[] = [];
+    if (term.length >= 3) {
+      globalMatches = allAssets.filter(a => {
         const etq = normalizeKey(a.ETIQUETA || '');
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXADO');
+        const assetCompKey = normalizeKey(a.EMPRESA || '');
         
-        // Busca exata ou parcial dependendo do tamanho do termo, apenas para ativos
-        const matchesTerm = term.length > 3 ? etq.includes(term) : etq === term;
-        return matchesTerm && isNotBaixado;
-    }).filter(a => normalizeKey(a.EMPRESA || '') !== currentCompKey);
+        // Se for a mesma empresa, já tratamos em companyMatches
+        if (assetCompKey === currentCompKey) return false;
 
-    return [...companyMatches, ...globalMatches];
+        // Busca exata por etiqueta em outras empresas
+        return etq === term;
+      });
+    }
+
+    // Combinar resultados, removendo duplicatas por ID (caso ocorra)
+    const combined = [...companyMatches];
+    globalMatches.forEach(gm => {
+      if (!combined.find(c => String(c.id) === String(gm.id))) {
+        combined.push(gm);
+      }
+    });
+
+    return combined.sort((a, b) => {
+      const etqA = String(a.ETIQUETA || '').padStart(10, '0');
+      const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+      return etqA.localeCompare(etqB, undefined, { numeric: true });
+    });
   }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany, normalizeKey]);
 
   const isSearchResultBatch = useMemo(() => {
@@ -310,7 +364,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedCompany || '');
+    const assetCompKey = normalizeKey(asset.EMPRESA || '');
     
+    // Regra C: Se for de outra empresa, pedir confirmação extra
+    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+      if (!confirm(`Este item pertence à empresa "${asset.EMPRESA}".\n\nDeseja ADOTAR este registro para a empresa "${selectedCompany}" no local "${selectedLocation}"?`)) {
+        return;
+      }
+      // Se confirmou, vamos atualizar a empresa do item para a atual
+      onUpdateAsset({ ...asset, EMPRESA: selectedCompany || asset.EMPRESA });
+      return;
+    }
+
     if (isBatch && etq && etq !== "ETIQUETAR") {
       // Restrito à EMPRESA ATUAL e STATUS ATIVO
       const related = allAssets.filter(a => {
@@ -327,7 +392,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       }
     }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, normalizeKey, selectedCompany]);
+  }, [allAssets, onSelectAsset, onUpdateAsset, normalizeKey, selectedCompany, selectedLocation]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -348,23 +413,33 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   };
 
   const handleCreateNew = () => {
+    if (confirm(`A etiqueta "${committedSearch}" não foi localizada.\n\nDeseja incluir como um NOVO REGISTRO manual?`)) {
+        setManualAsset({
+            ETIQUETA: committedSearch || "",
+            EMPRESA: selectedCompany || "",
+            STATUS: "NOVO ITEM: Registro de inclusão manual (fora da malha original)",
+            DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+            ENDERECO: selectedLocation || "",
+            QT: 1
+        });
+        setIsManualEntryOpen(true);
+    }
+  };
+
+  const saveManualEntry = () => {
     const newAsset: Asset = {
+        ...manualAsset,
         id: `manual_${Date.now()}`,
-        EMPRESA: selectedCompany || "EMPRESA NAO INFORMADA",
-        STATUS: "NOVO ITEM",
         TAG_INVENTARIO: "NOVO ITEM",
-        ETIQUETA: committedSearch || "ETIQUETAR",
-        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
-        ENDERECO: selectedLocation || "LOCAL NAO INFORMADO",
         _conferido: true,
         _isNew: true
-    };
-    if (confirm(`Deseja incluir "${newAsset.ETIQUETA}" como um NOVO REGISTRO fora da malha original?`)) {
-        onUpdateAsset(newAsset);
-        setCommittedSearch('');
-        setDisplayValue('');
-        onSelectAsset(newAsset);
-    }
+    } as Asset;
+    
+    onUpdateAsset(newAsset);
+    setIsManualEntryOpen(false);
+    setCommittedSearch('');
+    setDisplayValue('');
+    onSelectAsset(newAsset);
   };
 
   const locationsList = useMemo(() => {
@@ -373,7 +448,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       const statusUpper = String(a.STATUS || '').toUpperCase();
       if (statusUpper.includes('BAIXADO')) return; // Ignorar baixados no progresso por localidade
 
-      let loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
+      const loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       stats[loc].total++; 
       if (a._conferido) stats[loc].checked++;
@@ -477,7 +552,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                         <AlertTriangle size={32} />
                     </div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tighter italic">Nenhum Registro Localizado</h3>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2 max-w-[200px]">Etiqueta "{committedSearch}" não consta na malha GBR v24 (Ativa ou Baixada)</p>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2 max-w-[200px]">Etiqueta &quot;{committedSearch}&quot; não consta na malha GBR v24 (Ativa ou Baixada)</p>
                     
                     <button onClick={handleCreateNew} className="mt-10 px-8 py-5 bg-orange-600 text-white rounded-[1.8rem] flex items-center space-x-3 shadow-2xl active:scale-95 transition-all">
                         <FilePlus2 size={20} />
@@ -572,6 +647,92 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       )}
 
       {isScannerOpen && <Scanner onBack={() => setIsScannerOpen(false)} onScanSuccess={(text) => { setDisplayValue(text.toUpperCase()); setCommittedSearch(text.toUpperCase()); setIsScannerOpen(false); }} />}
+
+      {isManualEntryOpen && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 animate-fadeIn">
+          <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md" onClick={() => setIsManualEntryOpen(false)} />
+          <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-orange-500/30 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col max-h-[90vh]">
+            <div className="bg-orange-600 px-8 py-8 text-white shrink-0">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-2 bg-black/20 px-4 py-2 rounded-full border border-white/10">
+                  <FilePlus2 size={14} className="fill-white" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Inclusão Manual</span>
+                </div>
+                <button onClick={() => setIsManualEntryOpen(false)} className="p-2 bg-white/10 rounded-xl active:scale-90"><X size={20} /></button>
+              </div>
+              <h3 className="text-2xl font-black uppercase tracking-tighter italic leading-none">Novo Registro</h3>
+              <p className="text-[10px] font-black text-white/60 uppercase tracking-widest mt-1">Preencha os dados do ativo encontrado</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar">
+               <div className="space-y-4">
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
+                    <input 
+                      type="text" 
+                      value={manualAsset.ETIQUETA || ''} 
+                      onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-black font-mono text-lg outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Descrição do Ativo</label>
+                    <textarea 
+                      rows={3}
+                      value={manualAsset.DESCRICAODOATIVO || ''} 
+                      onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500 uppercase"
+                      placeholder="DESCREVA O BEM..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Nº de Série</label>
+                      <input 
+                        type="text" 
+                        value={manualAsset.SERIAL || ''} 
+                        onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Quantidade</label>
+                      <input 
+                        type="number" 
+                        value={manualAsset.QT || 1} 
+                        onChange={(e) => setManualAsset({...manualAsset, QT: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-2xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Empresa:</span>
+                      <span className="text-[9px] font-black text-orange-500 uppercase">{manualAsset.EMPRESA}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local:</span>
+                      <span className="text-[9px] font-black text-orange-500 uppercase">{manualAsset.ENDERECO}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Status:</span>
+                      <span className="text-[8px] font-black text-orange-500 uppercase text-right leading-tight">NOVO ITEM (MANUAL)</span>
+                    </div>
+                  </div>
+               </div>
+            </div>
+
+            <div className="p-8 bg-slate-900 border-t border-slate-800 shrink-0">
+               <button 
+                 onClick={saveManualEntry}
+                 className="w-full bg-orange-600 text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all border-b-4 border-orange-800"
+               >
+                 Salvar e Conferir
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

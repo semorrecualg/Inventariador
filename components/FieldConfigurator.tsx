@@ -6,11 +6,11 @@ import {
   SlidersHorizontal, 
   Lock, 
   Unlock, 
-  ShieldCheck, 
+
   Save, 
-  Info,
+
   CheckCircle2,
-  AlertCircle
+
 } from 'lucide-react';
 
 interface FieldConfiguratorProps {
@@ -45,9 +45,9 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
 
   const availableFields = useMemo(() => {
     if (assets.length === 0) return Object.keys(fieldLabels);
-    const keys = Object.keys(assets[0]).filter(k => !k.startsWith('_') && k !== 'id' && k !== 'TAG_INVENTARIO' && k !== 'TAG_DUPLICIDADE');
-    const mapped = Object.keys(fieldLabels).filter(k => keys.includes(k));
-    const unmapped = keys.filter(k => !Object.keys(fieldLabels).includes(k));
+    const keys = new Set(Object.keys(assets[0]).filter(k => !k.startsWith('_') && k !== 'id' && k !== 'TAG_INVENTARIO' && k !== 'TAG_DUPLICIDADE'));
+    const mapped = Object.keys(fieldLabels).filter(k => keys.has(k));
+    const unmapped = Array.from(keys).filter(k => !fieldLabels[k]);
     return [...mapped, ...unmapped];
   }, [assets]);
 

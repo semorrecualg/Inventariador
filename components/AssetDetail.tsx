@@ -19,13 +19,12 @@ import {
   Info,
   Briefcase,
   Wallet,
-  CheckCircle,
   QrCode,
   Printer,
   Download
 } from 'lucide-react';
 
-const formatDateBR = (val: any): string => {
+const formatDateBR = (val: string | number | null | undefined): string => {
   if (!val) return "";
   const s = String(val).trim();
   if (s === "" || s.toUpperCase() === "NULL") return "";
@@ -36,7 +35,7 @@ const formatDateBR = (val: any): string => {
   return s.toUpperCase();
 };
 
-const formatCurrency = (val: any): string => {
+const formatCurrency = (val: string | number | null | undefined): string => {
   if (!val) return "R$ 0,00";
   const num = parseFloat(String(val).replace(/[^\d.-]/g, ''));
   if (isNaN(num)) return String(val).toUpperCase();
@@ -116,7 +115,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
   const applyFieldEdit = (val?: string) => {
     if (editingField) {
-      const updates: any = { ...workingAsset };
+      const updates: Asset = { ...workingAsset };
       const newValue = (val || editValue).toUpperCase().trim();
       if (String(updates[editingField]) !== newValue) {
         const altered = new Set<string>(updates._camposAlterados || []);
@@ -142,7 +141,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     ? 'bg-amber-600' 
     : String(workingAsset.STATUS).includes('BAIXADO') 
       ? 'bg-red-900' 
-      : !!workingAsset._conferido 
+      : workingAsset._conferido 
         ? 'bg-emerald-900' 
         : 'bg-slate-900';
 

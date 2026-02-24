@@ -16,7 +16,6 @@ import {
   History,
   LayoutList,
   Download,
-  Tag,
   Info,
   X,
   Palette
@@ -98,7 +97,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     if (filtered.length === 0) return;
 
     const wsData = filtered.map(a => {
-      const res: any = {};
+      const res: { [key: string]: string | number | boolean | null | undefined } = {};
       Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
@@ -113,7 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     XLSX.writeFile(wb, `GBR_${fileName}_${new Date().getTime()}.xlsx`);
   };
 
-  const StatBar = ({ label, value, total, colorClass, icon: Icon, onClick }: any) => {
+  const StatBar = ({ label, value, total, colorClass, icon: Icon, onClick }: { label: string; value: number; total: number; colorClass: string; icon: React.ElementType; onClick: () => void }) => {
     const percentage = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
     
     const handleHintTrigger = (e: React.MouseEvent) => {
@@ -375,7 +374,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
             </div>
 
             <p className="text-sm font-medium text-slate-600 leading-relaxed italic">
-              "{hintOverlay.text}"
+              &quot;{hintOverlay.text}&quot;
             </p>
 
             <div className="mt-8 pt-6 border-t border-slate-50 flex justify-center">
