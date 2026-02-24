@@ -1,17 +1,13 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Asset } from '../types';
+import { Asset, TagInventario } from '../types';
 import Scanner from './Scanner';
 import { 
   ArrowLeft, 
   Check,
   Keyboard, 
   Zap, 
-
-
-
   Filter,
-
   Briefcase,
   MapPin,
   Trash2,
@@ -19,7 +15,6 @@ import {
   Square,
   CheckSquare,
   X,
-
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -64,7 +59,7 @@ interface LabelingProps {
   selectedCompany: string | null;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets, onSelectAsset }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSelectAsset }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [inputMethod, setInputMethod] = useState<'keyboard' | 'scanner'>('keyboard');
@@ -85,7 +80,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets,
   const assetsToLabel = useMemo(() => {
     return assets.filter(a => 
       normalize(a.ETIQUETA || '') === 'ETIQUETAR' || 
-      a.TAG_INVENTARIO === 'FALTA ETIQUETAR'
+      a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR
     );
   }, [assets]);
 
@@ -148,17 +143,35 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets,
   const handleBatchConfirm = () => {
     if (selectedIds.size === 0) return;
     if (confirm(`Confirmar emplaquetamento em lote para ${selectedIds.size} itens?`)) {
-      onBulkUpdateAssets(Array.from(selectedIds));
+      const ids = Array.from(selectedIds);
+      ids.forEach(id => {
+        const asset = assets.find(a => String(a.id) === id);
+        if (asset) {
+          onUpdateAsset({
+            ...asset,
+            _conferido: true,
+            TAG_INVENTARIO: TagInventario.ETIQUETADO,
+            _plaquetado: true
+          });
+        }
+      });
       setSelectedIds(new Set());
       setIsBatchMode(false);
     }
   };
 
   const handleConfirmAllFiltered = () => {
-    const ids = filteredAssets.filter(a => !a._conferido).map(a => String(a.id));
-    if (ids.length === 0) return;
-    if (confirm(`Deseja emplaquetar TODOS os ${ids.length} itens desta busca?`)) {
-      onBulkUpdateAssets(ids);
+    const pending = filteredAssets.filter(a => !a._conferido);
+    if (pending.length === 0) return;
+    if (confirm(`Deseja emplaquetar TODOS os ${pending.length} itens desta busca?`)) {
+      pending.forEach(asset => {
+        onUpdateAsset({
+          ...asset,
+          _conferido: true,
+          TAG_INVENTARIO: TagInventario.ETIQUETADO,
+          _plaquetado: true
+        });
+      });
     }
   };
 
@@ -240,7 +253,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets,
                 {isBatchMode ? (
                   isSelected ? <CheckSquare size={10} /> : <Square size={10} className="text-white/50" />
                 ) : null}
-                <span>{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {asset.TAG_INVENTARIO || (asset._conferido ? 'ETIQUETADO' : 'FALTA ETIQUETAR')}</span>
+                <span>{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {asset.TAG_INVENTARIO || (asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR)}</span>
               </div>
               
               <div className="pt-6 flex flex-col space-y-2.5">
@@ -262,7 +275,15 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onBulkUpdateAssets,
               </div>
 
               {!asset._conferido && !isBatchMode && (
-                <button onClick={(e) => { e.stopPropagation(); onBulkUpdateAssets([String(asset.id)]); }} className="absolute bottom-5 right-5 w-12 h-12 bg-amber-600 text-white rounded-2xl flex items-center justify-center shadow-2xl border-b-4 border-amber-800 active:scale-90">
+                <button onClick={(e) => { 
+                  e.stopPropagation(); 
+                  onUpdateAsset({
+                    ...asset,
+                    _conferido: true,
+                    TAG_INVENTARIO: TagInventario.ETIQUETADO,
+                    _plaquetado: true
+                  });
+                }} className="absolute bottom-5 right-5 w-12 h-12 bg-amber-600 text-white rounded-2xl flex items-center justify-center shadow-2xl border-b-4 border-amber-800 active:scale-90">
                   <Check size={28} strokeWidth={4} />
                 </button>
               )}

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Asset } from '../types';
+import { Asset, TagInventario } from '../types';
 import Scanner from './Scanner';
 import { 
   ArrowLeft, 
@@ -17,12 +17,11 @@ import {
   CheckSquare,
   ListChecks,
   Plus,
-
   Search,
   X,
   AlertTriangle,
   FilePlus2,
-
+  RefreshCw,
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -74,10 +73,6 @@ const AssetCard = React.memo(({
   const isConferido = !!asset._conferido;
   const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
-  const locAuditado = normalize(asset._localMaster || asset.ENDERECO || "");
-  const locAtual = normalize(selectedLocation || "");
-  
-  
   const companyKey = normalize(selectedCompany || '');
   const assetCompanyKey = normalize(asset.EMPRESA || '');
   const isDifferentCompany = selectedCompany && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
@@ -86,52 +81,83 @@ const AssetCard = React.memo(({
   const isBaixado = statusUpper.includes('BAIXADO');
 
   const visualStatus = useMemo(() => {
-    // Primeiro, checar casos que não dependem do status de conferido
-    if (isDifferentCompany) return 'ADOTADO EXTERNO';
-    if (isBaixado) return 'BAIXADO';
+    const statusUpper = String(asset.STATUS || '').toUpperCase();
+    const isBaixadoLogic = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
 
-    // Se não conferido, verificar se precisa de etiqueta ou está pendente
+    // B) BAIXADO: STATUS É PERMANENTE E IMUTÁVEL
+    if (isBaixadoLogic) return TagInventario.BAIXADO;
+
+    // 5) ADOTADO EXTERNO
+    if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
+
+    // Se não conferido
     if (!asset._conferido) {
+      // 7) FALTA ETIQUETAR
       const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
-      if (needsLabel) return 'FALTA ETIQUETAR';
-      return 'PENDENTE';
+      if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
+      
+      // A) PENDENTE
+      return TagInventario.PENDENTE;
     }
 
     // A partir daqui, o item está _conferido = true
-    const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
-    if (needsLabel) return 'ETIQUETADO';
     
-    if (asset._isNew || asset.TAG_INVENTARIO === "NOVO ITEM") return "NOVO ITEM";
+    // 8) ETIQUETADO
+    const wasFaltaEtiquetar = normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
+    if (wasFaltaEtiquetar && normalize(asset.ETIQUETA || '') !== 'ETIQUETAR') {
+      return TagInventario.ETIQUETADO;
+    }
+
+    // 4) NOVO ITEM
+    if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
+
+    // 3) RE-ADOTADO
+    if (asset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return TagInventario.RE_ADOTADO;
+
+    // 6) DIVERGÊNCIA: Etiqueta física difere do registro lógico
+    const currentEtq = normalize(asset.ETIQUETA || "");
+    const masterEtq = normalize(asset._plaquetaMaster || "");
+    if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
+      return TagInventario.DIVERGENCIA;
+    }
 
     const targetLocKey = normalize(selectedLocation || "");
     const originalLocKey = normalize(asset.ENDERECO || ""); 
-    const currentAuditLocKey = asset._localMaster ? normalize(asset._localMaster) : "";
 
-    // RE-ADOTADO: Já foi adotado antes e agora está em outro lugar
-    if (asset.TAG_INVENTARIO === 'ADOTADO' && currentAuditLocKey !== targetLocKey) {
-      return 'RE-ADOTADO';
-    }
-    
-    // ADOTADO: Encontrado em local diferente do original
-    if (originalLocKey !== "" && originalLocKey !== targetLocKey) {
-      return 'ADOTADO';
+    // 1) CONFERIDO: Localizado exatamente no ENDERECO original
+    if (originalLocKey === targetLocKey) {
+      return TagInventario.CONFERIDO;
     }
 
-    return 'CONFERIDO';
+    // 2) ADOTADO: Localizado em endereço diferente do original
+    return TagInventario.ADOTADO;
 
-  }, [asset, selectedLocation, isDifferentCompany, isBaixado, normalize]);
+  }, [asset, selectedLocation, isDifferentCompany, normalize]);
 
   const getColors = () => {
     switch (visualStatus) {
-      case 'BAIXADO': return { bg: 'bg-red-950/60', border: 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]', badge: 'bg-red-600 text-white animate-pulse font-black', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
-      case 'ADOTADO EXTERNO': return { bg: 'bg-sky-900/40', border: 'border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.4)]', badge: 'bg-sky-500 text-white font-black animate-bounce', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
-      case 'ADOTADO': return { bg: 'bg-blue-950/20', border: 'border-blue-400/40', badge: 'bg-blue-600 text-white', btn: 'bg-blue-600 shadow-blue-900/40', icon: MapPin };
-      case 'RE-ADOTADO': return { bg: 'bg-violet-950/20', border: 'border-violet-400/40', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600 shadow-violet-900/40', icon: MapPin };
-      case 'CONFERIDO': return { bg: 'bg-emerald-950/20', border: 'border-emerald-500/30', badge: 'bg-emerald-600 text-white', btn: 'bg-emerald-600 shadow-emerald-900/40', icon: Check };
-      case 'FALTA ETIQUETAR': return { bg: 'bg-amber-950/20', border: 'border-amber-500/40', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600 shadow-amber-900/40', icon: Hash };
-      case 'ETIQUETADO': return { bg: 'bg-violet-950/20', border: 'border-violet-500/40', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600 shadow-violet-900/40', icon: Check };
-      case 'NOVO ITEM': return { bg: 'bg-orange-900/40', border: 'border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)]', badge: 'bg-orange-500 text-black font-black', btn: 'bg-orange-600 shadow-orange-900/40', icon: Plus };
-      default: return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-800 text-white', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
+      case TagInventario.BAIXADO: 
+        return { bg: 'bg-red-950/60', border: 'border-red-600 shadow-[0_0_25px_rgba(220,38,38,0.5)]', badge: 'bg-red-600 text-white animate-pulse font-black', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
+      case TagInventario.ADOTADO_EXTERNO: 
+        return { bg: 'bg-sky-900/40', border: 'border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.4)]', badge: 'bg-sky-500 text-white font-black animate-bounce', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
+      case TagInventario.ADOTADO: 
+        return { bg: 'bg-blue-950/20', border: 'border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.3)]', badge: 'bg-blue-600 text-white font-black', btn: 'bg-blue-600 shadow-blue-900/40', icon: MapPin };
+      case TagInventario.RE_ADOTADO: 
+        return { bg: 'bg-fuchsia-950/20', border: 'border-fuchsia-500 shadow-[0_0_15px_rgba(192,38,211,0.3)]', badge: 'bg-fuchsia-600 text-white font-black', btn: 'bg-fuchsia-600 shadow-fuchsia-900/40', icon: RefreshCw };
+      case TagInventario.CONFERIDO: 
+        return { bg: 'bg-emerald-950/20', border: 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]', badge: 'bg-emerald-500 text-white font-black', btn: 'bg-emerald-600 shadow-emerald-900/40', icon: Check };
+      case TagInventario.FALTA_ETIQUETAR: 
+        return { bg: 'bg-amber-950/20', border: 'border-amber-500/40', badge: 'bg-amber-600 text-white font-black', btn: 'bg-amber-600 shadow-amber-900/40', icon: Hash };
+      case TagInventario.ETIQUETADO: 
+        return { bg: 'bg-violet-950/20', border: 'border-violet-500/40', badge: 'bg-violet-600 text-white font-black', btn: 'bg-violet-600 shadow-violet-900/40', icon: Check };
+      case TagInventario.NOVO_ITEM: 
+        return { bg: 'bg-orange-900/40', border: 'border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)]', badge: 'bg-amber-500 text-black font-black', btn: 'bg-amber-600 shadow-amber-900/40', icon: Plus };
+      case TagInventario.DIVERGENCIA:
+        return { bg: 'bg-red-900/20', border: 'border-orange-600 shadow-[0_0_15px_rgba(234,88,12,0.3)]', badge: 'bg-orange-600 text-white font-black', btn: 'bg-orange-700 shadow-orange-900/40', icon: AlertTriangle };
+      case TagInventario.PENDENTE:
+        return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-700 text-white font-black', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
+      default: 
+        return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-800 text-white', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
     }
   };
 
@@ -236,7 +262,7 @@ interface InventoryProps {
   uniqueCentrosDeCusto: string[];
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -341,14 +367,29 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedCompany || '');
     
+    // Determinar a TAG_INVENTARIO correta
+    let tag: TagInventario = TagInventario.CONFERIDO;
+    const originalLoc = normalizeKey(asset.ENDERECO || "");
+    const targetLoc = normalizeKey(selectedLocation || "");
+    const statusUpper = String(asset.STATUS || '').toUpperCase();
+    const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+
+    if (isBaixado) {
+      tag = TagInventario.BAIXADO;
+    } else if (asset._conferido) {
+      tag = TagInventario.RE_ADOTADO;
+    } else if (originalLoc !== targetLoc) {
+      tag = TagInventario.ADOTADO;
+    }
+
     if (isBatch && etq && etq !== "ETIQUETAR") {
       // Restrito à EMPRESA ATUAL e STATUS ATIVO
       const related = allAssets.filter(a => {
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
         const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXADO');
-        return sameEtq && sameComp && isNotBaixado && !a._conferido;
+        const sUpper = String(a.STATUS || '').toUpperCase();
+        const isNotB = !sUpper.includes('BAIXA') && !a.DATABAIXA;
+        return sameEtq && sameComp && isNotB && !a._conferido;
       });
 
       if (related.length > 1) {
@@ -357,8 +398,13 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       }
     }
     
-    onBulkUpdateAssets([id]);
-  }, [allAssets, onBulkUpdateAssets, normalizeKey, selectedCompany]);
+    onUpdateAsset({
+      ...asset,
+      _conferido: true,
+      TAG_INVENTARIO: tag,
+      _localMaster: selectedLocation || asset.ENDERECO
+    });
+  }, [allAssets, onUpdateAsset, normalizeKey, selectedCompany, selectedLocation]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
     const etq = normalizeKey(asset.ETIQUETA || "");
@@ -371,8 +417,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       if (!confirm(`Este item pertence à empresa "${asset.EMPRESA}".\n\nDeseja ADOTAR este registro para a empresa "${selectedCompany}" no local "${selectedLocation}"?`)) {
         return;
       }
-      // Se confirmou, vamos atualizar a empresa do item para a atual
-      onUpdateAsset({ ...asset, EMPRESA: selectedCompany || asset.EMPRESA });
+      // Se confirmou, vamos atualizar a empresa do item para a atual e marcar como ADOTADO EXTERNO
+      onUpdateAsset({ 
+        ...asset, 
+        EMPRESA: selectedCompany || asset.EMPRESA,
+        _conferido: true,
+        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+        _localMaster: selectedLocation || asset.ENDERECO
+      });
       return;
     }
 
@@ -382,7 +434,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
         const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
         const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXADO');
+        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.DATABAIXA;
         return sameEtq && sameComp && isNotBaixado;
       });
 
@@ -406,7 +458,32 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const handleBatchConfirm = () => {
     if (selectedIds.size === 0) return;
     if (confirm(`Confirmar auditoria em lote para ${selectedIds.size} itens?`)) {
-      onBulkUpdateAssets(Array.from(selectedIds));
+      const ids = Array.from(selectedIds);
+      ids.forEach(id => {
+        const asset = allAssets.find(a => String(a.id) === id);
+        if (asset) {
+          let tag: TagInventario = TagInventario.CONFERIDO;
+          const originalLoc = normalizeKey(asset.ENDERECO || "");
+          const targetLoc = normalizeKey(selectedLocation || "");
+          const statusUpper = String(asset.STATUS || '').toUpperCase();
+          const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+
+          if (isBaixado) {
+            tag = TagInventario.BAIXADO;
+          } else if (asset._conferido) {
+            tag = TagInventario.RE_ADOTADO;
+          } else if (originalLoc !== targetLoc) {
+            tag = TagInventario.ADOTADO;
+          }
+
+          onUpdateAsset({
+            ...asset,
+            _conferido: true,
+            TAG_INVENTARIO: tag,
+            _localMaster: selectedLocation || asset.ENDERECO
+          });
+        }
+      });
       setSelectedIds(new Set());
       setIsBatchMode(false);
     }
@@ -417,7 +494,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         setManualAsset({
             ETIQUETA: committedSearch || "",
             EMPRESA: selectedCompany || "",
-            STATUS: "NOVO ITEM: Registro de inclusão manual (fora da malha original)",
+            STATUS: "ATIVO",
             DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
             ENDERECO: selectedLocation || "",
             QT: 1
@@ -430,9 +507,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     const newAsset: Asset = {
         ...manualAsset,
         id: `manual_${Date.now()}`,
-        TAG_INVENTARIO: "NOVO ITEM",
+        TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
-        _isNew: true
+        _isNew: true,
+        _localMaster: selectedLocation || ""
     } as Asset;
     
     onUpdateAsset(newAsset);
@@ -632,7 +710,30 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
               <button 
                 onClick={() => {
-                  onBulkUpdateAssets(batchModalData.map(a => String(a.id)));
+                  const updates = batchModalData.map(asset => {
+                    let tag: TagInventario = TagInventario.CONFERIDO;
+                    const originalLoc = normalizeKey(asset.ENDERECO || "");
+                    const targetLoc = normalizeKey(selectedLocation || "");
+                    const statusUpper = String(asset.STATUS || '').toUpperCase();
+                    const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+
+                    if (isBaixado) {
+                      tag = TagInventario.BAIXADO;
+                    } else if (asset._conferido) {
+                      tag = TagInventario.RE_ADOTADO;
+                    } else if (originalLoc !== targetLoc) {
+                      tag = TagInventario.ADOTADO;
+                    }
+
+                    return {
+                      ...asset,
+                      _conferido: true,
+                      TAG_INVENTARIO: tag,
+                      _localMaster: selectedLocation || asset.ENDERECO
+                    };
+                  });
+                  
+                  updates.forEach(u => onUpdateAsset(u));
                   setBatchModalData(null);
                   setCommittedSearch('');
                   setDisplayValue('');

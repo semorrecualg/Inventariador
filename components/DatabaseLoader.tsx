@@ -293,7 +293,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
                const f = e.target.files?.[0];
                if (f) {
                  const r = new FileReader();
-                 r.onload = (ev) => processFile(ev.target?.result);
+                 r.onload = (ev) => {
+                   const data = ev.target?.result;
+                   if (data instanceof ArrayBuffer) {
+                     processFile(data);
+                   }
+                 };
                  r.readAsArrayBuffer(f);
                }
             }} />

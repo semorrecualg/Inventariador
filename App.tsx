@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AppScreen, User, Asset, InventoryState, DatabaseStatus } from './types';
+import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario } from './types';
 import Login from './components/Login';
 import Register from './components/Register';
 import MainMenu from './components/MainMenu';
@@ -114,39 +114,51 @@ const App: React.FC = () => {
   }, [inventory.assets]);
 
   // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
-  const determineTag = useCallback((asset: Asset, targetLocation: string): string => {
+  const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
     const statusUpper = String(asset.STATUS || '').toUpperCase();
-    const isBaixado = statusUpper.includes('BAIXADO');
+    const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
     
-    // Se o item está baixado no sistema mas foi encontrado fisicamente, é uma discrepância grave
-    if (isBaixado) return "BAIXADO";
+    // B) BAIXADO: STATUS É PERMANENTE E IMUTÁVEL
+    if (isBaixado) return TagInventario.BAIXADO;
     
+    // 5) ADOTADO EXTERNO (Se a empresa for diferente da selecionada)
+    const assetCompKey = normalizeKey(asset.EMPRESA || '');
+    const currentCompKey = normalizeKey(selectedCompany || '');
+    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+      return TagInventario.ADOTADO_EXTERNO;
+    }
+
     // Se o item for marcado para etiquetar na base mestre
     const needsLabel = normalizeKey(asset.ETIQUETA || '') === 'ETIQUETAR';
-    if (needsLabel) return asset._conferido ? "ETIQUETADO" : "FALTA ETIQUETAR";
+    if (needsLabel) return asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
     
-    // Itens novos inseridos manualmente
-    if (asset._isNew || asset.TAG_INVENTARIO === "NOVO ITEM") return "NOVO ITEM";
+    // 4) NOVO ITEM
+    if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
     const targetLocKey = normalizeKey(targetLocation);
     const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
     const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
 
-    // Se o local de auditoria é "BENS A SEREM ETIQUETADOS", a regra muda
-    if (targetLocation === "BENS A SEREM ETIQUETADOS") {
-      return asset._conferido ? "ETIQUETADO" : "FALTA ETIQUETAR";
+    // 6) DIVERGÊNCIA: Etiqueta física difere do registro lógico
+    const currentEtq = normalizeKey(asset.ETIQUETA || "");
+    const masterEtq = normalizeKey(asset._plaquetaMaster || "");
+    if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
+      return TagInventario.DIVERGENCIA;
     }
 
-    // ADOTADO: Item encontrado em local diferente do ENDERECO original
-    // RE-ADOTADO: Item já conferido anteriormente em um local e agora encontrado em outro local durante a mesma auditoria
-    if (originalLocKey !== "" && originalLocKey !== targetLocKey) {
-       return asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey 
-              ? "RE-ADOTADO" 
-              : "ADOTADO";
+    // 1) CONFERIDO: Localizado exatamente no ENDERECO original
+    if (originalLocKey === targetLocKey) {
+      return TagInventario.CONFERIDO;
     }
 
-    return "CONFERIDO";
-  }, [normalizeKey]);
+    // 3) RE-ADOTADO: Já conferido anteriormente em um local e agora encontrado em outro local
+    if (asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
+      return TagInventario.RE_ADOTADO;
+    }
+
+    // 2) ADOTADO: Localizado em endereço diferente do original
+    return TagInventario.ADOTADO;
+  }, [normalizeKey, selectedCompany]);
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -253,7 +265,7 @@ const App: React.FC = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
-      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
+      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
@@ -291,7 +303,7 @@ const App: React.FC = () => {
       )}
       
       <div className="flex-1 relative overflow-hidden">
-        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} onGoToRegister={() => pushScreen(AppScreen.REGISTER)} />}
+        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
         {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
         {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
         {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}

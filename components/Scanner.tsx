@@ -25,7 +25,7 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
         setError(null);
 
         if (scannerRef.current) {
-          try { await scannerRef.current.stop(); } catch (e: any) {
+          try { await scannerRef.current.stop(); } catch {
             // Do nothing
           }
         }
@@ -66,7 +66,7 @@ const Scanner: React.FC<ScannerProps> = ({ onBack, onScanSuccess }) => {
         );
         
         setInitializing(false);
-      } catch (err: any) {
+      } catch {
         setError("Erro ao acessar câmera. Verifique permissões.");
         setInitializing(false);
       }

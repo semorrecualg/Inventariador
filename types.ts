@@ -13,8 +13,21 @@ export enum DatabaseStatus {
   IN_USE = 'IN_USE'
 }
 
+export enum TagInventario {
+  PENDENTE = 'PENDENTE',
+  BAIXADO = 'BAIXADO',
+  CONFERIDO = 'CONFERIDO',
+  ADOTADO = 'ADOTADO',
+  RE_ADOTADO = 'RE_ADOTADO',
+  NOVO_ITEM = 'NOVO ITEM',
+  ADOTADO_EXTERNO = 'ADOTADO EXTERNO',
+  DIVERGENCIA = 'DIVERGÊNCIA',
+  FALTA_ETIQUETAR = 'FALTA ETIQUETAR',
+  ETIQUETADO = 'ETIQUETADO'
+}
+
 export interface Asset {
-  [key: string]: any;
+  [key: string]: string | number | boolean | string[] | undefined | null;
   id: string | number;
   
   // Estrutura Mestre v24
@@ -49,7 +62,7 @@ export interface Asset {
   
   // Tags de Auditoria
   TAG_DUPLICIDADE?: 'ÚNICO' | 'ETIQUETA+1REGISTRO' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
-  TAG_INVENTARIO?: string;
+  TAG_INVENTARIO?: TagInventario;
   _isNew?: boolean;
 }
 

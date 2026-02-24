@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Asset } from '../types';
+import { Asset, TagInventario } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Edit2, 
@@ -137,13 +137,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     onBack();
   };
 
-  const headerBg = isBatch 
-    ? 'bg-amber-600' 
-    : String(workingAsset.STATUS).includes('BAIXADO') 
-      ? 'bg-red-900' 
-      : workingAsset._conferido 
-        ? 'bg-emerald-900' 
-        : 'bg-slate-900';
+  const headerBg = useMemo(() => {
+    if (isBatch) return 'bg-amber-600';
+    
+    const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
+    const isBaixado = statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
+    
+    if (isBaixado) return 'bg-red-600';
+    if (workingAsset.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO) return 'bg-sky-600';
+    if (workingAsset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return 'bg-fuchsia-600';
+    if (workingAsset.TAG_INVENTARIO === TagInventario.ADOTADO) return 'bg-blue-600';
+    if (workingAsset.TAG_INVENTARIO === TagInventario.CONFERIDO) return 'bg-emerald-600';
+    if (workingAsset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return 'bg-orange-600';
+    
+    return 'bg-slate-900';
+  }, [isBatch, workingAsset]);
 
   const qrValue = useMemo(() => {
     const DB_ORDER = [
@@ -160,8 +168,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
     return sortedFields.map(f => {
       const val = workingAsset[f];
-      if (f === 'DATAAQUSIC' || f === 'DATABAIXA') return formatDateBR(val);
-      if (f === 'VLRAQUISIC') return formatCurrency(val);
+      if (f === 'DATAAQUSIC' || f === 'DATABAIXA') return formatDateBR(val as string | number | undefined);
+      if (f === 'VLRAQUISIC') return formatCurrency(val as string | number | undefined);
       return String(val || '');
     }).filter(v => v !== '').join(' | ');
   }, [workingAsset, qrCodeFields]);
@@ -199,8 +207,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
               <p className="text-xl font-black font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
             </div>
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-sm flex flex-col justify-center">
-              <p className="text-[7px] font-black text-white/50 uppercase tracking-widest mb-1">STATUS</p>
-              <span className="text-[9px] font-black uppercase text-sky-400">{workingAsset.TAG_DUPLICIDADE}</span>
+              <p className="text-[7px] font-black text-white/50 uppercase tracking-widest mb-1">AUDITORIA</p>
+              <span className="text-[9px] font-black uppercase text-sky-400">
+                {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
+              </span>
             </div>
           </div>
         </div>
@@ -241,9 +251,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                   const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
                   const isCurrency = key === 'VLRAQUISIC';
                   const rawVal = workingAsset[key];
-                  let displayVal = rawVal || '---';
-                  if (isDateField) displayVal = formatDateBR(rawVal);
-                  if (isCurrency) displayVal = formatCurrency(rawVal);
+                  let displayVal = String(rawVal || '---');
+                  if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
+                  if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
                   const canEdit = editableFields.includes(key);
                   if (!rawVal && key === 'DATABAIXA') return null;

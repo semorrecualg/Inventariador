@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Asset } from '../types';
+import { Asset, TagInventario } from '../types';
 import * as XLSX from 'xlsx';
 import { 
   BarChart3, 
@@ -57,10 +57,11 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     const comPlaqueta = assets.filter(a => !!a.ETIQUETA && String(a.ETIQUETA).toUpperCase() !== 'ETIQUETAR').length;
     
     const faltaEtiquetar = assets.filter(a => 
-      (String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR' || a.TAG_INVENTARIO === "FALTA ETIQUETAR") && !a._conferido
+      (String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR' || a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR) && !a._conferido
     ).length;
 
-    const jaEtiquetado = assets.filter(a => a.TAG_INVENTARIO === "ETIQUETADO").length;
+    const jaEtiquetado = assets.filter(a => a.TAG_INVENTARIO === TagInventario.ETIQUETADO).length;
+    const divergencia = assets.filter(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA).length;
 
     const semPlaqueta = total - comPlaqueta - faltaEtiquetar - jaEtiquetado;
     
@@ -88,7 +89,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       dupExterna,
       semId,
       countAtivos,
-      countBaixados
+      countBaixados,
+      divergencia
     };
   }, [assets]);
 
@@ -98,7 +100,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
     const wsData = filtered.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
-      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k]; });
+      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
@@ -289,7 +291,16 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
             total={stats.total} 
             colorClass="bg-violet-600" 
             icon={Palette} 
-            onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === "ETIQUETADO", 'ETIQUETADOS_EM_CAMPO')}
+            onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ETIQUETADO, 'ETIQUETADOS_EM_CAMPO')}
+          />
+
+          <StatBar 
+            label="Divergência" 
+            value={stats.divergencia} 
+            total={stats.total} 
+            colorClass="bg-orange-600" 
+            icon={AlertTriangle} 
+            onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS_PLAQUETA')}
           />
 
           <StatBar 

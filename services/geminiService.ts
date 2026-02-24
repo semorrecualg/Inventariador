@@ -31,7 +31,8 @@ export async function speakText(text: string): Promise<void> {
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) return;
 
-    const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
     const bytes = decode(base64Audio);
     const audioBuffer = await decodeAudioData(bytes, outputAudioContext, 24000, 1);
     const source = outputAudioContext.createBufferSource();
