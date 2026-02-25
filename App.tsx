@@ -14,7 +14,8 @@ import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
 import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
-import QrConfigurator from './components/QrConfigurator';
+import QrCodeConfigurator from './components/QrCodeConfigurator';
+
 import { Building2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -100,6 +101,24 @@ const App: React.FC = () => {
       .replace(/[^A-Z0-9]/g, '')
       .trim();
   }, []);
+
+  const [allLocations, setAllLocations] = useState<string[]>([]);
+
+  useEffect(() => {
+    const locationsFromAssets = new Set<string>();
+    inventory.assets.forEach(a => {
+      if (a.ENDERECO) locationsFromAssets.add(String(a.ENDERECO).trim().toUpperCase());
+    });
+
+    setAllLocations(prevLocations => {
+      const combined = new Set([...prevLocations, ...locationsFromAssets]);
+      const sorted = Array.from(combined).sort();
+      if (JSON.stringify(sorted) === JSON.stringify(prevLocations)) {
+        return prevLocations;
+      }
+      return sorted;
+    });
+  }, [inventory.assets]);
 
   const uniqueEnderecos = useMemo(() => {
     const set = new Set<string>();
@@ -219,6 +238,13 @@ const App: React.FC = () => {
     });
   }, [inventoryLocation, determineTag, normalizeKey]);
 
+  const addNewLocation = (newLocation: string) => {
+    const upperCaseLocation = newLocation.toUpperCase().trim();
+    if (upperCaseLocation && !allLocations.includes(upperCaseLocation)) {
+      setAllLocations(prev => [...prev, upperCaseLocation].sort());
+    }
+  };
+
   const bulkUpdateAssets = useCallback((ids: string[]) => {
     const idSet = new Set(ids.map(id => String(id)));
     const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
@@ -308,15 +334,15 @@ const App: React.FC = () => {
         {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
         {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
         {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
-        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={allLocations} onAddNewLocation={addNewLocation} />}
         {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
-        {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} />}
+        {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} />}
         {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
         {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
         {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
         {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
         {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
-        {screen === AppScreen.QR_CONFIGURATOR && <QrConfigurator assets={inventory.assets} currentFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
+        {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
       </div>
     </div>
   );

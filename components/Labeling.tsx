@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { Asset, TagInventario } from '../types';
-import Scanner from './Scanner';
+
 import { 
   ArrowLeft, 
   Check,
@@ -62,8 +62,7 @@ interface LabelingProps {
 const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSelectAsset }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
-  const [inputMethod, setInputMethod] = useState<'keyboard' | 'scanner'>('keyboard');
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
+
   
   // Lote
   const [isBatchMode, setIsBatchMode] = useState(false);
@@ -186,8 +185,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
             <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/40' : 'border-slate-800 text-slate-600'}`}>
               <ListChecks size={14} />
             </button>
-            <button onClick={() => setInputMethod('keyboard')} className={`p-2 rounded-lg border ${inputMethod === 'keyboard' ? 'bg-amber-600 text-white border-amber-500 shadow-lg' : 'text-slate-600 border-slate-800'}`}><Keyboard size={14} /></button>
-            <button onClick={() => { setInputMethod('scanner'); setIsScannerOpen(true); }} className={`p-2 rounded-lg border ${inputMethod === 'scanner' ? 'bg-amber-600 text-white border-amber-500 shadow-lg' : 'text-slate-600 border-slate-800'}`}><Zap size={14} /></button>
+
             <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-2 rounded-lg border ${isFilterOpen ? 'bg-amber-400 text-black border-amber-400 shadow-lg' : 'text-amber-600 border-amber-800'}`}><Filter size={14} /></button>
           </div>
         </div>
@@ -262,16 +260,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
                   <span className="text-lg font-black font-data tracking-tighter text-white">{formatEtiqueta(asset.ETIQUETA)}</span>
                 </div>
                 <p className="text-[10px] font-bold text-slate-200 uppercase italic leading-tight tracking-tight line-clamp-4">{fullDescription}</p>
-                <div className="bg-slate-950/50 p-3 rounded-[1.5rem] space-y-1.5 border border-slate-800 shadow-inner">
-                  <div className="flex items-center space-x-2">
-                    <MapPin size={10} className="text-amber-500 shrink-0" />
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight truncate">{asset.ENDERECO || 'LOCAL NÃO INFORMADO'}</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Briefcase size={10} className="text-sky-500 shrink-0" />
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight truncate">{asset.CENTRODECUSTO || 'C. CUSTO NÃO INFORMADO'}</span>
-                  </div>
-                </div>
+
               </div>
 
               {!asset._conferido && !isBatchMode && (
@@ -310,7 +299,6 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
         </div>
       )}
 
-      {isScannerOpen && <Scanner onBack={() => setIsScannerOpen(false)} onScanSuccess={(text) => { setAdvDesc(text.toUpperCase()); setIsScannerOpen(false); }} />}
     </div>
   );
 };

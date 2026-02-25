@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario } from '../types';
-import { QRCodeSVG } from 'qrcode.react';
+
 import { 
   Edit2, 
   X, 
@@ -23,6 +23,7 @@ import {
   Printer,
   Download
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 const formatDateBR = (val: string | number | null | undefined): string => {
   if (!val) return "";
@@ -58,9 +59,14 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  const [showQrModal, setShowQrModal] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+
 
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
+
+  const qrCodeData = useMemo(() => {
+    return qrCodeFields.map(field => workingAsset[field] || '').join('|');
+  }, [qrCodeFields, workingAsset]);
 
   const fieldGroups = [
     {
@@ -153,26 +159,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     return 'bg-slate-900';
   }, [isBatch, workingAsset]);
 
-  const qrValue = useMemo(() => {
-    const DB_ORDER = [
-      'EMPRESA', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAODOATIVO', 'SERIAL', 
-      'DATAAQUSIC', 'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 
-      'REGISTRO', 'SUBREG', 'DATABAIXA', 'CONTACONTABIL', 'PRIMARYKEY', 
-      'CENTRODECUSTO', 'VLRAQUISIC'
-    ];
 
-    if (qrCodeFields.length === 0) return workingAsset.ETIQUETA || 'NO_TAG';
-    
-    // Ordenar campos conforme a base de dados
-    const sortedFields = [...qrCodeFields].sort((a, b) => DB_ORDER.indexOf(a) - DB_ORDER.indexOf(b));
-
-    return sortedFields.map(f => {
-      const val = workingAsset[f];
-      if (f === 'DATAAQUSIC' || f === 'DATABAIXA') return formatDateBR(val as string | number | undefined);
-      if (f === 'VLRAQUISIC') return formatCurrency(val as string | number | undefined);
-      return String(val || '');
-    }).filter(v => v !== '').join(' | ');
-  }, [workingAsset, qrCodeFields]);
 
   return (
     <div className="flex flex-col h-full bg-[#f4f4f5] animate-fadeIn overflow-hidden">
@@ -181,13 +168,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
         <div className="flex items-center justify-between mb-4">
           <button onClick={onBack} className="p-2 bg-white/10 rounded-lg active:scale-90 transition-all"><X size={18} /></button>
           <div className="flex items-center space-x-2">
-            <button 
-              onClick={() => setShowQrModal(true)}
-              className="p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-all flex items-center space-x-2 border border-white/20"
-            >
-              <QrCode size={16} />
-              <span className="text-[9px] font-black uppercase tracking-widest">QR CODE</span>
-            </button>
+            <button onClick={() => setIsQrModalOpen(true)} className="p-2 bg-white/10 rounded-lg active:scale-90 transition-all"><QrCode size={18} /></button>
             <div className="bg-white/10 px-3 py-1.5 rounded-lg border border-white/10">
               <span className="text-[8px] font-black uppercase tracking-widest text-white/90">
                 {isBatch ? 'LOTE' : 'KARDEK v24.50'}
@@ -321,78 +302,23 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
          </button>
       </div>
 
-      {/* QR CODE MODAL */}
-      {showQrModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-fadeIn">
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowQrModal(false)} />
-          <div className="bg-white w-full max-w-xs rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10 animate-scaleUp">
-            <div className="bg-slate-900 p-6 text-center">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-[8px] font-black text-sky-400 uppercase tracking-[0.3em]">GERADOR DE ETIQUETA</span>
-                <button onClick={() => setShowQrModal(false)} className="text-slate-500 hover:text-white"><X size={20} /></button>
-              </div>
-              <h3 className="text-white font-black uppercase tracking-tight text-lg leading-tight mb-1">
-                {workingAsset.ETIQUETA || 'S/ ETQ'}
-              </h3>
-              <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest truncate">
-                {workingAsset.DESCRICAODOATIVO}
-              </p>
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-slate-200 shadow-2xl p-8 flex flex-col items-center text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-lg font-black text-slate-900 uppercase tracking-tighter font-mono mb-4">{workingAsset.EMPRESA}</p>
+            <div className="bg-white p-4 border-4 border-slate-900 rounded-2xl shadow-inner mb-6">
+              <QRCodeSVG value={qrCodeData} size={256} />
             </div>
-            
-            <div className="p-8 flex flex-col items-center justify-center bg-white">
-              <div className="p-5 bg-white border-4 border-slate-100 rounded-[2.5rem] shadow-inner mb-6 flex flex-col items-center w-full">
-                {/* TOPO: EMPRESA */}
-                <div className="mb-3 w-full text-center border-b border-slate-50 pb-2">
-                  <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight truncate px-2">
-                    {workingAsset.EMPRESA || 'GBR SYSTEMS'}
-                  </p>
-                </div>
-
-                <div className="p-2 bg-white rounded-xl">
-                  <QRCodeSVG 
-                    value={qrValue} 
-                    size={160}
-                    level="H"
-                    includeMargin={false}
-                  />
-                </div>
-
-                {/* BASE: ATIVO + ETIQUETA COM DESTAQUE NUMÉRICO */}
-                <div className="mt-4 w-full text-center border-t border-slate-50 pt-3">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">ATIVO PATRIMONIAL</p>
-                  <div className="bg-slate-950 text-white py-2 px-4 rounded-xl shadow-lg">
-                    <p className="text-2xl font-black font-mono tracking-tighter leading-none">
-                      {workingAsset.ETIQUETA || '000000'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mb-4 text-center">
-                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Conteúdo Codificado:</p>
-                <p className="text-[10px] font-black text-slate-900 uppercase break-all max-w-[200px]">{qrValue}</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3 w-full">
-                <button className="flex items-center justify-center space-x-2 py-3 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase active:scale-95 transition-all">
-                  <Printer size={14} />
-                  <span>Imprimir</span>
-                </button>
-                <button className="flex items-center justify-center space-x-2 py-3 bg-sky-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg shadow-sky-900/20 active:scale-95 transition-all">
-                  <Download size={14} />
-                  <span>Salvar</span>
-                </button>
-              </div>
+            <div className="text-center">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">NÚMERO DO ATIVO:</p>
+              <p className="bg-slate-900 text-white px-6 py-3 rounded-xl text-2xl font-black uppercase tracking-tighter font-mono inline-block">{workingAsset.ETIQUETA}</p>
             </div>
-            
-            <div className="bg-slate-50 p-4 border-t border-slate-100 text-center">
-              <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">
-                PADRÃO GBR AUDIT v24.50
-              </p>
-            </div>
+            <button onClick={() => setIsQrModalOpen(false)} className="mt-8 w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">Fechar</button>
           </div>
         </div>
       )}
+
+
     </div>
   );
 };

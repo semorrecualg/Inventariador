@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Asset } from '../types';
 import { 
   Search, 
@@ -8,18 +8,24 @@ import {
   Barcode,
   Keyboard,
   AlertCircle,
-  Filter
+  Filter,
+  QrCode
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface ConsultationProps {
   assets: Asset[];
   onBack: () => void;
   onSelectAsset: (asset: Asset) => void;
+  qrCodeFields: string[];
 }
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset }) => {
+const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
+  const [keyboardType, setKeyboardType] = useState<'text' | 'numeric'>('text');
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +44,22 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
       .slice(0, 50);
   }, [assets, committedSearch]);
 
+  useEffect(() => {
+    const searchTimeout = setTimeout(() => {
+      if (displayValue) {
+        triggerSearch(displayValue);
+      } else {
+        setCommittedSearch('');
+      }
+    }, 500);
+
+    return () => clearTimeout(searchTimeout);
+  }, [displayValue]);
+
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
   const triggerSearch = (val: string) => {
     setCommittedSearch(val);
     searchInputRef.current?.blur();
@@ -51,10 +73,10 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
             <ArrowLeft size={14} /> <span>Voltar</span>
           </button>
           
-          <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-indigo-900/20 text-indigo-400 border border-indigo-500/20">
-            <Filter size={10} />
-            <span className="text-[7px] font-black uppercase tracking-widest">Alfanumérico v23</span>
-          </div>
+          <button onClick={() => setKeyboardType(prev => prev === 'text' ? 'numeric' : 'text')} className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+            <Keyboard size={10} />
+            <span className="text-[7px] font-black uppercase tracking-widest">{keyboardType === 'text' ? 'TEXTO' : 'NUMÉRICO'}</span>
+          </button>
         </div>
 
         <div className="flex items-end justify-between mb-4">
@@ -67,7 +89,8 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
         <div className="relative">
           <input 
             ref={searchInputRef}
-            type="text" 
+            type={keyboardType === 'numeric' ? 'number' : 'text'} 
+            inputMode={keyboardType}
             value={displayValue} 
             onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && triggerSearch(displayValue)}
@@ -86,7 +109,7 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
             <div className="space-y-2">
               <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest px-2">Localizados: {filteredAssets.length}</span>
               {filteredAssets.map((asset) => (
-                <button key={asset.id} onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-4 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-sm active:bg-indigo-950 transition-all text-left">
+                <div key={asset.id} onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-4 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-sm active:bg-indigo-950 transition-all text-left cursor-pointer">
                   <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-indigo-500 mr-4 shrink-0 border border-slate-800"><Barcode size={24} /></div>
                   <div className="flex-1 min-w-0 pr-2">
                     <span className="text-[16px] font-black text-white font-mono leading-none block mb-1">{asset.ETIQUETA || 'S/ ETQ'}</span>
@@ -94,8 +117,9 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
                       {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
                     </p>
                   </div>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-3 bg-slate-800 rounded-xl text-white active:scale-90 mr-2"><QrCode size={18} /></button>
                   <ChevronRight size={16} className="text-slate-700" />
-                </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -111,6 +135,22 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
           </div>
         )}
       </div>
+
+      {isQrModalOpen && selectedAssetForQr && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-slate-200 shadow-2xl p-8 flex flex-col items-center text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-lg font-black text-slate-900 uppercase tracking-tighter font-mono mb-4">{selectedAssetForQr.EMPRESA}</p>
+            <div className="bg-white p-4 border-4 border-slate-900 rounded-2xl shadow-inner mb-6">
+              <QRCodeSVG value={qrCodeFields.map(field => selectedAssetForQr[field] || '').join('|')} size={256} />
+            </div>
+            <div className="text-center">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">NÚMERO DO ATIVO:</p>
+              <p className="bg-slate-900 text-white px-6 py-3 rounded-xl text-2xl font-black uppercase tracking-tighter font-mono inline-block">{selectedAssetForQr.ETIQUETA}</p>
+            </div>
+            <button onClick={() => setIsQrModalOpen(false)} className="mt-8 w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">Fechar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

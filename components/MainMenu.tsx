@@ -169,14 +169,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Controle de Edição</p>
                 </div>
               </button>
-              
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.QR_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left">
-                <div className="w-9 h-9 bg-sky-900/20 text-sky-400 rounded-xl flex items-center justify-center mr-4 border border-sky-500/20"><QrCode size={18} /></div>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.QR_CODE_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 transition-all text-left">
+                <div className="w-9 h-9 bg-purple-900/20 text-purple-400 rounded-xl flex items-center justify-center mr-4 border border-purple-500/20"><QrCode size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black text-slate-100 uppercase tracking-tighter">Configurar QR Code</h4>
-                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Campos da Etiqueta</p>
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Definir campos do QR</p>
                 </div>
               </button>
+              
 
               <button disabled={!hasData} onClick={() => { setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-slate-900 border border-slate-800 rounded-[1.8rem] active:scale-95 disabled:opacity-20 transition-all text-left">
                 <div className="w-9 h-9 bg-emerald-900/20 text-emerald-500 rounded-xl flex items-center justify-center mr-4 border border-emerald-500/20"><Download size={18} /></div>
@@ -186,7 +187,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                 </div>
               </button>
 
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-sky-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left shadow-lg shadow-sky-900/20">
+              <button disabled={hasData} onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-sky-600 text-white rounded-[1.8rem] active:scale-95 transition-all text-left shadow-lg shadow-sky-900/20 disabled:opacity-20 disabled:bg-slate-800">
                 <div className="w-9 h-9 bg-white/20 text-white rounded-xl flex items-center justify-center mr-4"><DatabaseZap size={18} /></div>
                 <div className="flex-1">
                   <h4 className="text-xs font-black uppercase tracking-tighter">Carga Expert</h4>

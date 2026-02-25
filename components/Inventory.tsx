@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Asset, TagInventario } from '../types';
-import Scanner from './Scanner';
+
 import { 
   ArrowLeft, 
   MapPin, 
@@ -65,10 +65,11 @@ interface AssetCardProps {
   isBatchMode: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
+  confirmButtonRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect
+  asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
   const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
@@ -134,14 +135,14 @@ const AssetCard = React.memo(({
 
   }, [asset, selectedLocation, isDifferentCompany, normalize]);
 
-  const getColors = () => {
+  const getColors = (tag: TagInventario) => {
     switch (visualStatus) {
       case TagInventario.BAIXADO: 
         return { bg: 'bg-red-950/60', border: 'border-red-600 shadow-[0_0_25px_rgba(220,38,38,0.5)]', badge: 'bg-red-600 text-white animate-pulse font-black', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
       case TagInventario.ADOTADO_EXTERNO: 
         return { bg: 'bg-sky-900/40', border: 'border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.4)]', badge: 'bg-sky-500 text-white font-black animate-bounce', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
       case TagInventario.ADOTADO: 
-        return { bg: 'bg-blue-950/20', border: 'border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.3)]', badge: 'bg-blue-600 text-white font-black', btn: 'bg-blue-600 shadow-blue-900/40', icon: MapPin };
+        return { bg: 'bg-indigo-950/20', border: 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]', badge: 'bg-indigo-600 text-white font-black', btn: 'bg-indigo-600 shadow-indigo-900/40', icon: MapPin };
       case TagInventario.RE_ADOTADO: 
         return { bg: 'bg-fuchsia-950/20', border: 'border-fuchsia-500 shadow-[0_0_15px_rgba(192,38,211,0.3)]', badge: 'bg-fuchsia-600 text-white font-black', btn: 'bg-fuchsia-600 shadow-fuchsia-900/40', icon: RefreshCw };
       case TagInventario.CONFERIDO: 
@@ -161,7 +162,7 @@ const AssetCard = React.memo(({
     }
   };
 
-  const colors = getColors();
+  const colors = getColors(visualStatus);
   const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
 
   const fullDescription = [
@@ -207,16 +208,15 @@ const AssetCard = React.memo(({
           {fullDescription}
         </p>
 
-        <div className="bg-black/30 p-3 rounded-[1.5rem] space-y-1.5 border border-white/5 shadow-inner">
-          <div className="flex items-center space-x-2">
-            <MapPin size={10} className="text-emerald-500 shrink-0" />
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight truncate">{asset.ENDERECO || 'LOCAL NÃO INFORMADO'}</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Briefcase size={10} className="text-sky-500 shrink-0" />
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight truncate">{asset.CENTRODECUSTO || 'C. CUSTO NÃO INFORMADO'}</span>
-          </div>
+        <div className="flex items-center space-x-2 pt-3">
+          {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
+            <span key={index} className={`px-2 py-1 rounded-md text-[7px] font-black uppercase ${index === 0 ? 'bg-sky-500/20 text-sky-400' : index === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-fuchsia-500/20 text-fuchsia-400'}`}>
+              {tag}
+            </span>
+          ))}
         </div>
+
+
 
         {isDifferentCompany && (
           <div className="flex items-center space-x-2 px-3 py-1 bg-sky-500/20 border border-sky-500/30 rounded-full self-start">
@@ -228,6 +228,7 @@ const AssetCard = React.memo(({
 
       {!isConferido && !isBatchMode && (
         <button 
+          ref={confirmButtonRef}
           onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
           className={`absolute bottom-5 right-5 w-12 h-12 rounded-2xl flex items-center justify-center text-white border-b-4 border-black/20 z-20 active:scale-90 transition-all ${colors.btn}`}
         >
@@ -259,21 +260,25 @@ interface InventoryProps {
   setIsInventorying: (val: boolean) => void;
   selectedCompany: string | null;
   uniqueEnderecos: string[];
-  uniqueCentrosDeCusto: string[];
+  onAddNewLocation: (newLocation: string) => void;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, uniqueEnderecos, onAddNewLocation }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
-  const [inputMethod, setInputMethod] = useState<'keyboard' | 'scanner'>('keyboard');
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [inputMethod, setInputMethod] = useState<'keyboard'>('keyboard');
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchModalData, setBatchModalData] = useState<Asset[] | null>(null);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
+  const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
+  const [newLocationName, setNewLocationName] = useState('');
+  const [keyboardType, setKeyboardType] = useState<'text' | 'numeric'>('text');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
@@ -368,18 +373,22 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     const currentCompKey = normalizeKey(selectedCompany || '');
     
     // Determinar a TAG_INVENTARIO correta
-    let tag: TagInventario = TagInventario.CONFERIDO;
     const originalLoc = normalizeKey(asset.ENDERECO || "");
     const targetLoc = normalizeKey(selectedLocation || "");
     const statusUpper = String(asset.STATUS || '').toUpperCase();
     const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+    let tag: TagInventario;
 
     if (isBaixado) {
       tag = TagInventario.BAIXADO;
     } else if (asset._conferido) {
       tag = TagInventario.RE_ADOTADO;
-    } else if (originalLoc !== targetLoc) {
-      tag = TagInventario.ADOTADO;
+    } else {
+      if (originalLoc !== targetLoc) {
+        tag = TagInventario.ADOTADO;
+      } else {
+        tag = TagInventario.CONFERIDO;
+      }
     }
 
     if (isBatch && etq && etq !== "ETIQUETAR") {
@@ -402,8 +411,11 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       ...asset,
       _conferido: true,
       TAG_INVENTARIO: tag,
-      _localMaster: selectedLocation || asset.ENDERECO
+      _localMaster: selectedLocation || asset.ENDERECO,
+      AUDITOR_STATUS_CONFERENCIA: tag
     });
+    setDisplayValue('');
+    searchInputRef.current?.focus();
   }, [allAssets, onUpdateAsset, normalizeKey, selectedCompany, selectedLocation]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
@@ -480,7 +492,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             ...asset,
             _conferido: true,
             TAG_INVENTARIO: tag,
-            _localMaster: selectedLocation || asset.ENDERECO
+            _localMaster: selectedLocation || asset.ENDERECO,
+            AUDITOR_STATUS_CONFERENCIA: tag
           });
         }
       });
@@ -490,17 +503,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   };
 
   const handleCreateNew = () => {
-    if (confirm(`A etiqueta "${committedSearch}" não foi localizada.\n\nDeseja incluir como um NOVO REGISTRO manual?`)) {
-        setManualAsset({
-            ETIQUETA: committedSearch || "",
-            EMPRESA: selectedCompany || "",
-            STATUS: "ATIVO",
-            DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
-            ENDERECO: selectedLocation || "",
-            QT: 1
-        });
-        setIsManualEntryOpen(true);
-    }
+    setManualAsset({
+        ETIQUETA: committedSearch || "",
+        EMPRESA: selectedCompany || "",
+        STATUS: "ATIVO",
+        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+        AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+        TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+        QT: 1,
+        DESCRICAODOATIVO: '',
+        SERIAL: ''
+    });
+    setIsManualEntryOpen(true);
   };
 
   const saveManualEntry = () => {
@@ -522,6 +536,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
   const locationsList = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
+    uniqueEnderecos.forEach(loc => {
+      if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
+    });
+
     assets.forEach(a => {
       const statusUpper = String(a.STATUS || '').toUpperCase();
       if (statusUpper.includes('BAIXADO')) return; // Ignorar baixados no progresso por localidade
@@ -533,6 +551,26 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     });
     return stats;
   }, [assets]);
+
+  useEffect(() => {
+    if (isInventorying) {
+      searchInputRef.current?.focus();
+    }
+  }, [isInventorying]);
+
+  useEffect(() => {
+    const searchTimeout = setTimeout(() => {
+      setCommittedSearch(displayValue);
+    }, 500);
+
+    return () => clearTimeout(searchTimeout);
+  }, [displayValue]);
+
+  useEffect(() => {
+    if (filteredAssets.length === 1 && committedSearch && !filteredAssets[0]._conferido) {
+      confirmButtonRef.current?.focus();
+    }
+  }, [filteredAssets, committedSearch]);
 
   return (
     <div className="flex flex-col h-full bg-slate-950 animate-fadeIn overflow-hidden">
@@ -546,6 +584,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
           </div>
           <div className="flex-1 overflow-y-auto p-6 space-y-3 pb-32 no-scrollbar">
+            <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-[1.8rem] flex items-center justify-center space-x-3 font-black uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-lg">
+              <Plus size={20} />
+              <span>Criar Nova Localidade</span>
+            </button>
             {Object.keys(locationsList).sort().map(loc => {
               const stats = locationsList[loc];
               const progress = Math.round((stats.checked / stats.total) * 100);
@@ -581,13 +623,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'border-slate-800 text-slate-600'}`}>
                   <ListChecks size={14} />
                 </button>
-                <button onClick={() => setInputMethod('keyboard')} className={`p-2 rounded-lg border ${inputMethod === 'keyboard' ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-800 text-slate-600'}`}><Keyboard size={14} /></button>
-                <button onClick={() => { setInputMethod('scanner'); setIsScannerOpen(true); }} className={`p-2 rounded-lg border ${inputMethod === 'scanner' ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-800 text-slate-600'}`}><Zap size={14} /></button>
+                <button onClick={() => setKeyboardType(prev => prev === 'text' ? 'numeric' : 'text')} className={`p-2 rounded-lg border ${keyboardType === 'numeric' ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-800 text-slate-600'}`}><Keyboard size={14} /></button>
               </div>
             </div>
 
             <div className="relative mb-3">
-              <input type="text" value={displayValue} onChange={(e) => setDisplayValue(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && setCommittedSearch(displayValue)} className="w-full bg-slate-950 border-2 border-slate-800 px-5 py-3.5 font-black font-mono text-xl text-center rounded-2xl text-white outline-none focus:border-sky-500 transition-all" placeholder="DIGITE ETIQUETA..." />
+              <input ref={searchInputRef} type={keyboardType === 'numeric' ? 'number' : 'text'} inputMode={keyboardType} value={displayValue} onChange={(e) => setDisplayValue(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && setCommittedSearch(displayValue)} className="w-full bg-slate-950 border-2 border-slate-800 px-5 py-3.5 font-black font-mono text-xl text-center rounded-2xl text-white outline-none focus:border-sky-500 transition-all" placeholder="DIGITE ETIQUETA..." />
               {displayValue && (
                   <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-700 active:text-white"><X size={20} /></button>
               )}
@@ -622,6 +663,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   isBatchMode={isBatchMode} 
                   isSelected={selectedIds.has(String(asset.id))} 
                   onToggleSelect={toggleSelect} 
+                  confirmButtonRef={confirmButtonRef}
                 />
                 ))
             ) : committedSearch ? (
@@ -645,6 +687,71 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             )}
           </div>
         </>
+      )}
+
+      {isManualEntryOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/30 shadow-2xl p-8">
+            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Incluir Novo Item Manual</h3>
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-6">Preencha os dados do novo ativo.</p>
+            
+            <div className="space-y-4 max-h-60 overflow-y-auto pr-2 no-scrollbar">
+              <div>
+                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">DESCRIÇÃO DO ATIVO</label>
+                <input 
+                  type="text"
+                  value={manualAsset.DESCRICAODOATIVO || ''}
+                  onChange={(e) => setManualAsset(prev => ({ ...prev, DESCRICAODOATIVO: e.target.value.toUpperCase() }))}
+                  className="w-full bg-slate-950 border-2 border-slate-800 rounded-lg px-4 py-2 font-mono text-sm text-white outline-none focus:border-orange-500 transition-all mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">SERIAL</label>
+                <input 
+                  type="text"
+                  value={manualAsset.SERIAL || ''}
+                  onChange={(e) => setManualAsset(prev => ({ ...prev, SERIAL: e.target.value.toUpperCase() }))}
+                  className="w-full bg-slate-950 border-2 border-slate-800 rounded-lg px-4 py-2 font-mono text-sm text-white outline-none focus:border-orange-500 transition-all mt-1"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-3 mt-6">
+              <button onClick={() => setIsManualEntryOpen(false)} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest">Cancelar</button>
+              <button onClick={saveManualEntry} className="flex-1 py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest">Salvar Item</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+       {isNewLocationModalOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-sky-500/30 shadow-2xl p-8">
+            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Criar Nova Localidade</h3>
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-6">Insira o nome para o novo local de auditoria.</p>
+            <input 
+              type="text"
+              value={newLocationName}
+              onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
+              className="w-full bg-slate-950 border-2 border-slate-800 rounded-xl px-5 py-4 font-black text-lg text-center text-white outline-none focus:border-sky-500 transition-all mb-6"
+              placeholder="NOME DO LOCAL"
+            />
+            <div className="flex space-x-3">
+              <button onClick={() => setIsNewLocationModalOpen(false)} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest">Cancelar</button>
+              <button 
+                onClick={() => {
+                  onAddNewLocation(newLocationName);
+                  setNewLocationName('');
+                  setIsNewLocationModalOpen(false);
+                }}
+                disabled={!newLocationName.trim()}
+                className="flex-1 py-4 bg-sky-600 text-white rounded-xl font-black uppercase text-xs tracking-widest disabled:opacity-30"
+              >
+                Criar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isBatchMode && selectedIds.size > 0 && (
@@ -747,7 +854,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </div>
       )}
 
-      {isScannerOpen && <Scanner onBack={() => setIsScannerOpen(false)} onScanSuccess={(text) => { setDisplayValue(text.toUpperCase()); setCommittedSearch(text.toUpperCase()); setIsScannerOpen(false); }} />}
 
       {isManualEntryOpen && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 animate-fadeIn">
