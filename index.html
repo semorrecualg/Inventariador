@@ -11,19 +11,25 @@
     <title>GBR Asset Management - Atmospheric</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
         
         :root {
             --safe-top: env(safe-area-inset-top);
             --safe-bottom: env(safe-area-inset-bottom);
+            --bg-main: #F8FAFC;
+            --surface: #FFFFFF;
+            --ink: #0F172A;
+            --ink-muted: #64748B;
+            --accent: #0284C7;
+            --border: #E2E8F0;
         }
 
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #0a0f1e;
+            background-color: var(--bg-main);
             margin: 0;
             padding: 0;
-            color: #f1f5f9;
+            color: var(--ink);
             overflow: hidden;
             height: 100vh;
             width: 100vw;
@@ -45,16 +51,39 @@
         
         input, textarea { 
             font-size: 16px !important; 
-            background-color: #111827 !important; 
-            color: white !important; 
+            background-color: white !important; 
+            color: var(--ink) !important; 
             user-select: text !important;
             -webkit-user-select: text !important;
         }
         
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
 
-        .font-data { font-family: 'IBM+Plex+Mono', monospace; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .animate-slideUp { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+        .font-data { font-family: 'JetBrains Mono', monospace; }
+
+        .modern-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
+        }
+
+        .btn-primary {
+            background-color: var(--accent);
+            color: white;
+            border-radius: 16px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:active {
+            transform: scale(0.96);
+            opacity: 0.9;
+        }
     </style>
     <script type="importmap">
 {

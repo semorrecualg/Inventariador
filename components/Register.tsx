@@ -26,52 +26,52 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   };
 
   return (
-    <div className="p-8 h-full flex flex-col justify-center animate-fadeIn">
-      <div className="mb-10">
-        <button onClick={onGoToLogin} className="mb-6 text-gray-400 flex items-center font-black text-[10px] uppercase tracking-widest">
-          <ChevronLeft size={20} className="mr-1" /> Voltar ao Login
+    <div className="p-8 h-full flex flex-col justify-center animate-fadeIn bg-bg-main">
+      <div className="mb-12 max-w-sm mx-auto w-full">
+        <button onClick={onGoToLogin} className="mb-8 text-slate-400 flex items-center font-bold text-[10px] uppercase tracking-[0.2em] hover:text-sky-600 transition-colors">
+          <ChevronLeft size={18} className="mr-2" /> Voltar ao Login
         </button>
-        <h1 className="text-3xl font-bold text-gray-900">Novo Acesso</h1>
-        <p className="text-gray-500 mt-2">Crie suas credenciais de inventariante</p>
+        <h1 className="text-3xl font-bold text-slate-900 uppercase tracking-tight">Novo Acesso</h1>
+        <p className="text-slate-400 mt-3 text-[11px] font-bold uppercase tracking-[0.2em]">Crie suas credenciais de inventariante</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Username (Acesso)</label>
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-sm mx-auto w-full">
+        <div className="space-y-2">
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
           <input 
             type="text" 
             required
             value={username}
             onChange={(e) => setUsername(e.target.value.toUpperCase())}
-            className="w-full px-4 py-4 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 font-bold uppercase"
+            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold uppercase shadow-sm"
             placeholder="EX: JOAO.SILVA"
           />
         </div>
-        <div>
-          <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">E-mail Corporativo</label>
+        <div className="space-y-2">
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
           <input 
             type="email" 
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-4 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 font-bold"
+            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm"
             placeholder="contato@gbr.com.br"
           />
         </div>
-        <div>
-          <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Senha</label>
+        <div className="space-y-2">
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Senha</label>
           <input 
             type="password" 
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-4 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900"
+            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm"
             placeholder="••••••••"
           />
         </div>
         <button 
           type="submit"
-          className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all mt-6 uppercase tracking-widest"
+          className="w-full bg-sky-600 text-white font-bold py-5 rounded-3xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-8 uppercase tracking-[0.2em] text-sm"
         >
           Criar Meu Acesso
         </button>

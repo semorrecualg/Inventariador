@@ -35,35 +35,35 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 animate-fadeIn">
+    <div className="flex flex-col h-full bg-bg-main animate-fadeIn">
       {/* Header Fixo */}
-      <div className="p-8 pt-10 bg-white border-b border-gray-100 shadow-sm">
+      <div className="p-8 pt-12 bg-white border-b border-slate-200 shadow-sm">
         <button 
           onClick={onBack}
-          className="mb-5 flex items-center space-x-2 text-gray-400 text-[10px] font-black uppercase tracking-widest"
+          className="mb-6 flex items-center space-x-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-sky-600 transition-colors"
         >
           <ArrowLeft size={16} />
           <span>Retornar ao Painel Principal</span>
         </button>
         
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none italic">Unidade Operacional</h2>
-            <p className="text-blue-500 text-[9px] font-black uppercase tracking-[0.3em] mt-2">Selecione o Foco do Inventário Atual</p>
+            <h2 className="text-3xl font-bold text-slate-900 uppercase tracking-tight leading-none">Unidade Operacional</h2>
+            <p className="text-sky-600 text-[10px] font-bold uppercase tracking-[0.3em] mt-3">Selecione o Foco do Inventário Atual</p>
           </div>
-          <div className="w-14 h-14 bg-slate-900 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl">
-            <LayoutGrid size={28} />
+          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-xl">
+            <LayoutGrid size={32} />
           </div>
         </div>
 
         <div className="relative">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
           <input 
             type="text"
             placeholder="PESQUISAR UNIDADE PRIMÁRIA..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-            className="w-full pl-14 pr-6 py-5 bg-slate-50 rounded-[1.8rem] text-[12px] font-black uppercase border-2 border-transparent focus:border-blue-500 outline-none transition-all shadow-inner placeholder:text-gray-300"
+            className="w-full pl-16 pr-8 py-5 bg-slate-50 rounded-3xl text-[12px] font-bold uppercase border border-slate-200 focus:border-sky-500 outline-none transition-all shadow-inner placeholder:text-slate-300"
           />
         </div>
       </div>
@@ -77,46 +77,46 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
                 <button
                   key={company}
                   onClick={() => onSelect(company)}
-                  className="bg-white p-6 rounded-[2.5rem] flex items-center justify-between shadow-md border-2 border-transparent hover:border-blue-500 active:scale-[0.97] transition-all group overflow-hidden relative"
+                  className="bg-white p-6 rounded-[2.5rem] flex items-center justify-between shadow-sm border border-slate-200 hover:border-sky-300 active:scale-[0.98] transition-all group overflow-hidden relative modern-card"
                 >
-                  <div className="flex items-center space-x-5 relative z-10">
-                    <div className={`w-16 h-16 ${style} rounded-[1.8rem] flex items-center justify-center group-hover:scale-110 transition-transform shadow-inner border`}>
+                  <div className="flex items-center space-x-6 relative z-10">
+                    <div className={`w-16 h-16 ${style} rounded-2xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border`}>
                       <Icon size={32} strokeWidth={2.5} />
                     </div>
                     <div className="text-left">
-                      <h4 className="font-black text-slate-900 text-sm uppercase leading-tight tracking-tight">{company}</h4>
-                      <div className="flex items-center space-x-1.5 mt-1">
-                         <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Base Master Disponível</span>
+                      <h4 className="font-bold text-slate-900 text-base uppercase leading-tight tracking-tight">{company}</h4>
+                      <div className="flex items-center space-x-2 mt-1.5">
+                         <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-sm shadow-emerald-500/50"></div>
+                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Base Master Disponível</span>
                       </div>
                     </div>
                   </div>
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-gray-100 group-hover:text-blue-500 transition-colors relative z-10">
-                    <CheckCircle2 size={24} />
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-slate-100 group-hover:text-sky-500 transition-colors relative z-10">
+                    <CheckCircle2 size={28} />
                   </div>
                   {/* Detalhe visual de fundo */}
-                  <div className={`absolute -right-4 -bottom-4 w-24 h-24 opacity-[0.03] rotate-12 group-hover:opacity-[0.08] transition-opacity`}>
-                    <Icon size={96} />
+                  <div className={`absolute -right-6 -bottom-6 w-32 h-32 opacity-[0.02] rotate-12 group-hover:opacity-[0.05] transition-opacity`}>
+                    <Icon size={128} />
                   </div>
                 </button>
               );
             })
           ) : (
-            <div className="flex flex-col items-center justify-center py-24 opacity-10">
-              <Building2 size={80} />
-              <p className="font-black uppercase tracking-[0.5em] text-[12px] mt-6">Unidade não encontrada</p>
+            <div className="flex flex-col items-center justify-center py-24 opacity-20">
+              <Building2 size={80} className="text-slate-300" />
+              <p className="font-bold uppercase tracking-[0.5em] text-[12px] mt-8 text-slate-400">Unidade não encontrada</p>
             </div>
           )}
         </div>
       </div>
 
       {/* Info Bar Técnica */}
-      <div className="fixed bottom-0 left-0 right-0 p-5 bg-white/90 backdrop-blur-xl border-t border-gray-100 flex justify-between items-center z-50">
-         <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-            <p className="text-[9px] text-slate-900 font-black uppercase tracking-widest">Pipeline Ativo</p>
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-200 flex justify-between items-center z-50 shadow-2xl">
+         <div className="flex items-center space-x-3">
+            <div className="w-2.5 h-2.5 bg-sky-500 rounded-full shadow-sm shadow-sky-500/50"></div>
+            <p className="text-[10px] text-slate-900 font-bold uppercase tracking-widest">Pipeline Ativo</p>
          </div>
-         <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest">
+         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
            {companies.length} Entidades Identificadas
          </p>
       </div>

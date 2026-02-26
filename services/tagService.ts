@@ -9,7 +9,8 @@ import {
   AlertTriangle, 
   ExternalLink,
   Tag,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 
 export interface TagMetadata {
@@ -24,7 +25,7 @@ export interface TagMetadata {
     button: string;
     icon: string;
   };
-  icon: any;
+  icon: React.ElementType;
   priority: number;
 }
 
@@ -88,6 +89,21 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     },
     icon: PlusCircle,
     priority: 4
+  },
+  [TagInventario.RE_ADOTADO]: {
+    id: TagInventario.RE_ADOTADO,
+    label: 'RE-ADOTADO',
+    description: 'Ativo já conferido anteriormente em um local e agora encontrado em outro local.',
+    color: {
+      bg: 'bg-fuchsia-950/30',
+      text: 'text-fuchsia-400',
+      border: 'border-fuchsia-500/30',
+      badge: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30',
+      button: 'bg-fuchsia-600 hover:bg-fuchsia-700 text-white',
+      icon: 'text-fuchsia-500'
+    },
+    icon: RefreshCw,
+    priority: 5.5
   },
   [TagInventario.ADOTADO]: {
     id: TagInventario.ADOTADO,

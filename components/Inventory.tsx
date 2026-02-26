@@ -1,17 +1,16 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
 
 import { 
   ArrowLeft, 
   MapPin, 
   Check,
-  Keyboard, 
   Zap, 
   ChevronRight,
   Building2,
   Hash,
-  Briefcase,
   AlertOctagon,
   Square,
   CheckSquare,
@@ -68,6 +67,32 @@ interface AssetCardProps {
   confirmButtonRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
+const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
+  
+  return (
+    <div className="bg-white/80 backdrop-blur-xl border-t border-slate-200 p-6 grid grid-cols-3 gap-4 animate-slideUp z-[100] shadow-2xl rounded-t-[3rem]">
+      {keys.map((key) => (
+        <button
+          key={key}
+          onClick={() => {
+            if (key === 'C') onClose();
+            else if (key === '⌫') onDelete();
+            else onInput(key);
+          }}
+          className={`h-16 rounded-3xl flex items-center justify-center text-2xl font-bold transition-all active:scale-90 ${
+            key === 'C' ? 'bg-slate-100 text-slate-400' : 
+            key === '⌫' ? 'bg-slate-100 text-slate-400' : 
+            'bg-white border border-slate-200 text-slate-900 shadow-sm hover:border-sky-300'
+          }`}
+        >
+          {key}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
 }: AssetCardProps) => {
@@ -85,37 +110,23 @@ const AssetCard = React.memo(({
     const statusUpper = String(asset.STATUS || '').toUpperCase();
     const isBaixadoLogic = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
 
-    // B) BAIXADO: STATUS É PERMANENTE E IMUTÁVEL
     if (isBaixadoLogic) return TagInventario.BAIXADO;
-
-    // 5) ADOTADO EXTERNO
     if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
 
-    // Se não conferido
     if (!asset._conferido) {
-      // 7) FALTA ETIQUETAR
       const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
       if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
-      
-      // A) PENDENTE
       return TagInventario.PENDENTE;
     }
 
-    // A partir daqui, o item está _conferido = true
-    
-    // 8) ETIQUETADO
     const wasFaltaEtiquetar = normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
     if (wasFaltaEtiquetar && normalize(asset.ETIQUETA || '') !== 'ETIQUETAR') {
       return TagInventario.ETIQUETADO;
     }
 
-    // 4) NOVO ITEM
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
-
-    // 3) RE-ADOTADO
     if (asset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return TagInventario.RE_ADOTADO;
 
-    // 6) DIVERGÊNCIA: Etiqueta física difere do registro lógico
     const currentEtq = normalize(asset.ETIQUETA || "");
     const masterEtq = normalize(asset._plaquetaMaster || "");
     if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
@@ -125,40 +136,35 @@ const AssetCard = React.memo(({
     const targetLocKey = normalize(selectedLocation || "");
     const originalLocKey = normalize(asset.ENDERECO || ""); 
 
-    // 1) CONFERIDO: Localizado exatamente no ENDERECO original
-    if (originalLocKey === targetLocKey) {
-      return TagInventario.CONFERIDO;
-    }
-
-    // 2) ADOTADO: Localizado em endereço diferente do original
+    if (originalLocKey === targetLocKey) return TagInventario.CONFERIDO;
     return TagInventario.ADOTADO;
 
   }, [asset, selectedLocation, isDifferentCompany, normalize]);
 
   const getColors = (tag: TagInventario) => {
-    switch (visualStatus) {
+    switch (tag) {
       case TagInventario.BAIXADO: 
-        return { bg: 'bg-red-950/60', border: 'border-red-600 shadow-[0_0_25px_rgba(220,38,38,0.5)]', badge: 'bg-red-600 text-white animate-pulse font-black', btn: 'bg-red-600 shadow-red-900/40', icon: AlertOctagon };
+        return { bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badge: 'bg-red-500 text-white', btn: 'bg-red-600', icon: AlertOctagon };
       case TagInventario.ADOTADO_EXTERNO: 
-        return { bg: 'bg-sky-900/40', border: 'border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.4)]', badge: 'bg-sky-500 text-white font-black animate-bounce', btn: 'bg-sky-600 shadow-sky-900/40', icon: Building2 };
+        return { bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-600', icon: Building2 };
       case TagInventario.ADOTADO: 
-        return { bg: 'bg-indigo-950/20', border: 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]', badge: 'bg-indigo-600 text-white font-black', btn: 'bg-indigo-600 shadow-indigo-900/40', icon: MapPin };
+        return { bg: 'bg-indigo-50', border: 'border-indigo-100', text: 'text-indigo-700', badge: 'bg-indigo-600 text-white', btn: 'bg-indigo-600', icon: MapPin };
       case TagInventario.RE_ADOTADO: 
-        return { bg: 'bg-fuchsia-950/20', border: 'border-fuchsia-500 shadow-[0_0_15px_rgba(192,38,211,0.3)]', badge: 'bg-fuchsia-600 text-white font-black', btn: 'bg-fuchsia-600 shadow-fuchsia-900/40', icon: RefreshCw };
+        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-100', text: 'text-fuchsia-700', badge: 'bg-fuchsia-600 text-white', btn: 'bg-fuchsia-600', icon: RefreshCw };
       case TagInventario.CONFERIDO: 
-        return { bg: 'bg-emerald-950/20', border: 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]', badge: 'bg-emerald-500 text-white font-black', btn: 'bg-emerald-600 shadow-emerald-900/40', icon: Check };
+        return { bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badge: 'bg-emerald-500 text-white', btn: 'bg-emerald-600', icon: Check };
       case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-amber-950/20', border: 'border-amber-500/40', badge: 'bg-amber-600 text-white font-black', btn: 'bg-amber-600 shadow-amber-900/40', icon: Hash };
+        return { bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600', icon: Hash };
       case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-950/20', border: 'border-violet-500/40', badge: 'bg-violet-600 text-white font-black', btn: 'bg-violet-600 shadow-violet-900/40', icon: Check };
+        return { bg: 'bg-violet-50', border: 'border-violet-100', text: 'text-violet-700', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600', icon: Check };
       case TagInventario.NOVO_ITEM: 
-        return { bg: 'bg-orange-900/40', border: 'border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)]', badge: 'bg-amber-500 text-black font-black', btn: 'bg-amber-600 shadow-amber-900/40', icon: Plus };
+        return { bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-600', icon: Plus };
       case TagInventario.DIVERGENCIA:
-        return { bg: 'bg-red-900/20', border: 'border-orange-600 shadow-[0_0_15px_rgba(234,88,12,0.3)]', badge: 'bg-orange-600 text-white font-black', btn: 'bg-orange-700 shadow-orange-900/40', icon: AlertTriangle };
+        return { bg: 'bg-rose-50', border: 'border-rose-100', text: 'text-rose-700', badge: 'bg-rose-600 text-white', btn: 'bg-rose-700', icon: AlertTriangle };
       case TagInventario.PENDENTE:
-        return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-700 text-white font-black', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
+        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-100 text-slate-600', btn: 'bg-sky-600', icon: Check };
       default: 
-        return { bg: 'bg-slate-900', border: 'border-slate-800', badge: 'bg-slate-800 text-white', btn: 'bg-sky-600 shadow-sky-900/40', icon: Check };
+        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-100 text-slate-600', btn: 'bg-sky-600', icon: Check };
     }
   };
 
@@ -175,53 +181,50 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-4 p-5 border rounded-[2.2rem] relative overflow-hidden transition-all shadow-lg active:scale-[0.98] ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-emerald-500' : ''}`} 
+      className={`mb-4 p-6 border rounded-[2.5rem] relative overflow-hidden transition-all modern-card active:scale-[0.98] ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-sky-500' : ''}`} 
       onClick={() => isBatchMode ? onToggleSelect(String(asset.id)) : onSelect(asset)}
     >
-      {/* SELO SUPERIOR v24 */}
-      <div className={`absolute top-0 left-0 px-4 py-1 rounded-br-[1.2rem] text-[8px] font-black uppercase shadow-md z-10 flex items-center space-x-2 ${colors.badge}`}>
+      <div className={`absolute top-0 left-0 px-5 py-2 rounded-br-3xl text-[9px] font-bold uppercase flex items-center space-x-2 shadow-sm ${colors.badge}`}>
         {isBatchMode ? (
-          isSelected ? <CheckSquare size={10} className="text-white" /> : <Square size={10} className="text-white/50" />
+          isSelected ? <CheckSquare size={12} className="text-white" strokeWidth={3} /> : <Square size={12} className="text-white/50" />
         ) : (
-          colors.icon && <colors.icon size={8} />
+          colors.icon && <colors.icon size={12} strokeWidth={3} />
         )}
-        <span>{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {visualStatus}</span>
+        <span className="tracking-widest">{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {visualStatus}</span>
       </div>
       
-      <div className="pt-6 pr-12 flex flex-col space-y-2.5">
-        <div className="flex items-center justify-between mb-0.5">
-          <div className="flex items-center space-x-1.5">
-            <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Patrimônio:</span>
-            <span className="text-lg font-black font-data tracking-tighter text-white">
+      <div className="pt-10 pr-14 flex flex-col space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
+            <span className={`text-2xl font-bold font-mono tracking-tight ${colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
           </div>
           {isBatch && (
-            <div className="px-2 py-0.5 bg-amber-500 rounded-md flex items-center space-x-1 shadow-lg shadow-amber-900/20">
-              <Zap size={8} className="text-black fill-black" />
-              <span className="text-[7px] font-black text-black uppercase tracking-widest">LOTE</span>
+            <div className="px-3 py-1.5 bg-amber-500 rounded-xl flex items-center space-x-2 shadow-lg shadow-amber-900/20">
+              <Zap size={12} className="text-white fill-white" />
+              <span className="text-[10px] font-bold text-white uppercase tracking-widest">LOTE</span>
             </div>
           )}
         </div>
 
-        <p className="text-[10px] font-bold text-slate-200 uppercase italic leading-tight tracking-tight line-clamp-3">
+        <p className="text-[13px] font-bold text-slate-600 uppercase leading-snug tracking-tight line-clamp-3">
           {fullDescription}
         </p>
 
-        <div className="flex items-center space-x-2 pt-3">
+        <div className="flex flex-wrap gap-2 pt-2">
           {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
-            <span key={index} className={`px-2 py-1 rounded-md text-[7px] font-black uppercase ${index === 0 ? 'bg-sky-500/20 text-sky-400' : index === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-fuchsia-500/20 text-fuchsia-400'}`}>
+            <span key={index} className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-sky-100 text-sky-600 border border-sky-200' : index === 1 ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-fuchsia-100 text-fuchsia-600 border border-fuchsia-200'}`}>
               {tag}
             </span>
           ))}
         </div>
 
-
-
         {isDifferentCompany && (
-          <div className="flex items-center space-x-2 px-3 py-1 bg-sky-500/20 border border-sky-500/30 rounded-full self-start">
-            <Building2 size={8} className="text-sky-400" />
-            <span className="text-[7px] font-black text-sky-400 uppercase tracking-widest">Divergência: {asset.EMPRESA}</span>
+          <div className="flex items-center space-x-3 px-4 py-2 bg-sky-50 border border-sky-100 rounded-2xl self-start mt-2 shadow-sm">
+            <Building2 size={14} className="text-sky-600" />
+            <span className="text-[10px] font-bold text-sky-700 uppercase tracking-widest">Divergência: {asset.EMPRESA}</span>
           </div>
         )}
       </div>
@@ -230,15 +233,15 @@ const AssetCard = React.memo(({
         <button 
           ref={confirmButtonRef}
           onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
-          className={`absolute bottom-5 right-5 w-12 h-12 rounded-2xl flex items-center justify-center text-white border-b-4 border-black/20 z-20 active:scale-90 transition-all ${colors.btn}`}
+          className={`absolute bottom-6 right-6 w-16 h-16 rounded-[2rem] flex items-center justify-center text-white shadow-xl active:scale-90 transition-all ${colors.btn} shadow-sky-900/20`}
         >
-          <Check size={28} strokeWidth={4} />
+          <Check size={36} strokeWidth={3} />
         </button>
       )}
 
       {isConferido && !isBatchMode && (
-        <div className={`absolute bottom-5 right-5 w-8 h-8 ${isBaixado ? 'bg-red-600' : 'bg-emerald-500'} text-white rounded-xl flex items-center justify-center shadow-lg`}>
-          <Check size={16} strokeWidth={4} />
+        <div className={`absolute bottom-6 right-6 w-12 h-12 ${isBaixado ? 'bg-red-500 shadow-red-900/20' : 'bg-emerald-500 shadow-emerald-900/20'} text-white rounded-2xl flex items-center justify-center shadow-lg`}>
+          <Check size={24} strokeWidth={3} />
         </div>
       )}
     </div>
@@ -259,15 +262,14 @@ interface InventoryProps {
   isInventorying: boolean;
   setIsInventorying: (val: boolean) => void;
   selectedCompany: string | null;
-  uniqueEnderecos: string[];
   onAddNewLocation: (newLocation: string) => void;
+  locationsWithStats: Record<string, { total: number; checked: number }>;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, uniqueEnderecos, onAddNewLocation }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
-  const [inputMethod, setInputMethod] = useState<'keyboard'>('keyboard');
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -276,9 +278,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
-  const [keyboardType, setKeyboardType] = useState<'text' | 'numeric'>('text');
+  const [showNumericKeypad, setShowNumericKeypad] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
@@ -534,23 +537,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     onSelectAsset(newAsset);
   };
 
-  const locationsList = useMemo(() => {
-    const stats: Record<string, { total: number; checked: number }> = {};
-    uniqueEnderecos.forEach(loc => {
-      if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
-    });
-
-    assets.forEach(a => {
-      const statusUpper = String(a.STATUS || '').toUpperCase();
-      if (statusUpper.includes('BAIXADO')) return; // Ignorar baixados no progresso por localidade
-
-      const loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
-      if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
-      stats[loc].total++; 
-      if (a._conferido) stats[loc].checked++;
-    });
-    return stats;
-  }, [assets]);
+ 
 
   useEffect(() => {
     if (isInventorying) {
@@ -568,44 +555,45 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
   useEffect(() => {
     if (filteredAssets.length === 1 && committedSearch && !filteredAssets[0]._conferido) {
+      searchInputRef.current?.blur();
       confirmButtonRef.current?.focus();
     }
   }, [filteredAssets, committedSearch]);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 animate-fadeIn overflow-hidden">
+    <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
         <>
-          <div className="px-6 pt-12 pb-6 bg-slate-900 border-b border-slate-800">
-            <button onClick={onBack} className="flex items-center space-x-2 text-slate-500 font-black text-[10px] uppercase tracking-widest mb-4">
+          <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200">
+            <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] mb-4">
               <ArrowLeft size={16} /> <span>Voltar ao Menu</span>
             </button>
-            <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter">Mapeamento Geográfico</h1>
-            <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
+            <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Mapeamento Geográfico</h1>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
           </div>
-          <div className="flex-1 overflow-y-auto p-6 space-y-3 pb-32 no-scrollbar">
-            <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-[1.8rem] flex items-center justify-center space-x-3 font-black uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-lg">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
+            <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md">
               <Plus size={20} />
               <span>Criar Nova Localidade</span>
             </button>
-            {Object.keys(locationsList).sort().map(loc => {
-              const stats = locationsList[loc];
-              const progress = Math.round((stats.checked / stats.total) * 100);
+            {Object.keys(locationsWithStats).sort().map(loc => {
+              const stats = locationsWithStats[loc];
+              const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
               const isStarted = stats.checked > 0;
               
               return (
-                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-slate-900 border border-slate-800 rounded-[1.8rem] p-5 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden">
-                  <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-gradient-to-r from-emerald-600/20 to-sky-600/10' : 'bg-slate-800/0'}`} style={{ width: `${progress}%` }} />
-                  <div className="flex items-center space-x-3 relative z-10">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-900/20' : 'bg-slate-950 text-sky-500 border-slate-800'}`}>
-                      <MapPin size={18} />
+                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-slate-200 rounded-3xl p-5 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
+                  <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-emerald-50' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
+                  <div className="flex items-center space-x-4 relative z-10">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                      <MapPin size={20} />
                     </div>
                     <div className="text-left">
-                      <span className="text-[12px] font-black uppercase block leading-none text-slate-100">{loc}</span>
-                      <span className={`text-[8px] font-black uppercase mt-2 block ${isStarted ? 'text-emerald-500' : 'text-slate-600'}`}>{stats.checked} / {stats.total} ITENS ({progress}%)</span>
+                      <span className="text-[13px] font-bold uppercase block leading-none text-slate-900">{loc}</span>
+                      <span className={`text-[9px] font-bold uppercase mt-2 block ${isStarted ? 'text-emerald-600' : 'text-slate-400'}`}>{stats.checked} / {stats.total} ITENS ({progress}%)</span>
                     </div>
                   </div>
-                  <ChevronRight size={14} className="text-slate-800 relative z-10" />
+                  <ChevronRight size={16} className="text-slate-300 relative z-10" />
                 </button>
               );
             })}
@@ -613,77 +601,103 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-6 pt-10 pb-3 bg-slate-900 border-b border-slate-800 shadow-xl z-20">
-            <div className="flex items-center justify-between mb-4">
-              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); }} className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg flex items-center space-x-2 text-slate-400">
-                <MapPin size={10} className="text-emerald-500" />
-                <span className="text-[10px] font-black uppercase truncate italic">{selectedLocation}</span>
+          <div className="px-6 pt-10 pb-4 bg-white border-b border-slate-200 shadow-sm z-20">
+            <div className="flex items-center justify-between mb-5">
+              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); }} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-2 text-slate-600">
+                <MapPin size={12} className="text-sky-500" />
+                <span className="text-[10px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
               </button>
               <div className="flex space-x-2">
-                <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'border-slate-800 text-slate-600'}`}>
-                  <ListChecks size={14} />
+                <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2.5 rounded-xl border transition-all ${isBatchMode ? 'bg-sky-600 border-sky-600 text-white shadow-md' : 'border-slate-200 text-slate-400'}`}>
+                  <ListChecks size={18} />
                 </button>
-                <button onClick={() => setKeyboardType(prev => prev === 'text' ? 'numeric' : 'text')} className={`p-2 rounded-lg border ${keyboardType === 'numeric' ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-800 text-slate-600'}`}><Keyboard size={14} /></button>
               </div>
             </div>
 
-            <div className="relative mb-3">
-              <input ref={searchInputRef} type={keyboardType === 'numeric' ? 'number' : 'text'} inputMode={keyboardType} value={displayValue} onChange={(e) => setDisplayValue(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && setCommittedSearch(displayValue)} className="w-full bg-slate-950 border-2 border-slate-800 px-5 py-3.5 font-black font-mono text-xl text-center rounded-2xl text-white outline-none focus:border-sky-500 transition-all" placeholder="DIGITE ETIQUETA..." />
+            <div className="relative mb-4">
+              <input 
+                ref={searchInputRef} 
+                type="text" 
+                readOnly
+                onFocus={() => setShowNumericKeypad(true)}
+                value={displayValue} 
+                className="w-full bg-slate-50 border-2 border-slate-200 px-6 py-4 font-bold font-mono text-2xl text-center rounded-2xl text-slate-900 outline-none focus:border-sky-500 transition-all cursor-pointer" 
+                placeholder="DIGITE ETIQUETA..." 
+              />
               {displayValue && (
-                  <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-700 active:text-white"><X size={20} /></button>
+                  <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={24} /></button>
               )}
             </div>
 
-            <div className="flex space-x-2">
-              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border-2 transition-all ${activeFilter === 'pending' ? 'bg-white text-slate-950 border-white' : 'text-slate-600 border-slate-800'}`}>Pendentes</button>
-              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border-2 transition-all ${activeFilter === 'checked' ? 'bg-sky-600 text-white border-sky-600' : 'text-slate-600 border-slate-800'}`}>Inventariado</button>
+            <div className="flex space-x-3">
+              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3.5 rounded-xl text-[10px] font-bold uppercase border-2 transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
+              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3.5 rounded-xl text-[10px] font-bold uppercase border-2 transition-all ${activeFilter === 'checked' ? 'bg-sky-600 text-white border-sky-600 shadow-md' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4 no-scrollbar pb-44 bg-slate-950">
+          <div className="flex-1 overflow-hidden bg-bg-main relative">
             {isSearchResultBatch && (
-              <button 
-                onClick={handleConfirmSearchBatch} 
-                className="w-full mb-4 bg-amber-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center space-x-3 border-b-4 border-amber-800"
-              >
-                <Zap size={16} className="fill-white" />
-                <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
-              </button>
+              <div className="px-6 pt-5">
+                <button 
+                  onClick={handleConfirmSearchBatch} 
+                  className="w-full mb-4 bg-amber-500 text-white py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3 border-b-4 border-amber-700"
+                >
+                  <Zap size={16} className="fill-white" />
+                  <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
+                </button>
+              </div>
             )}
 
             {filteredAssets.length > 0 ? (
-                filteredAssets.map(asset => (
-                <AssetCard 
-                  key={asset.id} 
-                  asset={asset} 
-                  selectedLocation={selectedLocation} 
-                  onSelect={() => handleAssetClick(asset)} 
-                  onMakeDecision={handleMakeDecision} 
-                  selectedCompany={selectedCompany} 
-                  isBatchMode={isBatchMode} 
-                  isSelected={selectedIds.has(String(asset.id))} 
-                  onToggleSelect={toggleSelect} 
-                  confirmButtonRef={confirmButtonRef}
-                />
-                ))
+              <Virtuoso
+                ref={virtuosoRef}
+                style={{ height: '100%' }}
+                data={filteredAssets}
+                increaseViewportBy={300}
+                itemContent={(index, asset) => (
+                  <div className="px-6 pt-2">
+                    <AssetCard 
+                      asset={asset} 
+                      selectedLocation={selectedLocation} 
+                      onSelect={() => handleAssetClick(asset)} 
+                      onMakeDecision={handleMakeDecision} 
+                      selectedCompany={selectedCompany} 
+                      isBatchMode={isBatchMode} 
+                      isSelected={selectedIds.has(String(asset.id))} 
+                      onToggleSelect={toggleSelect} 
+                      confirmButtonRef={confirmButtonRef}
+                    />
+                  </div>
+                )}
+              />
             ) : committedSearch ? (
-                <div className="py-20 flex flex-col items-center justify-center text-center animate-fadeIn">
-                    <div className="w-20 h-20 bg-orange-900/20 border border-orange-500/30 rounded-full flex items-center justify-center text-orange-500 mb-6 shadow-2xl">
-                        <AlertTriangle size={32} />
+                <div className="py-20 flex flex-col items-center justify-center text-center animate-fadeIn px-10">
+                    <div className="w-24 h-24 bg-orange-50 border border-orange-100 rounded-full flex items-center justify-center text-orange-500 mb-6 shadow-sm">
+                        <AlertTriangle size={40} />
                     </div>
-                    <h3 className="text-lg font-black text-white uppercase tracking-tighter italic">Nenhum Registro Localizado</h3>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2 max-w-[200px]">Etiqueta &quot;{committedSearch}&quot; não consta na malha GBR v24 (Ativa ou Baixada)</p>
+                    <h3 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Nenhum Registro</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3 leading-relaxed">Etiqueta &quot;{committedSearch}&quot; não localizada na base v24</p>
                     
-                    <button onClick={handleCreateNew} className="mt-10 px-8 py-5 bg-orange-600 text-white rounded-[1.8rem] flex items-center space-x-3 shadow-2xl active:scale-95 transition-all">
-                        <FilePlus2 size={20} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Incluir como Novo Item</span>
+                    <button onClick={handleCreateNew} className="mt-10 w-full py-5 bg-orange-500 text-white rounded-2xl flex items-center justify-center space-x-3 shadow-lg active:scale-95 transition-all font-bold uppercase text-[10px] tracking-widest">
+                        <FilePlus2 size={18} />
+                        <span>Incluir Manual</span>
                     </button>
                 </div>
             ) : (
-                <div className="py-24 flex flex-col items-center justify-center opacity-20 text-center">
-                    <Search size={48} className="mb-4 text-slate-500" />
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Aguardando Auditoria</p>
+                <div className="py-24 flex flex-col items-center justify-center opacity-30 text-center">
+                    <Search size={64} className="mb-6 text-slate-300" />
+                    <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-slate-400">Aguardando Auditoria</p>
                 </div>
+            )}
+
+            {showNumericKeypad && (
+              <div className="absolute inset-x-0 bottom-0 z-[100]">
+                <NumericKeypad 
+                  onInput={(val) => setDisplayValue(prev => prev + val)}
+                  onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
+                  onClose={() => setShowNumericKeypad(false)}
+                />
+              </div>
             )}
           </div>
         </>

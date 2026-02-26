@@ -30,14 +30,14 @@ const ChangePassword: React.FC<ChangePasswordProps> = ({ onPasswordChanged }) =>
   };
 
   return (
-    <div className="flex flex-col h-full bg-white p-8 animate-fadeIn">
-      <div className="flex-1 flex flex-col justify-center">
-        <div className="text-center mb-10">
-          <div className="w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center text-emerald-600 mx-auto mb-6 shadow-inner">
-            <ShieldCheck size={40} />
+    <div className="flex flex-col h-full bg-bg-main p-8 animate-fadeIn">
+      <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
+        <div className="text-center mb-12">
+          <div className="w-24 h-24 bg-emerald-50 rounded-3xl flex items-center justify-center text-emerald-600 mx-auto mb-8 shadow-sm border border-emerald-100">
+            <ShieldCheck size={48} />
           </div>
-          <h2 className="text-2xl font-black text-gray-900 uppercase">Segurança Ativa</h2>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2 leading-relaxed">
+          <h2 className="text-3xl font-bold text-slate-900 uppercase tracking-tight">Segurança Ativa</h2>
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-4 leading-relaxed">
             Identificamos que este é seu primeiro acesso. <br/> 
             Por favor, defina sua senha de uso diário.
           </p>
@@ -45,62 +45,62 @@ const ChangePassword: React.FC<ChangePasswordProps> = ({ onPasswordChanged }) =>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-xl text-[10px] font-black uppercase tracking-widest">
+            <div className="bg-red-50 text-red-600 p-5 rounded-2xl text-[10px] font-bold uppercase tracking-widest border border-red-100 shadow-sm">
               {error}
             </div>
           )}
 
-          <div className="space-y-4">
-            <div className="relative">
-              <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-2">Nova Senha</label>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Nova Senha</label>
               <div className="relative">
                 <input 
                   type={showPass ? "text" : "password"}
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full px-12 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                  className="w-full px-14 py-5 bg-white rounded-3xl border border-slate-200 focus:border-sky-500 outline-none font-bold text-sm shadow-sm transition-all"
                   placeholder="SENHA FORTE"
                 />
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
                 <button 
                   type="button"
                   onClick={() => setShowPass(!showPass)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-300 hover:text-blue-500"
+                  className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-sky-600 transition-colors"
                 >
-                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {showPass ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>
             </div>
 
-            <div className="relative">
-              <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-2">Confirmar Senha</label>
+            <div className="space-y-2">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Confirmar Senha</label>
               <div className="relative">
                 <input 
                   type={showPass ? "text" : "password"}
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full px-12 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                  className="w-full px-14 py-5 bg-white rounded-3xl border border-slate-200 focus:border-sky-500 outline-none font-bold text-sm shadow-sm transition-all"
                   placeholder="REPITA A SENHA"
                 />
-                <CheckCircle2 className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                <CheckCircle2 className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
               </div>
             </div>
           </div>
 
           <button 
             type="submit"
-            className="w-full py-5 bg-emerald-600 text-white rounded-[1.8rem] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 active:scale-95 transition-all mt-6"
+            className="w-full py-5 bg-emerald-600 text-white rounded-[2rem] font-bold uppercase tracking-widest shadow-lg shadow-emerald-900/10 active:scale-95 transition-all mt-8 text-sm"
           >
             Atualizar e Entrar
           </button>
         </form>
       </div>
 
-      <div className="text-center">
-        <div className="inline-flex items-center space-x-2 text-[9px] font-black text-gray-300 uppercase tracking-widest">
-          <Key size={12} />
+      <div className="text-center mt-8">
+        <div className="inline-flex items-center space-x-3 text-[10px] font-bold text-slate-300 uppercase tracking-[0.4em]">
+          <Key size={14} />
           <span>Troca Obrigatória • V1.0 Sec</span>
         </div>
       </div>

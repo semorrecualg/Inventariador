@@ -102,29 +102,40 @@ const App: React.FC = () => {
       .trim();
   }, []);
 
-  const [allLocations, setAllLocations] = useState<string[]>([]);
+  const [manualLocations, setManualLocations] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_manual_locations');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
 
-  useEffect(() => {
-    const locationsFromAssets = new Set<string>();
+  const { locationsWithStats, allLocations } = useMemo(() => {
+    const stats: Record<string, { total: number; checked: number }> = {};
+    const locationsSet = new Set<string>(manualLocations);
+    
+    // Filtramos os ativos pela empresa selecionada para as estatísticas serem relevantes
+    const currentCompKey = selectedCompany ? normalizeKey(selectedCompany) : '';
+    
     inventory.assets.forEach(a => {
-      if (a.ENDERECO) locationsFromAssets.add(String(a.ENDERECO).trim().toUpperCase());
+      const assetCompKey = normalizeKey(a.EMPRESA || '');
+      if (currentCompKey && assetCompKey !== currentCompKey) return;
+
+      const loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
+      if (loc) locationsSet.add(loc);
+
+      const statusUpper = String(a.STATUS || '').toUpperCase();
+      if (statusUpper.includes('BAIXADO')) return;
+
+      if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
+      stats[loc].total++;
+      if (a._conferido) stats[loc].checked++;
     });
 
-    setAllLocations(prevLocations => {
-      const combined = new Set([...prevLocations, ...locationsFromAssets]);
-      const sorted = Array.from(combined).sort();
-      if (JSON.stringify(sorted) === JSON.stringify(prevLocations)) {
-        return prevLocations;
-      }
-      return sorted;
-    });
-  }, [inventory.assets]);
-
-  const uniqueEnderecos = useMemo(() => {
-    const set = new Set<string>();
-    inventory.assets.forEach(a => { if (a.ENDERECO) set.add(String(a.ENDERECO).trim().toUpperCase()); });
-    return Array.from(set).sort();
-  }, [inventory.assets]);
+    return { 
+      locationsWithStats: stats, 
+      allLocations: Array.from(locationsSet).sort() 
+    };
+  }, [inventory.assets, selectedCompany, normalizeKey, manualLocations]);
 
   const uniqueCentrosDeCusto = useMemo(() => {
     const set = new Set<string>();
@@ -201,8 +212,14 @@ const App: React.FC = () => {
   };
 
   const popScreen = () => {
-    setSelectedAssets([]);
-    setHistory(prev => prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU]);
+    setHistory(prev => {
+      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
+      const newScreen = newHistory[newHistory.length - 1];
+      if (newScreen !== AppScreen.ASSET_DETAIL) {
+        setSelectedAssets([]);
+      }
+      return newHistory;
+    });
   };
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
@@ -211,7 +228,7 @@ const App: React.FC = () => {
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
       const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
       
-      const updates = { ...updatedAsset };
+      const updates = { ...updatedAsset } as Asset;
       updates._conferido = true;
       
       const alteredFields = new Set<string>(updates._camposAlterados || []);
@@ -241,7 +258,11 @@ const App: React.FC = () => {
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
     if (upperCaseLocation && !allLocations.includes(upperCaseLocation)) {
-      setAllLocations(prev => [...prev, upperCaseLocation].sort());
+      setManualLocations(prev => {
+        const next = [...prev, upperCaseLocation];
+        localStorage.setItem('app_manual_locations', JSON.stringify(next));
+        return next;
+      });
     }
   };
 
@@ -314,16 +335,18 @@ const App: React.FC = () => {
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
 
   return (
-    <div className="w-full h-screen bg-slate-950 overflow-hidden relative font-sans max-w-full flex flex-col">
+    <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
       {showCompanyHeader && (
-        <div className="bg-sky-600 px-6 py-2.5 flex items-center space-x-3 shadow-lg z-[200]">
-           <Building2 size={16} className="text-white shrink-0" />
-           <div className="flex-1 min-w-0">
-             <p className="text-[7px] font-black text-white/60 uppercase tracking-widest leading-none mb-0.5">Empresa em Auditoria</p>
-             <h2 className="text-[11px] font-black text-white uppercase truncate tracking-tight">{selectedCompany}</h2>
+        <div className="bg-white px-6 py-4 flex items-center space-x-5 border-b border-slate-200 shadow-sm z-[200]">
+           <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-600 shrink-0 shadow-sm">
+             <Building2 size={24} />
            </div>
-           <div className="px-2 py-0.5 rounded bg-white/20 border border-white/20">
-             <span className="text-[7px] font-black text-white uppercase tracking-widest">v24.50 PRO</span>
+           <div className="flex-1 min-w-0">
+             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] leading-none mb-2">Empresa em Auditoria</p>
+             <h2 className="text-[15px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
+           </div>
+           <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 shadow-sm">
+             <span className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.2em]">v24.50 PRO</span>
            </div>
         </div>
       )}
@@ -334,10 +357,10 @@ const App: React.FC = () => {
         {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
         {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
         {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
-        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} uniqueEnderecos={allLocations} onAddNewLocation={addNewLocation} />}
+        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} />}
         {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
         {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} />}
-        {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={uniqueEnderecos} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+        {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
         {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
         {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
         {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}

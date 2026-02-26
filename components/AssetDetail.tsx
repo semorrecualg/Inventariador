@@ -19,9 +19,7 @@ import {
   Info,
   Briefcase,
   Wallet,
-  QrCode,
-  Printer,
-  Download
+  QrCode
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -162,15 +160,19 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
 
   return (
-    <div className="flex flex-col h-full bg-[#f4f4f5] animate-fadeIn overflow-hidden">
+    <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {/* KARDEX HEADER */}
-      <div className={`px-6 pt-10 pb-6 ${headerBg} text-white relative shadow-xl z-20`}>
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="p-2 bg-white/10 rounded-lg active:scale-90 transition-all"><X size={18} /></button>
-          <div className="flex items-center space-x-2">
-            <button onClick={() => setIsQrModalOpen(true)} className="p-2 bg-white/10 rounded-lg active:scale-90 transition-all"><QrCode size={18} /></button>
-            <div className="bg-white/10 px-3 py-1.5 rounded-lg border border-white/10">
-              <span className="text-[8px] font-black uppercase tracking-widest text-white/90">
+      <div className={`px-6 pt-12 pb-10 ${headerBg} text-white relative shadow-lg z-20`}>
+        <div className="flex items-center justify-between mb-8">
+          <button onClick={onBack} className="p-3 bg-white/10 border border-white/20 rounded-2xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+            <X size={20} />
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => setIsQrModalOpen(true)} className="p-3 bg-white/10 border border-white/20 rounded-2xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+              <QrCode size={20} />
+            </button>
+            <div className="bg-white/10 px-5 py-2.5 rounded-2xl border border-white/20 backdrop-blur-md">
+              <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/90">
                 {isBatch ? 'LOTE' : 'KARDEK v24.50'}
               </span>
             </div>
@@ -178,43 +180,46 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
         </div>
         
         <div className="flex flex-col">
-          <h2 className="text-lg font-black uppercase tracking-tight leading-tight mb-4 text-white line-clamp-2">
+          <h2 className="text-2xl font-bold uppercase tracking-tight leading-tight mb-8 text-white line-clamp-2">
             {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
           </h2>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-sm">
-              <p className="text-[7px] font-black text-white/50 uppercase tracking-widest mb-1">PLAQUETA</p>
-              <p className="text-xl font-black font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-black/20 border border-white/10 p-5 rounded-3xl backdrop-blur-xl shadow-inner">
+              <p className="text-[9px] font-bold text-white/50 uppercase tracking-[0.3em] mb-3">PLAQUETA</p>
+              <p className="text-3xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
             </div>
-            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-sm flex flex-col justify-center">
-              <p className="text-[7px] font-black text-white/50 uppercase tracking-widest mb-1">AUDITORIA</p>
-              <span className="text-[9px] font-black uppercase text-sky-400">
-                {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
-              </span>
+            <div className="bg-black/20 border border-white/10 p-5 rounded-3xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
+              <p className="text-[9px] font-bold text-white/50 uppercase tracking-[0.3em] mb-3">AUDITORIA</p>
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse shadow-sm shadow-sky-400/50" />
+                <span className="text-[11px] font-bold uppercase text-sky-300 tracking-widest">
+                  {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* KARDEX BODY */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar pb-32 bg-[#f4f4f5]">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar pb-32 bg-bg-main">
           {isBatch && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center">
-                  <AlertCircle size={12} className="mr-1 text-amber-500" /> REGISTROS NO LOTE
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm modern-card">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center">
+                  <AlertCircle size={14} className="mr-2 text-amber-500" /> REGISTROS NO LOTE
                 </p>
-                <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-3 py-1 rounded-full">{assets.length} ITENS</span>
               </div>
-              <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+              <div className="space-y-3 max-h-48 overflow-y-auto no-scrollbar pr-1">
                 {assets.map((a, idx) => (
-                  <div key={a.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex items-center justify-between">
+                  <div key={a.id} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex items-center justify-between shadow-sm">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-slate-800 truncate uppercase">{a.DESCRICAODOATIVO}</p>
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
+                      <p className="text-[11px] font-bold text-slate-800 truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
+                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
                     </div>
-                    <span className="text-[8px] font-black text-slate-300 font-mono ml-2">#{idx + 1}</span>
+                    <span className="text-[10px] font-bold text-slate-300 font-mono ml-3">#{String(idx + 1).padStart(2, '0')}</span>
                   </div>
                 ))}
               </div>
@@ -222,9 +227,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
           )}
 
           {fieldGroups.map((group) => (
-            <div key={group.title} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">{group.title}</span>
+            <div key={group.title} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm modern-card">
+              <div className="bg-slate-50 px-6 py-3 border-b border-slate-100">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em]">{group.title}</span>
               </div>
               
               <div className="divide-y divide-slate-100">
@@ -243,39 +248,41 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                     <div 
                       key={key} 
                       onClick={(e) => { e.stopPropagation(); if (canEdit) { setEditingField(key); setEditValue(String(rawVal || '')); } }} 
-                      className={`px-4 py-3 flex flex-col transition-all active:bg-slate-50 ${editingField === key ? 'bg-sky-50 ring-1 ring-inset ring-sky-500' : ''}`}
+                      className={`px-6 py-5 flex flex-col transition-all active:bg-slate-50 ${editingField === key ? 'bg-sky-50 ring-1 ring-inset ring-sky-500' : ''}`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center space-x-1.5">
-                          {Icon && <Icon size={10} className="text-slate-400" />}
-                          <label className="text-[7px] font-black uppercase tracking-widest text-slate-400">{label}</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          {Icon && <Icon size={12} className="text-slate-400" />}
+                          <label className="text-[8px] font-bold uppercase tracking-[0.2em] text-slate-400">{label}</label>
                         </div>
-                        {canEdit && <Edit2 size={10} className="text-sky-500" />}
+                        {canEdit && <Edit2 size={12} className="text-sky-500" />}
                       </div>
                       
                       {editingField === key ? (
-                        <div className="mt-2 flex items-center space-x-2">
+                        <div className="mt-3 flex items-center space-x-3">
                           <input 
                             autoFocus 
                             value={editValue} 
                             onChange={(e) => setEditValue(e.target.value)} 
                             onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
-                            className="flex-1 bg-white p-2 border border-sky-300 rounded-lg text-[11px] font-bold uppercase text-slate-900 outline-none shadow-inner" 
+                            className="flex-1 bg-white px-4 py-3 border border-sky-300 rounded-xl text-sm font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-sky-500/20" 
                           />
-                          <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-sky-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-95"><Check size={18}/></button>
+                          <button onClick={() => applyFieldEdit()} className="w-12 h-12 bg-sky-600 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-all">
+                            <Check size={24}/>
+                          </button>
                         </div>
                       ) : (
-                        <p className={`text-[12px] font-bold uppercase leading-tight font-mono ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
+                        <p className={`text-sm font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
                           {displayVal}
                         </p>
                       )}
                       
                       {editingField === key && suggestions.length > 0 && (
-                        <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                          <p className="text-[6px] font-black text-slate-400 uppercase tracking-widest px-1 mb-1">SUGESTÕES</p>
-                          <div className="flex flex-wrap gap-1">
+                        <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl shadow-inner">
+                          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] px-1 mb-2">SUGESTÕES</p>
+                          <div className="flex flex-wrap gap-2">
                             {suggestions.map(s => (
-                              <button key={s} onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} className="px-2 py-1 rounded-md bg-white border border-slate-200 text-[8px] font-bold text-sky-600 uppercase active:bg-sky-600 active:text-white">
+                              <button key={s} onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-bold text-sky-600 uppercase active:bg-sky-600 active:text-white transition-all shadow-sm">
                                 {s}
                               </button>
                             ))}
@@ -291,29 +298,29 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
       
       {/* KARDEX FOOTER */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-slate-200 flex items-center justify-between z-30 shadow-[0_-8px_30px_rgba(0,0,0,0.08)]">
          <div className="flex flex-col">
-           <span className="text-[7px] font-black text-slate-400 uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-           <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">v24.50 KARDEK</span>
+           <span className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.4em]">AUDIT AUTHORITY</span>
+           <span className="text-[10px] font-bold text-slate-900 uppercase tracking-[0.2em] mt-1">v24.50 KARDEK</span>
          </div>
-         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600 shadow-amber-900/20' : 'bg-sky-600 shadow-sky-900/20'} text-white px-8 py-3.5 rounded-xl text-[10px] font-black uppercase shadow-lg active:scale-95 flex items-center space-x-2 transition-all`}>
-            <Save size={16} />
+         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600 shadow-amber-900/20' : 'bg-sky-600 shadow-sky-900/20'} text-white px-10 py-4 rounded-2xl text-[11px] font-bold uppercase shadow-xl active:scale-95 flex items-center space-x-3 transition-all tracking-widest`}>
+            <Save size={18} />
             <span>{isBatch ? 'EFETIVAR LOTE' : 'EFETIVAR AUDITORIA'}</span>
          </button>
       </div>
 
       {isQrModalOpen && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-slate-200 shadow-2xl p-8 flex flex-col items-center text-center" onClick={(e) => e.stopPropagation()}>
-            <p className="text-lg font-black text-slate-900 uppercase tracking-tighter font-mono mb-4">{workingAsset.EMPRESA}</p>
-            <div className="bg-white p-4 border-4 border-slate-900 rounded-2xl shadow-inner mb-6">
-              <QRCodeSVG value={qrCodeData} size={256} />
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[3rem] border border-slate-200 shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
+            <p className="text-xl font-bold text-slate-900 uppercase tracking-tight font-mono mb-6">{workingAsset.EMPRESA}</p>
+            <div className="bg-white p-6 border-2 border-slate-900 rounded-3xl shadow-inner mb-8">
+              <QRCodeSVG value={qrCodeData} size={240} />
             </div>
-            <div className="text-center">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">NÚMERO DO ATIVO:</p>
-              <p className="bg-slate-900 text-white px-6 py-3 rounded-xl text-2xl font-black uppercase tracking-tighter font-mono inline-block">{workingAsset.ETIQUETA}</p>
+            <div className="text-center w-full">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
+              <p className="bg-slate-900 text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.ETIQUETA}</p>
             </div>
-            <button onClick={() => setIsQrModalOpen(false)} className="mt-8 w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">Fechar</button>
+            <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-slate-100 text-slate-900 rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
           </div>
         </div>
       )}
