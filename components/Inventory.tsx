@@ -285,6 +285,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [isScannerStarting, setIsScannerStarting] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -309,6 +310,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, []);
 
   const handleScannedData = useCallback((data: string, mode: 'BARCODE' | 'QR') => {
+    console.log(`[Scanner] Dados capturados: ${data}`);
     let processedData = data;
     if (mode === 'QR') {
       try {
@@ -331,10 +333,32 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       setScannedAsset(asset);
       stopScanner();
       setEntryMode('LIST');
+      // Feedback tátil se disponível
+      if ('vibrate' in navigator) navigator.vibrate(100);
     } else {
       alert(`Ativo ${processedData} não encontrado no banco de dados.`);
     }
   }, [allAssets, normalizeKey, stopScanner]);
+
+  const handleNativePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingImage(true);
+    const html5QrCode = new Html5Qrcode(scannerContainerId);
+    
+    try {
+      const decodedText = await html5QrCode.scanFile(file, true);
+      handleScannedData(decodedText, entryMode === 'QR' ? 'QR' : 'BARCODE');
+    } catch (err) {
+      console.error("Erro ao processar foto:", err);
+      alert("Não foi possível identificar um código na foto. Tente tirar uma foto mais nítida e de perto.");
+    } finally {
+      setIsProcessingImage(false);
+      // Limpa o input para permitir a mesma foto novamente se necessário
+      event.target.value = '';
+    }
+  };
 
   const startScanner = useCallback(async (mode: 'BARCODE' | 'QR') => {
     console.log(`[Scanner] Iniciando modo: ${mode}`);
@@ -353,19 +377,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     }
 
     try {
-      // 1. Tenta obter as câmeras disponíveis para garantir permissão e escolher a melhor
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0) {
-        throw new Error("Nenhuma câmera encontrada.");
-      }
-
-      // Tenta encontrar a câmera traseira (back/environment)
-      const backCamera = devices.find(device => 
-        device.label.toLowerCase().includes('back') || 
-        device.label.toLowerCase().includes('traseira') ||
-        device.label.toLowerCase().includes('rear')
-      ) || devices[0];
-
+      // Tenta iniciar diretamente com facingMode para ser mais rápido e evitar hangs no getCameras
       const scanner = new Html5Qrcode(scannerContainerId, { 
         formatsToSupport: [
           Html5QrcodeSupportedFormats.QR_CODE,
@@ -378,76 +390,49 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       });
       scannerRef.current = scanner;
 
-      // 2. Configurações de ALTA PERFORMANCE
       const config = {
-        fps: 25, // Aumentado para maior fluidez
+        fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           let width, height;
           if (mode === 'BARCODE') {
-            // Caixa larga e fina para códigos de barras lineares
             width = Math.floor(viewfinderWidth * 0.85);
-            height = Math.floor(viewfinderHeight * 0.25);
+            height = Math.floor(viewfinderHeight * 0.3);
           } else {
-            // Caixa quadrada para QR Code
-            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
+            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.7;
             width = Math.floor(size);
             height = Math.floor(size);
           }
-          // Garante o tamanho mínimo de 50px exigido pela biblioteca
-          return { 
-            width: Math.max(width, 50), 
-            height: Math.max(height, 50) 
-          };
+          return { width: Math.max(width, 50), height: Math.max(height, 50) };
         },
-        // Solicita resolução mais alta para ler etiquetas pequenas
+        aspectRatio: 1.777778, // 16:9
         videoConstraints: {
           facingMode: "environment",
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true // Usa API nativa do Chrome/Android se disponível (MUITO mais rápido)
+          focusMode: "continuous",
+          whiteBalanceMode: "continuous"
         }
       };
 
-      await scanner.start(
-        backCamera.id,
-        config,
-        (decodedText, decodedResult) => {
-          const detectedFormat = decodedResult.result.format?.format;
-          
-          // Lógica de troca de modo inteligente
-          if (mode === 'BARCODE' && detectedFormat === Html5QrcodeSupportedFormats.QR_CODE) {
-            if (confirm("QR Code detectado. Alternar modo?")) {
-              setEntryMode('QR');
-              return;
-            }
+      await scanner.start({ facingMode: "environment" }, config, (decodedText, decodedResult) => {
+        const detectedFormat = decodedResult.result.format?.format;
+        if (mode === 'BARCODE' && detectedFormat === Html5QrcodeSupportedFormats.QR_CODE) {
+          if (confirm("QR Code detectado. Alternar modo?")) {
+            setEntryMode('QR');
+            return;
           }
-          
-          if (mode === 'QR' && detectedFormat !== Html5QrcodeSupportedFormats.QR_CODE) {
-            if (confirm("Código de barras detectado. Alternar modo?")) {
-              setEntryMode('BARCODE');
-              return;
-            }
+        }
+        if (mode === 'QR' && detectedFormat !== Html5QrcodeSupportedFormats.QR_CODE) {
+          if (confirm("Código de barras detectado. Alternar modo?")) {
+            setEntryMode('BARCODE');
+            return;
           }
+        }
+        handleScannedData(decodedText, mode);
+      }, () => {});
 
-          handleScannedData(decodedText, mode);
-        },
-        () => {} // Ignora erros de frame (comum)
-      );
-
-      console.log("[Scanner] Iniciado com sucesso");
       setIsScannerStarting(false);
     } catch (err: unknown) {
-      console.error("[Scanner] Erro fatal:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("NotAllowedError") || msg.includes("Permission denied")) {
-        setScannerError("Permissão de câmera negada pelo navegador.");
-      } else if (msg.includes("NotFound") || msg.includes("Nenhuma câmera")) {
-        setScannerError("Câmera não encontrada no dispositivo.");
-      } else {
-        setScannerError("Falha ao acessar câmera. Tente recarregar a página.");
-      }
+      console.error("[Scanner] Erro ao iniciar:", err);
+      setScannerError("Câmera indisponível. Use a opção 'Tirar Foto' abaixo.");
       setIsScannerStarting(false);
     }
   }, [stopScanner, handleScannedData]);
@@ -936,17 +921,41 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 </div>
 
                 {isScannerStarting && (
-                  <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center space-y-3 z-30">
-                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">Iniciando Câmera...</span>
+                  <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center space-y-4 z-30 p-6 text-center">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <div className="space-y-2">
+                      <span className="block text-[10px] font-bold text-white uppercase tracking-widest">Iniciando Câmera...</span>
+                      <p className="text-[9px] text-slate-400 leading-relaxed">Se demorar, você pode usar a câmera nativa do Android clicando no botão abaixo.</p>
+                    </div>
+                    
+                    <label className="mt-4 px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest border border-white/20 cursor-pointer transition-all active:scale-95">
+                      <input type="file" accept="image/*" capture="environment" onChange={handleNativePhoto} className="hidden" />
+                      Usar Câmera Nativa (Foto)
+                    </label>
+                  </div>
+                )}
+
+                {isProcessingImage && (
+                  <div className="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center space-y-3 z-50 backdrop-blur-sm">
+                    <div className="w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">Processando Imagem...</span>
                   </div>
                 )}
 
                 {scannerError && (
-                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-6 text-center z-40">
-                    <AlertTriangle className="text-amber-500 mb-2" size={32} />
-                    <p className="text-[10px] font-bold text-white uppercase tracking-widest">{scannerError}</p>
-                    <button onClick={() => startScanner(entryMode as 'BARCODE' | 'QR')} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold uppercase tracking-widest">Tentar Novamente</button>
+                  <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center z-40 space-y-4">
+                    <AlertTriangle className="text-amber-500" size={32} />
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-white uppercase tracking-widest">{scannerError}</p>
+                      <p className="text-[9px] text-slate-400">Tente recarregar ou use a foto direta.</p>
+                    </div>
+                    <div className="flex flex-col w-full space-y-2">
+                      <button onClick={() => startScanner(entryMode as 'BARCODE' | 'QR')} className="w-full py-3 bg-blue-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest">Tentar Novamente</button>
+                      <label className="w-full py-3 bg-slate-800 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest border border-slate-700 text-center cursor-pointer">
+                        <input type="file" accept="image/*" capture="environment" onChange={handleNativePhoto} className="hidden" />
+                        Tirar Foto da Etiqueta
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>
