@@ -395,6 +395,24 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, [stopScanner, handleScannedData]);
 
   useEffect(() => {
+    if (entryMode === 'MANUAL') {
+      setShowNumericKeypad(true);
+    }
+  }, [entryMode]);
+
+  useEffect(() => {
+    if (entryMode === 'BARCODE' || entryMode === 'QR') {
+      // Pequeno delay para garantir que o div scanner-container foi renderizado
+      const timer = setTimeout(() => {
+        startScanner(entryMode as 'BARCODE' | 'QR');
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      stopScanner();
+    }
+  }, [entryMode, startScanner, stopScanner]);
+
+  useEffect(() => {
     return () => {
       if (scannerRef.current) {
         scannerRef.current.stop().catch(console.error);
@@ -406,12 +424,23 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     if (scannerRef.current && scannerRef.current.isScanning) {
       try {
         const newState = !isFlashOn;
+        // Tenta aplicar a restrição de lanterna (torch)
+        // Alguns navegadores/dispositivos lançarão um erro se não for suportado
         await scannerRef.current.applyVideoConstraints({
           advanced: [{ torch: newState } as MediaTrackConstraintSet]
         } as MediaTrackConstraints);
         setIsFlashOn(newState);
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Erro ao alternar flash:", err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorName = err instanceof Error ? err.name : "";
+        
+        // Se o erro for relacionado a restrições não suportadas
+        if (errorName === 'OverconstrainedError' || errorMessage.includes('constraint') || errorMessage.includes('torch')) {
+          alert("Lanterna não suportada ou não pôde ser ativada neste dispositivo.");
+        } else {
+          alert("Erro ao tentar usar a lanterna.");
+        }
       }
     }
   };
@@ -779,21 +808,21 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             {entryMode === 'MENU' && (
               <div className="grid grid-cols-3 gap-2 mb-3 animate-fadeIn">
                 <button 
-                  onClick={() => { setEntryMode('MANUAL'); setShowNumericKeypad(true); }}
+                  onClick={() => setEntryMode('MANUAL')}
                   className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
                 >
                   <Keyboard size={18} className="text-blue-600" />
                   <span className="text-[8px] font-bold uppercase tracking-widest text-slate-600">Digitação</span>
                 </button>
                 <button 
-                  onClick={() => { setEntryMode('BARCODE'); startScanner('BARCODE'); }}
+                  onClick={() => setEntryMode('BARCODE')}
                   className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
                 >
                   <Camera size={18} className="text-blue-600" />
                   <span className="text-[8px] font-bold uppercase tracking-widest text-slate-600">Barras 125</span>
                 </button>
                 <button 
-                  onClick={() => { setEntryMode('QR'); startScanner('QR'); }}
+                  onClick={() => setEntryMode('QR')}
                   className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
                 >
                   <QrCode size={18} className="text-blue-600" />
