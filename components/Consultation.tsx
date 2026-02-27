@@ -1,6 +1,5 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
-import { Virtuoso } from 'react-virtuoso';
+import React, { useState, useMemo } from 'react';
 import { Asset } from '../types';
 import { 
   Search, 
@@ -63,7 +62,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
   
   return (
-    <div className="bg-white border-t border-slate-200 p-6 grid grid-cols-3 gap-4 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] rounded-t-[3rem]">
+    <div className="bg-white border-t border-slate-200 p-4 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
       {keys.map((key) => (
         <button
           key={key}
@@ -72,10 +71,10 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
             else if (key === '⌫') onDelete();
             else onInput(key);
           }}
-          className={`h-16 rounded-3xl flex items-center justify-center text-2xl font-bold transition-all active:scale-90 ${
+          className={`h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all active:scale-90 ${
             key === 'C' ? 'bg-slate-100 text-slate-400' : 
             key === '⌫' ? 'bg-slate-100 text-slate-400' : 
-            'bg-white border border-slate-200 text-slate-900 shadow-sm hover:border-sky-300'
+            'bg-white border border-slate-200 text-slate-900 shadow-sm'
           }`}
         >
           {key}
@@ -83,9 +82,9 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
       ))}
       <button 
         onClick={onSearch}
-        className="col-span-3 h-16 bg-sky-600 text-white rounded-3xl flex items-center justify-center text-lg font-bold uppercase tracking-widest shadow-lg shadow-sky-900/20 active:scale-95 transition-all mt-2"
+        className="col-span-3 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center text-sm font-bold uppercase tracking-widest shadow-md active:scale-95 transition-all mt-1"
       >
-        <Search size={20} className="mr-3" /> Confirmar Busca
+        <Search size={16} className="mr-2" /> Confirmar Busca
       </button>
     </div>
   );
@@ -111,7 +110,6 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
   const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   const [activeField, setActiveField] = useState<keyof SearchFilters | null>(null);
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
-  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(true);
   
   // Selection list state
   const [selectionModal, setSelectionModal] = useState<{ field: 'CONTACONTABIL' | 'CENTRODECUSTO' | null, searchTerm: string }>({ field: null, searchTerm: '' });
@@ -170,14 +168,14 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
       }
 
       return true;
-    }).sort((a, b) => String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true }));
+    }).sort((a, b) => String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true }))
+      .slice(0, 100);
   }, [assets, committedFilters]);
 
   const triggerSearch = () => {
     setCommittedFilters({ ...filters });
     setShowNumericKeypad(false);
     setActiveField(null);
-    setIsFilterDrawerOpen(false);
   };
 
   const handleInputChange = (field: keyof SearchFilters, value: string) => {
@@ -210,10 +208,10 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
     const isSelectable = field === 'CONTACONTABIL' || field === 'CENTRODECUSTO';
     
     return (
-      <div className="space-y-2">
-        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">{label}</label>
+      <div className="space-y-1.5">
+        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">{label}</label>
         <div className="relative group">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-sky-500 transition-colors">
+          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
             {icon}
           </div>
           <input 
@@ -238,15 +236,15 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
                 setShowNumericKeypad(true);
               }
             }}
-            className={`w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-sky-500 focus:bg-white transition-all text-sm font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
-            placeholder={isSelectable ? `Selecionar ${label.toLowerCase()}...` : `Buscar por ${label.toLowerCase()}...`}
+            className={`w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
+            placeholder={isSelectable ? `Selecionar...` : `Buscar...`}
           />
           {filters[field] && (
             <button 
               onClick={() => handleInputChange(field, '')}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           )}
         </div>
@@ -254,186 +252,138 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
     );
   };
 
-  const renderAssetItem = useCallback((index: number, asset: Asset) => (
-    <div className="px-6 py-2">
-      <div onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-5 bg-white rounded-[2rem] border border-slate-200 shadow-sm active:scale-[0.98] transition-all text-left cursor-pointer hover:border-sky-200 group">
-        <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-sky-50 group-hover:text-sky-600 mr-5 shrink-0 border border-slate-100 transition-colors">
-          <Barcode size={28} />
-        </div>
-        <div className="flex-1 min-w-0 pr-3">
-          <span className="text-lg font-bold text-slate-900 font-mono leading-none block mb-1 tracking-tight">{asset.ETIQUETA || 'S/ ETQ'}</span>
-          <p className="text-[11px] font-bold text-slate-500 uppercase truncate tracking-tight">
-            {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
-          </p>
-          <div className="flex items-center space-x-2 mt-2">
-            <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">SN: {asset.SERIAL || '---'}</span>
-            <span className="text-slate-200">•</span>
-            <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{asset.ENDERECO || '---'}</span>
-          </div>
-        </div>
-        <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 active:scale-90 mr-3 shadow-sm hover:text-sky-600 transition-colors">
-          <QrCode size={20} />
-        </button>
-        <ChevronRight size={20} className="text-slate-300 group-hover:text-sky-400 transition-colors" />
-      </div>
-    </div>
-  ), [onSelectAsset, setSelectedAssetForQr, setIsQrModalOpen]);
-
   return (
     <div className="flex flex-col h-screen bg-bg-main animate-fadeIn relative overflow-hidden">
       {/* HEADER */}
-      <div className="bg-white px-6 pt-12 pb-6 border-b border-slate-200 relative z-20 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={onBack} className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
-            <ArrowLeft size={20} />
+      <div className="bg-white px-5 pt-8 pb-4 border-b border-slate-200 relative z-20 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onBack} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
+            <ArrowLeft size={18} />
           </button>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
             <button 
-              onClick={() => setIsFilterDrawerOpen(true)}
-              className="flex items-center space-x-2 px-5 py-3 rounded-2xl bg-sky-600 text-white shadow-lg shadow-sky-900/20 active:scale-95 transition-all"
+              onClick={clearFilters}
+              className="px-3 py-1.5 rounded-lg bg-slate-50 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all"
             >
-              <Filter size={18} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Filtros</span>
+              Limpar
             </button>
+            <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
+              <Search size={20} />
+            </div>
           </div>
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight leading-none">Consulta Expert</h1>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
-            {committedFilters ? 'Resultados da Pesquisa' : 'Inicie sua consulta'}
-          </p>
+          <h1 className="text-xl font-bold text-slate-900 uppercase tracking-tight leading-none">Consulta Expert</h1>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">Formulário Multifunção v24</p>
         </div>
       </div>
 
-      <div className="flex-1 relative">
-        {committedFilters ? (
-          filteredAssets.length > 0 ? (
-            <div className="h-full flex flex-col">
-              <div className="px-8 py-4 flex items-center justify-between bg-slate-50/50 border-b border-slate-100">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ativos Localizados</span>
-                <span className="bg-sky-100 text-sky-600 px-3 py-1 rounded-full text-[10px] font-bold">{filteredAssets.length}</span>
+      <div className="flex-1 overflow-y-auto no-scrollbar">
+        {/* SEARCH FORM */}
+        <div className="p-5 space-y-4 bg-white border-b border-slate-100 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {renderInput('ETIQUETA', 'Etiqueta', <Barcode size={16} />)}
+            {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={16} />)}
+            {renderInput('SERIAL', 'Serial', <Hash size={16} />)}
+            {renderInput('CNPJ', 'CNPJ', <Building2 size={16} />)}
+            {renderInput('NOMEFORNECEDOR', 'Fornecedor', <User size={16} />)}
+            {renderInput('NOTAFISCAL', 'Nota Fiscal', <FileText size={16} />)}
+            {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
+            {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
+            {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
+            
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (De)</label>
+              <div className="relative group">
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+                  <Calendar size={16} />
+                </div>
+                <input 
+                  type="date"
+                  value={filters.DATAAQUSIC_START}
+                  onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
+                />
               </div>
-              <Virtuoso
-                style={{ height: '100%' }}
-                data={filteredAssets}
-                itemContent={renderAssetItem}
-                className="no-scrollbar"
-              />
             </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
+              <div className="relative group">
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+                  <Calendar size={16} />
+                </div>
+                <input 
+                  type="date"
+                  value={filters.DATAAQUSIC_END}
+                  onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button 
+            onClick={triggerSearch}
+            className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[11px] tracking-[0.1em] shadow-md active:scale-[0.98] transition-all flex items-center justify-center space-x-2 mt-2"
+          >
+            <Search size={18} strokeWidth={2.5} />
+            <span>Executar Consulta</span>
+          </button>
+        </div>
+
+        {/* RESULTS */}
+        <div className="px-5 py-6 pb-28">
+          {committedFilters ? (
+            filteredAssets.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-1 mb-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Resultados</span>
+                  <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[9px] font-bold">{filteredAssets.length}</span>
+                </div>
+                {filteredAssets.map((asset) => (
+                  <div key={asset.id} onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-3 bg-white rounded-xl border border-slate-200 shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer hover:border-blue-200 group">
+                    <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 mr-4 shrink-0 border border-slate-100 transition-colors">
+                      <Barcode size={20} />
+                    </div>
+                    <div className="flex-1 min-w-0 pr-2">
+                      <span className="text-base font-bold text-slate-900 font-mono leading-none block mb-0.5 tracking-tight">{asset.ETIQUETA || 'S/ ETQ'}</span>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase truncate tracking-tight">
+                        {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
+                      </p>
+                      <div className="flex items-center space-x-1.5 mt-1">
+                        <span className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">SN: {asset.SERIAL || '---'}</span>
+                        <span className="text-slate-200">•</span>
+                        <span className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">{asset.ENDERECO || '---'}</span>
+                      </div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 mr-2 shadow-sm hover:text-blue-600 transition-colors">
+                      <QrCode size={16} />
+                    </button>
+                    <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center py-20">
+                <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-6 border border-slate-100">
+                  <AlertCircle size={48} />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 uppercase tracking-tight">Nenhum Registro</h3>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-2 max-w-[200px]">Não encontramos ativos com os critérios informados.</p>
+              </div>
+            )
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center p-12">
-              <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-6 border border-slate-100">
-                <AlertCircle size={48} />
+            <div className="flex flex-col items-center justify-center text-center py-20 opacity-40">
+              <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-8 border border-slate-100">
+                <Filter size={48} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 uppercase tracking-tight">Nenhum Registro</h3>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-2 max-w-[200px]">Não encontramos ativos com os critérios informados.</p>
-              <button 
-                onClick={() => setIsFilterDrawerOpen(true)}
-                className="mt-8 px-8 py-4 bg-sky-600 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all"
-              >
-                Ajustar Filtros
-              </button>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] max-w-[220px] leading-relaxed">Preencha os campos acima para iniciar sua consulta expert</p>
             </div>
-          )
-        ) : (
-          <div className="h-full flex flex-col items-center justify-center text-center p-12 opacity-40">
-            <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-8 border border-slate-100">
-              <Filter size={48} />
-            </div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] max-w-[220px] leading-relaxed">Clique no botão de filtros para iniciar sua consulta expert</p>
-            <button 
-              onClick={() => setIsFilterDrawerOpen(true)}
-              className="mt-8 px-8 py-4 bg-slate-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest active:scale-95 transition-all"
-            >
-              Abrir Filtros
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* FILTER DRAWER */}
-      {isFilterDrawerOpen && (
-        <div className="fixed inset-0 z-[400] flex flex-col bg-slate-950/60 backdrop-blur-sm animate-fadeIn">
-          <div className="mt-auto bg-white w-full rounded-t-[3rem] shadow-2xl flex flex-col max-h-[90vh] animate-slideUp overflow-hidden">
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Filtros de Consulta</h3>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Refine sua busca expert</p>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button 
-                  onClick={clearFilters}
-                  className="p-3 bg-slate-50 rounded-2xl text-slate-400 active:scale-90 transition-all"
-                  title="Limpar Filtros"
-                >
-                  <X size={20} />
-                </button>
-                <button 
-                  onClick={() => setIsFilterDrawerOpen(false)}
-                  className="p-3 bg-slate-900 rounded-2xl text-white active:scale-90 transition-all shadow-lg"
-                >
-                  <ChevronRight size={20} className="rotate-90" />
-                </button>
-              </div>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar pb-32">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {renderInput('ETIQUETA', 'Etiqueta', <Barcode size={18} />)}
-                {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={18} />)}
-                {renderInput('SERIAL', 'Serial', <Hash size={18} />)}
-                {renderInput('CNPJ', 'CNPJ', <Building2 size={18} />)}
-                {renderInput('NOMEFORNECEDOR', 'Fornecedor', <User size={18} />)}
-                {renderInput('NOTAFISCAL', 'Nota Fiscal', <FileText size={18} />)}
-                {renderInput('ENDERECO', 'Endereço', <MapPin size={18} />)}
-                {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={18} />)}
-                {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={18} />)}
-                
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (De)</label>
-                  <div className="relative group">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-sky-500 transition-colors">
-                      <Calendar size={18} />
-                    </div>
-                    <input 
-                      type="date"
-                      value={filters.DATAAQUSIC_START}
-                      onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-sky-500 focus:bg-white transition-all text-sm font-bold text-slate-900 shadow-inner"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
-                  <div className="relative group">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-sky-500 transition-colors">
-                      <Calendar size={18} />
-                    </div>
-                    <input 
-                      type="date"
-                      value={filters.DATAAQUSIC_END}
-                      onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-sky-500 focus:bg-white transition-all text-sm font-bold text-slate-900 shadow-inner"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-8 bg-white border-t border-slate-100 sticky bottom-0 z-10">
-              <button 
-                onClick={triggerSearch}
-                className="w-full bg-sky-600 text-white py-5 rounded-3xl font-bold uppercase text-[12px] tracking-[0.2em] shadow-xl active:scale-[0.98] transition-all flex items-center justify-center space-x-3 shadow-sky-900/20"
-              >
-                <Search size={20} strokeWidth={2.5} />
-                <span>Confirmar e Buscar</span>
-              </button>
-            </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* MODALS */}
       {isQrModalOpen && selectedAssetForQr && (

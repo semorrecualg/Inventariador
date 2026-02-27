@@ -93,9 +93,13 @@ const App: React.FC = () => {
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [buttonPos, setButtonPos] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleFullscreen = useCallback(() => {
+    if (isDragging) return;
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
         console.error(`Error attempting to enable full-screen mode: ${err.message}`);
@@ -103,6 +107,41 @@ const App: React.FC = () => {
     } else {
       document.exitFullscreen();
     }
+  }, [isDragging]);
+
+  const handleStart = (clientX: number, clientY: number) => {
+    setIsDragging(false);
+    dragOffset.current = {
+      x: clientX - buttonPos.x,
+      y: clientY - buttonPos.y
+    };
+  };
+
+  const handleMove = (clientX: number, clientY: number) => {
+    const newX = clientX - dragOffset.current.x;
+    const newY = clientY - dragOffset.current.y;
+    
+    // Check if moved enough to be considered a drag
+    if (Math.abs(newX - buttonPos.x) > 5 || Math.abs(newY - buttonPos.y) > 5) {
+      setIsDragging(true);
+    }
+
+    // Keep within viewport boundaries
+    const boundedX = Math.max(20, Math.min(window.innerWidth - 60, newX));
+    const boundedY = Math.max(20, Math.min(window.innerHeight - 60, newY));
+    
+    setButtonPos({ x: boundedX, y: boundedY });
+  };
+
+  useEffect(() => {
+    const onResize = () => {
+      setButtonPos(prev => ({
+        x: Math.min(window.innerWidth - 80, prev.x),
+        y: Math.min(window.innerHeight - 80, prev.y)
+      }));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => {
@@ -356,16 +395,16 @@ const App: React.FC = () => {
   return (
     <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
       {showCompanyHeader && (
-        <div className="bg-white px-6 py-4 flex items-center space-x-5 border-b border-slate-200 shadow-sm z-[200]">
-           <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-600 shrink-0 shadow-sm">
-             <Building2 size={24} />
+        <div className="bg-white px-4 py-3 flex items-center space-x-4 border-b border-slate-200 shadow-sm z-[200]">
+           <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
+             <Building2 size={20} />
            </div>
            <div className="flex-1 min-w-0">
-             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] leading-none mb-2">Empresa em Auditoria</p>
-             <h2 className="text-[15px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
+             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1.5">Empresa em Auditoria</p>
+             <h2 className="text-[13px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
            </div>
-           <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 shadow-sm">
-             <span className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.2em]">v24.50 PRO</span>
+           <div className="px-2 py-1 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
+             <span className="text-[8px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
            </div>
         </div>
       )}
@@ -387,11 +426,16 @@ const App: React.FC = () => {
         {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
       </div>
 
-      {/* Floating Immersive Mode Toggle */}
+      {/* Floating Immersive Mode Toggle (Draggable) */}
       {user && (
         <button 
+          onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+          onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+          onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
+          onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
           onClick={toggleFullscreen}
-          className="fixed bottom-6 right-6 w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl z-[999] active:scale-90 transition-all border border-white/10"
+          style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}
+          className="fixed w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl z-[999] active:scale-90 transition-transform border border-white/10 touch-none select-none"
           title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
         >
           {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}

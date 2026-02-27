@@ -162,17 +162,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {/* KARDEX HEADER */}
-      <div className={`px-6 pt-12 pb-10 ${headerBg} text-white relative shadow-lg z-20`}>
-        <div className="flex items-center justify-between mb-8">
-          <button onClick={onBack} className="p-3 bg-white/10 border border-white/20 rounded-2xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
-            <X size={20} />
+      <div className={`px-5 pt-8 pb-6 ${headerBg} text-white relative shadow-md z-20`}>
+        <div className="flex items-center justify-between mb-6">
+          <button onClick={onBack} className="p-2.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+            <X size={18} />
           </button>
-          <div className="flex items-center space-x-3">
-            <button onClick={() => setIsQrModalOpen(true)} className="p-3 bg-white/10 border border-white/20 rounded-2xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
-              <QrCode size={20} />
+          <div className="flex items-center space-x-2">
+            <button onClick={() => setIsQrModalOpen(true)} className="p-2.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+              <QrCode size={18} />
             </button>
-            <div className="bg-white/10 px-5 py-2.5 rounded-2xl border border-white/20 backdrop-blur-md">
-              <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/90">
+            <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/20 backdrop-blur-md">
+              <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/90">
                 {isBatch ? 'LOTE' : 'KARDEK v24.50'}
               </span>
             </div>
@@ -180,20 +180,20 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
         </div>
         
         <div className="flex flex-col">
-          <h2 className="text-2xl font-bold uppercase tracking-tight leading-tight mb-8 text-white line-clamp-2">
+          <h2 className="text-xl font-bold uppercase tracking-tight leading-tight mb-6 text-white line-clamp-2">
             {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
           </h2>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-black/20 border border-white/10 p-5 rounded-3xl backdrop-blur-xl shadow-inner">
-              <p className="text-[9px] font-bold text-white/50 uppercase tracking-[0.3em] mb-3">PLAQUETA</p>
-              <p className="text-3xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner">
+              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">PLAQUETA</p>
+              <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
             </div>
-            <div className="bg-black/20 border border-white/10 p-5 rounded-3xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
-              <p className="text-[9px] font-bold text-white/50 uppercase tracking-[0.3em] mb-3">AUDITORIA</p>
+            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
+              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">AUDITORIA</p>
               <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse shadow-sm shadow-sky-400/50" />
-                <span className="text-[11px] font-bold uppercase text-sky-300 tracking-widest">
+                <div className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-sm shadow-sky-400/50" />
+                <span className="text-[10px] font-bold uppercase text-sky-300 tracking-widest">
                   {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
                 </span>
               </div>
@@ -203,23 +203,23 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
 
       {/* KARDEX BODY */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar pb-32 bg-bg-main">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-28 bg-bg-main">
           {isBatch && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm modern-card">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center">
-                  <AlertCircle size={14} className="mr-2 text-amber-500" /> REGISTROS NO LOTE
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm modern-card">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] flex items-center">
+                  <AlertCircle size={12} className="mr-1.5 text-amber-500" /> REGISTROS NO LOTE
                 </p>
-                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-3 py-1 rounded-full">{assets.length} ITENS</span>
+                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
               </div>
-              <div className="space-y-3 max-h-48 overflow-y-auto no-scrollbar pr-1">
+              <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar pr-1">
                 {assets.map((a, idx) => (
-                  <div key={a.id} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex items-center justify-between shadow-sm">
+                  <div key={a.id} className="bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between shadow-sm">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-bold text-slate-800 truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
-                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
+                      <p className="text-[10px] font-bold text-slate-800 truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
+                      <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
                     </div>
-                    <span className="text-[10px] font-bold text-slate-300 font-mono ml-3">#{String(idx + 1).padStart(2, '0')}</span>
+                    <span className="text-[9px] font-bold text-slate-300 font-mono ml-2">#{String(idx + 1).padStart(2, '0')}</span>
                   </div>
                 ))}
               </div>
@@ -227,9 +227,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
           )}
 
           {fieldGroups.map((group) => (
-            <div key={group.title} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm modern-card">
-              <div className="bg-slate-50 px-6 py-3 border-b border-slate-100">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em]">{group.title}</span>
+            <div key={group.title} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm modern-card">
+              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em]">{group.title}</span>
               </div>
               
               <div className="divide-y divide-slate-100">
@@ -248,41 +248,41 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                     <div 
                       key={key} 
                       onClick={(e) => { e.stopPropagation(); if (canEdit) { setEditingField(key); setEditValue(String(rawVal || '')); } }} 
-                      className={`px-6 py-5 flex flex-col transition-all active:bg-slate-50 ${editingField === key ? 'bg-sky-50 ring-1 ring-inset ring-sky-500' : ''}`}
+                      className={`px-4 py-3 flex flex-col transition-all active:bg-slate-50 ${editingField === key ? 'bg-blue-50 ring-1 ring-inset ring-blue-500' : ''}`}
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          {Icon && <Icon size={12} className="text-slate-400" />}
-                          <label className="text-[8px] font-bold uppercase tracking-[0.2em] text-slate-400">{label}</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center space-x-1.5">
+                          {Icon && <Icon size={10} className="text-slate-400" />}
+                          <label className="text-[7px] font-bold uppercase tracking-[0.1em] text-slate-400">{label}</label>
                         </div>
-                        {canEdit && <Edit2 size={12} className="text-sky-500" />}
+                        {canEdit && <Edit2 size={10} className="text-blue-500" />}
                       </div>
                       
                       {editingField === key ? (
-                        <div className="mt-3 flex items-center space-x-3">
+                        <div className="mt-2 flex items-center space-x-2">
                           <input 
                             autoFocus 
                             value={editValue} 
                             onChange={(e) => setEditValue(e.target.value)} 
                             onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
-                            className="flex-1 bg-white px-4 py-3 border border-sky-300 rounded-xl text-sm font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-sky-500/20" 
+                            className="flex-1 bg-white px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-blue-500/20" 
                           />
-                          <button onClick={() => applyFieldEdit()} className="w-12 h-12 bg-sky-600 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-all">
-                            <Check size={24}/>
+                          <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
+                            <Check size={20}/>
                           </button>
                         </div>
                       ) : (
-                        <p className={`text-sm font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
+                        <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
                           {displayVal}
                         </p>
                       )}
                       
                       {editingField === key && suggestions.length > 0 && (
-                        <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl shadow-inner">
-                          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] px-1 mb-2">SUGESTÕES</p>
-                          <div className="flex flex-wrap gap-2">
+                        <div className="mt-3 p-2 bg-slate-50 border border-slate-200 rounded-xl shadow-inner">
+                          <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.1em] px-1 mb-1.5">SUGESTÕES</p>
+                          <div className="flex flex-wrap gap-1.5">
                             {suggestions.map(s => (
-                              <button key={s} onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-bold text-sky-600 uppercase active:bg-sky-600 active:text-white transition-all shadow-sm">
+                              <button key={s} onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-bold text-blue-600 uppercase active:bg-blue-600 active:text-white transition-all shadow-sm">
                                 {s}
                               </button>
                             ))}
@@ -298,14 +298,14 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
       
       {/* KARDEX FOOTER */}
-      <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-slate-200 flex items-center justify-between z-30 shadow-[0_-8px_30px_rgba(0,0,0,0.08)]">
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
          <div className="flex flex-col">
-           <span className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.4em]">AUDIT AUTHORITY</span>
-           <span className="text-[10px] font-bold text-slate-900 uppercase tracking-[0.2em] mt-1">v24.50 KARDEK</span>
+           <span className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
+           <span className="text-[9px] font-bold text-slate-900 uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
          </div>
-         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600 shadow-amber-900/20' : 'bg-sky-600 shadow-sky-900/20'} text-white px-10 py-4 rounded-2xl text-[11px] font-bold uppercase shadow-xl active:scale-95 flex items-center space-x-3 transition-all tracking-widest`}>
-            <Save size={18} />
-            <span>{isBatch ? 'EFETIVAR LOTE' : 'EFETIVAR AUDITORIA'}</span>
+         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600' : 'bg-blue-600'} text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase shadow-md active:scale-95 flex items-center space-x-2 transition-all tracking-widest`}>
+            <Save size={16} />
+            <span>{isBatch ? 'EFETIVAR LOTE' : 'EFETIVAR'}</span>
          </button>
       </div>
 

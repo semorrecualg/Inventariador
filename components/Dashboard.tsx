@@ -125,29 +125,29 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     };
 
     return (
-      <div className="w-full relative group p-3 -mx-3 rounded-2xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100">
-        <div className="flex justify-between items-center mb-3">
-          <div className="flex items-center space-x-3">
+      <div className="w-full relative group p-2 -mx-2 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center space-x-2.5">
             <button 
               onClick={handleHintTrigger}
-              className={`p-2 rounded-xl ${colorClass} bg-opacity-10 text-opacity-100 flex items-center justify-center active:scale-90 shadow-sm`}
+              className={`p-1.5 rounded-lg ${colorClass} bg-opacity-10 text-opacity-100 flex items-center justify-center active:scale-90 shadow-sm`}
             >
-              <Icon size={14} className={colorClass.replace('bg-', 'text-')} />
+              <Icon size={12} className={colorClass.replace('bg-', 'text-')} />
             </button>
-            <div className="flex items-center space-x-2" onClick={onClick}>
-              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest cursor-pointer">{label}</span>
-              {DASHBOARD_HINTS[label] && <Info size={12} className="text-slate-300 group-hover:text-sky-500 transition-colors" />}
+            <div className="flex items-center space-x-1.5" onClick={onClick}>
+              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest cursor-pointer">{label}</span>
+              {DASHBOARD_HINTS[label] && <Info size={10} className="text-slate-300 group-hover:text-blue-500 transition-colors" />}
             </div>
           </div>
-          <div className="text-right flex items-center space-x-3" onClick={onClick}>
-            <div className="flex items-baseline space-x-1.5">
-              <span className="text-sm font-bold text-slate-900">{value}</span>
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">({percentage}%)</span>
+          <div className="text-right flex items-center space-x-2" onClick={onClick}>
+            <div className="flex items-baseline space-x-1">
+              <span className="text-xs font-bold text-slate-900">{value}</span>
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">({percentage}%)</span>
             </div>
-            <Download size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </div>
-        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden cursor-pointer shadow-inner" onClick={onClick}>
+        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden cursor-pointer shadow-inner" onClick={onClick}>
           <div className={`h-full ${colorClass} transition-all duration-1000 ease-out shadow-sm`} style={{ width: `${percentage}%` }} />
         </div>
       </div>
@@ -156,78 +156,78 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
-      <div className="p-6 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center space-x-4">
-          <button onClick={onBack} className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
-            <ArrowLeft size={20} />
+      <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
+        <div className="flex items-center space-x-3">
+          <button onClick={onBack} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
+            <ArrowLeft size={18} />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Relatórios</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Analytics Precision v24</p>
+            <h2 className="text-lg font-bold text-slate-900 uppercase tracking-tight">Relatórios</h2>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Analytics Precision v24</p>
           </div>
         </div>
-        <div className="w-12 h-12 bg-sky-50 border border-sky-100 rounded-2xl flex items-center justify-center text-sky-600 shadow-sm">
-          <BarChart3 size={24} />
+        <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
+          <BarChart3 size={20} />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar pb-32">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-28">
         
         {/* PROGRESSO DA AUDITORIA */}
-        <section className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col items-center modern-card">
-          <div className="w-full flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-sky-50 rounded-xl flex items-center justify-center text-sky-600">
-                <TrendingUp size={20} />
+        <section className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col items-center modern-card">
+          <div className="w-full flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                <TrendingUp size={16} />
               </div>
-              <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">Eficiência Auditada</h3>
+              <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Eficiência</h3>
             </div>
             <div className="text-right">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Taxa de Conclusão</span>
-              <p className="text-2xl font-bold text-sky-600 leading-none mt-1">{stats.percConferido}%</p>
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Conclusão</span>
+              <p className="text-xl font-bold text-blue-600 leading-none mt-0.5">{stats.percConferido}%</p>
             </div>
           </div>
           
-          <div className="relative w-48 h-48 flex items-center justify-center mb-8">
+          <div className="relative w-32 h-32 flex items-center justify-center mb-6">
              <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
                 <circle cx="18" cy="18" r="16" fill="none" stroke="#F1F5F9" strokeWidth="3.5" />
                 <circle cx="18" cy="18" r="16" fill="none" stroke="#10B981" strokeWidth="3.5" strokeDasharray="100" strokeDashoffset={100 - stats.percConferido} strokeLinecap="round" className="transition-all duration-1000" />
              </svg>
              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-bold text-slate-900 tracking-tighter">{stats.conferido}</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Auditados</span>
+                <span className="text-3xl font-bold text-slate-900 tracking-tighter">{stats.conferido}</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em]">Auditados</span>
              </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-4 w-full">
+          <div className="grid grid-cols-2 gap-3 w-full">
             <button 
               onClick={() => exportFilteredData(a => !!a._conferido, 'ITENS_CONFERIDOS')}
-              className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-center active:scale-95 transition-all shadow-sm"
+              className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center active:scale-95 transition-all shadow-sm"
             >
-               <span className="block text-xl font-bold text-slate-900 leading-none mb-2">{stats.conferido}</span>
-               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Baixar Conferidos</span>
+               <span className="block text-lg font-bold text-slate-900 leading-none mb-1">{stats.conferido}</span>
+               <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Conferidos</span>
             </button>
             <button 
               onClick={() => exportFilteredData(a => !a._conferido, 'ITENS_PENDENTES')}
-              className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-center active:scale-95 transition-all shadow-sm"
+              className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center active:scale-95 transition-all shadow-sm"
             >
-               <span className="block text-xl font-bold text-slate-900 leading-none mb-2">{stats.pendente}</span>
-               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Baixar Pendentes</span>
+               <span className="block text-lg font-bold text-slate-900 leading-none mb-1">{stats.pendente}</span>
+               <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Pendentes</span>
             </button>
           </div>
         </section>
 
         {/* RESUMO DE SITUAÇÃO */}
-        <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden modern-card">
-          <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center space-x-3">
-            <LayoutList size={18} className="text-sky-600" />
-            <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">Resumo de Situação</h3>
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden modern-card">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center space-x-2.5">
+            <LayoutList size={16} className="text-blue-600" />
+            <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Resumo</h3>
           </div>
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-100">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Total</th>
+                <th className="px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-right">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -235,16 +235,16 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
                 className="border-b border-slate-50 group hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={() => exportFilteredData(a => String(a.STATUS || '').toUpperCase().includes('ATIVO'), 'ATIVOS')}
               >
-                <td className="px-6 py-5">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200"></div>
-                    <span className="text-sm font-bold text-slate-700 uppercase tracking-tight">ATIVO</span>
+                <td className="px-4 py-3">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200"></div>
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-tight">ATIVO</span>
                   </div>
                 </td>
-                <td className="px-6 py-5 text-right">
-                  <div className="flex items-center justify-end space-x-3">
-                    <span className="font-mono font-bold text-slate-900 text-base">{stats.countAtivos}</span>
-                    <Download size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end space-x-2">
+                    <span className="font-mono font-bold text-slate-900 text-sm">{stats.countAtivos}</span>
+                    <Download size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </td>
               </tr>
@@ -252,36 +252,36 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
                 className="border-b border-slate-50 group hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={() => exportFilteredData(a => String(a.STATUS || '').toUpperCase().includes('BAIXADO'), 'BAIXADOS')}
               >
-                <td className="px-6 py-5">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-200"></div>
-                    <span className="text-sm font-bold text-slate-700 uppercase tracking-tight">BAIXADO</span>
+                <td className="px-4 py-3">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-2 h-2 rounded-full bg-red-500 shadow-sm shadow-red-200"></div>
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-tight">BAIXADO</span>
                   </div>
                 </td>
-                <td className="px-6 py-5 text-right">
-                   <div className="flex items-center justify-end space-x-3">
-                    <span className="font-mono font-bold text-slate-900 text-base">{stats.countBaixados}</span>
-                    <Download size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <td className="px-4 py-3 text-right">
+                   <div className="flex items-center justify-end space-x-2">
+                    <span className="font-mono font-bold text-slate-900 text-sm">{stats.countBaixados}</span>
+                    <Download size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </td>
               </tr>
-              <tr className="bg-sky-50/50">
-                <td className="px-6 py-5">
-                  <span className="text-sm font-bold text-sky-700 uppercase tracking-tight">TOTAL GERAL</span>
+              <tr className="bg-blue-50/50">
+                <td className="px-4 py-3">
+                  <span className="text-xs font-bold text-blue-700 uppercase tracking-tight">TOTAL GERAL</span>
                 </td>
-                <td className="px-6 py-5 text-right font-mono font-bold text-sky-700 text-base">{stats.total}</td>
+                <td className="px-4 py-3 text-right font-mono font-bold text-blue-700 text-sm">{stats.total}</td>
               </tr>
             </tbody>
           </table>
         </section>
 
         {/* DISTRIBUIÇÃO POR TAGS INTERATIVA */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-8 modern-card">
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-              <Target size={20} />
+        <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 modern-card">
+          <div className="flex items-center space-x-2.5 mb-1">
+            <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600">
+              <Target size={16} />
             </div>
-            <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">Distribuição por Tags</h3>
+            <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Distribuição por Tags</h3>
           </div>
           
           <StatBar 

@@ -68,25 +68,25 @@ interface AssetCardProps {
 }
 
 const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/80 backdrop-blur-xl border-t border-slate-200 p-6 grid grid-cols-3 gap-4 animate-slideUp z-[100] shadow-2xl rounded-t-[3rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-4 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
       {keys.map((key) => (
         <button
           key={key}
           onClick={() => {
-            if (key === 'C') onClose();
+            if (key === 'OK') onClose();
             else if (key === '⌫') onDelete();
             else onInput(key);
           }}
-          className={`h-16 rounded-3xl flex items-center justify-center text-2xl font-bold transition-all active:scale-90 ${
-            key === 'C' ? 'bg-slate-100 text-slate-400' : 
-            key === '⌫' ? 'bg-slate-100 text-slate-400' : 
-            'bg-white border border-slate-200 text-slate-900 shadow-sm hover:border-sky-300'
+          className={`h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all active:scale-90 ${
+            key === 'OK' ? 'bg-blue-600 text-white shadow-md' : 
+            key === '⌫' ? 'bg-slate-100 text-slate-500' : 
+            'bg-white border border-slate-200 text-slate-900 shadow-sm'
           }`}
         >
-          {key}
+          {key === 'OK' ? 'PRONTO' : key}
         </button>
       ))}
     </div>
@@ -181,67 +181,60 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-4 p-6 border rounded-[2.5rem] relative overflow-hidden transition-all modern-card active:scale-[0.98] ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-sky-500' : ''}`} 
+      className={`mb-2 p-3 border rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
       onClick={() => isBatchMode ? onToggleSelect(String(asset.id)) : onSelect(asset)}
     >
-      <div className={`absolute top-0 left-0 px-5 py-2 rounded-br-3xl text-[9px] font-bold uppercase flex items-center space-x-2 shadow-sm ${colors.badge}`}>
+      <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[8px] font-bold uppercase flex items-center space-x-1.5 shadow-sm ${colors.badge}`}>
         {isBatchMode ? (
-          isSelected ? <CheckSquare size={12} className="text-white" strokeWidth={3} /> : <Square size={12} className="text-white/50" />
+          isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
         ) : (
-          colors.icon && <colors.icon size={12} strokeWidth={3} />
+          colors.icon && <colors.icon size={10} strokeWidth={3} />
         )}
-        <span className="tracking-widest">{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {visualStatus}</span>
+        <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
       </div>
       
-      <div className="pt-10 pr-14 flex flex-col space-y-4">
+      <div className="pt-5 pr-10 flex flex-col space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
-            <span className={`text-2xl font-bold font-mono tracking-tight ${colors.text}`}>
+          <div className="flex items-center space-x-2">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
+            <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
           </div>
           {isBatch && (
-            <div className="px-3 py-1.5 bg-amber-500 rounded-xl flex items-center space-x-2 shadow-lg shadow-amber-900/20">
-              <Zap size={12} className="text-white fill-white" />
-              <span className="text-[10px] font-bold text-white uppercase tracking-widest">LOTE</span>
+            <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
+              <Zap size={10} className="text-white fill-white" />
+              <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
             </div>
           )}
         </div>
 
-        <p className="text-[13px] font-bold text-slate-600 uppercase leading-snug tracking-tight line-clamp-3">
+        <p className="text-[11px] font-medium text-slate-600 uppercase leading-tight tracking-tight line-clamp-2">
           {fullDescription}
         </p>
 
-        <div className="flex flex-wrap gap-2 pt-2">
+        <div className="flex flex-wrap gap-1.5 pt-1">
           {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
-            <span key={index} className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-sky-100 text-sky-600 border border-sky-200' : index === 1 ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-fuchsia-100 text-fuchsia-600 border border-fuchsia-200'}`}>
+            <span key={index} className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-blue-100 text-blue-600 border border-blue-200' : index === 1 ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-purple-100 text-purple-600 border border-purple-200'}`}>
               {tag}
             </span>
           ))}
         </div>
-
-        {isDifferentCompany && (
-          <div className="flex items-center space-x-3 px-4 py-2 bg-sky-50 border border-sky-100 rounded-2xl self-start mt-2 shadow-sm">
-            <Building2 size={14} className="text-sky-600" />
-            <span className="text-[10px] font-bold text-sky-700 uppercase tracking-widest">Divergência: {asset.EMPRESA}</span>
-          </div>
-        )}
       </div>
 
       {!isConferido && !isBatchMode && (
         <button 
           ref={confirmButtonRef}
           onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
-          className={`absolute bottom-6 right-6 w-16 h-16 rounded-[2rem] flex items-center justify-center text-white shadow-xl active:scale-90 transition-all ${colors.btn} shadow-sky-900/20`}
+          className={`absolute bottom-3 right-3 w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg active:scale-90 transition-all ${colors.btn} shadow-blue-900/10`}
         >
-          <Check size={36} strokeWidth={3} />
+          <Check size={20} strokeWidth={3} />
         </button>
       )}
 
       {isConferido && !isBatchMode && (
-        <div className={`absolute bottom-6 right-6 w-12 h-12 ${isBaixado ? 'bg-red-500 shadow-red-900/20' : 'bg-emerald-500 shadow-emerald-900/20'} text-white rounded-2xl flex items-center justify-center shadow-lg`}>
-          <Check size={24} strokeWidth={3} />
+        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isBaixado ? 'bg-red-500' : 'bg-emerald-500'} text-white rounded-lg flex items-center justify-center shadow-md`}>
+          <Check size={16} strokeWidth={3} />
         </div>
       )}
     </div>
@@ -418,7 +411,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       AUDITOR_STATUS_CONFERENCIA: tag
     });
     setDisplayValue('');
-    searchInputRef.current?.focus();
+    // searchInputRef.current?.focus(); // Removido para evitar que o teclado apareça ao confirmar itens na lista
   }, [allAssets, onUpdateAsset, normalizeKey, selectedCompany, selectedLocation]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
@@ -539,11 +532,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
  
 
-  useEffect(() => {
-    if (isInventorying) {
-      searchInputRef.current?.focus();
-    }
-  }, [isInventorying]);
+  // Removido auto-focus automático ao entrar na tela para atender solicitação do usuário
+  // useEffect(() => {
+  //   if (isInventorying) {
+  //     searchInputRef.current?.focus();
+  //   }
+  // }, [isInventorying]);
 
   useEffect(() => {
     const searchTimeout = setTimeout(() => {
@@ -601,37 +595,38 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-6 pt-10 pb-4 bg-white border-b border-slate-200 shadow-sm z-20">
-            <div className="flex items-center justify-between mb-5">
-              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); }} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-2 text-slate-600">
-                <MapPin size={12} className="text-sky-500" />
-                <span className="text-[10px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
+          <div className="px-5 pt-8 pb-3 bg-white border-b border-slate-200 shadow-sm z-20">
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); }} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600">
+                <MapPin size={10} className="text-blue-500" />
+                <span className="text-[9px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
               </button>
               <div className="flex space-x-2">
-                <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2.5 rounded-xl border transition-all ${isBatchMode ? 'bg-sky-600 border-sky-600 text-white shadow-md' : 'border-slate-200 text-slate-400'}`}>
-                  <ListChecks size={18} />
+                <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}>
+                  <ListChecks size={16} />
                 </button>
               </div>
             </div>
 
-            <div className="relative mb-4">
+            <div className="relative mb-3">
               <input 
                 ref={searchInputRef} 
                 type="text" 
                 readOnly
+                inputMode="none"
                 onFocus={() => setShowNumericKeypad(true)}
                 value={displayValue} 
-                className="w-full bg-slate-50 border-2 border-slate-200 px-6 py-4 font-bold font-mono text-2xl text-center rounded-2xl text-slate-900 outline-none focus:border-sky-500 transition-all cursor-pointer" 
+                className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold font-mono text-xl text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
                 placeholder="DIGITE ETIQUETA..." 
               />
               {displayValue && (
-                  <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={24} /></button>
+                  <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={20} /></button>
               )}
             </div>
 
-            <div className="flex space-x-3">
-              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3.5 rounded-xl text-[10px] font-bold uppercase border-2 transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
-              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-3.5 rounded-xl text-[10px] font-bold uppercase border-2 transition-all ${activeFilter === 'checked' ? 'bg-sky-600 text-white border-sky-600 shadow-md' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
+            <div className="flex space-x-2">
+              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-2 rounded-lg text-[9px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
+              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-2 rounded-lg text-[9px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
             </div>
           </div>
 
@@ -654,6 +649,11 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 style={{ height: '100%' }}
                 data={filteredAssets}
                 increaseViewportBy={300}
+                isScrolling={(scrolling) => {
+                  if (scrolling && showNumericKeypad) {
+                    setShowNumericKeypad(false);
+                  }
+                }}
                 itemContent={(index, asset) => (
                   <div className="px-6 pt-2">
                     <AssetCard 

@@ -261,32 +261,32 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn w-full overflow-hidden">
-      <div className="px-6 pt-12 pb-8 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
-        <div className="flex items-center space-x-5">
-          <button onClick={onBack} className="p-3 bg-slate-50 rounded-2xl text-slate-400 active:scale-90 border border-slate-100 transition-all"><ArrowLeft size={20} /></button>
+      <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
+        <div className="flex items-center space-x-4">
+          <button onClick={onBack} className="p-2.5 bg-slate-50 rounded-xl text-slate-400 active:scale-90 border border-slate-100 transition-all"><ArrowLeft size={18} /></button>
           <div>
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest leading-none">Protocolo v24.50</h2>
-            <p className="text-sky-600 text-[9px] font-bold uppercase tracking-[0.2em] mt-1.5">Base de Dados Reestruturada</p>
+            <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest leading-none">Protocolo v24.50</h2>
+            <p className="text-blue-600 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">Base de Dados</p>
           </div>
         </div>
-        <div className="w-12 h-12 bg-sky-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-sky-900/20"><Activity size={24} /></div>
+        <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 no-scrollbar pb-32">
+      <div className="flex-1 overflow-y-auto p-5 no-scrollbar pb-24">
         {step === 'SOURCE' && (
-          <div className="space-y-8">
-            <div className="bg-white border border-slate-200 p-8 rounded-[2.5rem] shadow-sm modern-card">
-               <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-sky-600">Mapeamento v24.50</span>
-               <h3 className="text-xl font-bold uppercase text-slate-900 tracking-tight mt-2 mb-3">Reestruturação de Banco</h3>
-               <p className="text-[11px] font-bold text-slate-400 leading-relaxed uppercase tracking-widest">
-                Suporte nativo para Centro de Custo, Valor de Aquisição e Dados de Fornecedor. Índices de busca otimizados para 18 colunas mestres.
+          <div className="space-y-6">
+            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
+               <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v24.50</span>
+               <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-1.5 mb-2">Reestruturação</h3>
+               <p className="text-[10px] font-bold text-slate-400 leading-relaxed uppercase tracking-widest">
+                Suporte nativo para Centro de Custo, Valor e Fornecedor. Índices otimizados para 18 colunas.
                </p>
             </div>
-            <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-12 rounded-[3rem] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-6 active:scale-[0.98] transition-all hover:border-sky-300 hover:bg-sky-50/30 group">
-              <div className="w-20 h-20 bg-slate-50 text-sky-600 rounded-3xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={36} /></div>
+            <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
+              <div className="w-16 h-16 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={32} /></div>
               <div className="text-center">
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Carregar Base GBR v24</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase mt-2 tracking-widest">Excel / CSV Autodetect</p>
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Carregar Base GBR</h3>
+                <p className="text-[9px] font-bold text-slate-400 uppercase mt-1.5 tracking-widest">Excel / CSV Autodetect</p>
               </div>
             </button>
             <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={(e) => {
@@ -321,68 +321,68 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         )}
 
         {step === 'COMPANY_SELECTION' && (
-          <div className="space-y-8 animate-slideUp">
-            <div className="bg-white border border-slate-200 p-8 rounded-[2.5rem] shadow-sm modern-card">
-               <div className="flex items-center justify-between mb-6">
-                  <span className="text-[10px] font-bold uppercase text-sky-600 tracking-[0.3em]">Seleção de Unidades</span>
-                  <div className="flex space-x-3">
+          <div className="space-y-6 animate-slideUp">
+            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
+               <div className="flex items-center justify-between mb-4">
+                  <span className="text-[9px] font-bold uppercase text-blue-600 tracking-[0.2em]">Seleção de Unidades</span>
+                  <div className="flex space-x-2">
                     <button 
                       onClick={() => setSelectedCompanies(new Set(availableCompanies.map(c => c.name)))} 
-                      className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-xl active:bg-sky-600 active:text-white transition-all shadow-sm"
+                      className="text-[9px] font-bold text-slate-400 uppercase tracking-widest border border-slate-200 px-3 py-1.5 rounded-lg active:bg-blue-600 active:text-white transition-all shadow-sm"
                     >
                       Todos
                     </button>
                     <button 
                       onClick={() => setSelectedCompanies(new Set())} 
-                      className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-xl active:bg-red-600 active:text-white transition-all shadow-sm"
+                      className="text-[9px] font-bold text-slate-400 uppercase tracking-widest border border-slate-200 px-3 py-1.5 rounded-lg active:bg-red-600 active:text-white transition-all shadow-sm"
                     >
                       Nenhum
                     </button>
                   </div>
                </div>
-               <div className="space-y-3 max-h-[50vh] overflow-y-auto no-scrollbar pr-1">
+               <div className="space-y-2.5 max-h-[45vh] overflow-y-auto no-scrollbar pr-1">
                   {availableCompanies.map(comp => (
-                    <button key={comp.name} onClick={() => toggleCompany(comp.name)} className={`w-full flex items-center justify-between p-6 rounded-3xl border transition-all active:scale-[0.98] ${selectedCompanies.has(comp.name) ? 'bg-sky-50 border-sky-200 text-slate-900 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
-                      <div className="flex items-center space-x-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${selectedCompanies.has(comp.name) ? 'bg-sky-600 text-white border-sky-500 shadow-md' : 'bg-white text-slate-200 border-slate-100'}`}>
-                          {selectedCompanies.has(comp.name) ? <CheckSquare size={20} strokeWidth={3} /> : <Square size={20} />}
+                    <button key={comp.name} onClick={() => toggleCompany(comp.name)} className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all active:scale-[0.99] ${selectedCompanies.has(comp.name) ? 'bg-blue-50 border-blue-200 text-slate-900 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${selectedCompanies.has(comp.name) ? 'bg-blue-600 text-white border-blue-500 shadow-md' : 'bg-white text-slate-200 border-slate-100'}`}>
+                          {selectedCompanies.has(comp.name) ? <CheckSquare size={16} strokeWidth={3} /> : <Square size={16} />}
                         </div>
                         <div className="text-left">
-                          <span className="text-[13px] font-bold uppercase tracking-tight block">{comp.name}</span>
-                          <span className="text-[10px] font-bold opacity-60 uppercase tracking-widest mt-1">{comp.count} Ativos</span>
+                          <span className="text-[12px] font-bold uppercase tracking-tight block">{comp.name}</span>
+                          <span className="text-[9px] font-bold opacity-60 uppercase tracking-widest mt-0.5">{comp.count} Ativos</span>
                         </div>
                       </div>
                     </button>
                   ))}
                </div>
             </div>
-            <button disabled={selectedCompanies.size === 0} onClick={finalizeLoading} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-bold uppercase text-[11px] tracking-[0.2em] shadow-2xl active:scale-95 disabled:opacity-30 transition-all flex items-center justify-center space-x-4">
-              <span>EFETIVAR BASE MESTRE</span> <ArrowRight size={20} />
+            <button disabled={selectedCompanies.size === 0} onClick={finalizeLoading} className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-lg active:scale-95 disabled:opacity-30 transition-all flex items-center justify-center space-x-3">
+              <span>EFETIVAR BASE MESTRE</span> <ArrowRight size={18} />
             </button>
           </div>
         )}
 
         {step === 'SUMMARY' && summary && (
-          <div className="space-y-8 animate-slideUp">
-            <div className="bg-white border border-slate-200 p-8 rounded-[3rem] shadow-sm modern-card">
-               <span className="text-[10px] font-bold uppercase text-emerald-600 tracking-[0.3em]">Carga v24.50 Finalizada</span>
-               <div className="flex items-baseline space-x-3 mt-4">
-                  <h3 className="text-5xl font-bold tracking-tight text-slate-900">{summary.rows}</h3>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Itens Registrados</span>
+          <div className="space-y-6 animate-slideUp">
+            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
+               <span className="text-[9px] font-bold uppercase text-emerald-600 tracking-[0.2em]">Carga Finalizada</span>
+               <div className="flex items-baseline space-x-2 mt-3">
+                  <h3 className="text-4xl font-bold tracking-tight text-slate-900">{summary.rows}</h3>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens</span>
                </div>
-               <div className="mt-8 space-y-4">
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex justify-between items-center shadow-inner">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Colunas Mapeadas</span>
-                    <span className="text-base font-bold text-sky-600">{summary.cols}</span>
+               <div className="mt-6 space-y-3">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Colunas</span>
+                    <span className="text-sm font-bold text-blue-600">{summary.cols}</span>
                   </div>
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex justify-between items-center shadow-inner">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Endereços Ativos</span>
-                    <span className="text-base font-bold text-sky-600">{summary.locationsMasterCount}</span>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Endereços</span>
+                    <span className="text-sm font-bold text-blue-600">{summary.locationsMasterCount}</span>
                   </div>
                </div>
             </div>
-            <button onClick={() => onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort())} className="w-full bg-sky-600 text-white py-6 rounded-3xl font-bold uppercase text-[11px] tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center space-x-4 shadow-sky-900/20">
-              <span>ATIVAR SISTEMA</span> <ArrowRight size={20} />
+            <button onClick={() => onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort())} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3">
+              <span>ATIVAR SISTEMA</span> <ArrowRight size={18} />
             </button>
           </div>
         )}
