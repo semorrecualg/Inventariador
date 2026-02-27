@@ -382,13 +382,22 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       const config = {
         fps: 25, // Aumentado para maior fluidez
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          let width, height;
           if (mode === 'BARCODE') {
             // Caixa larga e fina para códigos de barras lineares
-            return { width: Math.floor(viewfinderWidth * 0.85), height: Math.floor(viewfinderHeight * 0.25) };
+            width = Math.floor(viewfinderWidth * 0.85);
+            height = Math.floor(viewfinderHeight * 0.25);
+          } else {
+            // Caixa quadrada para QR Code
+            const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
+            width = Math.floor(size);
+            height = Math.floor(size);
           }
-          // Caixa quadrada para QR Code
-          const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
-          return { width: Math.floor(size), height: Math.floor(size) };
+          // Garante o tamanho mínimo de 50px exigido pela biblioteca
+          return { 
+            width: Math.max(width, 50), 
+            height: Math.max(height, 50) 
+          };
         },
         // Solicita resolução mais alta para ler etiquetas pequenas
         videoConstraints: {
