@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario } from '../types';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Asset, TagInventario, ConservationState } from '../types';
 
 import { 
   ArrowLeft, 
@@ -21,6 +22,11 @@ import {
   AlertTriangle,
   FilePlus2,
   RefreshCw,
+  Camera,
+  QrCode,
+  Keyboard,
+  Flashlight,
+  FlashlightOff,
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -272,11 +278,167 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
+  
+  // Novos estados para o fluxo de entrada de 3 vias
+  const [entryMode, setEntryMode] = useState<'LIST' | 'MENU' | 'BARCODE' | 'QR' | 'MANUAL'>('LIST');
+  const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
+  const [isFlashOn, setIsFlashOn] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const [isScannerStarting, setIsScannerStarting] = useState(false);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerContainerId = "scanner-container";
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
+
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+      } catch (err) {
+        console.error("Erro ao parar scanner:", err);
+      }
+      scannerRef.current = null;
+    }
+    setIsFlashOn(false);
+  }, []);
+
+  const handleScannedData = useCallback((data: string, mode: 'BARCODE' | 'QR') => {
+    let processedData = data;
+    if (mode === 'QR') {
+      try {
+        if (data.startsWith('{')) {
+          const json = JSON.parse(data);
+          processedData = json.ID_Patrimonio || json.id || data;
+        } else if (data.startsWith('http')) {
+          const url = new URL(data);
+          processedData = url.searchParams.get('ID_Patrimonio') || url.pathname.split('/').pop() || data;
+        }
+      } catch (e) {
+        console.error("Erro ao processar QR Code:", e);
+      }
+    }
+
+    const term = normalizeKey(processedData);
+    const asset = allAssets.find(a => normalizeKey(a.ETIQUETA || '') === term);
+    
+    if (asset) {
+      setScannedAsset(asset);
+      stopScanner();
+      setEntryMode('LIST');
+    } else {
+      alert(`Ativo ${processedData} não encontrado no banco de dados.`);
+    }
+  }, [allAssets, normalizeKey, stopScanner]);
+
+  const startScanner = useCallback(async (mode: 'BARCODE' | 'QR') => {
+    await stopScanner();
+    setScannerError(null);
+    setIsScannerStarting(true);
+
+    // Permitimos ambos para detectar erro de formato, mas priorizamos o modo selecionado
+    const formats = [
+      Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.ITF,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.EAN_13
+    ];
+
+    const config = {
+      fps: 15,
+      qrbox: mode === 'BARCODE' ? { width: 300, height: 120 } : { width: 250, height: 250 },
+      aspectRatio: 1.0,
+    };
+
+    try {
+      const scanner = new Html5Qrcode(scannerContainerId, { formatsToSupport: formats, verbose: false });
+      scannerRef.current = scanner;
+
+      await scanner.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText, decodedResult) => {
+          const detectedFormat = decodedResult.result.format?.format;
+          
+          if (mode === 'BARCODE' && detectedFormat === Html5QrcodeSupportedFormats.QR_CODE) {
+            if (confirm("QR Code detectado. Deseja trocar para o modo de leitura de QR Code?")) {
+              setEntryMode('QR');
+              startScanner('QR');
+              return;
+            }
+          }
+          
+          if (mode === 'QR' && detectedFormat !== Html5QrcodeSupportedFormats.QR_CODE) {
+            if (confirm("Código de barras detectado. Deseja trocar para o modo de leitura de barras?")) {
+              setEntryMode('BARCODE');
+              startScanner('BARCODE');
+              return;
+            }
+          }
+
+          handleScannedData(decodedText, mode);
+        },
+        () => {}
+      );
+      setIsScannerStarting(false);
+    } catch (err) {
+      console.error("Erro ao iniciar scanner:", err);
+      setScannerError("Câmera indisponível ou permissão negada.");
+      setIsScannerStarting(false);
+    }
+  }, [stopScanner, handleScannedData]);
+
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(console.error);
+      }
+    };
+  }, []);
+
+  const toggleFlash = async () => {
+    if (scannerRef.current && scannerRef.current.isScanning) {
+      try {
+        const newState = !isFlashOn;
+        await scannerRef.current.applyVideoConstraints({
+          advanced: [{ torch: newState } as MediaTrackConstraintSet]
+        } as MediaTrackConstraints);
+        setIsFlashOn(newState);
+      } catch (err) {
+        console.error("Erro ao alternar flash:", err);
+      }
+    }
+  };
+
+  const handleConfirmAsset = (state: ConservationState) => {
+    if (scannedAsset) {
+      const originalLoc = normalizeKey(scannedAsset.ENDERECO || "");
+      const targetLoc = normalizeKey(selectedLocation || "");
+      
+      let tag: TagInventario = TagInventario.CONFERIDO;
+      if (originalLoc !== targetLoc) {
+        tag = TagInventario.ADOTADO;
+      }
+
+      onUpdateAsset({
+        ...scannedAsset,
+        _conferido: true,
+        ESTADO_CONSERVACAO: state,
+        TAG_INVENTARIO: tag,
+        _localMaster: selectedLocation || scannedAsset.ENDERECO,
+        AUDITOR_STATUS_CONFERENCIA: tag
+      });
+      setScannedAsset(null);
+      setCommittedSearch('');
+      setDisplayValue('');
+    }
+  };
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
@@ -597,32 +759,106 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         <>
           <div className="px-5 pt-8 pb-3 bg-white border-b border-slate-200 shadow-sm z-20">
             <div className="flex items-center justify-between mb-3">
-              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); }} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600">
+              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setEntryMode('LIST'); }} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600">
                 <MapPin size={10} className="text-blue-500" />
                 <span className="text-[9px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
               </button>
               <div className="flex space-x-2">
+                <button 
+                  onClick={() => setEntryMode(entryMode === 'MENU' ? 'LIST' : 'MENU')} 
+                  className={`p-2 rounded-lg border transition-all ${entryMode === 'MENU' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
+                >
+                  <Plus size={16} />
+                </button>
                 <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}>
                   <ListChecks size={16} />
                 </button>
               </div>
             </div>
 
-            <div className="relative mb-3">
-              <input 
-                ref={searchInputRef} 
-                type="text" 
-                readOnly
-                inputMode="none"
-                onFocus={() => setShowNumericKeypad(true)}
-                value={displayValue} 
-                className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold font-mono text-xl text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
-                placeholder="DIGITE ETIQUETA..." 
-              />
-              {displayValue && (
-                  <button onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={20} /></button>
-              )}
-            </div>
+            {entryMode === 'MENU' && (
+              <div className="grid grid-cols-3 gap-2 mb-3 animate-fadeIn">
+                <button 
+                  onClick={() => { setEntryMode('MANUAL'); setShowNumericKeypad(true); }}
+                  className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
+                >
+                  <Keyboard size={18} className="text-blue-600" />
+                  <span className="text-[8px] font-bold uppercase tracking-widest text-slate-600">Digitação</span>
+                </button>
+                <button 
+                  onClick={() => { setEntryMode('BARCODE'); startScanner('BARCODE'); }}
+                  className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
+                >
+                  <Camera size={18} className="text-blue-600" />
+                  <span className="text-[8px] font-bold uppercase tracking-widest text-slate-600">Barras 125</span>
+                </button>
+                <button 
+                  onClick={() => { setEntryMode('QR'); startScanner('QR'); }}
+                  className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl space-y-1 active:bg-slate-50"
+                >
+                  <QrCode size={18} className="text-blue-600" />
+                  <span className="text-[8px] font-bold uppercase tracking-widest text-slate-600">QR Code</span>
+                </button>
+              </div>
+            )}
+
+            {entryMode === 'MANUAL' && (
+              <div className="relative mb-3 animate-fadeIn">
+                <input 
+                  ref={searchInputRef} 
+                  type="text" 
+                  readOnly
+                  inputMode="none"
+                  onFocus={() => setShowNumericKeypad(true)}
+                  value={displayValue} 
+                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold font-mono text-xl text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
+                  placeholder="DIGITE ETIQUETA..." 
+                />
+                <button onClick={() => { setEntryMode('LIST'); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={20} /></button>
+              </div>
+            )}
+
+            {(entryMode === 'BARCODE' || entryMode === 'QR') && (
+              <div className="relative mb-3 animate-fadeIn overflow-hidden rounded-xl border border-slate-200 bg-black aspect-video">
+                <div id={scannerContainerId} className="w-full h-full" />
+                
+                {/* Overlay Visual */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+                  <div className={`border-2 border-blue-500/50 relative transition-all duration-300 ${entryMode === 'BARCODE' ? 'w-4/5 h-1/3' : 'w-2/3 h-2/3'}`}>
+                    <div className="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-blue-500" />
+                    <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-blue-500" />
+                    <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-blue-500" />
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-blue-500" />
+                    <div className="absolute inset-0 bg-blue-500/5 animate-pulse" />
+                  </div>
+                </div>
+
+                {/* Controles do Scanner */}
+                <div className="absolute bottom-3 left-3 right-3 flex justify-between items-center z-20">
+                  <button onClick={toggleFlash} className="p-2 bg-black/50 rounded-lg text-white backdrop-blur-sm">
+                    {isFlashOn ? <FlashlightOff size={18} /> : <Flashlight size={18} />}
+                  </button>
+                  <button onClick={() => { stopScanner(); setEntryMode('LIST'); }} className="p-2 bg-red-600 rounded-lg text-white shadow-lg">
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {isScannerStarting && (
+                  <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center space-y-3 z-30">
+                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">Iniciando Câmera...</span>
+                  </div>
+                )}
+
+                {scannerError && (
+                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-6 text-center z-40">
+                    <AlertTriangle className="text-amber-500 mb-2" size={32} />
+                    <p className="text-[10px] font-bold text-white uppercase tracking-widest">{scannerError}</p>
+                    <button onClick={() => startScanner(entryMode as 'BARCODE' | 'QR')} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold uppercase tracking-widest">Tentar Novamente</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex space-x-2">
               <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-2 rounded-lg text-[9px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
@@ -868,6 +1104,52 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </div>
       )}
 
+
+      {scannedAsset && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-scaleIn">
+            <div className="bg-blue-600 p-6 text-white">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Ativo Identificado</span>
+                <button onClick={() => setScannedAsset(null)} className="p-2 bg-white/10 rounded-lg"><X size={18} /></button>
+              </div>
+              <h3 className="text-2xl font-bold tracking-tight uppercase leading-none">{scannedAsset.ETIQUETA}</h3>
+              <p className="text-[10px] font-bold uppercase tracking-widest mt-2 opacity-80">{scannedAsset.REGISTRO} | {scannedAsset.EMPRESA}</p>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Descrição do Item</label>
+                <p className="text-sm font-bold text-slate-900 uppercase leading-tight">{scannedAsset.DESCRICAODOATIVO}</p>
+              </div>
+
+              <div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-3">Estado de Conservação</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.values(ConservationState).map((state) => (
+                    <button 
+                      key={state}
+                      onClick={() => handleConfirmAsset(state)}
+                      className="py-3 px-4 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 transition-all active:scale-95"
+                    >
+                      {state}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-slate-50 border-t border-slate-100">
+              <button 
+                onClick={() => setScannedAsset(null)}
+                className="w-full py-4 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-bold uppercase tracking-widest"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isManualEntryOpen && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 animate-fadeIn">

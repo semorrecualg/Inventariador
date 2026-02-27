@@ -26,6 +26,13 @@ export enum TagInventario {
   ETIQUETADO = 'ETIQUETADO'
 }
 
+export enum ConservationState {
+  NOVO = 'NOVO',
+  BOM = 'BOM',
+  RECUPERAVEL = 'RECUPERAVEL',
+  INSERVIVEL = 'INSERVIVEL'
+}
+
 export interface Asset {
   [key: string]: string | number | boolean | string[] | undefined | null;
   id: string | number;
@@ -63,6 +70,7 @@ export interface Asset {
   // Tags de Auditoria
   TAG_DUPLICIDADE?: 'ÚNICO' | 'ETIQUETA+1REGISTRO' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
   TAG_INVENTARIO?: TagInventario;
+  ESTADO_CONSERVACAO?: ConservationState;
   _isNew?: boolean;
 }
 
