@@ -337,9 +337,21 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, [allAssets, normalizeKey, stopScanner]);
 
   const startScanner = useCallback(async (mode: 'BARCODE' | 'QR') => {
+    console.log(`Iniciando scanner modo: ${mode}`);
     await stopScanner();
     setScannerError(null);
     setIsScannerStarting(true);
+
+    // Pequeno delay adicional para garantir que o DOM está pronto e estável
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    const element = document.getElementById(scannerContainerId);
+    if (!element) {
+      console.error("Elemento container do scanner não encontrado no DOM");
+      setScannerError("Erro interno: Container não localizado.");
+      setIsScannerStarting(false);
+      return;
+    }
 
     // Permitimos ambos para detectar erro de formato, mas priorizamos o modo selecionado
     const formats = [
@@ -350,16 +362,26 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       Html5QrcodeSupportedFormats.EAN_13
     ];
 
+    // Configuração mais flexível para evitar erros de restrição em dispositivos variados
     const config = {
-      fps: 15,
-      qrbox: mode === 'BARCODE' ? { width: 300, height: 120 } : { width: 250, height: 250 },
-      aspectRatio: 1.0,
+      fps: 20,
+      qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+        if (mode === 'BARCODE') {
+          return { width: viewfinderWidth * 0.8, height: viewfinderHeight * 0.3 };
+        }
+        const size = minEdge * 0.7;
+        return { width: size, height: size };
+      },
+      aspectRatio: undefined, // Deixa o navegador escolher o melhor aspect ratio
     };
 
     try {
+      console.log("Criando instância Html5Qrcode...");
       const scanner = new Html5Qrcode(scannerContainerId, { formatsToSupport: formats, verbose: false });
       scannerRef.current = scanner;
 
+      console.log("Chamando scanner.start...");
       await scanner.start(
         { facingMode: "environment" },
         config,
@@ -369,7 +391,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           if (mode === 'BARCODE' && detectedFormat === Html5QrcodeSupportedFormats.QR_CODE) {
             if (confirm("QR Code detectado. Deseja trocar para o modo de leitura de QR Code?")) {
               setEntryMode('QR');
-              startScanner('QR');
               return;
             }
           }
@@ -377,19 +398,22 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           if (mode === 'QR' && detectedFormat !== Html5QrcodeSupportedFormats.QR_CODE) {
             if (confirm("Código de barras detectado. Deseja trocar para o modo de leitura de barras?")) {
               setEntryMode('BARCODE');
-              startScanner('BARCODE');
               return;
             }
           }
 
           handleScannedData(decodedText, mode);
         },
-        () => {}
+        () => {
+          // Log silencioso de erros de scan (normal enquanto procura)
+          // console.log(errorMessage);
+        }
       );
+      console.log("Scanner iniciado com sucesso");
       setIsScannerStarting(false);
     } catch (err) {
-      console.error("Erro ao iniciar scanner:", err);
-      setScannerError("Câmera indisponível ou permissão negada.");
+      console.error("Erro fatal ao iniciar scanner:", err);
+      setScannerError("Não foi possível acessar a câmera. Verifique as permissões.");
       setIsScannerStarting(false);
     }
   }, [stopScanner, handleScannedData]);
@@ -401,12 +425,17 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, [entryMode]);
 
   useEffect(() => {
+    let isMounted = true;
     if (entryMode === 'BARCODE' || entryMode === 'QR') {
-      // Pequeno delay para garantir que o div scanner-container foi renderizado
       const timer = setTimeout(() => {
-        startScanner(entryMode as 'BARCODE' | 'QR');
-      }, 100);
-      return () => clearTimeout(timer);
+        if (isMounted) {
+          startScanner(entryMode as 'BARCODE' | 'QR');
+        }
+      }, 500); // Aumentado para 500ms para garantir renderização
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+      };
     } else {
       stopScanner();
     }
