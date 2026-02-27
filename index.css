@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-main: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-ink: #0F172A;
+  --color-ink-muted: #64748B;
+  --color-accent: #0284C7;
+  --color-border: #E2E8F0;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-main text-ink font-sans overflow-hidden h-screen w-screen fixed;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #root {
+    @apply h-full w-full flex flex-col;
+  }
+
+  input, textarea { 
+    @apply text-base bg-white text-ink;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+  }
+}
+
+@layer components {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  .modern-card {
+    @apply bg-white border border-border rounded-3xl shadow-sm;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-white rounded-2xl font-semibold transition-all active:scale-95 active:opacity-90;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.font-data {
+  font-family: 'JetBrains Mono', monospace;
+}

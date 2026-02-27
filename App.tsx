@@ -16,7 +16,7 @@ import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 
-import { Building2 } from 'lucide-react';
+import { Building2, Maximize2, Minimize2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
@@ -92,7 +92,26 @@ const App: React.FC = () => {
   });
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const normalizeKey = useCallback((s: string) => {
     return s.toString().toUpperCase()
@@ -367,6 +386,17 @@ const App: React.FC = () => {
         {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
         {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
       </div>
+
+      {/* Floating Immersive Mode Toggle */}
+      {user && (
+        <button 
+          onClick={toggleFullscreen}
+          className="fixed bottom-6 right-6 w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl z-[999] active:scale-90 transition-all border border-white/10"
+          title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
+        >
+          {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
+        </button>
+      )}
     </div>
   );
 };
