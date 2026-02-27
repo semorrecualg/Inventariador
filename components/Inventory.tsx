@@ -337,66 +337,86 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, [allAssets, normalizeKey, stopScanner]);
 
   const startScanner = useCallback(async (mode: 'BARCODE' | 'QR') => {
-    console.log(`Iniciando scanner modo: ${mode}`);
+    console.log(`[Scanner] Iniciando modo: ${mode}`);
     await stopScanner();
     setScannerError(null);
     setIsScannerStarting(true);
 
-    // Pequeno delay adicional para garantir que o DOM está pronto e estável
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Aguarda o DOM estabilizar
+    await new Promise(resolve => setTimeout(resolve, 400));
 
     const element = document.getElementById(scannerContainerId);
     if (!element) {
-      console.error("Elemento container do scanner não encontrado no DOM");
-      setScannerError("Erro interno: Container não localizado.");
+      setScannerError("Erro: Container de vídeo não encontrado.");
       setIsScannerStarting(false);
       return;
     }
 
-    // Permitimos ambos para detectar erro de formato, mas priorizamos o modo selecionado
-    const formats = [
-      Html5QrcodeSupportedFormats.QR_CODE,
-      Html5QrcodeSupportedFormats.ITF,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.EAN_13
-    ];
-
-    // Configuração mais flexível para evitar erros de restrição em dispositivos variados
-    const config = {
-      fps: 20,
-      qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-        if (mode === 'BARCODE') {
-          return { width: viewfinderWidth * 0.8, height: viewfinderHeight * 0.3 };
-        }
-        const size = minEdge * 0.7;
-        return { width: size, height: size };
-      },
-      aspectRatio: undefined, // Deixa o navegador escolher o melhor aspect ratio
-    };
-
     try {
-      console.log("Criando instância Html5Qrcode...");
-      const scanner = new Html5Qrcode(scannerContainerId, { formatsToSupport: formats, verbose: false });
+      // 1. Tenta obter as câmeras disponíveis para garantir permissão e escolher a melhor
+      const devices = await Html5Qrcode.getCameras();
+      if (!devices || devices.length === 0) {
+        throw new Error("Nenhuma câmera encontrada.");
+      }
+
+      // Tenta encontrar a câmera traseira (back/environment)
+      const backCamera = devices.find(device => 
+        device.label.toLowerCase().includes('back') || 
+        device.label.toLowerCase().includes('traseira') ||
+        device.label.toLowerCase().includes('rear')
+      ) || devices[0];
+
+      const scanner = new Html5Qrcode(scannerContainerId, { 
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.ITF
+        ],
+        verbose: false 
+      });
       scannerRef.current = scanner;
 
-      console.log("Chamando scanner.start...");
+      // 2. Configurações de ALTA PERFORMANCE
+      const config = {
+        fps: 25, // Aumentado para maior fluidez
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          if (mode === 'BARCODE') {
+            // Caixa larga e fina para códigos de barras lineares
+            return { width: Math.floor(viewfinderWidth * 0.85), height: Math.floor(viewfinderHeight * 0.25) };
+          }
+          // Caixa quadrada para QR Code
+          const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.65;
+          return { width: Math.floor(size), height: Math.floor(size) };
+        },
+        // Solicita resolução mais alta para ler etiquetas pequenas
+        videoConstraints: {
+          facingMode: "environment",
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true // Usa API nativa do Chrome/Android se disponível (MUITO mais rápido)
+        }
+      };
+
       await scanner.start(
-        { facingMode: "environment" },
+        backCamera.id,
         config,
         (decodedText, decodedResult) => {
           const detectedFormat = decodedResult.result.format?.format;
           
+          // Lógica de troca de modo inteligente
           if (mode === 'BARCODE' && detectedFormat === Html5QrcodeSupportedFormats.QR_CODE) {
-            if (confirm("QR Code detectado. Deseja trocar para o modo de leitura de QR Code?")) {
+            if (confirm("QR Code detectado. Alternar modo?")) {
               setEntryMode('QR');
               return;
             }
           }
           
           if (mode === 'QR' && detectedFormat !== Html5QrcodeSupportedFormats.QR_CODE) {
-            if (confirm("Código de barras detectado. Deseja trocar para o modo de leitura de barras?")) {
+            if (confirm("Código de barras detectado. Alternar modo?")) {
               setEntryMode('BARCODE');
               return;
             }
@@ -404,16 +424,21 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
           handleScannedData(decodedText, mode);
         },
-        () => {
-          // Log silencioso de erros de scan (normal enquanto procura)
-          // console.log(errorMessage);
-        }
+        () => {} // Ignora erros de frame (comum)
       );
-      console.log("Scanner iniciado com sucesso");
+
+      console.log("[Scanner] Iniciado com sucesso");
       setIsScannerStarting(false);
-    } catch (err) {
-      console.error("Erro fatal ao iniciar scanner:", err);
-      setScannerError("Não foi possível acessar a câmera. Verifique as permissões.");
+    } catch (err: unknown) {
+      console.error("[Scanner] Erro fatal:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("NotAllowedError") || msg.includes("Permission denied")) {
+        setScannerError("Permissão de câmera negada pelo navegador.");
+      } else if (msg.includes("NotFound") || msg.includes("Nenhuma câmera")) {
+        setScannerError("Câmera não encontrada no dispositivo.");
+      } else {
+        setScannerError("Falha ao acessar câmera. Tente recarregar a página.");
+      }
       setIsScannerStarting(false);
     }
   }, [stopScanner, handleScannedData]);
