@@ -273,6 +273,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [newLocationName, setNewLocationName] = useState('');
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
+  const [locationSearchTerm, setLocationSearchTerm] = useState('');
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -569,19 +571,51 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {!isInventorying ? (
         <>
           <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200">
-            <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] mb-4">
-              <ArrowLeft size={16} /> <span>Voltar ao Menu</span>
-            </button>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">
+                <ArrowLeft size={16} /> <span>Voltar ao Menu</span>
+              </button>
+              <button 
+                onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
+                className={`p-2 rounded-lg transition-all ${isLocationSearchVisible ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                <Search size={18} />
+              </button>
+            </div>
             <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Mapeamento Geográfico</h1>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
+            
+            {isLocationSearchVisible && (
+              <div className="mt-4 relative animate-fadeIn">
+                <input 
+                  type="text"
+                  value={locationSearchTerm}
+                  onChange={(e) => setLocationSearchTerm(e.target.value.toUpperCase())}
+                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold text-sm rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all"
+                  placeholder="PESQUISAR LOCAL..."
+                  autoFocus
+                />
+                {locationSearchTerm && (
+                  <button 
+                    onClick={() => setLocationSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
             <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md">
               <Plus size={20} />
               <span>Criar Nova Localidade</span>
             </button>
-            {Object.keys(locationsWithStats).sort().map(loc => {
-              const stats = locationsWithStats[loc];
+            {Object.keys(locationsWithStats)
+              .filter(loc => normalizeKey(loc).includes(normalizeKey(locationSearchTerm)))
+              .sort()
+              .map(loc => {
+                const stats = locationsWithStats[loc];
               const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
               const isStarted = stats.checked > 0;
               
