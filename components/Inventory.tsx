@@ -104,13 +104,13 @@ const AssetCard = React.memo(({
   const isDifferentCompany = selectedCompany && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
-  const isBaixado = statusUpper.includes('BAIXADO');
+  
+  const isBaixado = useMemo(() => {
+    return statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+  }, [statusUpper, asset.DATABAIXA]);
 
   const visualStatus = useMemo(() => {
-    const statusUpper = String(asset.STATUS || '').toUpperCase();
-    const isBaixadoLogic = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
-
-    if (isBaixadoLogic) return TagInventario.BAIXADO;
+    if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
     if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
 
     if (!asset._conferido) {
@@ -144,31 +144,39 @@ const AssetCard = React.memo(({
   const getColors = (tag: TagInventario) => {
     switch (tag) {
       case TagInventario.BAIXADO: 
-        return { bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badge: 'bg-red-500 text-white', btn: 'bg-red-600', icon: AlertOctagon };
+        return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-600 text-white', btn: 'bg-red-600', hex: '#dc2626', icon: AlertOctagon };
       case TagInventario.ADOTADO_EXTERNO: 
-        return { bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-600', icon: Building2 };
+        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-600 text-white', btn: 'bg-sky-600', hex: '#0284c7', icon: Building2 };
       case TagInventario.ADOTADO: 
-        return { bg: 'bg-indigo-50', border: 'border-indigo-100', text: 'text-indigo-700', badge: 'bg-indigo-600 text-white', btn: 'bg-indigo-600', icon: MapPin };
+        return { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-600 text-white', btn: 'bg-indigo-600', hex: '#4f46e5', icon: MapPin };
       case TagInventario.RE_ADOTADO: 
-        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-100', text: 'text-fuchsia-700', badge: 'bg-fuchsia-600 text-white', btn: 'bg-fuchsia-600', icon: RefreshCw };
+        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-600 text-white', btn: 'bg-fuchsia-600', hex: '#c026d3', icon: RefreshCw };
       case TagInventario.CONFERIDO: 
-        return { bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badge: 'bg-emerald-500 text-white', btn: 'bg-emerald-600', icon: Check };
+        return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-600 text-white', btn: 'bg-emerald-600', hex: '#059669', icon: Check };
       case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600', icon: Hash };
+        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600', hex: '#d97706', icon: Hash };
       case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-50', border: 'border-violet-100', text: 'text-violet-700', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600', icon: Check };
+        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600', hex: '#7c3aed', icon: Check };
       case TagInventario.NOVO_ITEM: 
-        return { bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-600', icon: Plus };
+        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-600 text-white', btn: 'bg-orange-600', hex: '#ea580c', icon: Plus };
       case TagInventario.DIVERGENCIA:
-        return { bg: 'bg-rose-50', border: 'border-rose-100', text: 'text-rose-700', badge: 'bg-rose-600 text-white', btn: 'bg-rose-700', icon: AlertTriangle };
+        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-600 text-white', btn: 'bg-rose-700', hex: '#e11d48', icon: AlertTriangle };
       case TagInventario.PENDENTE:
-        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-100 text-slate-600', btn: 'bg-sky-600', icon: Check };
+        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-200 text-slate-600', btn: 'bg-slate-600', hex: '#e2e8f0', icon: Check };
       default: 
-        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-100 text-slate-600', btn: 'bg-sky-600', icon: Check };
+        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-200 text-slate-600', btn: 'bg-slate-600', hex: '#e2e8f0', icon: Check };
     }
   };
 
-  const colors = getColors(visualStatus);
+  const colors = useMemo(() => {
+    const baseColors = getColors(visualStatus);
+    // Se for baixado e conferido, vamos usar um tom de vermelho mais suave ou manter o alerta
+    if (isBaixado && isConferido) {
+      return { ...baseColors, bg: 'bg-red-50', border: 'border-red-200' };
+    }
+    return baseColors;
+  }, [visualStatus, isBaixado, isConferido]);
+
   const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
 
   const fullDescription = [
@@ -181,10 +189,11 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-2 p-3 border rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
+      className={`mb-3 p-4 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
+      style={{ borderLeftColor: colors.hex }}
       onClick={() => isBatchMode ? onToggleSelect(String(asset.id)) : onSelect(asset)}
     >
-      <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[8px] font-bold uppercase flex items-center space-x-1.5 shadow-sm ${colors.badge}`}>
+      <div className={`absolute top-0 left-0 px-3 py-1.5 rounded-br-xl text-[8px] font-bold uppercase flex items-center space-x-1.5 shadow-sm z-10 ${colors.badge}`}>
         {isBatchMode ? (
           isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
         ) : (
@@ -214,12 +223,34 @@ const AssetCard = React.memo(({
         </p>
 
         <div className="flex flex-wrap gap-1.5 pt-1">
+          {isBaixado && (
+            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700">
+              BAIXADO
+            </span>
+          )}
           {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
             <span key={index} className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-blue-100 text-blue-600 border border-blue-200' : index === 1 ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-purple-100 text-purple-600 border border-purple-200'}`}>
-              {tag}
+              {String(tag)}
             </span>
           ))}
         </div>
+
+        {asset._camposAlterados && asset._camposAlterados.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-slate-100/50 space-y-1">
+            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Auditoria DE/PARA:</p>
+            {asset._camposAlterados.slice(0, 3).map(field => (
+              <div key={field} className="flex flex-col">
+                <span className="text-[8px] font-bold text-slate-700 uppercase tracking-tight">{String(field)}: {String(asset[field] || '---')}</span>
+                {asset._valoresOriginais?.[field] !== undefined && (
+                  <span className="text-[7px] text-red-500 font-bold uppercase italic">DE: {String(asset._valoresOriginais[field] || '---')}</span>
+                )}
+              </div>
+            ))}
+            {asset._camposAlterados.length > 3 && (
+              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 3} campos alterados</p>
+            )}
+          </div>
+        )}
       </div>
 
       {!isConferido && !isBatchMode && (
@@ -301,9 +332,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       return assets.filter(a => {
         const locKey = normalizeKey(a.ENDERECO || "");
         const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXADO');
+        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         
-        if (isBaixado) return false; // REGRA A: Baixado não aparece na listagem um clique
+        // REGRA A: Baixado PENDENTE não aparece na listagem um clique
+        if (isBaixado && !a._conferido) return false; 
 
         if (activeFilter === 'checked') return !!a._conferido && locKey === currentLocKey;
         return !a._conferido && locKey === currentLocKey;

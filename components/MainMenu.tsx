@@ -93,7 +93,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
             <Tag size={20} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-amber-700 uppercase tracking-tight">EMPLAQUETAR</h3>
+            <h3 className="text-[14px] font-bold text-amber-700 uppercase tracking-tight">ETIQUETAR</h3>
             <p className="text-[9px] text-amber-600 font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
           </div>
           <ChevronRight size={16} className="text-amber-300 group-hover:text-amber-500 transition-colors" />

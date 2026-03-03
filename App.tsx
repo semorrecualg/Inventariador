@@ -182,11 +182,21 @@ const App: React.FC = () => {
       if (loc) locationsSet.add(loc);
 
       const statusUpper = String(a.STATUS || '').toUpperCase();
-      if (statusUpper.includes('BAIXADO')) return;
+      const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+      
+      // REGRA A: Baixado PENDENTE não entra nas estatísticas de total/checked
+      if (isBaixado && !a._conferido) return;
 
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
-      stats[loc].total++;
-      if (a._conferido) stats[loc].checked++;
+      
+      // Se for um item ativo, conta no total
+      if (!isBaixado) stats[loc].total++;
+      
+      if (a._conferido) {
+        stats[loc].checked++;
+        // Se for um item baixado que foi localizado, adicionamos ao total para manter a coerência do progresso
+        if (isBaixado) stats[loc].total++;
+      }
     });
 
     return { 
@@ -206,21 +216,25 @@ const App: React.FC = () => {
     const statusUpper = String(asset.STATUS || '').toUpperCase();
     const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
     
-    // B) BAIXADO: STATUS É PERMANENTE E IMUTÁVEL
-    if (isBaixado) return TagInventario.BAIXADO;
+    // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
+    // Se o item nasceu para ser etiquetado, o fato de ter sido etiquetado é a informação soberana.
+    const originalEtq = normalizeKey(asset._plaquetaMaster || '');
+    const needsLabel = originalEtq === 'ETIQUETAR';
+    if (needsLabel) {
+      return asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
+    }
+
+    // 2. BAIXADO (Se não conferido)
+    if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
     
-    // 5) ADOTADO EXTERNO (Se a empresa for diferente da selecionada)
+    // 3. ADOTADO EXTERNO (Empresa diferente)
     const assetCompKey = normalizeKey(asset.EMPRESA || '');
     const currentCompKey = normalizeKey(selectedCompany || '');
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
     }
 
-    // Se o item for marcado para etiquetar na base mestre
-    const needsLabel = normalizeKey(asset.ETIQUETA || '') === 'ETIQUETAR';
-    if (needsLabel) return asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
-    
-    // 4) NOVO ITEM
+    // 4. NOVO ITEM
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
     const targetLocKey = normalizeKey(targetLocation);
@@ -281,6 +295,20 @@ const App: React.FC = () => {
   };
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
+    // ALERTA DE DUPLICIDADE DE ETIQUETA
+    const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
+    if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
+      const duplicate = inventory.assets.find(a => 
+        String(a.id) !== String(updatedAsset.id) && 
+        String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
+      );
+      if (duplicate) {
+        if (!confirm(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`)) {
+          return;
+        }
+      }
+    }
+
     setInventory(prev => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
@@ -293,10 +321,29 @@ const App: React.FC = () => {
       
       const existingAsset = index !== -1 ? newAssets[index] : null;
       if (existingAsset) {
+        const originalValues = { ...(existingAsset._valoresOriginais || {}) };
+        
+        // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
+        const wasLabelingCandidate = 
+          String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+          existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+          existingAsset._plaquetado === true;
+
         Object.keys(updates).forEach(key => {
           if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-          if (String(updates[key]) !== String(existingAsset[key])) alteredFields.add(key);
+          if (String(updates[key]) !== String(existingAsset[key])) {
+            alteredFields.add(key);
+            if (originalValues[key] === undefined) {
+              originalValues[key] = existingAsset[key] as string | number | boolean | string[] | null | undefined;
+            }
+          }
         });
+        updates._valoresOriginais = originalValues;
+
+        // Se era candidato a etiquetagem e foi conferido/alterado, marcamos como plaquetado
+        if (wasLabelingCandidate) {
+          updates._plaquetado = true;
+        }
       }
 
       if (normalizeKey(String(existingAsset?.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
@@ -334,14 +381,33 @@ const App: React.FC = () => {
         if (idSet.has(String(a.id))) {
           const updates = { ...a };
           updates._conferido = true;
-          const alteredFields = new Set<string>(updates._camposAlterados || []);
           
-          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) alteredFields.add('ENDERECO');
+          // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
+          const wasLabelingCandidate = 
+            String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+            a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+            a._plaquetado === true;
+
+          const alteredFields = new Set<string>(updates._camposAlterados || []);
+          const originalValues = { ...(a._valoresOriginais || {}) };
+          
+          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) {
+            alteredFields.add('ENDERECO');
+            if (originalValues['ENDERECO'] === undefined) {
+              originalValues['ENDERECO'] = a.ENDERECO;
+            }
+          }
           updates._localMaster = targetLoc;
           updates.ENDERECO = targetLoc; 
           
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           updates._camposAlterados = Array.from(alteredFields);
+          updates._valoresOriginais = originalValues;
+
+          if (wasLabelingCandidate) {
+            updates._plaquetado = true;
+          }
+
           return updates;
         }
         return a;
@@ -371,6 +437,14 @@ const App: React.FC = () => {
     const wsData = inventory.assets.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
       Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
+      
+      const originalValues = a._valoresOriginais;
+      if (originalValues) {
+        Object.keys(originalValues).forEach(key => {
+          res[`ORIGINAL_${key}`] = originalValues[key] as string | number | boolean | null | undefined;
+        });
+      }
+
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';

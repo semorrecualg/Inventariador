@@ -109,10 +109,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
   const suggestions = useMemo(() => {
     if (editingField === 'ENDERECO') {
-      return uniqueEnderecos.filter(e => e.includes(editValue.toUpperCase())).slice(0, 5);
+      return uniqueEnderecos.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
     }
     if (editingField === 'CENTRODECUSTO') {
-      return uniqueCentrosDeCusto.filter(e => e.includes(editValue.toUpperCase())).slice(0, 5);
+      return uniqueCentrosDeCusto.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
     }
     return [];
   }, [editingField, editValue, uniqueEnderecos, uniqueCentrosDeCusto]);
@@ -136,26 +136,45 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     if (isBatch) {
       onBulkUpdate(assets.map(a => String(a.id)));
     } else {
+      // ALERTA DE DUPLICIDADE DE ETIQUETA
+      // (O App.tsx já tem a trava, mas aqui damos o feedback imediato se necessário)
       onUpdate({ ...workingAsset, _conferido: true });
     }
     onBack();
   };
 
-  const headerBg = useMemo(() => {
-    if (isBatch) return 'bg-amber-600';
-    
+  const getTagColors = (tag: TagInventario | string) => {
+    switch (tag) {
+      case TagInventario.BAIXADO: return { bg: 'bg-red-600', hex: '#dc2626' };
+      case TagInventario.ADOTADO_EXTERNO: return { bg: 'bg-sky-600', hex: '#0284c7' };
+      case TagInventario.ADOTADO: return { bg: 'bg-indigo-600', hex: '#4f46e5' };
+      case TagInventario.RE_ADOTADO: return { bg: 'bg-fuchsia-600', hex: '#c026d3' };
+      case TagInventario.CONFERIDO: return { bg: 'bg-emerald-600', hex: '#059669' };
+      case TagInventario.FALTA_ETIQUETAR: return { bg: 'bg-amber-600', hex: '#d97706' };
+      case TagInventario.ETIQUETADO: return { bg: 'bg-violet-600', hex: '#7c3aed' };
+      case TagInventario.NOVO_ITEM: return { bg: 'bg-orange-600', hex: '#ea580c' };
+      case TagInventario.DIVERGENCIA: return { bg: 'bg-rose-600', hex: '#e11d48' };
+      default: return { bg: 'bg-slate-900', hex: '#0f172a' };
+    }
+  };
+
+  const isBaixado = useMemo(() => {
     const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
-    const isBaixado = statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
-    
-    if (isBaixado) return 'bg-red-600';
-    if (workingAsset.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO) return 'bg-sky-600';
-    if (workingAsset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return 'bg-fuchsia-600';
-    if (workingAsset.TAG_INVENTARIO === TagInventario.ADOTADO) return 'bg-blue-600';
-    if (workingAsset.TAG_INVENTARIO === TagInventario.CONFERIDO) return 'bg-emerald-600';
-    if (workingAsset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return 'bg-orange-600';
-    
-    return 'bg-slate-900';
-  }, [isBatch, workingAsset]);
+    return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
+  }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
+
+  const tagColors = useMemo(() => {
+    if (isBatch) return { bg: 'bg-amber-600', hex: '#d97706' };
+    const tag = workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE);
+    const base = getTagColors(tag);
+    // Se for baixado, vamos manter o cabeçalho vermelho ou com tom de alerta
+    if (isBaixado) {
+      return { bg: 'bg-red-600', hex: '#dc2626' };
+    }
+    return base;
+  }, [isBatch, workingAsset, isBaixado]);
+
+  const headerBg = tagColors.bg;
 
 
 
@@ -192,8 +211,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
               <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">AUDITORIA</p>
               <div className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-sm shadow-sky-400/50" />
-                <span className="text-[10px] font-bold uppercase text-sky-300 tracking-widest">
+                <div className={`w-1.5 h-1.5 rounded-full ${isBaixado ? 'bg-red-400 shadow-red-400/50' : 'bg-sky-400 shadow-sky-400/50'} shadow-sm`} />
+                <span className={`text-[10px] font-bold uppercase ${isBaixado ? 'text-red-100' : 'text-sky-300'} tracking-widest`}>
+                  {isBaixado ? 'BAIXADO | ' : ''}
                   {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
                 </span>
               </div>
@@ -272,17 +292,31 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                           </button>
                         </div>
                       ) : (
-                        <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
-                          {displayVal}
-                        </p>
+                        <div className="flex flex-col">
+                          <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
+                            {displayVal}
+                          </p>
+                          {workingAsset._valoresOriginais?.[key] !== undefined && (
+                            <p className="text-[8px] text-red-500 font-bold uppercase mt-1 tracking-wider">
+                              DE: {String(workingAsset._valoresOriginais[key] || '---')}
+                            </p>
+                          )}
+                        </div>
                       )}
                       
                       {editingField === key && suggestions.length > 0 && (
-                        <div className="mt-3 p-2 bg-slate-50 border border-slate-200 rounded-xl shadow-inner">
-                          <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.1em] px-1 mb-1.5">SUGESTÕES</p>
-                          <div className="flex flex-wrap gap-1.5">
+                        <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl shadow-inner">
+                          <div className="flex items-center justify-between mb-2 px-1">
+                            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em]">Sugestões Disponíveis</p>
+                            <span className="text-[7px] font-bold text-blue-500 uppercase">{suggestions.length} encontrados</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar py-1">
                             {suggestions.map(s => (
-                              <button key={s} onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-bold text-blue-600 uppercase active:bg-blue-600 active:text-white transition-all shadow-sm">
+                              <button 
+                                key={s} 
+                                onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} 
+                                className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-bold text-slate-700 uppercase active:bg-blue-600 active:text-white active:border-blue-600 transition-all shadow-sm hover:border-blue-300"
+                              >
                                 {s}
                               </button>
                             ))}
@@ -303,7 +337,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
            <span className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
            <span className="text-[9px] font-bold text-slate-900 uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
          </div>
-         <button onClick={handleFinalize} className={`${isBatch ? 'bg-amber-600' : 'bg-blue-600'} text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase shadow-md active:scale-95 flex items-center space-x-2 transition-all tracking-widest`}>
+         <button onClick={handleFinalize} className={`text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase shadow-md active:scale-95 flex items-center space-x-2 transition-all tracking-widest ${tagColors.bg}`}>
             <Save size={16} />
             <span>{isBatch ? 'EFETIVAR LOTE' : 'EFETIVAR'}</span>
          </button>

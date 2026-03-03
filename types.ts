@@ -34,7 +34,7 @@ export enum ConservationState {
 }
 
 export interface Asset {
-  [key: string]: string | number | boolean | string[] | undefined | null;
+  [key: string]: string | number | boolean | string[] | Record<string, string | number | boolean | string[] | null | undefined> | undefined | null;
   id: string | number;
   
   // Estrutura Mestre v24
@@ -66,6 +66,7 @@ export interface Asset {
   _descricaoMaster?: string;
   _baseSinteticaLoc?: string[];
   _camposAlterados?: string[]; 
+  _valoresOriginais?: Record<string, string | number | boolean | string[] | null | undefined>;
   
   // Tags de Auditoria
   TAG_DUPLICIDADE?: 'ÚNICO' | 'ETIQUETA+1REGISTRO' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
