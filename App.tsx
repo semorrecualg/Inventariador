@@ -312,7 +312,12 @@ const App: React.FC = () => {
     setInventory(prev => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
-      const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
+      
+      // REGRA DE OURO: Se o auditor está em um local específico (Inventory Mode), forçamos esse local.
+      // Se ele está em modo livre (Labeling/Consultation), respeitamos o endereço que está no objeto (que pode ter sido editado).
+      const targetLoc = inventoryLocation 
+        ? inventoryLocation.toUpperCase().trim() 
+        : (updatedAsset.ENDERECO || "SEM LOCAL").toString().toUpperCase().trim();
       
       const updates = { ...updatedAsset } as Asset;
       updates._conferido = true;
@@ -326,6 +331,7 @@ const App: React.FC = () => {
         // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
         const wasLabelingCandidate = 
           String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+          String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
           existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
           existingAsset._plaquetado === true;
 
@@ -371,25 +377,44 @@ const App: React.FC = () => {
     }
   };
 
-  const bulkUpdateAssets = useCallback((ids: string[]) => {
+  const bulkUpdateAssets = useCallback((ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
-    const targetLoc = (inventoryLocation || "SEM LOCAL").toUpperCase().trim();
     
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
-          const updates = { ...a };
+          const updates = { ...a, ...(manualUpdates || {}) };
+          
+          // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
+          const targetLoc = inventoryLocation 
+            ? inventoryLocation.toUpperCase().trim() 
+            : (updates.ENDERECO || "SEM LOCAL").toString().toUpperCase().trim();
+
           updates._conferido = true;
           
           // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
           const wasLabelingCandidate = 
             String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+            String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
             a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
             a._plaquetado === true;
 
           const alteredFields = new Set<string>(updates._camposAlterados || []);
           const originalValues = { ...(a._valoresOriginais || {}) };
+
+          // Se houver manualUpdates, registramos os campos alterados
+          if (manualUpdates) {
+            Object.keys(manualUpdates).forEach(key => {
+              if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+              if (String(manualUpdates[key]) !== String(a[key])) {
+                alteredFields.add(key);
+                if (originalValues[key] === undefined) {
+                  originalValues[key] = a[key] as string | number | boolean | string[] | null | undefined;
+                }
+              }
+            });
+          }
           
           if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) {
             alteredFields.add('ENDERECO');
@@ -401,6 +426,7 @@ const App: React.FC = () => {
           updates.ENDERECO = targetLoc; 
           
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
+          updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
           updates._camposAlterados = Array.from(alteredFields);
           updates._valoresOriginais = originalValues;
 

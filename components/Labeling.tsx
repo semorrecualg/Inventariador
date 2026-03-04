@@ -49,13 +49,13 @@ interface LabelingProps {
   assets: Asset[];
   onBack: () => void;
   onUpdateAsset: (asset: Asset) => void;
-  onBulkUpdateAssets: (ids: string[]) => void;
+  onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void;
   onSelectAsset: (asset: Asset) => void;
   uniqueCentrosDeCusto: string[];
   selectedCompany: string | null;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSelectAsset }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
 
@@ -75,7 +75,9 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
   const assetsToLabel = useMemo(() => {
     return assets.filter(a => 
       String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+      String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
       a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+      a.TAG_INVENTARIO === TagInventario.ETIQUETADO ||
       a._plaquetado === true
     );
   }, [assets]);
@@ -142,37 +144,30 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
 
   const handleBatchConfirm = () => {
     if (selectedIds.size === 0) return;
-    if (confirm(`Confirmar etiquetagem em lote para ${selectedIds.size} itens?`)) {
-      const ids = Array.from(selectedIds);
-      ids.forEach(id => {
-        const asset = assets.find(a => String(a.id) === id);
-        if (asset) {
-          onUpdateAsset({
-            ...asset,
-            _conferido: true,
-            TAG_INVENTARIO: TagInventario.ETIQUETADO,
-            _plaquetado: true
-          });
-        }
-      });
+    
+    // Feedback tátil/visual imediato
+    const ids = Array.from(selectedIds);
+    onBulkUpdateAssets(ids);
+    
+    setSelectedIds(new Set());
+    setIsBatchMode(false);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredAssets.length) {
       setSelectedIds(new Set());
-      setIsBatchMode(false);
+    } else {
+      const allIds = filteredAssets.map(a => String(a.id));
+      setSelectedIds(new Set(allIds));
     }
   };
 
   const handleConfirmAllFiltered = () => {
     const pending = filteredAssets.filter(a => !a._conferido);
     if (pending.length === 0) return;
-    if (confirm(`Deseja etiquetar TODOS os ${pending.length} itens desta busca?`)) {
-      pending.forEach(asset => {
-        onUpdateAsset({
-          ...asset,
-          _conferido: true,
-          TAG_INVENTARIO: TagInventario.ETIQUETADO,
-          _plaquetado: true
-        });
-      });
-    }
+    
+    const ids = pending.map(a => String(a.id));
+    onBulkUpdateAssets(ids);
   };
 
   const getColors = (tag: string) => {
@@ -194,7 +189,16 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
             <ArrowLeft size={16} /> <span>Menu Principal</span>
           </button>
           <div className="flex space-x-2">
-            <button onClick={() => setIsBatchMode(!isBatchMode)} className={`p-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            {isBatchMode && (
+              <button 
+                onClick={toggleSelectAll} 
+                className={`flex items-center space-x-2 px-4 py-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+              >
+                {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
+              </button>
+            )}
+            <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <ListChecks size={16} />
             </button>
 
@@ -219,6 +223,22 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
                  </button>
                </div>
             </div>
+            
+            {/* BARRA DE AÇÃO LOTE ETIQUETAR - TOPO PARA FLUIDEZ */}
+            {isBatchMode && selectedIds.size > 0 && (
+              <div className="mb-4 animate-slideDown">
+                 <div className="bg-amber-600 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
+                    <div className="flex items-center space-x-3 pl-2">
+                       <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
+                       <span className="text-[9px] font-bold text-amber-100 uppercase tracking-widest">Selecionados</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                       <button onClick={() => setSelectedIds(new Set())} className="p-2 bg-black/20 text-white rounded-xl"><X size={16} /></button>
+                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-amber-600 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
+                    </div>
+                 </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Busca (Descrição/Serial/NF/Reg)</label>
@@ -316,24 +336,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onSe
         })}
       </div>
 
-      {/* BARRA DE AÇÃO LOTE ETIQUETAR */}
-      {isBatchMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-10 left-6 right-6 z-50 animate-slideUp">
-           <div className="bg-amber-600 p-5 rounded-[2.5rem] shadow-2xl flex items-center justify-between border border-white/20 backdrop-blur-sm">
-              <div className="flex items-center space-x-4">
-                 <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center text-white font-mono font-bold text-lg shadow-inner">{selectedIds.size}</div>
-                 <div className="text-white">
-                   <p className="text-[11px] font-bold uppercase tracking-widest leading-none">Etiquetar em Lote</p>
-                 </div>
-              </div>
-              <div className="flex space-x-3">
-                 <button onClick={() => setSelectedIds(new Set())} className="p-4 bg-black/20 text-white rounded-2xl active:scale-90 transition-all"><X size={20} /></button>
-                 <button onClick={handleBatchConfirm} className="px-8 py-4 bg-white text-amber-600 rounded-2xl text-[11px] font-bold uppercase tracking-widest shadow-xl active:scale-95 transition-all">Conferir</button>
-              </div>
-           </div>
-        </div>
-      )}
-
+      {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
     </div>
   );
 };

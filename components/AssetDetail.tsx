@@ -6,7 +6,6 @@ import {
   Edit2, 
   X, 
   ShieldCheck, 
-  Save, 
   Check, 
   MapPin, 
   Building2, 
@@ -45,7 +44,7 @@ interface AssetDetailProps {
   assets: Asset[];
   onBack: () => void;
   onUpdate: (asset: Asset) => void;
-  onBulkUpdate: (ids: string[]) => void;
+  onBulkUpdate: (ids: string[], updates?: Partial<Asset>) => void;
   editableFields: string[];
   qrCodeFields: string[];
   uniqueEnderecos: string[];
@@ -121,11 +120,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     if (editingField) {
       const updates: Asset = { ...workingAsset };
       const newValue = (val || editValue).toUpperCase().trim();
-      if (String(updates[editingField]) !== newValue) {
-        const altered = new Set<string>(updates._camposAlterados || []);
-        altered.add(editingField);
-        updates._camposAlterados = Array.from(altered);
-      }
       updates[editingField] = newValue;
       setWorkingAsset(updates);
       setEditingField(null);
@@ -133,12 +127,29 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
   };
 
   const handleFinalize = () => {
+    const finalAsset = { ...workingAsset };
+    
+    // Se o usuário está editando um campo e clicou direto em SALVAR, aplicamos o valor atual
+    if (editingField) {
+      const newValue = editValue.toUpperCase().trim();
+      finalAsset[editingField] = newValue;
+    }
+
     if (isBatch) {
-      onBulkUpdate(assets.map(a => String(a.id)));
+      // Para lote, se houve alteração em algum campo no finalAsset, aplicamos a todos os itens do lote.
+      const manualUpdates: Partial<Asset> = {};
+      const original = assets[0];
+      
+      Object.keys(finalAsset).forEach(key => {
+        if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+        if (String(finalAsset[key]) !== String(original[key])) {
+          (manualUpdates as Record<string, string | number | boolean | string[] | null | undefined>)[key] = finalAsset[key];
+        }
+      });
+
+      onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
     } else {
-      // ALERTA DE DUPLICIDADE DE ETIQUETA
-      // (O App.tsx já tem a trava, mas aqui damos o feedback imediato se necessário)
-      onUpdate({ ...workingAsset, _conferido: true });
+      onUpdate({ ...finalAsset, _conferido: true });
     }
     onBack();
   };
@@ -337,9 +348,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
            <span className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
            <span className="text-[9px] font-bold text-slate-900 uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
          </div>
-         <button onClick={handleFinalize} className={`text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase shadow-md active:scale-95 flex items-center space-x-2 transition-all tracking-widest ${tagColors.bg}`}>
-            <Save size={16} />
-            <span>{isBatch ? 'EFETIVAR LOTE' : 'EFETIVAR'}</span>
+         <button 
+           onClick={handleFinalize} 
+           className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
+         >
+            <Check size={20} strokeWidth={3} />
+            <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
          </button>
       </div>
 
