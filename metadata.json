@@ -1,7 +1,5 @@
 {
   "name": "Inventariado Ativo Imobilizado by GBR",
   "description": "Um aplicativo completo para inventário de ativos imobilizados, com suporte a carga de planilhas Excel, consultas dinâmicas e gerenciamento de base local.",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "requestFramePermissions": []
 }
