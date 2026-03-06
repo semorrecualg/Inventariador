@@ -186,12 +186,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                 </div>
               </button>
 
-              <button disabled={hasData} onClick={() => { 
-                if (confirm("Deseja iniciar uma nova CARGA EXPERT?")) {
-                  setIsAdminMenuOpen(false); 
-                  onNavigate(AppScreen.LOAD_DATABASE); 
-                }
-              }} className="w-full flex items-center p-5 bg-sky-600 text-white rounded-3xl active:scale-[0.98] transition-all text-left shadow-lg disabled:opacity-40 disabled:bg-slate-200">
+              <button onClick={() => { 
+                setIsAdminMenuOpen(false); 
+                onNavigate(AppScreen.LOAD_DATABASE); 
+              }} className="w-full flex items-center p-5 bg-sky-600 text-white rounded-3xl active:scale-[0.98] transition-all text-left shadow-lg">
                 <div className="w-10 h-10 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5"><DatabaseZap size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-sm font-bold uppercase tracking-tight">Carga Expert</h4>

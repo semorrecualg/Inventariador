@@ -567,16 +567,16 @@ const App: React.FC = () => {
   return (
     <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
       {showCompanyHeader && (
-        <div className="bg-white px-4 py-3 flex items-center space-x-4 border-b border-slate-200 shadow-sm z-[200]">
-           <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
-             <Building2 size={20} />
+        <div className="bg-white px-3 py-1.5 flex items-center space-x-3 border-b border-slate-200 shadow-sm z-[200]">
+           <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
+             <Building2 size={16} />
            </div>
            <div className="flex-1 min-w-0">
-             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1.5">Empresa em Auditoria</p>
-             <h2 className="text-[13px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
+             <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Empresa em Auditoria</p>
+             <h2 className="text-[11px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
            </div>
-           <div className="px-2 py-1 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
-             <span className="text-[8px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
+           <div className="px-1.5 py-0.5 rounded-md bg-blue-50 border border-blue-100 shadow-sm">
+             <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
            </div>
         </div>
       )}

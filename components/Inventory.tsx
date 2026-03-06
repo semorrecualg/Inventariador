@@ -72,7 +72,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-4 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-3 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
       {keys.map((key) => (
         <button
           key={key}
@@ -190,11 +190,11 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-3 p-4 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
+      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
       style={{ borderLeftColor: colors.hex }}
       onClick={() => isBatchMode ? onToggleSelect(String(asset.id)) : onSelect(asset)}
     >
-      <div className={`absolute top-0 left-0 px-3 py-1.5 rounded-br-xl text-[8px] font-bold uppercase flex items-center space-x-1.5 shadow-sm z-10 ${colors.badge}`}>
+      <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${colors.badge}`}>
         {isBatchMode ? (
           isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
         ) : (
@@ -203,7 +203,7 @@ const AssetCard = React.memo(({
         <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
       </div>
       
-      <div className="pt-5 pr-10 flex flex-col space-y-2">
+      <div className="pt-4 pr-8 flex flex-col space-y-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
@@ -567,7 +567,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
         <>
-          <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200">
+          <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200">
             <div className="flex items-center justify-between mb-4">
               <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">
                 <ArrowLeft size={16} /> <span>Voltar ao Menu</span>
@@ -603,7 +603,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32 no-scrollbar">
             <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md">
               <Plus size={20} />
               <span>Criar Nova Localidade</span>
@@ -617,7 +617,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               const isStarted = stats.checked > 0;
               
               return (
-                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-slate-200 rounded-3xl p-5 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
+                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-slate-200 rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
                   <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-emerald-50' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
                   <div className="flex items-center space-x-4 relative z-10">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
@@ -636,39 +636,48 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-5 pt-8 pb-3 bg-white border-b border-slate-200 shadow-sm z-20">
-            <div className="flex items-center justify-between mb-3">
-              <button onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600">
-                <MapPin size={10} className="text-blue-500" />
-                <span className="text-[9px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
-              </button>
-              <div className="flex items-center space-x-2">
+          <div className="px-3 pt-1.5 pb-1 bg-white border-b border-slate-200 shadow-sm z-20">
+            <div className="flex flex-col space-y-1.5 mb-1">
+              {/* Row 1: Action Buttons & SAFE Status */}
+              <div className="flex items-center justify-end space-x-2">
                 <div className="flex items-center space-x-1 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg shadow-sm" title="Banco de Dados Protegido (IndexedDB)">
                   <ShieldCheck size={10} className="text-emerald-600" />
                   <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
                 </div>
-                <div className="flex space-x-2">
-                {isBatchMode && (
+                <div className="flex items-center space-x-1.5">
+                  {isBatchMode && (
+                    <button 
+                      onClick={toggleSelectAll} 
+                      className={`flex items-center space-x-1.5 px-2 py-1 rounded-lg border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                    >
+                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={12} /> : <Square size={12} />}
+                      <span className="text-[8px] font-bold uppercase tracking-widest">Todos</span>
+                    </button>
+                  )}
                   <button 
-                    onClick={toggleSelectAll} 
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                    onClick={() => setIsSearchVisible(!isSearchVisible)} 
+                    className={`p-1.5 rounded-lg border transition-all ${isSearchVisible ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
                   >
-                    {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={14} /> : <Square size={14} />}
-                    <span className="text-[9px] font-bold uppercase tracking-widest">Todos</span>
+                    <Search size={14} />
                   </button>
-                )}
-                <button 
-                  onClick={() => setIsSearchVisible(!isSearchVisible)} 
-                  className={`p-2 rounded-lg border transition-all ${isSearchVisible ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
-                >
-                  <Search size={16} />
-                </button>
-                <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-2 rounded-lg border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}>
-                  <ListChecks size={16} />
-                </button>
+                  <button 
+                    onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} 
+                    className={`p-1.5 rounded-lg border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
+                  >
+                    <ListChecks size={14} />
+                  </button>
+                </div>
               </div>
+
+              {/* Row 2: Location Field (Limited width on mobile) */}
+              <button 
+                onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }} 
+                className="w-full max-w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600 overflow-hidden active:bg-slate-100 transition-colors"
+              >
+                <MapPin size={12} className="text-blue-500 shrink-0" />
+                <span className="text-[9px] font-bold uppercase truncate italic tracking-wide flex-1 text-left">{selectedLocation}</span>
+              </button>
             </div>
-          </div>
 
             {isSearchVisible && (
               <div className="relative mb-3 animate-fadeIn">
@@ -679,25 +688,25 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   inputMode="none"
                   onFocus={() => setShowNumericKeypad(true)}
                   value={displayValue} 
-                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold font-mono text-xl text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
+                  className="w-full bg-slate-50 border border-slate-200 px-4 py-2 font-bold font-mono text-lg text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
                   placeholder="DIGITE ETIQUETA..." 
                 />
                 <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={20} /></button>
               </div>
             )}
 
-            <div className="flex space-x-2">
-              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-2 rounded-lg text-[9px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
-              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-2 rounded-lg text-[9px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
+            <div className="flex space-x-1.5">
+              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
+              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
             </div>
           </div>
 
           <div className="flex-1 overflow-hidden bg-bg-main relative">
             {isSearchResultBatch && (
-              <div className="px-6 pt-5">
+              <div className="px-4 pt-3">
                 <button 
                   onClick={handleConfirmSearchBatch} 
-                  className="w-full mb-4 bg-amber-500 text-white py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3 border-b-4 border-amber-700"
+                  className="w-full mb-3 bg-amber-500 text-white py-3 rounded-xl font-bold uppercase text-[9px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-2 border-b-4 border-amber-700"
                 >
                   <Zap size={16} className="fill-white" />
                   <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
@@ -707,7 +716,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
             {/* BARRA DE AÇÃO LOTE INVENTARIO - TOPO PARA FLUIDEZ */}
             {isBatchMode && selectedIds.size > 0 && (
-              <div className="px-6 pb-4 animate-slideDown">
+              <div className="px-4 pb-2 animate-slideDown">
                  <div className="bg-emerald-600 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
                     <div className="flex items-center space-x-3 pl-2">
                        <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
@@ -733,7 +742,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   }
                 }}
                 itemContent={(index, asset) => (
-                  <div className="px-6 pt-2">
+                  <div className="px-4 pt-1.5">
                     <AssetCard 
                       asset={asset} 
                       selectedLocation={selectedLocation} 
