@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   FilePlus2,
   RefreshCw,
+  ShieldCheck,
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -641,7 +642,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 <MapPin size={10} className="text-blue-500" />
                 <span className="text-[9px] font-bold uppercase truncate italic tracking-wide">{selectedLocation}</span>
               </button>
-              <div className="flex space-x-2">
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg shadow-sm" title="Banco de Dados Protegido (IndexedDB)">
+                  <ShieldCheck size={10} className="text-emerald-600" />
+                  <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
+                </div>
+                <div className="flex space-x-2">
                 {isBatchMode && (
                   <button 
                     onClick={toggleSelectAll} 
@@ -662,6 +668,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 </button>
               </div>
             </div>
+          </div>
 
             {isSearchVisible && (
               <div className="relative mb-3 animate-fadeIn">
@@ -695,22 +702,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   <Zap size={16} className="fill-white" />
                   <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
                 </button>
-              </div>
-            )}
-
-            {/* BARRA DE AÇÃO LOTE INVENTARIO - TOPO PARA FLUIDEZ */}
-            {isBatchMode && selectedIds.size > 0 && (
-              <div className="px-6 pb-4 animate-slideDown">
-                 <div className="bg-emerald-600 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
-                    <div className="flex items-center space-x-3 pl-2">
-                       <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
-                       <span className="text-[9px] font-bold text-emerald-100 uppercase tracking-widest">Selecionados</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                       <button onClick={() => setSelectedIds(new Set())} className="p-2 bg-black/20 text-white rounded-xl"><X size={16} /></button>
-                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
-                    </div>
-                 </div>
               </div>
             )}
 
@@ -786,7 +777,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 />
               </div>
             )}
-      {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
           </div>
         </>
       )}

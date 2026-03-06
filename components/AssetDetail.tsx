@@ -143,7 +143,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       Object.keys(finalAsset).forEach(key => {
         if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
         if (String(finalAsset[key]) !== String(original[key])) {
-          (manualUpdates as any)[key] = finalAsset[key];
+          (manualUpdates as Record<string, unknown>)[key] = finalAsset[key];
         }
       });
 

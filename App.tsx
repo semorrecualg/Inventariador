@@ -16,8 +16,9 @@ import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 
-import { Building2, Maximize2, Minimize2 } from 'lucide-react';
+import { Building2, Maximize2, Minimize2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { saveInventory, loadInventory, clearInventory } from './services/persistenceService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -44,33 +45,53 @@ const App: React.FC = () => {
     return localStorage.getItem('app_selected_company') || null;
   });
 
-  const [inventory, setInventory] = useState<InventoryState>(() => {
-    const defaultState: InventoryState = { 
-      assets: [], 
-      companies: [], 
-      lastUpdated: null, 
-      status: DatabaseStatus.EMPTY,
-      editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
-      qrCodeFields: ['ETIQUETA']
-    };
-
-    try {
-      const saved = localStorage.getItem('inventory_data');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...defaultState,
-          ...parsed,
-          // Garante que campos de configuração existam mesmo em migrações de versão
-          editableFields: parsed.editableFields || defaultState.editableFields,
-          qrCodeFields: parsed.qrCodeFields || defaultState.qrCodeFields
-        };
-      }
-      return defaultState;
-    } catch { 
-      return defaultState; 
-    }
+  const [inventory, setInventory] = useState<InventoryState>({ 
+    assets: [], 
+    companies: [], 
+    lastUpdated: null, 
+    status: DatabaseStatus.EMPTY,
+    editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
+    qrCodeFields: ['ETIQUETA']
   });
+
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+
+  // Load inventory from IndexedDB on mount
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const saved = await loadInventory();
+        if (saved && saved.assets && saved.assets.length > 0) {
+          setInventory(prev => ({
+            ...prev,
+            ...saved,
+            editableFields: saved.editableFields || prev.editableFields,
+            qrCodeFields: saved.qrCodeFields || prev.qrCodeFields
+          }));
+          setShowRecoveryToast(true);
+          setTimeout(() => setShowRecoveryToast(false), 5000);
+        } else {
+          // Fallback to localStorage for migration
+          const legacy = localStorage.getItem('inventory_data');
+          if (legacy) {
+            const parsed = JSON.parse(legacy);
+            if (parsed && parsed.assets && parsed.assets.length > 0) {
+              setInventory(prev => ({ ...prev, ...parsed }));
+              await saveInventory(parsed);
+              setShowRecoveryToast(true);
+              setTimeout(() => setShowRecoveryToast(false), 5000);
+            }
+          }
+        }
+      } catch (e) { 
+        console.error("Data load failed", e); 
+      } finally {
+        setIsDataLoaded(true);
+      }
+    };
+    init();
+  }, []);
 
   const [users, setUsers] = useState<User[]>(() => {
     try {
@@ -98,14 +119,57 @@ const App: React.FC = () => {
   const dragOffset = useRef({ x: 0, y: 0 });
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (inventory.assets.length > 0 && inventory.status !== DatabaseStatus.EMPTY) {
+        e.preventDefault();
+        e.returnValue = 'Inventário em curso. Deseja realmente sair? Seus dados estão salvos no dispositivo.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [inventory]);
+
   const toggleFullscreen = useCallback(() => {
     if (isDragging) return;
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
-      });
-    } else {
-      document.exitFullscreen();
+    try {
+      if (!document.fullscreenElement) {
+        const docEl = document.documentElement as HTMLElement & {
+          webkitRequestFullScreen?: () => Promise<void>;
+          mozRequestFullScreen?: () => Promise<void>;
+          msRequestFullscreen?: () => Promise<void>;
+        };
+        
+        if (docEl.requestFullscreen) {
+          docEl.requestFullscreen().catch((err: Error) => {
+            console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+          });
+        } else if (docEl.webkitRequestFullScreen) {
+          docEl.webkitRequestFullScreen();
+        } else if (docEl.mozRequestFullScreen) {
+          docEl.mozRequestFullScreen();
+        } else if (docEl.msRequestFullscreen) {
+          docEl.msRequestFullscreen();
+        }
+      } else {
+        const doc = document as Document & {
+          webkitExitFullscreen?: () => Promise<void>;
+          mozCancelFullScreen?: () => Promise<void>;
+          msExitFullscreen?: () => Promise<void>;
+        };
+        if (doc.exitFullscreen) {
+          doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          doc.msExitFullscreen();
+        }
+      }
+    } catch (e) {
+      console.error("Fullscreen toggle failed", e);
     }
   }, [isDragging]);
 
@@ -264,9 +328,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
+    saveTimeoutRef.current = setTimeout(async () => {
       try {
-        localStorage.setItem('inventory_data', JSON.stringify(inventory));
+        if (isDataLoaded) {
+          await saveInventory(inventory);
+        }
         localStorage.setItem('app_screen_history', JSON.stringify(history));
         localStorage.setItem('app_current_user', JSON.stringify(user));
         localStorage.setItem('app_users', JSON.stringify(users));
@@ -276,7 +342,7 @@ const App: React.FC = () => {
       } catch { console.warn("Storage cap reached"); }
     }, 1500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying]);
+  }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded]);
 
   const pushScreen = (s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
@@ -516,10 +582,16 @@ const App: React.FC = () => {
       )}
       
       <div className="flex-1 relative overflow-hidden">
+        {showRecoveryToast && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
+            <ShieldCheck size={20} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
+          </div>
+        )}
         {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
         {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
         {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-        {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={() => setInventory({ ...inventory, assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY })} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+        {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
         {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
         {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} />}
         {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
@@ -534,18 +606,24 @@ const App: React.FC = () => {
 
       {/* Floating Immersive Mode Toggle (Draggable) */}
       {user && (
-        <button 
-          onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
-          onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
-          onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
-          onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
-          onClick={toggleFullscreen}
-          style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}
-          className="fixed w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl z-[999] active:scale-90 transition-transform border border-white/10 touch-none select-none"
-          title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
-        >
-          {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
-        </button>
+        <div className="fixed z-[999] flex flex-col items-center space-y-2" style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}>
+          {inventory.status !== DatabaseStatus.EMPTY && (
+            <div className="bg-emerald-500 text-white text-[8px] font-bold px-2 py-1 rounded-full shadow-lg animate-pulse uppercase tracking-tighter">
+              Banco Protegido
+            </div>
+          )}
+          <button 
+            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+            onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
+            onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
+            onClick={toggleFullscreen}
+            className="w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
+            title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
+          >
+            {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
+          </button>
+        </div>
       )}
     </div>
   );
