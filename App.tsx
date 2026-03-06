@@ -298,13 +298,19 @@ const App: React.FC = () => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
     const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
     if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
-      const duplicate = inventory.assets.find(a => 
-        String(a.id) !== String(updatedAsset.id) && 
-        String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
-      );
-      if (duplicate) {
-        if (!confirm(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`)) {
-          return;
+      const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
+      const oldEtiqueta = String(existing?.ETIQUETA || '').trim().toUpperCase();
+
+      // Só valida duplicidade se a etiqueta foi alterada ou é um novo item (manual)
+      if (newEtiqueta !== oldEtiqueta) {
+        const duplicate = inventory.assets.find(a => 
+          String(a.id) !== String(updatedAsset.id) && 
+          String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
+        );
+        if (duplicate) {
+          if (!confirm(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`)) {
+            return;
+          }
         }
       }
     }
@@ -364,7 +370,7 @@ const App: React.FC = () => {
       
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventoryLocation, determineTag, normalizeKey]);
+  }, [inventory.assets, inventoryLocation, determineTag, normalizeKey]);
 
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
