@@ -57,24 +57,41 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
         ]
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
+    // Simplificado o config para evitar problemas de renderização em alguns dispositivos
     const config = {
-      fps: 20,
+      fps: 15,
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 300, height: 120 } 
         : { width: 250, height: 250 },
-      aspectRatio: 1.0,
+      // Removido aspectRatio fixo para permitir que a câmera use sua resolução nativa
       formatsToSupport: formats,
-      experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true
-      }
     };
 
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Seu navegador não suporta acesso à câmera ou você está em uma conexão não segura.");
+      }
+
+      // Pequeno delay para garantir que o elemento DOM esteja pronto
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
+      // Tenta obter as câmeras para escolher a traseira explicitamente se possível
+      const cameras = await Html5Qrcode.getCameras();
+      let cameraIdOrConfig: string | { facingMode: string } = { facingMode: "environment" };
+      
+      if (cameras && cameras.length > 0) {
+        // Tenta encontrar uma câmera que pareça ser a traseira (back)
+        const backCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('traseira'));
+        if (backCamera) {
+          cameraIdOrConfig = backCamera.id;
+        }
+      }
+
       await html5QrCode.start(
-        { facingMode: "environment" },
+        cameraIdOrConfig,
         config,
         (decodedText) => {
           playBeep();
@@ -86,18 +103,14 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
       );
 
       // Check for torch and zoom capabilities
-      const track = (html5QrCode as any).getRunningTrack();
+      const track = (html5QrCode as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
       const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean, zoom?: { min: number, max: number } };
       
       if (capabilities.torch) setHasTorch(true);
-      
-      // Auto-flashlight if low light (simulated via exposure if supported)
-      // Note: Web API doesn't directly expose light level easily without extra permissions
-      // but we can check if the track supports torch and suggest it.
 
     } catch (err) {
       console.error("Scanner start error", err);
-      setError("Não foi possível acessar a câmera. Verifique as permissões.");
+      setError("Não foi possível acessar a câmera. Verifique as permissões e certifique-se de fechar outros apps que possam estar sobrepondo a tela (balões de chat, filtros de luz, etc).");
     }
   }, [mode, onScan]);
 
@@ -121,7 +134,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
 
   const toggleTorch = async () => {
     if (!scannerRef.current) return;
-    const track = (scannerRef.current as any).getRunningTrack();
+    const track = (scannerRef.current as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
     try {
       await track.applyConstraints({
         advanced: [{ torch: !isTorchOn } as MediaTrackConstraintSet & { torch: boolean }]
@@ -134,7 +147,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
 
   const handleZoom = async (delta: number) => {
     if (!scannerRef.current) return;
-    const track = (scannerRef.current as any).getRunningTrack();
+    const track = (scannerRef.current as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
     const capabilities = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number, max: number } };
     
     if (capabilities.zoom) {
@@ -151,9 +164,9 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-fadeIn">
+    <div className="fixed inset-0 z-[2000] bg-black flex flex-col items-center justify-center">
       {/* Viewport Overlay */}
-      <div id="reader" className="w-full h-full"></div>
+      <div id="reader" key={mode} className="w-full h-full"></div>
       
       {/* Custom UI Overlay */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
@@ -229,12 +242,19 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
         .animate-scanLine {
           animation: scanLine 3s ease-in-out infinite;
         }
+        #reader {
+          background-color: black !important;
+        }
         #reader video {
           object-fit: cover !important;
           width: 100% !important;
           height: 100% !important;
+          display: block !important;
         }
         #reader__scan_region {
+          display: none !important;
+        }
+        #reader__dashboard {
           display: none !important;
         }
       `}</style>
