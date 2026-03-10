@@ -22,6 +22,56 @@ import { saveInventory, loadInventory, clearInventory } from './services/persist
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("App Crash:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-slate-50 text-center">
+          <div className="w-20 h-20 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6">
+            <ShieldCheck size={40} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
+          <p className="text-sm text-slate-500 mb-8 max-w-xs">
+            Ocorreu um erro inesperado na interface. Tente reiniciar o aplicativo ou limpar o cache.
+          </p>
+          <div className="space-y-3 w-full max-w-xs">
+            <button 
+              onClick={() => window.location.reload()} 
+              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+            >
+              Recarregar App
+            </button>
+            <button 
+              onClick={() => {
+                localStorage.clear();
+                window.location.href = '/';
+              }} 
+              className="w-full py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all"
+            >
+              Limpar Tudo e Sair
+            </button>
+          </div>
+          <pre className="mt-8 p-4 bg-slate-100 rounded-lg text-[10px] text-slate-400 overflow-auto max-w-full text-left">
+            {String(this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -93,6 +143,38 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+
+  // Safety check to prevent getting stuck on screens with missing state
+  useEffect(() => {
+    if (!isDataLoaded) return;
+
+    const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
+
+    // 1. If no user, must be at LOGIN or REGISTER
+    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER) {
+      setHistory([AppScreen.LOGIN]);
+      return;
+    }
+
+    // 2. If ASSET_DETAIL but no assets selected, go back
+    if (currentScreen === AppScreen.ASSET_DETAIL && selectedAssets.length === 0) {
+      popScreen();
+      return;
+    }
+
+    // 3. If on a company-specific screen but no company selected, go to selection
+    const companyRequiredScreens = [
+      AppScreen.INVENTORY, 
+      AppScreen.LABELING, 
+      AppScreen.CONSULTATION, 
+      AppScreen.DASHBOARD
+    ];
+    if (user && !selectedCompany && companyRequiredScreens.includes(currentScreen)) {
+      pushScreen(AppScreen.COMPANY_SELECTION);
+    }
+  }, [isDataLoaded, user, history, selectedAssets.length, selectedCompany]);
+
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem('app_users');
@@ -112,7 +194,6 @@ const App: React.FC = () => {
     return localStorage.getItem('app_is_inventorying') === 'true';
   });
 
-  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [buttonPos, setButtonPos] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
   const [isDragging, setIsDragging] = useState(false);
@@ -565,67 +646,69 @@ const App: React.FC = () => {
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
 
   return (
-    <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
-      {showCompanyHeader && (
-        <div className="bg-white px-3 py-1.5 flex items-center space-x-3 border-b border-slate-200 shadow-sm z-[200]">
-           <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
-             <Building2 size={16} />
-           </div>
-           <div className="flex-1 min-w-0">
-             <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Empresa em Auditoria</p>
-             <h2 className="text-[11px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
-           </div>
-           <div className="px-1.5 py-0.5 rounded-md bg-blue-50 border border-blue-100 shadow-sm">
-             <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
-           </div>
-        </div>
-      )}
-      
-      <div className="flex-1 relative overflow-hidden">
-        {showRecoveryToast && (
-          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
-            <ShieldCheck size={20} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
+    <ErrorBoundary>
+      <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
+        {showCompanyHeader && (
+          <div className="bg-white px-3 py-1.5 flex items-center space-x-3 border-b border-slate-200 shadow-sm z-[200]">
+             <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
+               <Building2 size={16} />
+             </div>
+             <div className="flex-1 min-w-0">
+               <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Empresa em Auditoria</p>
+               <h2 className="text-[11px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
+             </div>
+             <div className="px-1.5 py-0.5 rounded-md bg-blue-50 border border-blue-100 shadow-sm">
+               <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
+             </div>
           </div>
         )}
-        {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
-        {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
-        {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-        {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
-        {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
-        {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} />}
-        {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
-        {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} />}
-        {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
-        {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
-        {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
-        {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
-        {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
-        {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
-      </div>
-
-      {/* Floating Immersive Mode Toggle (Draggable) */}
-      {user && (
-        <div className="fixed z-[999] flex flex-col items-center space-y-2" style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}>
-          {inventory.status !== DatabaseStatus.EMPTY && (
-            <div className="bg-emerald-500 text-white text-[8px] font-bold px-2 py-1 rounded-full shadow-lg animate-pulse uppercase tracking-tighter">
-              Banco Protegido
+        
+        <div className="flex-1 relative overflow-hidden">
+          {showRecoveryToast && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
+              <ShieldCheck size={20} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
-          <button 
-            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
-            onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
-            onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
-            onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
-            onClick={toggleFullscreen}
-            className="w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
-            title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
-          >
-            {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
-          </button>
+          {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
+          {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
+          {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
+          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} />}
+          {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
+          {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} />}
+          {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} />}
+          {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={popScreen} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} />}
+          {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
+          {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
+          {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
+          {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
+          {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
         </div>
-      )}
-    </div>
+  
+        {/* Floating Immersive Mode Toggle (Draggable) */}
+        {user && (
+          <div className="fixed z-[999] flex flex-col items-center space-y-2" style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}>
+            {inventory.status !== DatabaseStatus.EMPTY && (
+              <div className="bg-emerald-500 text-white text-[8px] font-bold px-2 py-1 rounded-full shadow-lg animate-pulse uppercase tracking-tighter">
+                Banco Protegido
+              </div>
+            )}
+            <button 
+              onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+              onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+              onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
+              onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
+              onClick={toggleFullscreen}
+              className="w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
+              title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
+            >
+              {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
+            </button>
+          </div>
+        )}
+      </div>
+    </ErrorBoundary>
   );
 };
 

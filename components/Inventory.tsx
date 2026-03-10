@@ -636,35 +636,35 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-3 pt-1.5 pb-1 bg-white border-b border-slate-200 shadow-sm z-20">
-            <div className="flex flex-col space-y-1.5 mb-1">
+          <div className="px-2 pt-1 pb-1 bg-white border-b border-slate-200 shadow-sm z-20">
+            <div className="flex flex-col space-y-1 mb-1">
               {/* Row 1: Action Buttons & SAFE Status */}
-              <div className="flex items-center justify-end space-x-2">
-                <div className="flex items-center space-x-1 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg shadow-sm" title="Banco de Dados Protegido (IndexedDB)">
+              <div className="flex items-center justify-end space-x-1.5">
+                <div className="flex items-center space-x-1 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-md shadow-sm" title="Banco de Dados Protegido (IndexedDB)">
                   <ShieldCheck size={10} className="text-emerald-600" />
                   <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
                 </div>
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-1">
                   {isBatchMode && (
                     <button 
                       onClick={toggleSelectAll} 
-                      className={`flex items-center space-x-1.5 px-2 py-1 rounded-lg border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                      className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
                     >
-                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={12} /> : <Square size={12} />}
-                      <span className="text-[8px] font-bold uppercase tracking-widest">Todos</span>
+                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={10} /> : <Square size={10} />}
+                      <span className="text-[7px] font-bold uppercase tracking-widest">Todos</span>
                     </button>
                   )}
                   <button 
                     onClick={() => setIsSearchVisible(!isSearchVisible)} 
-                    className={`p-1.5 rounded-lg border transition-all ${isSearchVisible ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
+                    className={`p-1 rounded-md border transition-all ${isSearchVisible ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
                   >
-                    <Search size={14} />
+                    <Search size={12} />
                   </button>
                   <button 
                     onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} 
-                    className={`p-1.5 rounded-lg border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
+                    className={`p-1 rounded-md border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
                   >
-                    <ListChecks size={14} />
+                    <ListChecks size={12} />
                   </button>
                 </div>
               </div>
@@ -672,10 +672,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               {/* Row 2: Location Field (Limited width on mobile) */}
               <button 
                 onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }} 
-                className="w-full max-w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-slate-600 overflow-hidden active:bg-slate-100 transition-colors"
+                className="w-full max-w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-md flex items-center space-x-1.5 text-slate-600 overflow-hidden active:bg-slate-100 transition-colors"
               >
-                <MapPin size={12} className="text-blue-500 shrink-0" />
-                <span className="text-[9px] font-bold uppercase truncate italic tracking-wide flex-1 text-left">{selectedLocation}</span>
+                <MapPin size={10} className="text-blue-500 shrink-0" />
+                <span className="text-[8px] font-bold uppercase truncate italic tracking-tight flex-1 text-left">{selectedLocation}</span>
               </button>
             </div>
 
