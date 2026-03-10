@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { X, Zap, ZapOff, Maximize, Minimize, Camera } from 'lucide-react';
 import { ScannerMode } from '../types';
@@ -200,8 +201,8 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[2000] bg-black flex flex-col items-center justify-center">
+  const scannerContent = (
+    <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center overflow-hidden">
       {/* Viewport Overlay */}
       <div id="reader" key={mode} className="w-full h-full"></div>
       
@@ -235,12 +236,12 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
       <div className="absolute top-8 left-0 right-0 px-6 flex items-center justify-between">
         <button 
           onClick={onClose}
-          className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10"
+          className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
         >
           <X size={24} />
         </button>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3 pointer-events-auto">
           {hasTorch && (
             <button 
               onClick={toggleTorch}
@@ -258,7 +259,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
       </div>
 
       {error && (
-        <div className="absolute bottom-24 left-6 right-6 p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center">
+        <div className="absolute bottom-24 left-6 right-6 p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto">
           <p className="text-white text-xs font-bold uppercase tracking-tight">{error}</p>
           <button onClick={() => { setError(null); startScanner(); }} className="mt-2 text-white text-[10px] font-bold underline uppercase tracking-widest">Tentar Novamente</button>
         </div>
@@ -281,6 +282,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
         }
         #reader {
           background-color: black !important;
+          border: none !important;
         }
         #reader video {
           object-fit: cover !important;
@@ -288,15 +290,31 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
           height: 100% !important;
           display: block !important;
         }
-        #reader__scan_region {
+        /* Hide all library UI elements except the video */
+        #reader > div:not(:has(video)) {
           display: none !important;
         }
+        #reader__scan_region {
+          background: transparent !important;
+        }
         #reader__dashboard {
+          display: none !important;
+        }
+        /* Hide the library's own shaded region and corners */
+        #qr-shaded-region {
+          display: none !important;
+        }
+        #reader__camera_selection {
+          display: none !important;
+        }
+        #reader img {
           display: none !important;
         }
       `}</style>
     </div>
   );
+
+  return createPortal(scannerContent, document.body);
 };
 
 export default Scanner;
