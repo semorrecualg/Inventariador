@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario } from '../types';
+import { Asset, TagInventario, ScannerMode } from '../types';
+import Scanner from './Scanner';
 
 import { 
   ArrowLeft, 
@@ -22,6 +23,7 @@ import {
   FilePlus2,
   RefreshCw,
   ShieldCheck,
+  Camera,
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -289,9 +291,10 @@ interface InventoryProps {
   selectedCompany: string | null;
   onAddNewLocation: (newLocation: string) => void;
   locationsWithStats: Record<string, { total: number; checked: number }>;
+  scannerMode: ScannerMode;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -306,6 +309,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -661,6 +665,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     <Search size={12} />
                   </button>
                   <button 
+                    onClick={() => setIsScannerOpen(true)} 
+                    className="p-1 rounded-md border border-slate-200 text-slate-400 active:scale-95 transition-all"
+                  >
+                    <Camera size={12} />
+                  </button>
+                  <button 
                     onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} 
                     className={`p-1 rounded-md border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
                   >
@@ -941,6 +951,19 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             </div>
           </div>
         </div>
+      )}
+
+      {isScannerOpen && (
+        <Scanner 
+          mode={scannerMode}
+          onScan={(result) => {
+            setCommittedSearch(result);
+            setDisplayValue(result);
+            setIsSearchVisible(true);
+            setIsScannerOpen(false);
+          }}
+          onClose={() => setIsScannerOpen(false)}
+        />
       )}
     </div>
   );

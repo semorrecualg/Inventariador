@@ -12,6 +12,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "@types/react-window": "^1.8.8",
+    "html5-qrcode": "^2.3.8",
     "localforage": "^1.10.0",
     "lucide-react": "^0.454.0",
     "qrcode.react": "^4.2.0",

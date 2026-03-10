@@ -94,6 +94,11 @@ export enum AppScreen {
   QR_CONFIGURATOR = 'QR_CONFIGURATOR'
 }
 
+export enum ScannerMode {
+  BARCODE = 'BARCODE',
+  QRCODE = 'QRCODE'
+}
+
 export interface InventoryState {
   assets: Asset[];
   companies: string[];
@@ -101,4 +106,5 @@ export interface InventoryState {
   status: DatabaseStatus;
   editableFields?: string[]; 
   qrCodeFields?: string[];
+  scannerMode?: ScannerMode;
 }

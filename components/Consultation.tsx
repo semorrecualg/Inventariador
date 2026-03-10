@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { Asset } from '../types';
+import { Asset, ScannerMode } from '../types';
+import Scanner from './Scanner';
 import { 
   Search, 
   ChevronRight, 
@@ -17,7 +18,8 @@ import {
   Hash,
   User,
   LayoutGrid,
-  Calendar
+  Calendar,
+  Camera
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -26,6 +28,7 @@ interface ConsultationProps {
   onBack: () => void;
   onSelectAsset: (asset: Asset) => void;
   qrCodeFields: string[];
+  scannerMode: ScannerMode;
 }
 
 interface SearchFilters {
@@ -90,7 +93,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   );
 };
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields }) => {
+const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode }) => {
   const [filters, setFilters] = useState<SearchFilters>({
     ETIQUETA: '',
     DESCRICAODOATIVO: '',
@@ -110,6 +113,7 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
   const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   const [activeField, setActiveField] = useState<keyof SearchFilters | null>(null);
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   
   // Selection list state
   const [selectionModal, setSelectionModal] = useState<{ field: 'CONTACONTABIL' | 'CENTRODECUSTO' | null, searchTerm: string }>({ field: null, searchTerm: '' });
@@ -236,15 +240,23 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
                 setShowNumericKeypad(true);
               }
             }}
-            className={`w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
+            className={`w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
             placeholder={isSelectable ? `Selecionar...` : `Buscar...`}
           />
-          {filters[field] && (
+          {field === 'ETIQUETA' && (
+            <button 
+              onClick={() => setIsScannerOpen(true)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg shadow-sm active:scale-95 transition-all"
+            >
+              <Camera size={14} />
+            </button>
+          )}
+          {filters[field] && field !== 'ETIQUETA' && (
             <button 
               onClick={() => handleInputChange(field, '')}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           )}
         </div>
@@ -474,6 +486,17 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
             </div>
           </div>
         </div>
+      )}
+
+      {isScannerOpen && (
+        <Scanner 
+          mode={scannerMode}
+          onScan={(result) => {
+            setFilters({ ...filters, ETIQUETA: result });
+            setIsScannerOpen(false);
+          }}
+          onClose={() => setIsScannerOpen(false)}
+        />
       )}
     </div>
   );

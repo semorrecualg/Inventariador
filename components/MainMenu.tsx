@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppScreen, User } from '../types';
+import { AppScreen, User, ScannerMode } from '../types';
 import { 
   Search, 
   BarChart3, 
@@ -17,7 +17,8 @@ import {
   Trash2,
   SlidersHorizontal,
   Tag,
-  QrCode
+  QrCode,
+  ScanLine
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -27,9 +28,11 @@ interface MainMenuProps {
   onClearDatabase: () => void;
   user: User | null;
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
+  scannerMode: ScannerMode;
+  onUpdateScannerMode: (mode: ScannerMode) => void;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo, scannerMode, onUpdateScannerMode }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
@@ -176,6 +179,30 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Definir campos do QR</p>
                 </div>
               </button>
+
+              <div className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl shadow-sm">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-5 border border-blue-100"><ScanLine size={20} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Modo do Scanner</h4>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Otimização de Leitura</p>
+                  </div>
+                </div>
+                <div className="flex p-1 bg-white border border-slate-200 rounded-2xl">
+                  <button 
+                    onClick={() => onUpdateScannerMode(ScannerMode.BARCODE)}
+                    className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.BARCODE ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
+                  >
+                    Código de Barras
+                  </button>
+                  <button 
+                    onClick={() => onUpdateScannerMode(ScannerMode.QRCODE)}
+                    className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.QRCODE ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
+                  >
+                    QR Code
+                  </button>
+                </div>
+              </div>
               
 
               <button disabled={!hasData} onClick={() => { setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-5 bg-white border border-slate-200 rounded-3xl active:scale-[0.98] disabled:opacity-40 transition-all text-left shadow-sm">

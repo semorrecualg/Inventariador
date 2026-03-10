@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Asset, TagInventario } from '../types';
+import { Asset, TagInventario, ScannerMode } from '../types';
+import Scanner from './Scanner';
 
 import { 
   ArrowLeft, 
@@ -11,6 +12,7 @@ import {
   Square,
   CheckSquare,
   X,
+  Camera,
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -53,11 +55,13 @@ interface LabelingProps {
   onSelectAsset: (asset: Asset) => void;
   uniqueCentrosDeCusto: string[];
   selectedCompany: string | null;
+  scannerMode: ScannerMode;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   
   // Lote
@@ -242,7 +246,15 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
 
             <div className="space-y-2">
               <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Busca (Descrição/Serial/NF/Reg)</label>
-              <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[11px] font-bold uppercase text-slate-900 outline-none focus:border-amber-500 shadow-sm transition-all" />
+              <div className="relative">
+                <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-slate-200 pl-4 pr-12 py-3 rounded-2xl text-[11px] font-bold uppercase text-slate-900 outline-none focus:border-amber-500 shadow-sm transition-all" />
+                <button 
+                  onClick={() => setIsScannerOpen(true)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-600 text-white rounded-xl shadow-md active:scale-95 transition-all"
+                >
+                  <Camera size={14} />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -337,6 +349,16 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
       </div>
 
       {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
+      {isScannerOpen && (
+        <Scanner 
+          mode={scannerMode}
+          onScan={(result) => {
+            setAdvDesc(result);
+            setIsScannerOpen(false);
+          }}
+          onClose={() => setIsScannerOpen(false)}
+        />
+      )}
     </div>
   );
 };
