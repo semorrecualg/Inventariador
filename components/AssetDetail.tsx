@@ -194,15 +194,15 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       {/* KARDEX HEADER */}
       <div className={`px-5 pt-8 pb-6 ${headerBg} text-white relative shadow-md z-20`}>
         <div className="flex items-center justify-between mb-6">
-          <button onClick={onBack} className="p-2.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
-            <X size={18} />
+          <button onClick={onBack} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+            <X size={22} />
           </button>
-          <div className="flex items-center space-x-2">
-            <button onClick={() => setIsQrModalOpen(true)} className="p-2.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
-              <QrCode size={18} />
+          <div className="flex items-center space-x-3">
+            <button onClick={() => setIsQrModalOpen(true)} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
+              <QrCode size={22} />
             </button>
-            <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/20 backdrop-blur-md">
-              <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/90">
+            <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md">
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">
                 {isBatch ? 'LOTE' : 'KARDEK v24.50'}
               </span>
             </div>

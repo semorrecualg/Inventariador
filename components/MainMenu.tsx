@@ -40,12 +40,12 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn relative overflow-hidden">
       <div className="px-5 pt-10 pb-6 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 shadow-sm">
-            <Shield size={20} />
+        <div className="flex items-center space-x-4">
+          <div className="w-12 h-12 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 shadow-sm">
+            <Shield size={24} />
           </div>
           <div>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
             <h1 className="text-lg font-bold text-slate-900 truncate max-w-[180px] tracking-tight">
               {user?.username || 'Operador'}
             </h1>
@@ -54,9 +54,9 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
         {isAdmin && (
           <button 
             onClick={() => setIsAdminMenuOpen(true)} 
-            className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900"
+            className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900"
           >
-            <Settings size={20} />
+            <Settings size={24} />
           </button>
         )}
       </div>
@@ -75,31 +75,31 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.COMPANY_SELECTION)}
-          className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-blue-200"
+          className="w-full flex items-center p-5 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-blue-200"
         >
-          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-blue-100 transition-colors">
-            <ClipboardList size={20} />
+          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-blue-100 transition-colors">
+            <ClipboardList size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-slate-900 uppercase tracking-tight">Inventário</h3>
-            <p className="text-[9px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Conferência Física</p>
+            <h3 className="text-[16px] font-bold text-slate-900 uppercase tracking-tight">Inventário</h3>
+            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Conferência Física</p>
           </div>
-          <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.LABELING)}
-          className="w-full flex items-center p-4 bg-amber-50 border border-amber-100 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-amber-200"
+          className="w-full flex items-center p-5 bg-amber-50 border border-amber-100 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-amber-200"
         >
-          <div className="w-10 h-10 bg-amber-500 text-white rounded-xl flex items-center justify-center mr-4 shadow-md">
-            <Tag size={20} />
+          <div className="w-12 h-12 bg-amber-500 text-white rounded-xl flex items-center justify-center mr-4 shadow-md">
+            <Tag size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-amber-700 uppercase tracking-tight">ETIQUETAR</h3>
-            <p className="text-[9px] text-amber-600 font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
+            <h3 className="text-[16px] font-bold text-amber-700 uppercase tracking-tight">ETIQUETAR</h3>
+            <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
           </div>
-          <ChevronRight size={16} className="text-amber-300 group-hover:text-amber-500 transition-colors" />
+          <ChevronRight size={20} className="text-amber-300 group-hover:text-amber-500 transition-colors" />
         </button>
 
         <button

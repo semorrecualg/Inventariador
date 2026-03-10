@@ -40,9 +40,9 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
       <div className="p-5 pt-10 bg-white border-b border-slate-200 shadow-sm">
         <button 
           onClick={onBack}
-          className="mb-4 flex items-center space-x-2 text-slate-400 text-[9px] font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
+          className="mb-6 flex items-center space-x-3 text-slate-400 text-[12px] font-bold uppercase tracking-widest hover:text-blue-600 transition-colors active:scale-95"
         >
-          <ArrowLeft size={14} />
+          <ArrowLeft size={20} />
           <span>Retornar ao Painel</span>
         </button>
         

@@ -691,7 +691,7 @@ const App: React.FC = () => {
         {user && (
           <div className="fixed z-[999] flex flex-col items-center space-y-2" style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}>
             {inventory.status !== DatabaseStatus.EMPTY && (
-              <div className="bg-emerald-500 text-white text-[8px] font-bold px-2 py-1 rounded-full shadow-lg animate-pulse uppercase tracking-tighter">
+              <div className="bg-emerald-500 text-white text-[11px] font-bold px-4 py-2 rounded-full shadow-lg animate-pulse uppercase tracking-tight border border-white/20">
                 Banco Protegido
               </div>
             )}
@@ -701,10 +701,10 @@ const App: React.FC = () => {
               onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
               onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
               onClick={toggleFullscreen}
-              className="w-14 h-14 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
+              className="w-16 h-16 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
               title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
             >
-              {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
+              {isFullscreen ? <Minimize2 size={28} /> : <Maximize2 size={28} />}
             </button>
           </div>
         )}

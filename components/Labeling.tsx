@@ -189,25 +189,25 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200 shadow-sm relative z-30">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest active:text-amber-600 transition-colors">
-            <ArrowLeft size={16} /> <span>Menu Principal</span>
+          <button onClick={onBack} className="flex items-center space-x-3 text-slate-400 font-bold text-[12px] uppercase tracking-widest active:text-amber-600 transition-colors">
+            <ArrowLeft size={20} /> <span>Menu Principal</span>
           </button>
-          <div className="flex space-x-2">
+          <div className="flex space-x-3">
             {isBatchMode && (
               <button 
                 onClick={toggleSelectAll} 
-                className={`flex items-center space-x-2 px-4 py-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                className={`flex items-center space-x-3 px-4 py-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
               >
-                {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
+                {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
+                <span className="text-[11px] font-bold uppercase tracking-widest">Todos</span>
               </button>
             )}
-            <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-              <ListChecks size={16} />
+            <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+              <ListChecks size={20} />
             </button>
 
-            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-              <Filter size={16} />
+            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+              <Filter size={20} />
             </button>
           </div>
         </div>
@@ -222,8 +222,8 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
                  {activeTab === 'pending' && filteredAssets.length > 1 && !isBatchMode && (
                     <button onClick={handleConfirmAllFiltered} className="text-[9px] font-bold text-violet-600 uppercase tracking-widest px-4 py-2 bg-violet-50 border border-violet-100 rounded-xl active:scale-95 transition-all shadow-sm">Conferir Todos</button>
                  )}
-                 <button onClick={() => { setAdvDesc(''); setAdvCC(''); setAdvSupplier(''); setAdvDateStart(''); setAdvDateEnd(''); }} className="flex items-center space-x-2 text-[9px] font-bold text-red-600 uppercase tracking-widest px-4 py-2 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all shadow-sm">
-                   <Trash2 size={12} /> <span>Limpar</span>
+                 <button onClick={() => { setAdvDesc(''); setAdvCC(''); setAdvSupplier(''); setAdvDateStart(''); setAdvDateEnd(''); }} className="flex items-center space-x-2 text-[10px] font-bold text-red-600 uppercase tracking-widest px-5 py-3 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all shadow-sm">
+                   <Trash2 size={16} /> <span>Limpar</span>
                  </button>
                </div>
             </div>

@@ -246,9 +246,9 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
           {field === 'ETIQUETA' && (
             <button 
               onClick={() => setIsScannerOpen(true)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg shadow-sm active:scale-95 transition-all"
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-blue-600 text-white rounded-xl shadow-sm active:scale-95 transition-all"
             >
-              <Camera size={14} />
+              <Camera size={20} />
             </button>
           )}
           {filters[field] && field !== 'ETIQUETA' && (
@@ -269,18 +269,18 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
       {/* HEADER */}
       <div className="bg-white px-5 pt-8 pb-4 border-b border-slate-200 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
-            <ArrowLeft size={18} />
+          <button onClick={onBack} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
+            <ArrowLeft size={22} />
           </button>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             <button 
               onClick={clearFilters}
-              className="px-3 py-1.5 rounded-lg bg-slate-50 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all"
+              className="px-4 py-2.5 rounded-xl bg-slate-50 text-slate-500 border border-slate-200 text-[11px] font-bold uppercase tracking-widest active:scale-95 transition-all"
             >
               Limpar
             </button>
-            <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
-              <Search size={20} />
+            <div className="w-12 h-12 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
+              <Search size={24} />
             </div>
           </div>
         </div>
