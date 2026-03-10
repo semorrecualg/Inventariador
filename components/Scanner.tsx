@@ -11,11 +11,19 @@ interface ScannerProps {
 }
 
 const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
+  const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [hasTorch, setHasTorch] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   const playBeep = () => {
     try {
@@ -74,12 +82,15 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
 
       // Pequeno delay para garantir que o elemento DOM esteja pronto
       await new Promise(resolve => setTimeout(resolve, 300));
+      if (!isMounted.current) return;
       
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
       // Tenta obter as câmeras para escolher a traseira explicitamente se possível
-      const cameras = await Html5Qrcode.getCameras();
+      const cameras = await Html5Qrcode.getCameras().catch(() => []);
+      if (!isMounted.current) return;
+
       let cameraIdOrConfig: string | { facingMode: string } = { facingMode: "environment" };
       
       if (cameras && cameras.length > 0) {
@@ -94,23 +105,40 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
         cameraIdOrConfig,
         config,
         (decodedText) => {
-          playBeep();
-          onScan(decodedText);
+          if (isMounted.current) {
+            playBeep();
+            onScan(decodedText);
+          }
         },
         () => {
           // Ignore frequent noise errors
         }
       );
 
-      // Check for torch and zoom capabilities
-      const track = (html5QrCode as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
-      const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean, zoom?: { min: number, max: number } };
-      
-      if (capabilities.torch) setHasTorch(true);
+      if (!isMounted.current) {
+        await html5QrCode.stop().catch(() => {});
+        return;
+      }
+
+      // Check for torch and zoom capabilities safely
+      try {
+        const scannerInstance = html5QrCode as unknown as { getRunningTrack?: () => MediaStreamTrack };
+        if (typeof scannerInstance.getRunningTrack === 'function') {
+          const track = scannerInstance.getRunningTrack();
+          if (track) {
+            const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean, zoom?: { min: number, max: number } };
+            if (capabilities.torch) setHasTorch(true);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not check capabilities", e);
+      }
 
     } catch (err) {
-      console.error("Scanner start error", err);
-      setError("Não foi possível acessar a câmera. Verifique as permissões e certifique-se de fechar outros apps que possam estar sobrepondo a tela (balões de chat, filtros de luz, etc).");
+      if (isMounted.current) {
+        console.error("Scanner start error", err);
+        setError("Não foi possível acessar a câmera. Verifique as permissões e certifique-se de fechar outros apps que possam estar sobrepondo a tela (balões de chat, filtros de luz, etc).");
+      }
     }
   }, [mode, onScan]);
 
@@ -134,12 +162,17 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
 
   const toggleTorch = async () => {
     if (!scannerRef.current) return;
-    const track = (scannerRef.current as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
     try {
-      await track.applyConstraints({
-        advanced: [{ torch: !isTorchOn } as MediaTrackConstraintSet & { torch: boolean }]
-      });
-      setIsTorchOn(!isTorchOn);
+      const scannerInstance = scannerRef.current as unknown as { getRunningTrack?: () => MediaStreamTrack };
+      if (typeof scannerInstance.getRunningTrack === 'function') {
+        const track = scannerInstance.getRunningTrack();
+        if (track) {
+          await track.applyConstraints({
+            advanced: [{ torch: !isTorchOn } as MediaTrackConstraintSet & { torch: boolean }]
+          });
+          setIsTorchOn(!isTorchOn);
+        }
+      }
     } catch (e) {
       console.error("Torch toggle failed", e);
     }
@@ -147,19 +180,23 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
 
   const handleZoom = async (delta: number) => {
     if (!scannerRef.current) return;
-    const track = (scannerRef.current as unknown as { getRunningTrack: () => MediaStreamTrack }).getRunningTrack();
-    const capabilities = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number, max: number } };
-    
-    if (capabilities.zoom) {
-      const newZoom = Math.max(capabilities.zoom.min, Math.min(capabilities.zoom.max, zoomLevel + delta));
-      try {
-        await track.applyConstraints({
-          advanced: [{ zoom: newZoom } as MediaTrackConstraintSet & { zoom: number }]
-        });
-        setZoomLevel(newZoom);
-      } catch (e) {
-        console.error("Zoom failed", e);
+    try {
+      const scannerInstance = scannerRef.current as unknown as { getRunningTrack?: () => MediaStreamTrack };
+      if (typeof scannerInstance.getRunningTrack === 'function') {
+        const track = scannerInstance.getRunningTrack();
+        if (track) {
+          const capabilities = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number, max: number } };
+          if (capabilities.zoom) {
+            const newZoom = Math.max(capabilities.zoom.min, Math.min(capabilities.zoom.max, zoomLevel + delta));
+            await track.applyConstraints({
+              advanced: [{ zoom: newZoom } as MediaTrackConstraintSet & { zoom: number }]
+            });
+            setZoomLevel(newZoom);
+          }
+        }
       }
+    } catch (e) {
+      console.error("Zoom failed", e);
     }
   };
 
