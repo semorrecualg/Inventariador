@@ -239,18 +239,21 @@ const AssetCard = React.memo(({
         </div>
 
         {asset._camposAlterados && asset._camposAlterados.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-slate-100/50 space-y-1">
+          <div className="mt-2 pt-2 border-t border-slate-100/50 space-y-1.5">
             <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Auditoria DE/PARA:</p>
-            {asset._camposAlterados.slice(0, 3).map(field => (
-              <div key={field} className="flex flex-col">
-                <span className="text-[8px] font-bold text-slate-700 uppercase tracking-tight">{String(field)}: {String(asset[field] || '---')}</span>
+            {asset._camposAlterados.slice(0, 10).map(field => (
+              <div key={field} className="flex flex-col bg-slate-50/50 p-1 rounded-md border border-slate-100/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-[7px] font-bold text-slate-400 uppercase">{String(field)}</span>
+                  <span className="text-[8px] font-bold text-emerald-600 uppercase">PARA: {String(asset[field] || '---')}</span>
+                </div>
                 {asset._valoresOriginais?.[field] !== undefined && (
-                  <span className="text-[7px] text-red-500 font-bold uppercase italic">DE: {String(asset._valoresOriginais[field] || '---')}</span>
+                  <span className="text-[7px] text-red-500 font-bold uppercase italic mt-0.5">DE: {String(asset._valoresOriginais[field] || '---')}</span>
                 )}
               </div>
             ))}
-            {asset._camposAlterados.length > 3 && (
-              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 3} campos alterados</p>
+            {asset._camposAlterados.length > 10 && (
+              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 10} campos alterados</p>
             )}
           </div>
         )}
@@ -294,10 +297,11 @@ interface InventoryProps {
   scannerMode: ScannerMode;
   searchMode: InventorySearchMode;
   onUpdateSearchMode: (mode: InventorySearchMode) => void;
+  onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, autoConfirmOnScan }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -313,6 +317,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -849,7 +854,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </div>
       )}
 
-       {isNewLocationModalOpen && (
+      {isNewLocationModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
           <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-sky-500/30 shadow-2xl p-8">
             <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Criar Nova Localidade</h3>
@@ -874,6 +879,62 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               >
                 Criar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duplicateAsset && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-amber-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-amber-600 p-8 text-white text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                <AlertTriangle size={40} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Item já Inventariado</h3>
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Este patrimônio já possui registro de conferência</p>
+            </div>
+            
+            <div className="p-8 space-y-4">
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
+                <p className="text-xl font-black text-white font-mono">{duplicateAsset.ETIQUETA}</p>
+                <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
+                <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local Registrado:</span>
+                  <span className="text-[9px] font-black text-amber-500 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
+                </div>
+              </div>
+
+              <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-tight leading-relaxed">
+                Deseja confirmar o registro novamente para a localização atual?
+              </p>
+
+              <div className="flex space-x-3 pt-2">
+                <button 
+                  onClick={() => {
+                    setDuplicateAsset(null);
+                    if (searchMode === InventorySearchMode.SCANNER) setIsScannerOpen(true);
+                  }} 
+                  className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                >
+                  Não
+                </button>
+                <button 
+                  onClick={() => {
+                    onUpdateAsset({
+                      ...duplicateAsset,
+                      _conferido: true,
+                      _localMaster: selectedLocation || duplicateAsset.ENDERECO
+                    });
+                    setDuplicateAsset(null);
+                    if (searchMode === InventorySearchMode.SCANNER) setIsScannerOpen(true);
+                  }} 
+                  className="flex-1 py-4 bg-amber-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
+                >
+                  Sim, Confirmar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -970,15 +1031,23 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
+          onModeChange={onUpdateScannerMode}
           onScan={(result) => {
             const term = normalizeKey(result);
             setCommittedSearch(result);
             setDisplayValue(result);
             
+            // Buscar o ativo na base total
+            const foundAsset = allAssets.find(a => normalizeKey(a.ETIQUETA || '') === term);
+            
+            // REGRA: Se já foi inventariado, avisa
+            if (foundAsset && foundAsset._conferido) {
+              setDuplicateAsset(foundAsset);
+              setIsScannerOpen(false);
+              return;
+            }
+
             if (autoConfirmOnScan) {
-              // Buscar o ativo na base total
-              const foundAsset = allAssets.find(a => normalizeKey(a.ETIQUETA || '') === term);
-              
               if (foundAsset) {
                 // Se encontrou, confirma automaticamente na localização atual
                 const currentCompKey = normalizeKey(selectedCompany || '');
@@ -1004,8 +1073,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 
                 // Se o modo de busca for SCANNER, mantém o scanner aberto para fluidez
                 if (searchMode === InventorySearchMode.SCANNER) {
-                  // Pequeno delay para o usuário ver que leu? Não, o usuário pediu fluidez.
-                  // Mas precisamos resetar a busca para não filtrar a lista se o usuário fechar o scanner.
                   setCommittedSearch('');
                   setDisplayValue('');
                 } else {
@@ -1018,8 +1085,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               }
             } else {
               // Comportamento atual (NÃO auto-conferir)
-              setIsSearchVisible(true);
-              setIsScannerOpen(false);
+              // Se estiver no modo SCANNER, vamos manter aberto mas mostrar o resultado na lista atrás?
+              // O usuário reclamou que fecha. Então vamos manter aberto se searchMode for SCANNER.
+              if (searchMode === InventorySearchMode.SCANNER) {
+                // Mantém aberto, apenas atualiza a busca
+              } else {
+                setIsSearchVisible(true);
+                setIsScannerOpen(false);
+              }
             }
           }}
           onClose={() => setIsScannerOpen(false)}

@@ -56,9 +56,10 @@ interface LabelingProps {
   uniqueCentrosDeCusto: string[];
   selectedCompany: string | null;
   scannerMode: ScannerMode;
+  onUpdateScannerMode: (mode: ScannerMode) => void;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -319,10 +320,13 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
                   <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Auditoria DE/PARA:</p>
                     {asset._camposAlterados.map(field => (
-                      <div key={field} className="flex flex-col">
-                        <span className="text-[10px] font-bold text-slate-700 uppercase tracking-tight">{String(field)}: {String(asset[field] || '---')}</span>
+                      <div key={field} className="flex flex-col bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[8px] font-bold text-slate-400 uppercase">{String(field)}</span>
+                          <span className="text-[10px] font-bold text-emerald-600 uppercase">PARA: {String(asset[field] || '---')}</span>
+                        </div>
                         {asset._valoresOriginais?.[field] !== undefined && (
-                          <span className="text-[9px] text-red-500 font-bold uppercase italic">DE: {String(asset._valoresOriginais[field] || '---')}</span>
+                          <span className="text-[9px] text-red-500 font-bold uppercase italic mt-1">DE: {String(asset._valoresOriginais[field] || '---')}</span>
                         )}
                       </div>
                     ))}
@@ -352,6 +356,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
       {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
+          onModeChange={onUpdateScannerMode}
           onScan={(result) => {
             setAdvDesc(result);
             setIsScannerOpen(false);

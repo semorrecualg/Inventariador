@@ -305,11 +305,11 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                       ) : (
                         <div className="flex flex-col">
                           <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
-                            {displayVal}
+                            {workingAsset._valoresOriginais?.[key] !== undefined ? `PARA: ${displayVal}` : displayVal}
                           </p>
                           {workingAsset._valoresOriginais?.[key] !== undefined && (
                             <p className="text-[8px] text-red-500 font-bold uppercase mt-1 tracking-wider">
-                              DE: {String(workingAsset._valoresOriginais[key] || '---')}
+                              DE: {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
                             </p>
                           )}
                         </div>

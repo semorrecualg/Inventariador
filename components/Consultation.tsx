@@ -29,6 +29,7 @@ interface ConsultationProps {
   onSelectAsset: (asset: Asset) => void;
   qrCodeFields: string[];
   scannerMode: ScannerMode;
+  onUpdateScannerMode: (mode: ScannerMode) => void;
 }
 
 interface SearchFilters {
@@ -93,7 +94,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   );
 };
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode }) => {
+const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode, onUpdateScannerMode }) => {
   const [filters, setFilters] = useState<SearchFilters>({
     ETIQUETA: '',
     DESCRICAODOATIVO: '',
@@ -491,6 +492,7 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
       {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
+          onModeChange={onUpdateScannerMode}
           onScan={(result) => {
             setFilters({ ...filters, ETIQUETA: result });
             setIsScannerOpen(false);

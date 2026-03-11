@@ -2,16 +2,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Zap, ZapOff, Maximize, Minimize, Camera } from 'lucide-react';
+import { X, Zap, ZapOff, Maximize, Minimize, Camera, RefreshCw } from 'lucide-react';
 import { ScannerMode } from '../types';
 
 interface ScannerProps {
   mode: ScannerMode;
   onScan: (result: string) => void;
   onClose: () => void;
+  onModeChange?: (mode: ScannerMode) => void;
 }
 
-const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
+const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isTorchOn, setIsTorchOn] = useState(false);
@@ -242,12 +243,24 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose }) => {
         </button>
 
         <div className="flex items-center space-x-3 pointer-events-auto">
+          {onModeChange && (
+            <button 
+              onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}
+              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center min-w-[60px]"
+            >
+              <RefreshCw size={20} className="mb-1" />
+              <span className="text-[8px] font-black uppercase tracking-tighter">
+                {mode === ScannerMode.BARCODE ? 'p/ QR' : 'p/ Barras'}
+              </span>
+            </button>
+          )}
           {hasTorch && (
             <button 
               onClick={toggleTorch}
-              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
+              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border flex flex-col items-center justify-center min-w-[60px] ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
             >
-              {isTorchOn ? <Zap size={24} /> : <ZapOff size={24} />}
+              {isTorchOn ? <Zap size={20} className="mb-1" /> : <ZapOff size={20} className="mb-1" />}
+              <span className="text-[8px] font-black uppercase tracking-tighter">Lanternas</span>
             </button>
           )}
           <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10">
