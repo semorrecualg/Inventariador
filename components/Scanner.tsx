@@ -124,6 +124,9 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
 
       // Check for torch and zoom capabilities safely
       try {
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile) setHasTorch(true);
+
         const scannerInstance = html5QrCode as unknown as { getRunningTrack?: () => MediaStreamTrack };
         if (typeof scannerInstance.getRunningTrack === 'function') {
           const track = scannerInstance.getRunningTrack();
@@ -234,19 +237,23 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
       </div>
 
       {/* Controls */}
-      <div className="absolute top-8 left-0 right-0 px-6 flex items-center justify-between">
-        <button 
-          onClick={onClose}
-          className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
-        >
-          <X size={24} />
-        </button>
+      <div className="absolute top-8 left-0 right-0 px-6 flex items-center justify-between pointer-events-none z-50">
+        {/* Lado Esquerdo: Fechar */}
+        <div className="flex-1 flex justify-start">
+          <button 
+            onClick={onClose}
+            className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
+          >
+            <X size={24} />
+          </button>
+        </div>
 
-        <div className="flex items-center space-x-3 pointer-events-auto">
+        {/* Centro: Modo de Leitura */}
+        <div className="flex-1 flex justify-center">
           {onModeChange && (
             <button 
               onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}
-              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center min-w-[60px]"
+              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center min-w-[64px] pointer-events-auto shadow-xl"
             >
               <RefreshCw size={20} className="mb-1" />
               <span className="text-[8px] font-black uppercase tracking-tighter">
@@ -254,16 +261,21 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
               </span>
             </button>
           )}
+        </div>
+
+        {/* Lado Direito: Lanterna e Zoom */}
+        <div className="flex-1 flex justify-end items-center space-x-2 pointer-events-auto">
           {hasTorch && (
             <button 
               onClick={toggleTorch}
-              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border flex flex-col items-center justify-center min-w-[60px] ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
+              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border flex flex-col items-center justify-center min-w-[64px] shadow-xl ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
             >
               {isTorchOn ? <Zap size={20} className="mb-1" /> : <ZapOff size={20} className="mb-1" />}
               <span className="text-[8px] font-black uppercase tracking-tighter">Lanternas</span>
             </button>
           )}
-          <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10">
+
+          <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl">
             <button onClick={() => handleZoom(-0.5)} className="p-2 text-white active:scale-90"><Minimize size={20} /></button>
             <span className="text-white text-[10px] font-bold w-8 text-center">{zoomLevel.toFixed(1)}x</span>
             <button onClick={() => handleZoom(0.5)} className="p-2 text-white active:scale-90"><Maximize size={20} /></button>
