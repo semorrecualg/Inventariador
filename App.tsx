@@ -521,7 +521,11 @@ const App: React.FC = () => {
 
       updates._valoresOriginais = originalValues;
       updates._localMaster = targetLoc;
-      updates.ENDERECO = targetLoc;
+      // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original (Regra Sênior v24.5)
+      
+      // Adicionamos o status DE/PARA para relatórios
+      const originalLoc = String(existingAsset?.ENDERECO || originalValues['ENDERECO'] || '').trim().toUpperCase();
+      updates.DE_PARA = originalLoc === targetLoc ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO';
       
       updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
       updates._camposAlterados = Array.from(alteredFields);
@@ -583,14 +587,17 @@ const App: React.FC = () => {
             });
           }
           
-          if (normalizeKey(String(updates.ENDERECO)) !== normalizeKey(targetLoc)) {
+          if (normalizeKey(String(a.ENDERECO)) !== normalizeKey(targetLoc)) {
             alteredFields.add('ENDERECO');
             if (originalValues['ENDERECO'] === undefined) {
               originalValues['ENDERECO'] = a.ENDERECO;
             }
           }
           updates._localMaster = targetLoc;
-          updates.ENDERECO = targetLoc; 
+          // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original
+          
+          const originalLoc = String(a.ENDERECO || '').trim().toUpperCase();
+          updates.DE_PARA = originalLoc === targetLoc ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO';
           
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
@@ -638,7 +645,9 @@ const App: React.FC = () => {
         });
       }
 
+      res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
+      res['AUDITOR_DE_PARA'] = a.DE_PARA || (a._conferido ? (normalizeKey(String(a.ENDERECO)) === normalizeKey(String(a._localMaster || a.ENDERECO)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
       return res;

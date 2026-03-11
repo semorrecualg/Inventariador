@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode } from '../types';
 import Scanner from './Scanner';
@@ -137,9 +138,9 @@ const AssetCard = React.memo(({
     }
 
     const targetLocKey = normalize(selectedLocation || "");
-    const originalLocKey = normalize(asset.ENDERECO || ""); 
+    const effectiveLocKey = normalize(asset._localMaster || asset.ENDERECO || ""); 
 
-    if (originalLocKey === targetLocKey) return TagInventario.CONFERIDO;
+    if (effectiveLocKey === targetLocKey && normalize(asset.ENDERECO || "") === targetLocKey) return TagInventario.CONFERIDO;
     return TagInventario.ADOTADO;
 
   }, [asset, selectedLocation, isDifferentCompany, normalize]);
@@ -238,10 +239,24 @@ const AssetCard = React.memo(({
           ))}
         </div>
 
+        {asset.DE_PARA === 'COM ALTERAÇÃO' && (
+          <div className="mt-2 pt-2 border-t border-slate-100/50">
+            <div className="flex items-center space-x-2 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100/30">
+              <div className="flex-1">
+                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Localização DE/PARA:</p>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-[8px] font-bold text-red-500 uppercase italic">DE: {asset.ENDERECO || '---'}</span>
+                  <span className="text-[8px] font-bold text-indigo-600 uppercase">PARA: {asset._localMaster || '---'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {asset._camposAlterados && asset._camposAlterados.length > 0 && (
           <div className="mt-2 pt-2 border-t border-slate-100/50 space-y-1.5">
-            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Auditoria DE/PARA:</p>
-            {asset._camposAlterados.slice(0, 10).map(field => (
+            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Outras Alterações:</p>
+            {asset._camposAlterados.filter(f => f !== 'ENDERECO').slice(0, 5).map(field => (
               <div key={field} className="flex flex-col bg-slate-50/50 p-1 rounded-md border border-slate-100/30">
                 <div className="flex items-center justify-between">
                   <span className="text-[7px] font-bold text-slate-400 uppercase">{String(field)}</span>
@@ -318,12 +333,99 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
+  const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
+  const [scannedResult, setScannedResult] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
+
+  // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
+  const allAssetsRef = useRef(allAssets);
+  const selectedLocationRef = useRef(selectedLocation);
+  const selectedCompanyRef = useRef(selectedCompany);
+  const onUpdateAssetRef = useRef(onUpdateAsset);
+  const autoConfirmOnScanRef = useRef(autoConfirmOnScan);
+  const lastScanTime = useRef<number>(0);
+  const lastScanResult = useRef<string>('');
+  const isModalOpenRef = useRef(false);
+
+  useEffect(() => { allAssetsRef.current = allAssets; }, [allAssets]);
+  useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
+  useEffect(() => { selectedCompanyRef.current = selectedCompany; }, [selectedCompany]);
+  useEffect(() => { onUpdateAssetRef.current = onUpdateAsset; }, [onUpdateAsset]);
+  useEffect(() => { autoConfirmOnScanRef.current = autoConfirmOnScan; }, [autoConfirmOnScan]);
+  
+  useEffect(() => {
+    isModalOpenRef.current = !!(scannedAsset || scannedResult || duplicateAsset || isManualEntryOpen);
+  }, [scannedAsset, scannedResult, duplicateAsset, isManualEntryOpen]);
+
+  const handleScan = useCallback((result: string) => {
+    // Se já houver algum modal aberto, ignora novas leituras para evitar sobreposição
+    if (isModalOpenRef.current) return;
+
+    // Debounce para evitar múltiplas leituras do mesmo código em sequência rápida (2 segundos)
+    const now = Date.now();
+    if (result === lastScanResult.current && now - lastScanTime.current < 2000) return;
+    
+    lastScanTime.current = now;
+    lastScanResult.current = result;
+
+    const term = normalizeKey(result);
+    setCommittedSearch(result);
+    setDisplayValue(result);
+    
+    // Buscar o ativo na base total usando o Ref para estabilidade
+    const foundAsset = allAssetsRef.current.find(a => normalizeKey(a.ETIQUETA || '') === term);
+    
+    // REGRA: Se já foi inventariado, avisa (Sempre mostra modal de duplicidade)
+    if (foundAsset && foundAsset._conferido) {
+      setDuplicateAsset(foundAsset);
+      return;
+    }
+
+    if (autoConfirmOnScanRef.current) {
+      if (foundAsset) {
+        // Se encontrou, confirma automaticamente na localização atual
+        const currentCompKey = normalizeKey(selectedCompanyRef.current || '');
+        const assetCompKey = normalizeKey(foundAsset.EMPRESA || '');
+        
+        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+          // Caso seja de outra empresa, adota
+          onUpdateAssetRef.current({ 
+            ...foundAsset, 
+            EMPRESA: selectedCompanyRef.current || foundAsset.EMPRESA,
+            _conferido: true,
+            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
+          });
+        } else {
+          // Caso seja da mesma empresa
+          onUpdateAssetRef.current({
+            ...foundAsset,
+            _conferido: true,
+            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
+          });
+        }
+        
+        // Limpa busca para próxima leitura contínua
+        setCommittedSearch('');
+        setDisplayValue('');
+      } else {
+        // Se não encontrou e está em auto-confirm, mostra modal de "Não Localizado"
+        setScannedResult(result);
+      }
+    } else {
+      // Se NÃO for auto-conferência (NÃO), deve mostrar o item e aguardar confirmação
+      if (foundAsset) {
+        setScannedAsset(foundAsset);
+      } else {
+        setScannedResult(result);
+      }
+    }
+  }, [normalizeKey]);
 
   useEffect(() => {
     if (isSearchVisible) {
@@ -342,7 +444,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     // Se NÃO tem termo de busca, aplicamos Regra A: Esconde Baixados
     if (!term) {
       return assets.filter(a => {
-        const locKey = normalizeKey(a.ENDERECO || "");
+        // REGRA SÊNIOR v24.5: Se o item já foi conferido, usamos o _localMaster (onde foi encontrado)
+        // Se não, usamos o ENDERECO original.
+        const effectiveLoc = a._localMaster || a.ENDERECO || "";
+        const locKey = normalizeKey(effectiveLoc);
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         
@@ -819,40 +924,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       )}
 
-      {isManualEntryOpen && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/30 shadow-2xl p-8">
-            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Incluir Novo Item Manual</h3>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-6">Preencha os dados do novo ativo.</p>
-            
-            <div className="space-y-4 max-h-60 overflow-y-auto pr-2 no-scrollbar">
-              <div>
-                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">DESCRIÇÃO DO ATIVO</label>
-                <input 
-                  type="text"
-                  value={manualAsset.DESCRICAODOATIVO || ''}
-                  onChange={(e) => setManualAsset(prev => ({ ...prev, DESCRICAODOATIVO: e.target.value.toUpperCase() }))}
-                  className="w-full bg-slate-950 border-2 border-slate-800 rounded-lg px-4 py-2 font-mono text-sm text-white outline-none focus:border-orange-500 transition-all mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">SERIAL</label>
-                <input 
-                  type="text"
-                  value={manualAsset.SERIAL || ''}
-                  onChange={(e) => setManualAsset(prev => ({ ...prev, SERIAL: e.target.value.toUpperCase() }))}
-                  className="w-full bg-slate-950 border-2 border-slate-800 rounded-lg px-4 py-2 font-mono text-sm text-white outline-none focus:border-orange-500 transition-all mt-1"
-                />
-              </div>
-            </div>
-
-            <div className="flex space-x-3 mt-6">
-              <button onClick={() => setIsManualEntryOpen(false)} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest">Cancelar</button>
-              <button onClick={saveManualEntry} className="flex-1 py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest">Salvar Item</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 
       {isNewLocationModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
@@ -884,8 +956,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </div>
       )}
 
-      {duplicateAsset && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+      {duplicateAsset && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
           <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-amber-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
             <div className="bg-amber-600 p-8 text-white text-center">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
@@ -914,7 +986,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 <button 
                   onClick={() => {
                     setDuplicateAsset(null);
-                    if (searchMode === InventorySearchMode.SCANNER) setIsScannerOpen(true);
+                    // Não fecha o scanner se estiver no modo scanner
                   }} 
                   className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                 >
@@ -928,7 +1000,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                       _localMaster: selectedLocation || duplicateAsset.ENDERECO
                     });
                     setDuplicateAsset(null);
-                    if (searchMode === InventorySearchMode.SCANNER) setIsScannerOpen(true);
+                    // Não fecha o scanner se estiver no modo scanner
                   }} 
                   className="flex-1 py-4 bg-amber-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
                 >
@@ -937,13 +1009,128 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {scannedAsset && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-blue-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-blue-600 p-8 text-white text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                <ShieldCheck size={40} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>
+            </div>
+            
+            <div className="p-8 space-y-4">
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
+                <p className="text-xl font-black text-white font-mono">{scannedAsset.ETIQUETA}</p>
+                <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Localização Atual:</span>
+                  <span className="text-[9px] font-black text-blue-500 uppercase">{selectedLocation}</span>
+                </div>
+              </div>
+
+              <div className="flex space-x-3 pt-2">
+                <button 
+                  onClick={() => setScannedAsset(null)} 
+                  className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => {
+                    const currentCompKey = normalizeKey(selectedCompany || '');
+                    const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
+                    
+                    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                      onUpdateAsset({ 
+                        ...scannedAsset, 
+                        EMPRESA: selectedCompany || scannedAsset.EMPRESA,
+                        _conferido: true,
+                        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                        _localMaster: selectedLocation || scannedAsset.ENDERECO
+                      });
+                    } else {
+                      onUpdateAsset({
+                        ...scannedAsset,
+                        _conferido: true,
+                        _localMaster: selectedLocation || scannedAsset.ENDERECO
+                      });
+                    }
+                    setScannedAsset(null);
+                  }} 
+                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 active:scale-95 transition-all"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {scannedResult && !scannedAsset && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-orange-600 p-8 text-white text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                <AlertTriangle size={40} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Não Localizado</h3>
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Patrimônio não encontrado na base</p>
+            </div>
+            
+            <div className="p-8 space-y-4">
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Código Lido</p>
+                <p className="text-xl font-black text-white font-mono">{scannedResult}</p>
+              </div>
+
+              <div className="flex flex-col space-y-3 pt-2">
+                <button 
+                  onClick={() => {
+                    setManualAsset({
+                      ETIQUETA: scannedResult,
+                      EMPRESA: selectedCompany || "",
+                      STATUS: "ATIVO",
+                      DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+                      AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+                      TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+                      QT: 1,
+                      DESCRICAODOATIVO: '',
+                      SERIAL: ''
+                    });
+                    setIsManualEntryOpen(true);
+                    setScannedResult(null);
+                  }} 
+                  className="w-full py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2"
+                >
+                  <FilePlus2 size={16} />
+                  <span>Incluir Manual</span>
+                </button>
+                <button 
+                  onClick={() => setScannedResult(null)} 
+                  className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                >
+                  Voltar ao Scanner
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
 
-      {isManualEntryOpen && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 animate-fadeIn">
+      {isManualEntryOpen && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 animate-fadeIn">
           <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md" onClick={() => setIsManualEntryOpen(false)} />
           <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-orange-500/30 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col max-h-[90vh]">
             <div className="bg-orange-600 px-8 py-8 text-white shrink-0">
@@ -1025,77 +1212,31 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
-          onScan={(result) => {
-            const term = normalizeKey(result);
-            setCommittedSearch(result);
-            setDisplayValue(result);
-            
-            // Buscar o ativo na base total
-            const foundAsset = allAssets.find(a => normalizeKey(a.ETIQUETA || '') === term);
-            
-            // REGRA: Se já foi inventariado, avisa
-            if (foundAsset && foundAsset._conferido) {
-              setDuplicateAsset(foundAsset);
-              setIsScannerOpen(false);
-              return;
-            }
-
-            if (autoConfirmOnScan) {
-              if (foundAsset) {
-                // Se encontrou, confirma automaticamente na localização atual
-                const currentCompKey = normalizeKey(selectedCompany || '');
-                const assetCompKey = normalizeKey(foundAsset.EMPRESA || '');
-                
-                if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                  // Caso seja de outra empresa, adota
-                  onUpdateAsset({ 
-                    ...foundAsset, 
-                    EMPRESA: selectedCompany || foundAsset.EMPRESA,
-                    _conferido: true,
-                    TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                    _localMaster: selectedLocation || foundAsset.ENDERECO
-                  });
-                } else {
-                  // Caso seja da mesma empresa
-                  onUpdateAsset({
-                    ...foundAsset,
-                    _conferido: true,
-                    _localMaster: selectedLocation || foundAsset.ENDERECO
-                  });
-                }
-                
-                // Se o modo de busca for SCANNER, mantém o scanner aberto para fluidez
-                if (searchMode === InventorySearchMode.SCANNER) {
-                  setCommittedSearch('');
-                  setDisplayValue('');
-                } else {
-                  setIsScannerOpen(false);
-                }
-              } else {
-                // Se não encontrou, abre a busca para mostrar que não tem ou permitir inclusão manual
-                setIsSearchVisible(true);
-                setIsScannerOpen(false);
-              }
-            } else {
-              // Comportamento atual (NÃO auto-conferir)
-              // Se estiver no modo SCANNER, vamos manter aberto mas mostrar o resultado na lista atrás?
-              // O usuário reclamou que fecha. Então vamos manter aberto se searchMode for SCANNER.
-              if (searchMode === InventorySearchMode.SCANNER) {
-                // Mantém aberto, apenas atualiza a busca
-              } else {
-                setIsSearchVisible(true);
-                setIsScannerOpen(false);
-              }
-            }
-          }}
+          onScan={handleScan}
           onClose={() => setIsScannerOpen(false)}
+          onManualInput={() => {
+            setManualAsset({
+              ETIQUETA: "",
+              EMPRESA: selectedCompany || "",
+              STATUS: "ATIVO",
+              DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+              AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+              TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+              QT: 1,
+              DESCRICAODOATIVO: '',
+              SERIAL: '',
+              ENDERECO: selectedLocation || ""
+            });
+            setIsManualEntryOpen(true);
+          }}
         />
       )}
     </div>

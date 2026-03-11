@@ -69,6 +69,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     const adotado = assets.filter(a => a.TAG_INVENTARIO === TagInventario.ADOTADO || a.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO).length;
     const readotado = assets.filter(a => a.TAG_INVENTARIO === TagInventario.RE_ADOTADO).length;
     const conferidoOk = assets.filter(a => a.TAG_INVENTARIO === TagInventario.CONFERIDO).length;
+    const locChanges = assets.filter(a => a.DE_PARA === 'COM ALTERAÇÃO').length;
 
     const unico = assets.filter(a => a.TAG_DUPLICIDADE === 'ÚNICO').length;
     const dupInterna = assets.filter(a => a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO').length;
@@ -94,6 +95,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       adotado,
       readotado,
       conferidoOk,
+      locChanges,
       unico,
       dupInterna,
       dupExterna,
@@ -110,7 +112,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     const wsData = filtered.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
       Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
+      
+      res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
+      res['AUDITOR_DE_PARA'] = a.DE_PARA || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
       res['AUDITOR_DUPLICIDADE'] = a.TAG_DUPLICIDADE || 'NAO ANALISADO';
@@ -300,6 +305,14 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               colorClass="bg-emerald-600" 
               icon={CheckCircle2} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.CONFERIDO, 'CONFERIDOS_OK')}
+            />
+            <StatCard 
+              label="Alterações de Local (DE/PARA)" 
+              value={stats.locChanges} 
+              total={stats.totalConferidoGeral} 
+              colorClass="bg-indigo-600" 
+              icon={TrendingUp} 
+              onClick={() => exportFilteredData(a => a.DE_PARA === 'COM ALTERAÇÃO', 'ALTERACOES_LOCAL')}
             />
           </div>
         </section>

@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Zap, ZapOff, Maximize, Minimize, Camera, RefreshCw } from 'lucide-react';
+import { X, Zap, ZapOff, Maximize, Minimize, Camera, RefreshCw, ShieldCheck } from 'lucide-react';
 import { ScannerMode } from '../types';
 
 interface ScannerProps {
@@ -10,15 +10,18 @@ interface ScannerProps {
   onScan: (result: string) => void;
   onClose: () => void;
   onModeChange?: (mode: ScannerMode) => void;
+  onManualInput?: () => void;
 }
 
-const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }) => {
+const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, onManualInput }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [hasTorch, setHasTorch] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
 
   useEffect(() => {
     isMounted.current = true;
@@ -109,6 +112,14 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
         (decodedText) => {
           if (isMounted.current) {
             playBeep();
+            setIsFlashing(true);
+            setShowSuccess(true);
+            setTimeout(() => {
+              if (isMounted.current) {
+                setIsFlashing(false);
+                setTimeout(() => setShowSuccess(false), 1000);
+              }
+            }, 150);
             onScan(decodedText);
           }
         },
@@ -128,7 +139,8 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const track = (html5QrCode as any).getRunningTrack();
+        const html5QrCodeAny = html5QrCode as any;
+        const track = html5QrCodeAny.getRunningTrack();
         if (track) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const capabilities = track.getCapabilities() as any;
@@ -192,37 +204,60 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
         // Feedback tátil
         if (navigator.vibrate) navigator.vibrate(50);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const settings = track.getSettings() as any;
-        const currentTorch = settings.torch || false;
-        const newState = !currentTorch;
+        const newState = !isTorchOn;
         
-        // Aplica a restrição de lanterna
+        // Tenta aplicar a restrição de lanterna
+        // Alguns dispositivos ignoram se o valor for o mesmo que o atual detectado,
+        // então forçamos a mudança baseada no nosso estado interno.
+        // Adicionamos uma verificação extra de capacidades
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const capabilities = track.getCapabilities() as any;
+        if (!capabilities.torch) {
+          console.warn("Torch not supported by this track");
+          // Mesmo assim tentamos, pois getCapabilities pode mentir em alguns browsers
+        }
+
         await track.applyConstraints({
           advanced: [{ torch: newState }]
         });
         
         setIsTorchOn(newState);
+        
+        // Verificação dupla: alguns navegadores precisam de um tempo para atualizar o settings
+        setTimeout(async () => {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const settings = track.getSettings() as any;
+            if (settings && typeof settings.torch !== 'undefined') {
+              setIsTorchOn(settings.torch);
+            }
+          } catch {
+            // Ignora erro na verificação secundária
+          }
+        }, 500);
       } else {
         console.error("No running track found to toggle torch");
       }
     } catch (e) {
       console.error("Torch toggle failed", e);
-      // Fallback: tenta aplicar usando o estado do React se o settings falhar
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const track = (scannerRef.current as any).getRunningTrack();
-        if (track) {
-          const newState = !isTorchOn;
-          await track.applyConstraints({
-            advanced: [{ torch: newState }]
+      // Fallback: tenta novamente forçando o estado oposto com um pequeno delay
+      setTimeout(async () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const scannerAny = scannerRef.current as any;
+          const track = scannerAny.getRunningTrack();
+          if (track) {
+            const newState = !isTorchOn;
+            await track.applyConstraints({
+              advanced: [{ torch: newState }]
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any);
-          setIsTorchOn(newState);
+            } as any);
+            setIsTorchOn(newState);
+          }
+        } catch (err2) {
+          console.error("Torch fallback failed", err2);
         }
-      } catch (err2) {
-        console.error("Torch fallback failed", err2);
-      }
+      }, 200);
     }
   };
 
@@ -237,8 +272,9 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
           if (capabilities.zoom) {
             const newZoom = Math.max(capabilities.zoom.min, Math.min(capabilities.zoom.max, zoomLevel + delta));
             await track.applyConstraints({
-              advanced: [{ zoom: newZoom } as MediaTrackConstraintSet & { zoom: number }]
-            });
+              advanced: [{ zoom: newZoom }]
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any);
             setZoomLevel(newZoom);
           }
         }
@@ -251,8 +287,23 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
   const scannerContent = (
     <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center overflow-hidden">
       {/* Viewport Overlay */}
-      <div id="reader" key={mode} className="w-full h-full"></div>
+      <div id="reader" key={mode} className={`w-full h-full transition-opacity duration-75 ${isFlashing ? 'opacity-50' : 'opacity-100'}`}></div>
       
+      {/* Flash Effect */}
+      {isFlashing && (
+        <div className="absolute inset-0 bg-white z-[100] pointer-events-none animate-pulse"></div>
+      )}
+
+      {/* Success Feedback */}
+      {showSuccess && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] pointer-events-none">
+          <div className="bg-emerald-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
+            <ShieldCheck size={24} />
+            <span className="text-sm font-black uppercase tracking-widest">Lido!</span>
+          </div>
+        </div>
+      )}
+
       {/* Custom UI Overlay */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
         {/* Bounding Box Simulation */}
@@ -334,9 +385,21 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
       )}
 
       {/* Bottom Tip */}
-      <div className="absolute bottom-10 flex items-center space-x-2 text-white/40">
-        <Camera size={14} />
-        <span className="text-[9px] font-bold uppercase tracking-widest">Processamento de Imagem v24 PRO</span>
+      <div className="absolute bottom-24 flex flex-col items-center space-y-4 pointer-events-auto">
+        {onManualInput && (
+          <button 
+            onClick={onManualInput}
+            className="px-8 py-4 bg-white/10 backdrop-blur-md rounded-2xl text-white border border-white/20 flex items-center space-x-3 active:scale-95 transition-all shadow-2xl"
+          >
+            <RefreshCw size={20} className="text-blue-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest">Digitar Código Manualmente</span>
+          </button>
+        )}
+        
+        <div className="flex items-center space-x-2 text-white/40">
+          <Camera size={14} />
+          <span className="text-[9px] font-bold uppercase tracking-widest">Processamento de Imagem v24 PRO</span>
+        </div>
       </div>
 
       <style>{`
