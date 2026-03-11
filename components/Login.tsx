@@ -17,9 +17,10 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
     e.preventDefault();
     setError(null);
     
-    // Busca o usuário comparando exclusivamente o username
+    // Busca o usuário comparando username ou email
     const foundUser = users.find(u => 
-      u.username.toLowerCase() === username.toLowerCase()
+      u.username.toLowerCase() === username.toLowerCase().trim() ||
+      u.email.toLowerCase() === username.toLowerCase().trim()
     );
     
     if (foundUser && foundUser.password === password) {

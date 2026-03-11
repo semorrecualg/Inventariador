@@ -13,7 +13,9 @@ import {
   Mail,
   User as UserIcon,
   Save,
-  ChevronRight
+  ChevronRight,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -31,20 +33,32 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUsername || !newEmail || !newPassword) return;
+    const username = newUsername.toUpperCase().trim();
+    const email = newEmail.toLowerCase().trim();
+    const password = newPassword.trim();
+
+    if (!username || !email || !password) return;
+
+    // Verificar duplicidade
+    if (users.find(u => u.email.toLowerCase() === email || u.username.toUpperCase() === username)) {
+      alert("Usuário ou E-mail já cadastrado!");
+      return;
+    }
 
     const newUser: User = {
-      username: newUsername.toUpperCase(),
-      email: newEmail.toLowerCase(),
-      password: newPassword,
+      username,
+      email,
+      password,
       isAdmin: false,
       mustChangePassword: true
     };
@@ -73,10 +87,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     e.preventDefault();
     if (!selectedUser || !editUsername || !editEmail || !editPassword) return;
 
+    const username = editUsername.toUpperCase().trim();
+    const email = editEmail.toLowerCase().trim();
+    const password = editPassword.trim();
+
+    // Verificar duplicidade (excluindo o próprio usuário)
+    if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username))) {
+      alert("Este Username ou E-mail já está em uso por outro usuário!");
+      return;
+    }
+
     setUsers(prev => {
       const updated = prev.map(u => 
         u.email === selectedUser.email 
-          ? { ...u, username: editUsername.toUpperCase(), email: editEmail.toLowerCase(), password: editPassword } 
+          ? { ...u, username, email, password } 
           : u
       );
       localStorage.setItem('app_users', JSON.stringify(updated));
@@ -161,37 +185,44 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
       {/* Modal de Edição */}
       {isEditModalOpen && selectedUser && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl relative animate-slideUp overflow-hidden modern-card">
-            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-8 right-8 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-all shadow-sm"><X size={20} /></button>
-            <div className="text-center mb-10">
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn overflow-y-auto">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-slideUp my-auto modern-card">
+            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-6 right-6 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-all shadow-sm"><X size={20} /></button>
+            <div className="text-center mb-8">
               <h3 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Editar Credenciais</h3>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-2">Username e Senha de Acesso</p>
             </div>
-            <form onSubmit={handleSaveEdit} className="space-y-6">
-              <div className="space-y-2">
+            <form onSubmit={handleSaveEdit} className="space-y-5">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Username de Login</label>
                 <div className="relative">
-                  <input type="text" required value={editUsername} onChange={(e) => setEditUsername(e.target.value.toUpperCase())} className="w-full pl-14 pr-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm uppercase transition-all shadow-sm" />
-                  <UserIcon className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                  <input type="text" required autoComplete="off" value={editUsername} onChange={(e) => setEditUsername(e.target.value.toUpperCase())} className="w-full pl-12 pr-6 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm uppercase transition-all shadow-sm" />
+                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                 </div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Senha</label>
                 <div className="relative">
-                  <input type="text" required value={editPassword} onChange={(e) => setEditPassword(e.target.value)} className="w-full pl-14 pr-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
-                  <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                  <input type={showEditPassword ? "text" : "password"} required autoComplete="off" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} className="w-full pl-12 pr-14 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <button 
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 p-2 hover:text-sky-600 transition-colors"
+                  >
+                    {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">E-mail</label>
                 <div className="relative">
-                  <input type="email" required value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-14 pr-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
-                  <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                  <input type="email" required autoComplete="off" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                 </div>
               </div>
-              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all mt-6 flex items-center justify-center space-x-3">
-                <Save size={20} />
+              <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all mt-4 flex items-center justify-center space-x-3">
+                <Save size={18} />
                 <span className="text-sm">Atualizar Acesso</span>
               </button>
             </form>
@@ -201,27 +232,36 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
       {/* Modal Novo Usuário */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl relative animate-slideUp overflow-hidden modern-card">
-            <button onClick={() => setIsAddModalOpen(false)} className="absolute top-8 right-8 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-all shadow-sm"><X size={20} /></button>
-            <div className="text-center mb-10">
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn overflow-y-auto">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-slideUp my-auto modern-card">
+            <button onClick={() => setIsAddModalOpen(false)} className="absolute top-6 right-6 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-all shadow-sm"><X size={20} /></button>
+            <div className="text-center mb-8">
               <h3 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Novo Inventariante</h3>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-2">Criação de Username de Acesso</p>
             </div>
-            <form onSubmit={handleAddUser} className="space-y-6">
-              <div className="space-y-2">
+            <form onSubmit={handleAddUser} className="space-y-5">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Username</label>
-                <input type="text" required placeholder="EX: PEDRO.GBR" value={newUsername} onChange={(e) => setNewUsername(e.target.value.toUpperCase())} className="w-full px-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <input type="text" required autoComplete="off" placeholder="EX: PEDRO.GBR" value={newUsername} onChange={(e) => setNewUsername(e.target.value.toUpperCase())} className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">E-mail</label>
-                <input type="email" required placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <input type="email" required autoComplete="off" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-2">Senha</label>
-                <input type="password" required placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-6 py-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <div className="relative">
+                  <input type={showNewPassword ? "text" : "password"} required autoComplete="off" placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full pl-6 pr-14 py-4 bg-slate-50 rounded-3xl border border-slate-200 focus:border-sky-500 focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                  <button 
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 p-2 hover:text-sky-600 transition-colors"
+                  >
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
-              <button type="submit" className="w-full py-5 bg-sky-600 text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl shadow-sky-900/10 active:scale-95 transition-all mt-6 text-sm">
+              <button type="submit" className="w-full py-4 bg-sky-600 text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl shadow-sky-900/10 active:scale-95 transition-all mt-4 text-sm">
                 Confirmar Cadastro
               </button>
             </form>
