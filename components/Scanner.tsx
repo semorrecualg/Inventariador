@@ -124,19 +124,33 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
 
       // Check for torch and zoom capabilities safely
       try {
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) setHasTorch(true);
-
-        const scannerInstance = html5QrCode as unknown as { getRunningTrack?: () => MediaStreamTrack };
-        if (typeof scannerInstance.getRunningTrack === 'function') {
-          const track = scannerInstance.getRunningTrack();
-          if (track) {
-            const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean, zoom?: { min: number, max: number } };
-            if (capabilities.torch) setHasTorch(true);
+        // Pequeno delay para garantir que o track está estável
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const track = (html5QrCode as any).getRunningTrack();
+        if (track) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const capabilities = track.getCapabilities() as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const settings = track.getSettings() as any;
+          
+          if (capabilities.torch) {
+            setHasTorch(true);
+            setIsTorchOn(settings.torch || false);
+          } else {
+            // Fallback para mobile
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            if (isMobile) setHasTorch(true);
           }
+        } else {
+          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+          if (isMobile) setHasTorch(true);
         }
       } catch (e) {
         console.warn("Could not check capabilities", e);
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile) setHasTorch(true);
       }
 
     } catch (err) {
@@ -168,18 +182,47 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange }
   const toggleTorch = async () => {
     if (!scannerRef.current) return;
     try {
-      const scannerInstance = scannerRef.current as unknown as { getRunningTrack?: () => MediaStreamTrack };
-      if (typeof scannerInstance.getRunningTrack === 'function') {
-        const track = scannerInstance.getRunningTrack();
-        if (track) {
-          await track.applyConstraints({
-            advanced: [{ torch: !isTorchOn } as MediaTrackConstraintSet & { torch: boolean }]
-          });
-          setIsTorchOn(!isTorchOn);
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const html5QrCode = scannerRef.current as any;
+      const track = typeof html5QrCode.getRunningTrack === 'function' 
+        ? html5QrCode.getRunningTrack() 
+        : null;
+
+      if (track) {
+        // Feedback tátil
+        if (navigator.vibrate) navigator.vibrate(50);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const settings = track.getSettings() as any;
+        const currentTorch = settings.torch || false;
+        const newState = !currentTorch;
+        
+        // Aplica a restrição de lanterna
+        await track.applyConstraints({
+          advanced: [{ torch: newState }]
+        });
+        
+        setIsTorchOn(newState);
+      } else {
+        console.error("No running track found to toggle torch");
       }
     } catch (e) {
       console.error("Torch toggle failed", e);
+      // Fallback: tenta aplicar usando o estado do React se o settings falhar
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const track = (scannerRef.current as any).getRunningTrack();
+        if (track) {
+          const newState = !isTorchOn;
+          await track.applyConstraints({
+            advanced: [{ torch: newState }]
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any);
+          setIsTorchOn(newState);
+        }
+      } catch (err2) {
+        console.error("Torch fallback failed", err2);
+      }
     }
   };
 
