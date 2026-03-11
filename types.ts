@@ -99,6 +99,11 @@ export enum ScannerMode {
   QRCODE = 'QRCODE'
 }
 
+export enum InventorySearchMode {
+  MANUAL = 'MANUAL',
+  SCANNER = 'SCANNER'
+}
+
 export interface InventoryState {
   assets: Asset[];
   companies: string[];
@@ -107,4 +112,6 @@ export interface InventoryState {
   editableFields?: string[]; 
   qrCodeFields?: string[];
   scannerMode?: ScannerMode;
+  autoConfirmOnScan?: boolean;
+  inventorySearchMode?: InventorySearchMode;
 }

@@ -30,9 +30,11 @@ interface MainMenuProps {
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
   scannerMode: ScannerMode;
   onUpdateScannerMode: (mode: ScannerMode) => void;
+  autoConfirmOnScan: boolean;
+  onUpdateAutoConfirm: (val: boolean) => void;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo, scannerMode, onUpdateScannerMode }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo, scannerMode, onUpdateScannerMode, autoConfirmOnScan, onUpdateAutoConfirm }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
@@ -200,6 +202,30 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
                     className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.QRCODE ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
                   >
                     QR Code
+                  </button>
+                </div>
+              </div>
+
+              <div className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl shadow-sm">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 border border-emerald-100"><ShieldCheck size={20} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Auto-Conferência</h4>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Registro Automático no Scan</p>
+                  </div>
+                </div>
+                <div className="flex p-1 bg-white border border-slate-200 rounded-2xl">
+                  <button 
+                    onClick={() => onUpdateAutoConfirm(true)}
+                    className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}
+                  >
+                    SIM
+                  </button>
+                  <button 
+                    onClick={() => onUpdateAutoConfirm(false)}
+                    className={`flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${!autoConfirmOnScan ? 'bg-slate-400 text-white shadow-md' : 'text-slate-400'}`}
+                  >
+                    NÃO
                   </button>
                 </div>
               </div>

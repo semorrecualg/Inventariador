@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode } from '../types';
 import Scanner from './Scanner';
 
 import { 
@@ -292,9 +292,12 @@ interface InventoryProps {
   onAddNewLocation: (newLocation: string) => void;
   locationsWithStats: Record<string, { total: number; checked: number }>;
   scannerMode: ScannerMode;
+  searchMode: InventorySearchMode;
+  onUpdateSearchMode: (mode: InventorySearchMode) => void;
+  autoConfirmOnScan: boolean;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, autoConfirmOnScan }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -545,12 +548,11 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
  
 
-  // Removido auto-focus automático ao entrar na tela para atender solicitação do usuário
-  // useEffect(() => {
-  //   if (isInventorying) {
-  //     searchInputRef.current?.focus();
-  //   }
-  // }, [isInventorying]);
+  useEffect(() => {
+    if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
+      setIsScannerOpen(true);
+    }
+  }, [isInventorying]); // Só dispara quando entra no inventário de um local
 
   useEffect(() => {
     const searchTimeout = setTimeout(() => {
@@ -658,18 +660,30 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                       <span className="text-[11px] font-bold uppercase tracking-widest">Todos</span>
                     </button>
                   )}
-                  <button 
-                    onClick={() => setIsSearchVisible(!isSearchVisible)} 
-                    className={`p-3 rounded-xl border transition-all ${isSearchVisible ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
-                  >
-                    <Search size={20} />
-                  </button>
-                  <button 
-                    onClick={() => setIsScannerOpen(true)} 
-                    className="p-3 rounded-xl border border-slate-200 text-slate-400 active:scale-95 transition-all bg-white shadow-sm"
-                  >
-                    <Camera size={20} />
-                  </button>
+                  
+                  <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
+                    <button 
+                      onClick={() => {
+                        onUpdateSearchMode(InventorySearchMode.MANUAL);
+                        setIsSearchVisible(true);
+                        setIsScannerOpen(false);
+                      }} 
+                      className={`p-3 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                    >
+                      <Search size={22} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        onUpdateSearchMode(InventorySearchMode.SCANNER);
+                        setIsSearchVisible(false);
+                        setIsScannerOpen(true);
+                      }} 
+                      className={`p-3 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                    >
+                      <Camera size={22} strokeWidth={searchMode === InventorySearchMode.SCANNER ? 3 : 2} />
+                    </button>
+                  </div>
+
                   <button 
                     onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} 
                     className={`p-3 rounded-xl border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
@@ -957,10 +971,56 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         <Scanner 
           mode={scannerMode}
           onScan={(result) => {
+            const term = normalizeKey(result);
             setCommittedSearch(result);
             setDisplayValue(result);
-            setIsSearchVisible(true);
-            setIsScannerOpen(false);
+            
+            if (autoConfirmOnScan) {
+              // Buscar o ativo na base total
+              const foundAsset = allAssets.find(a => normalizeKey(a.ETIQUETA || '') === term);
+              
+              if (foundAsset) {
+                // Se encontrou, confirma automaticamente na localização atual
+                const currentCompKey = normalizeKey(selectedCompany || '');
+                const assetCompKey = normalizeKey(foundAsset.EMPRESA || '');
+                
+                if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                  // Caso seja de outra empresa, adota
+                  onUpdateAsset({ 
+                    ...foundAsset, 
+                    EMPRESA: selectedCompany || foundAsset.EMPRESA,
+                    _conferido: true,
+                    TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                    _localMaster: selectedLocation || foundAsset.ENDERECO
+                  });
+                } else {
+                  // Caso seja da mesma empresa
+                  onUpdateAsset({
+                    ...foundAsset,
+                    _conferido: true,
+                    _localMaster: selectedLocation || foundAsset.ENDERECO
+                  });
+                }
+                
+                // Se o modo de busca for SCANNER, mantém o scanner aberto para fluidez
+                if (searchMode === InventorySearchMode.SCANNER) {
+                  // Pequeno delay para o usuário ver que leu? Não, o usuário pediu fluidez.
+                  // Mas precisamos resetar a busca para não filtrar a lista se o usuário fechar o scanner.
+                  setCommittedSearch('');
+                  setDisplayValue('');
+                } else {
+                  setIsScannerOpen(false);
+                }
+              } else {
+                // Se não encontrou, abre a busca para mostrar que não tem ou permitir inclusão manual
+                setIsSearchVisible(true);
+                setIsScannerOpen(false);
+              }
+            } else {
+              // Comportamento atual (NÃO auto-conferir)
+              setIsSearchVisible(true);
+              setIsScannerOpen(false);
+            }
           }}
           onClose={() => setIsScannerOpen(false)}
         />
