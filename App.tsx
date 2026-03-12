@@ -524,8 +524,8 @@ const App: React.FC = () => {
       // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original (Regra Sênior v24.5)
       
       // Adicionamos o status DE/PARA para relatórios
-      const originalLoc = String(existingAsset?.ENDERECO || originalValues['ENDERECO'] || '').trim().toUpperCase();
-      updates.DE_PARA = originalLoc === targetLoc ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO';
+      const hasChanges = alteredFields.size > 0;
+      updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
       
       updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
       updates._camposAlterados = Array.from(alteredFields);
@@ -596,8 +596,8 @@ const App: React.FC = () => {
           updates._localMaster = targetLoc;
           // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original
           
-          const originalLoc = String(a.ENDERECO || '').trim().toUpperCase();
-          updates.DE_PARA = originalLoc === targetLoc ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO';
+          const hasChanges = alteredFields.size > 0;
+          updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
           
           updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
           updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
@@ -636,20 +636,48 @@ const App: React.FC = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
-      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
       
+      // Mapeia campos normais (PARA)
+      Object.keys(a).forEach(k => { 
+        if (!k.startsWith('_') && k !== 'id') {
+          const val = a[k];
+          const colName = `PARA_${k}`;
+          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+            res[colName] = JSON.stringify(val);
+          } else {
+            res[colName] = val as string | number | boolean | null | undefined;
+          }
+          // Mantém também o nome original para compatibilidade
+          res[k] = res[colName];
+        }
+      });
+      
+      // Mapeia campos originais (DE)
       const originalValues = a._valoresOriginais;
       if (originalValues) {
         Object.keys(originalValues).forEach(key => {
-          res[`ORIGINAL_${key}`] = originalValues[key] as string | number | boolean | null | undefined;
+          const val = originalValues[key];
+          const colName = `DE_${key}`;
+          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+            res[colName] = JSON.stringify(val);
+          } else {
+            res[colName] = val as string | number | boolean | null | undefined;
+          }
+        });
+      } else {
+        // Se não foi alterado, o DE é igual ao PARA
+        Object.keys(a).forEach(k => {
+          if (!k.startsWith('_') && k !== 'id') {
+            res[`DE_${k}`] = a[k] as string | number | boolean | null | undefined;
+          }
         });
       }
 
       res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
-      res['AUDITOR_DE_PARA'] = a.DE_PARA || (a._conferido ? (normalizeKey(String(a.ENDERECO)) === normalizeKey(String(a._localMaster || a.ENDERECO)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.ENDERECO)) === normalizeKey(String(a._localMaster || a.ENDERECO)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
-      res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
+      res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       return res;
     });
     const ws = XLSX.utils.json_to_sheet(wsData);

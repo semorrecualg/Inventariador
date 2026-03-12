@@ -111,14 +111,49 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
     const wsData = filtered.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
-      Object.keys(a).forEach(k => { if (!k.startsWith('_') && k !== 'id') res[k] = a[k] as string | number | boolean | null | undefined; });
+      
+      // Mapeia campos normais (PARA)
+      Object.keys(a).forEach(k => { 
+        if (!k.startsWith('_') && k !== 'id') {
+          const val = a[k];
+          const colName = `PARA_${k}`;
+          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+            res[colName] = JSON.stringify(val);
+          } else {
+            res[colName] = val as string | number | boolean | null | undefined;
+          }
+          // Mantém também o nome original para compatibilidade
+          res[k] = res[colName];
+        }
+      });
+      
+      // Mapeia campos originais (DE)
+      const originalValues = a._valoresOriginais;
+      if (originalValues) {
+        Object.keys(originalValues).forEach(key => {
+          const val = originalValues[key];
+          const colName = `DE_${key}`;
+          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+            res[colName] = JSON.stringify(val);
+          } else {
+            res[colName] = val as string | number | boolean | null | undefined;
+          }
+        });
+      } else {
+        // Se não foi alterado, o DE é igual ao PARA
+        Object.keys(a).forEach(k => {
+          if (!k.startsWith('_') && k !== 'id') {
+            res[`DE_${k}`] = a[k] as string | number | boolean | null | undefined;
+          }
+        });
+      }
       
       res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
-      res['AUDITOR_DE_PARA'] = a.DE_PARA || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
-      res['AUDITOR_TAG_REGRA_OURO'] = a.TAG_INVENTARIO || 'PENDENTE';
-      res['AUDITOR_DUPLICIDADE'] = a.TAG_DUPLICIDADE || 'NAO ANALISADO';
+      res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
+      res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';
       return res;
     });
 

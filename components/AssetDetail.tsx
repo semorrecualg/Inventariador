@@ -290,17 +290,25 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                       </div>
                       
                       {editingField === key ? (
-                        <div className="mt-2 flex items-center space-x-2">
-                          <input 
-                            autoFocus 
-                            value={editValue} 
-                            onChange={(e) => setEditValue(e.target.value)} 
-                            onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
-                            className="flex-1 bg-white px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-blue-500/20" 
-                          />
-                          <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
-                            <Check size={20}/>
-                          </button>
+                        <div className="mt-2 flex flex-col space-y-2">
+                          {workingAsset._valoresOriginais?.[key] !== undefined && (
+                            <p className="text-[8px] text-red-500 font-bold uppercase tracking-wider px-1">
+                              ORIGINAL (DE): {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
+                            </p>
+                          )}
+                          <div className="flex items-center space-x-2">
+                            <input 
+                              autoFocus 
+                              value={editValue} 
+                              onChange={(e) => setEditValue(e.target.value)} 
+                              onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
+                              className="flex-1 bg-white px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-blue-500/20" 
+                              placeholder={`NOVO VALOR (PARA) ${label}`}
+                            />
+                            <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
+                              <Check size={20}/>
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div className="flex flex-col">
