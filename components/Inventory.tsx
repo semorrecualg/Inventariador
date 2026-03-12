@@ -679,6 +679,183 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     }
   }, [filteredAssets, committedSearch]);
 
+  // Helper para renderizar os modais de confirmação/erro de leitura
+  const renderConfirmationModals = () => {
+    return (
+      <>
+        {/* Modal de Item Duplicado */}
+        {duplicateAsset && createPortal(
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-amber-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-amber-600 p-8 text-white text-center">
+                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                  <AlertTriangle size={40} className="text-white" />
+                </div>
+                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Item já Inventariado</h3>
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Este patrimônio já possui registro de conferência</p>
+              </div>
+              
+              <div className="p-8 space-y-4">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
+                  <p className="text-xl font-black text-white font-mono">{duplicateAsset.ETIQUETA}</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local Registrado:</span>
+                    <span className="text-[9px] font-black text-amber-500 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
+                  </div>
+                </div>
+
+                <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-tight leading-relaxed">
+                  Deseja confirmar o registro novamente para a localização atual?
+                </p>
+
+                <div className="flex space-x-3 pt-2">
+                  <button 
+                    onClick={() => setDuplicateAsset(null)} 
+                    className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                  >
+                    Não
+                  </button>
+                  <button 
+                    onClick={() => {
+                      onUpdateAsset({
+                        ...duplicateAsset,
+                        _conferido: true,
+                        _localMaster: selectedLocation || duplicateAsset.ENDERECO
+                      });
+                      setDuplicateAsset(null);
+                    }} 
+                    className="flex-1 py-4 bg-amber-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
+                  >
+                    Sim, Confirmar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Modal de Confirmação de Item Lido */}
+        {scannedAsset && createPortal(
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-blue-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-blue-600 p-8 text-white text-center">
+                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                  <ShieldCheck size={40} className="text-white" />
+                </div>
+                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>
+              </div>
+              
+              <div className="p-8 space-y-4">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
+                  <p className="text-xl font-black text-white font-mono">{scannedAsset.ETIQUETA}</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Localização Atual:</span>
+                    <span className="text-[9px] font-black text-blue-500 uppercase">{selectedLocation}</span>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 pt-2">
+                  <button 
+                    onClick={() => setScannedAsset(null)} 
+                    className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const currentCompKey = normalizeKey(selectedCompany || '');
+                      const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
+                      
+                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                        onUpdateAsset({ 
+                          ...scannedAsset, 
+                          EMPRESA: selectedCompany || scannedAsset.EMPRESA,
+                          _conferido: true,
+                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        });
+                      } else {
+                        onUpdateAsset({
+                          ...scannedAsset,
+                          _conferido: true,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        });
+                      }
+                      setScannedAsset(null);
+                    }} 
+                    className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 active:scale-95 transition-all"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Modal de Item Não Localizado */}
+        {scannedResult && !scannedAsset && createPortal(
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-orange-600 p-8 text-white text-center">
+                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                  <AlertTriangle size={40} className="text-white" />
+                </div>
+                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Não Localizado</h3>
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Patrimônio não encontrado na base</p>
+              </div>
+              
+              <div className="p-8 space-y-4">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Código Lido</p>
+                  <p className="text-xl font-black text-white font-mono">{scannedResult}</p>
+                </div>
+
+                <div className="flex flex-col space-y-3 pt-2">
+                  <button 
+                    onClick={() => {
+                      setManualAsset({
+                        ETIQUETA: scannedResult,
+                        EMPRESA: selectedCompany || "",
+                        STATUS: "ATIVO",
+                        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+                        AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+                        TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+                        QT: 1,
+                        DESCRICAODOATIVO: '',
+                        SERIAL: ''
+                      });
+                      setIsManualEntryOpen(true);
+                      setScannedResult(null);
+                    }} 
+                    className="w-full py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2"
+                  >
+                    <FilePlus2 size={16} />
+                    <span>Incluir Manual</span>
+                  </button>
+                  <button 
+                    onClick={() => setScannedResult(null)} 
+                    className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                  >
+                    Voltar ao Scanner
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      </>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
@@ -864,6 +1041,28 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
             )}
 
+            {/* Scanner Integrado (Inline) */}
+            {isScannerOpen && searchMode === 'SCANNER' && (
+              <div className="px-4 mb-4">
+                <div className="relative overflow-hidden rounded-3xl border-4 border-white/10 shadow-2xl">
+                  <Scanner 
+                    isInline={true}
+                    mode={scannerMode}
+                    onModeChange={onUpdateScannerMode}
+                    onScan={handleScan}
+                    onClose={() => setIsScannerOpen(false)}
+                    isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+                  />
+                  <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
+                    <div className="px-3 py-1 bg-emerald-500/80 backdrop-blur-md rounded-full flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                      <span className="text-[10px] font-black text-white uppercase tracking-widest">Scanner Ativo</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {filteredAssets.length > 0 ? (
               <Virtuoso
                 ref={virtuosoRef}
@@ -926,6 +1125,37 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 
+      {/* Scanner Full-Screen */}
+      {isScannerOpen && searchMode !== 'SCANNER' && (
+        <Scanner 
+          mode={scannerMode}
+          onModeChange={onUpdateScannerMode}
+          onScan={handleScan}
+          onClose={() => setIsScannerOpen(false)}
+          isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+          onManualInput={() => {
+            setIsScannerOpen(false);
+            setManualAsset({
+              ETIQUETA: "",
+              EMPRESA: selectedCompany || "",
+              STATUS: "ATIVO",
+              DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+              AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+              TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+              QT: 1,
+              DESCRICAODOATIVO: '',
+              SERIAL: '',
+              ENDERECO: selectedLocation || ""
+            });
+            setIsManualEntryOpen(true);
+          }}
+        />
+      )}
+
+      {/* Modais de Confirmação e Erro de Leitura */}
+      {renderConfirmationModals()}
+
+      {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
           <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-sky-500/30 shadow-2xl p-8">
@@ -1216,7 +1446,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         document.body
       )}
 
-      {isScannerOpen && (
+      {/* Scanner Full-Screen (Apenas se não estiver no modo integrado ou se explicitamente aberto) */}
+      {isScannerOpen && searchMode !== 'SCANNER' && (
         <Scanner 
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}

@@ -11,9 +11,21 @@ interface ScannerProps {
   onClose: () => void;
   onModeChange?: (mode: ScannerMode) => void;
   onManualInput?: () => void;
+  isInline?: boolean;
+  isPaused?: boolean;
+  children?: React.ReactNode;
 }
 
-const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, onManualInput }) => {
+const Scanner: React.FC<ScannerProps> = ({ 
+  mode, 
+  onScan, 
+  onClose, 
+  onModeChange, 
+  onManualInput, 
+  isInline = false,
+  isPaused = false,
+  children
+}) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isTorchOn, setIsTorchOn] = useState(false);
@@ -22,11 +34,17 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      // Garantir que o track pare ao desmontar para economizar bateria
+      if (trackRef.current) {
+        trackRef.current.stop();
+        trackRef.current = null;
+      }
     };
   }, []);
 
@@ -70,13 +88,11 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
         ]
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
-    // Simplificado o config para evitar problemas de renderização em alguns dispositivos
     const config = {
-      fps: 15,
+      fps: 20, // Aumentado para melhor performance
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 300, height: 120 } 
         : { width: 250, height: 250 },
-      // Removido aspectRatio fixo para permitir que a câmera use sua resolução nativa
       formatsToSupport: formats,
     };
 
@@ -85,21 +101,18 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
         throw new Error("Seu navegador não suporta acesso à câmera ou você está em uma conexão não segura.");
       }
 
-      // Pequeno delay para garantir que o elemento DOM esteja pronto
       await new Promise(resolve => setTimeout(resolve, 300));
       if (!isMounted.current) return;
       
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
-      // Tenta obter as câmeras para escolher a traseira explicitamente se possível
       const cameras = await Html5Qrcode.getCameras().catch(() => []);
       if (!isMounted.current) return;
 
       let cameraIdOrConfig: string | { facingMode: string } = { facingMode: "environment" };
       
       if (cameras && cameras.length > 0) {
-        // Tenta encontrar uma câmera que pareça ser a traseira (back)
         const backCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('traseira'));
         if (backCamera) {
           cameraIdOrConfig = backCamera.id;
@@ -123,9 +136,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
             onScan(decodedText);
           }
         },
-        () => {
-          // Ignore frequent noise errors
-        }
+        () => {}
       );
 
       if (!isMounted.current) {
@@ -133,42 +144,42 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
         return;
       }
 
-      // Check for torch and zoom capabilities safely
+      // Detecção robusta de capacidades
       try {
-        // Pequeno delay para garantir que o track está estável
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800)); // Espera o hardware estabilizar
         
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const html5QrCodeAny = html5QrCode as any;
         const track = html5QrCodeAny.getRunningTrack();
+        
         if (track) {
+          trackRef.current = track;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const capabilities = track.getCapabilities() as any;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const settings = track.getSettings() as any;
           
           if (capabilities.torch) {
             setHasTorch(true);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const settings = track.getSettings() as any;
             setIsTorchOn(settings.torch || false);
           } else {
-            // Fallback para mobile
-            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            if (isMobile) setHasTorch(true);
+            // Alguns navegadores não reportam torch mas suportam via constraints
+            // Verificamos se 'torch' está na lista de constraints suportadas
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const supportedConstraints = navigator.mediaDevices.getSupportedConstraints() as any;
+            if (supportedConstraints.torch) {
+              setHasTorch(true);
+            }
           }
-        } else {
-          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-          if (isMobile) setHasTorch(true);
         }
       } catch (e) {
-        console.warn("Could not check capabilities", e);
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) setHasTorch(true);
+        console.warn("Capability check failed", e);
       }
 
     } catch (err) {
       if (isMounted.current) {
         console.error("Scanner start error", err);
-        setError("Não foi possível acessar a câmera. Verifique as permissões e certifique-se de fechar outros apps que possam estar sobrepondo a tela (balões de chat, filtros de luz, etc).");
+        setError("Erro ao acessar câmera. Verifique as permissões.");
       }
     }
   }, [mode, onScan]);
@@ -176,13 +187,26 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
   const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
       try {
+        // Desliga a lanterna antes de parar para garantir estado limpo
+        if (trackRef.current && isTorchOn) {
+          await trackRef.current.applyConstraints({
+            advanced: [{ torch: false }]
+          } as Record<string, unknown>).catch(() => {});
+        }
+        
         await scannerRef.current.stop();
         scannerRef.current = null;
+        
+        // Gestão de bateria: parar o track explicitamente
+        if (trackRef.current) {
+          trackRef.current.stop();
+          trackRef.current = null;
+        }
       } catch (err) {
         console.error("Scanner stop error", err);
       }
     }
-  }, []);
+  }, [isTorchOn]);
 
   useEffect(() => {
     startScanner();
@@ -191,73 +215,57 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
     };
   }, [startScanner, stopScanner]);
 
+  /**
+   * Função robusta para alternar lanterna (torch)
+   * Focada em WebApps Android / iOS
+   */
   const toggleTorch = async () => {
-    if (!scannerRef.current) return;
+    const track = trackRef.current;
+    if (!track) {
+      console.error("Nenhum track ativo para a lanterna");
+      return;
+    }
+
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const html5QrCode = scannerRef.current as any;
-      const track = typeof html5QrCode.getRunningTrack === 'function' 
-        ? html5QrCode.getRunningTrack() 
-        : null;
-
-      if (track) {
-        // Feedback tátil
-        if (navigator.vibrate) navigator.vibrate(50);
-
-        const newState = !isTorchOn;
-        
-        // Tenta aplicar a restrição de lanterna
-        // Alguns dispositivos ignoram se o valor for o mesmo que o atual detectado,
-        // então forçamos a mudança baseada no nosso estado interno.
-        // Adicionamos uma verificação extra de capacidades
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const capabilities = track.getCapabilities() as any;
-        if (!capabilities.torch) {
-          console.warn("Torch not supported by this track");
-          // Mesmo assim tentamos, pois getCapabilities pode mentir em alguns browsers
+      // 1. Verificação de Suporte
+      const capabilities = track.getCapabilities() as Record<string, unknown>;
+      if (!capabilities.torch) {
+        // Fallback: Tenta verificar se a constraint é suportada globalmente
+        const supported = navigator.mediaDevices.getSupportedConstraints() as Record<string, unknown>;
+        if (!supported.torch) {
+          alert("Lanterna não suportada neste navegador/dispositivo.");
+          return;
         }
-
-        await track.applyConstraints({
-          advanced: [{ torch: newState }]
-        });
-        
-        setIsTorchOn(newState);
-        
-        // Verificação dupla: alguns navegadores precisam de um tempo para atualizar o settings
-        setTimeout(async () => {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const settings = track.getSettings() as any;
-            if (settings && typeof settings.torch !== 'undefined') {
-              setIsTorchOn(settings.torch);
-            }
-          } catch {
-            // Ignora erro na verificação secundária
-          }
-        }, 500);
-      } else {
-        console.error("No running track found to toggle torch");
       }
+
+      // 2. Feedback tátil (Haptic)
+      if (navigator.vibrate) navigator.vibrate(40);
+
+      const newState = !isTorchOn;
+
+      // 3. Aplicação de Constraints via MediaStreamTrack
+      await track.applyConstraints({
+        advanced: [{ torch: newState }]
+      } as Record<string, unknown>);
+      
+      setIsTorchOn(newState);
+
+      // 4. Gestão de Bateria (Opcional/Contextual)
+      // Se o usuário quisesse parar a câmera ao desligar a luz:
+      // if (!newState) track.stop(); 
+      // Nota: No scanner, não paramos o track aqui para não congelar a imagem.
+      // O stop() é chamado no fechamento do componente (stopScanner).
+
     } catch (e) {
-      console.error("Torch toggle failed", e);
-      // Fallback: tenta novamente forçando o estado oposto com um pequeno delay
-      setTimeout(async () => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const scannerAny = scannerRef.current as any;
-          const track = scannerAny.getRunningTrack();
-          if (track) {
-            const newState = !isTorchOn;
-            await track.applyConstraints({
-              advanced: [{ torch: newState }]
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } as any);
-            setIsTorchOn(newState);
-          }
-        } catch (err2) {
-          console.error("Torch fallback failed", err2);
-        }
-      }, 200);
+      console.error("Falha ao alternar torch:", e);
+      // Tentativa de recuperação forçada
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] } as any);
+        setIsTorchOn(!isTorchOn);
+      } catch {
+        setError("Não foi possível controlar a lanterna.");
+      }
     }
   };
 
@@ -285,17 +293,17 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
   };
 
   const scannerContent = (
-    <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center overflow-hidden">
+    <div className={`${isInline ? 'relative w-full h-64 rounded-3xl' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-300`}>
       {/* Viewport Overlay */}
-      <div id="reader" key={mode} className={`w-full h-full transition-opacity duration-75 ${isFlashing ? 'opacity-50' : 'opacity-100'}`}></div>
+      <div id="reader" key={mode} className={`w-full h-full transition-all duration-500 ${isFlashing ? 'opacity-50' : 'opacity-100'} ${isPaused ? 'blur-xl opacity-40 scale-110' : 'blur-0 opacity-100 scale-100'}`}></div>
       
       {/* Flash Effect */}
-      {isFlashing && (
+      {isFlashing && !isPaused && (
         <div className="absolute inset-0 bg-white z-[100] pointer-events-none animate-pulse"></div>
       )}
 
       {/* Success Feedback */}
-      {showSuccess && (
+      {showSuccess && !isPaused && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] pointer-events-none">
           <div className="bg-emerald-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
             <ShieldCheck size={24} />
@@ -305,13 +313,15 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
       )}
 
       {/* Custom UI Overlay */}
-      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+      <div className={`absolute inset-0 pointer-events-none flex flex-col items-center justify-center transition-opacity duration-300 ${isPaused ? 'opacity-0' : 'opacity-100'}`}>
         {/* Bounding Box Simulation */}
         <div className={`border-2 border-blue-500/50 rounded-2xl relative overflow-hidden shadow-[0_0_0_1000px_rgba(0,0,0,0.7)] ${
-          mode === ScannerMode.BARCODE ? 'w-[300px] h-[120px]' : 'w-[250px] h-[250px]'
+          mode === ScannerMode.BARCODE 
+            ? (isInline ? 'w-[200px] h-[80px]' : 'w-[300px] h-[120px]') 
+            : (isInline ? 'w-[180px] h-[180px]' : 'w-[250px] h-[250px]')
         }`}>
           {/* Scanner Line */}
-          <div className="absolute left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scanLine"></div>
+          {!isPaused && <div className="absolute left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scanLine"></div>}
           
           {/* Corners */}
           <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"></div>
@@ -320,26 +330,30 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
           <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-500 rounded-br-lg"></div>
         </div>
 
-        <div className="mt-12 text-center px-8">
-          <p className="text-white text-xs font-bold uppercase tracking-[0.2em] mb-2">
-            {mode === ScannerMode.BARCODE ? 'Modo Código de Barras' : 'Modo QR Code'}
-          </p>
-          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-            Posicione o código dentro do quadro azul
-          </p>
-        </div>
+        {!isInline && (
+          <div className="mt-12 text-center px-8">
+            <p className="text-white text-xs font-bold uppercase tracking-[0.2em] mb-2">
+              {mode === ScannerMode.BARCODE ? 'Modo Código de Barras' : 'Modo QR Code'}
+            </p>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+              Posicione o código dentro do quadro azul
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
-      <div className="absolute top-8 left-0 right-0 px-6 flex items-center justify-between pointer-events-none z-50">
+      <div className={`absolute ${isInline ? 'top-4' : 'top-8'} left-0 right-0 px-6 flex items-center justify-between pointer-events-none z-50 transition-opacity duration-300 ${isPaused ? 'opacity-20' : 'opacity-100'}`}>
         {/* Lado Esquerdo: Fechar */}
         <div className="flex-1 flex justify-start">
-          <button 
-            onClick={onClose}
-            className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
-          >
-            <X size={24} />
-          </button>
+          {!isInline && (
+            <button 
+              onClick={onClose}
+              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
+            >
+              <X size={24} />
+            </button>
+          )}
         </div>
 
         {/* Centro: Modo de Leitura */}
@@ -347,10 +361,10 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
           {onModeChange && (
             <button 
               onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}
-              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center min-w-[64px] pointer-events-auto shadow-xl"
+              className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
             >
-              <RefreshCw size={20} className="mb-1" />
-              <span className="text-[8px] font-black uppercase tracking-tighter">
+              <RefreshCw size={isInline ? 16 : 20} className="mb-1" />
+              <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
                 {mode === ScannerMode.BARCODE ? 'p/ QR' : 'p/ Barras'}
               </span>
             </button>
@@ -362,45 +376,56 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
           {hasTorch && (
             <button 
               onClick={toggleTorch}
-              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border flex flex-col items-center justify-center min-w-[64px] shadow-xl ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
+              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} shadow-xl ${isTorchOn ? 'bg-yellow-500 text-white border-yellow-400 shadow-lg shadow-yellow-500/20' : 'bg-white/10 text-white border-white/10'}`}
             >
-              {isTorchOn ? <Zap size={20} className="mb-1" /> : <ZapOff size={20} className="mb-1" />}
-              <span className="text-[8px] font-black uppercase tracking-tighter">Lanternas</span>
+              {isTorchOn ? <Zap size={isInline ? 16 : 20} className="mb-1" /> : <ZapOff size={isInline ? 16 : 20} className="mb-1" />}
+              <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>Lanternas</span>
             </button>
           )}
 
-          <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl">
-            <button onClick={() => handleZoom(-0.5)} className="p-2 text-white active:scale-90"><Minimize size={20} /></button>
-            <span className="text-white text-[10px] font-bold w-8 text-center">{zoomLevel.toFixed(1)}x</span>
-            <button onClick={() => handleZoom(0.5)} className="p-2 text-white active:scale-90"><Maximize size={20} /></button>
-          </div>
+          {!isInline && (
+            <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl">
+              <button onClick={() => handleZoom(-0.5)} className="p-2 text-white active:scale-90"><Minimize size={20} /></button>
+              <span className="text-white text-[10px] font-bold w-8 text-center">{zoomLevel.toFixed(1)}x</span>
+              <button onClick={() => handleZoom(0.5)} className="p-2 text-white active:scale-90"><Maximize size={20} /></button>
+            </div>
+          )}
         </div>
       </div>
 
-      {error && (
-        <div className="absolute bottom-24 left-6 right-6 p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto">
+      {/* Overlay Children (Confirmation UI) */}
+      {children && (
+        <div className="absolute inset-0 z-[200] flex items-center justify-center p-6 animate-fadeIn">
+          {children}
+        </div>
+      )}
+
+      {error && !isPaused && (
+        <div className={`absolute ${isInline ? 'bottom-4' : 'bottom-24'} left-6 right-6 p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto`}>
           <p className="text-white text-xs font-bold uppercase tracking-tight">{error}</p>
           <button onClick={() => { setError(null); startScanner(); }} className="mt-2 text-white text-[10px] font-bold underline uppercase tracking-widest">Tentar Novamente</button>
         </div>
       )}
 
       {/* Bottom Tip */}
-      <div className="absolute bottom-24 flex flex-col items-center space-y-4 pointer-events-auto">
-        {onManualInput && (
-          <button 
-            onClick={onManualInput}
-            className="px-8 py-4 bg-white/10 backdrop-blur-md rounded-2xl text-white border border-white/20 flex items-center space-x-3 active:scale-95 transition-all shadow-2xl"
-          >
-            <RefreshCw size={20} className="text-blue-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Digitar Código Manualmente</span>
-          </button>
-        )}
-        
-        <div className="flex items-center space-x-2 text-white/40">
-          <Camera size={14} />
-          <span className="text-[9px] font-bold uppercase tracking-widest">Processamento de Imagem v24 PRO</span>
+      {!isInline && (
+        <div className="absolute bottom-24 flex flex-col items-center space-y-4 pointer-events-auto">
+          {onManualInput && (
+            <button 
+              onClick={onManualInput}
+              className="px-8 py-4 bg-white/10 backdrop-blur-md rounded-2xl text-white border border-white/20 flex items-center space-x-3 active:scale-95 transition-all shadow-2xl"
+            >
+              <RefreshCw size={20} className="text-blue-400" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Digitar Código Manualmente</span>
+            </button>
+          )}
+          
+          <div className="flex items-center space-x-2 text-white/40">
+            <Camera size={14} />
+            <span className="text-[9px] font-bold uppercase tracking-widest">Processamento de Imagem v24 PRO</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <style>{`
         @keyframes scanLine {
@@ -445,6 +470,7 @@ const Scanner: React.FC<ScannerProps> = ({ mode, onScan, onClose, onModeChange, 
     </div>
   );
 
+  if (isInline) return scannerContent;
   return createPortal(scannerContent, document.body);
 };
 

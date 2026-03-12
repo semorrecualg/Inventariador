@@ -170,10 +170,7 @@ const App: React.FC = () => {
 
     // 3. If on a company-specific screen but no company selected, go to selection
     const companyRequiredScreens = [
-      AppScreen.INVENTORY, 
-      AppScreen.LABELING, 
-      AppScreen.CONSULTATION, 
-      AppScreen.DASHBOARD
+      AppScreen.INVENTORY
     ];
     if (user && !selectedCompany && companyRequiredScreens.includes(currentScreen)) {
       pushScreen(AppScreen.COMPANY_SELECTION);
