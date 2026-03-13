@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 
 import { 
@@ -314,9 +314,10 @@ interface InventoryProps {
   onUpdateSearchMode: (mode: InventorySearchMode) => void;
   onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
+  scanFeedbackMode: ScanFeedbackMode;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -348,6 +349,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const selectedCompanyRef = useRef(selectedCompany);
   const onUpdateAssetRef = useRef(onUpdateAsset);
   const autoConfirmOnScanRef = useRef(autoConfirmOnScan);
+  const scanFeedbackModeRef = useRef(scanFeedbackMode);
   const lastScanTime = useRef<number>(0);
   const lastScanResult = useRef<string>('');
   const isModalOpenRef = useRef(false);
@@ -357,6 +359,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   useEffect(() => { selectedCompanyRef.current = selectedCompany; }, [selectedCompany]);
   useEffect(() => { onUpdateAssetRef.current = onUpdateAsset; }, [onUpdateAsset]);
   useEffect(() => { autoConfirmOnScanRef.current = autoConfirmOnScan; }, [autoConfirmOnScan]);
+  useEffect(() => { scanFeedbackModeRef.current = scanFeedbackMode; }, [scanFeedbackMode]);
   
   useEffect(() => {
     isModalOpenRef.current = !!(scannedAsset || scannedResult || duplicateAsset || isManualEntryOpen);
@@ -1052,6 +1055,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     onScan={handleScan}
                     onClose={() => setIsScannerOpen(false)}
                     isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+                    scanFeedbackMode={scanFeedbackMode}
                   />
                   <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
                     <div className="px-3 py-1 bg-emerald-500/80 backdrop-blur-md rounded-full flex items-center space-x-2">
@@ -1133,6 +1137,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           onScan={handleScan}
           onClose={() => setIsScannerOpen(false)}
           isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+          scanFeedbackMode={scanFeedbackMode}
           onManualInput={() => {
             setIsScannerOpen(false);
             setManualAsset({

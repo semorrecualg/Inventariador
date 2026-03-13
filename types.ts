@@ -99,6 +99,13 @@ export enum ScannerMode {
   QRCODE = 'QRCODE'
 }
 
+export enum ScanFeedbackMode {
+  VIBRATE = 'VIBRATE',
+  SOUND = 'SOUND',
+  BOTH = 'BOTH',
+  NONE = 'NONE'
+}
+
 export enum InventorySearchMode {
   MANUAL = 'MANUAL',
   SCANNER = 'SCANNER'
@@ -113,5 +120,6 @@ export interface InventoryState {
   qrCodeFields?: string[];
   scannerMode?: ScannerMode;
   autoConfirmOnScan?: boolean;
+  scanFeedbackMode?: ScanFeedbackMode;
   inventorySearchMode?: InventorySearchMode;
 }

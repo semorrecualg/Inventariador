@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { Asset, TagInventario, ScannerMode } from '../types';
+import { Asset, TagInventario, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 
 import { 
@@ -57,9 +57,10 @@ interface LabelingProps {
   selectedCompany: string | null;
   scannerMode: ScannerMode;
   onUpdateScannerMode: (mode: ScannerMode) => void;
+  scanFeedbackMode: ScanFeedbackMode;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -362,6 +363,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             setIsScannerOpen(false);
           }}
           onClose={() => setIsScannerOpen(false)}
+          scanFeedbackMode={scanFeedbackMode}
         />
       )}
     </div>

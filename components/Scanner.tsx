@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck } from 'lucide-react';
-import { ScannerMode } from '../types';
+import { ScannerMode, ScanFeedbackMode } from '../types';
 
 interface ScannerProps {
   mode: ScannerMode;
@@ -14,6 +14,7 @@ interface ScannerProps {
   isInline?: boolean;
   isPaused?: boolean;
   children?: React.ReactNode;
+  scanFeedbackMode?: ScanFeedbackMode;
 }
 
 const Scanner: React.FC<ScannerProps> = ({ 
@@ -24,7 +25,8 @@ const Scanner: React.FC<ScannerProps> = ({
   onManualInput, 
   isInline = false,
   isPaused = false,
-  children
+  children,
+  scanFeedbackMode = ScanFeedbackMode.BOTH
 }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -48,27 +50,35 @@ const Scanner: React.FC<ScannerProps> = ({
 
   const playBeep = () => {
     try {
-      const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextClass) return;
-      const audioCtx = new AudioContextClass();
-      const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
+      if (scanFeedbackMode === ScanFeedbackMode.NONE) return;
 
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
+      const shouldSound = scanFeedbackMode === ScanFeedbackMode.SOUND || scanFeedbackMode === ScanFeedbackMode.BOTH;
+      const shouldVibrate = scanFeedbackMode === ScanFeedbackMode.VIBRATE || scanFeedbackMode === ScanFeedbackMode.BOTH;
 
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      if (shouldSound) {
+        const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (AudioContextClass) {
+          const audioCtx = new AudioContextClass();
+          const oscillator = audioCtx.createOscillator();
+          const gainNode = audioCtx.createGain();
 
-      oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.1);
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+          gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+
+          oscillator.start();
+          oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+      }
       
-      if (navigator.vibrate) {
+      if (shouldVibrate && navigator.vibrate) {
         navigator.vibrate(100);
       }
     } catch (e) {
-      console.error('Audio feedback failed', e);
+      console.error('Feedback failed', e);
     }
   };
 

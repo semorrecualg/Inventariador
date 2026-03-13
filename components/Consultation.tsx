@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Asset, ScannerMode } from '../types';
+import { Asset, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 import { 
   Search, 
@@ -30,6 +30,7 @@ interface ConsultationProps {
   qrCodeFields: string[];
   scannerMode: ScannerMode;
   onUpdateScannerMode: (mode: ScannerMode) => void;
+  scanFeedbackMode: ScanFeedbackMode;
 }
 
 interface SearchFilters {
@@ -94,7 +95,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   );
 };
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode, onUpdateScannerMode }) => {
+const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
   const [filters, setFilters] = useState<SearchFilters>({
     ETIQUETA: '',
     DESCRICAODOATIVO: '',
@@ -498,6 +499,7 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
             setIsScannerOpen(false);
           }}
           onClose={() => setIsScannerOpen(false)}
+          scanFeedbackMode={scanFeedbackMode}
         />
       )}
     </div>
