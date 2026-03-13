@@ -181,14 +181,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
             
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-5 bg-white border border-slate-200 rounded-3xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-5 border border-blue-100"><Users size={20} /></div>
-                <div className="flex-1">
-                  <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Acessos</h4>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Gerir Usuários</p>
-                </div>
-              </button>
-
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-5 bg-white border border-slate-200 rounded-3xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-xl flex items-center justify-center mr-5 border border-cyan-100"><SlidersHorizontal size={20} /></div>
                 <div className="flex-1">
@@ -356,6 +348,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
 
             <div className="space-y-4">
+              <button onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-6 bg-white/5 border border-white/10 rounded-3xl active:scale-[0.98] transition-all text-left">
+                <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center mr-5 border border-blue-500/30"><Users size={24} /></div>
+                <div className="flex-1">
+                  <h4 className="text-sm font-bold text-white uppercase tracking-tight">Acessos</h4>
+                  <p className="text-[9px] font-bold text-white/40 uppercase tracking-widest mt-1">Gerir Usuários</p>
+                </div>
+              </button>
+
               <button disabled={!hasData} onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-6 bg-white/5 border border-white/10 rounded-3xl active:scale-[0.98] disabled:opacity-30 transition-all text-left">
                 <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-xl flex items-center justify-center mr-5 border border-emerald-500/30"><Download size={24} /></div>
                 <div className="flex-1">

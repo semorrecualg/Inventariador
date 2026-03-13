@@ -6,6 +6,7 @@ import {
   Search, 
   ChevronRight, 
   ArrowLeft, 
+  Check,
   Barcode,
   AlertCircle,
   QrCode,
@@ -31,6 +32,8 @@ interface ConsultationProps {
   scannerMode: ScannerMode;
   onUpdateScannerMode: (mode: ScannerMode) => void;
   scanFeedbackMode: ScanFeedbackMode;
+  isReturnMode?: boolean;
+  onReturnToInventory?: (etiqueta: string) => void;
 }
 
 interface SearchFilters {
@@ -95,7 +98,17 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   );
 };
 
-const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAsset, qrCodeFields, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
+const Consultation: React.FC<ConsultationProps> = ({ 
+  assets, 
+  onBack, 
+  onSelectAsset, 
+  qrCodeFields, 
+  scannerMode, 
+  onUpdateScannerMode, 
+  scanFeedbackMode,
+  isReturnMode = false,
+  onReturnToInventory
+}) => {
   const [filters, setFilters] = useState<SearchFilters>({
     ETIQUETA: '',
     DESCRICAODOATIVO: '',
@@ -372,10 +385,25 @@ const Consultation: React.FC<ConsultationProps> = ({ assets, onBack, onSelectAss
                         <span className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">{asset.ENDERECO || '---'}</span>
                       </div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 mr-2 shadow-sm hover:text-blue-600 transition-colors">
-                      <QrCode size={16} />
-                    </button>
-                    <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
+                    <div className="flex items-center space-x-2">
+                      {isReturnMode && onReturnToInventory && (
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            onReturnToInventory(asset.ETIQUETA || ''); 
+                          }} 
+                          className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-600 active:scale-90 shadow-sm hover:bg-emerald-100 transition-all flex items-center space-x-2"
+                          title="Retornar ao Inventário"
+                        >
+                          <Check size={16} strokeWidth={3} />
+                          <span className="text-[10px] font-black uppercase tracking-tighter">Selecionar</span>
+                        </button>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 shadow-sm hover:text-blue-600 transition-colors">
+                        <QrCode size={16} />
+                      </button>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors ml-1" />
                   </div>
                 ))}
               </div>

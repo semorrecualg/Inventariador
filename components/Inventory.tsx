@@ -315,9 +315,12 @@ interface InventoryProps {
   onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
   scanFeedbackMode: ScanFeedbackMode;
+  onOpenConsultation: () => void;
+  inventorySearchValue: string | null;
+  clearInventorySearchValue: () => void;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -364,6 +367,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   useEffect(() => {
     isModalOpenRef.current = !!(scannedAsset || scannedResult || duplicateAsset || isManualEntryOpen);
   }, [scannedAsset, scannedResult, duplicateAsset, isManualEntryOpen]);
+
+  // Handle returned search value from Consultation
+  useEffect(() => {
+    if (inventorySearchValue) {
+      setDisplayValue(inventorySearchValue);
+      setCommittedSearch(inventorySearchValue);
+      setIsSearchVisible(true);
+      setIsScannerOpen(false);
+      onUpdateSearchMode(InventorySearchMode.MANUAL);
+      clearInventorySearchValue();
+    }
+  }, [inventorySearchValue, clearInventorySearchValue, onUpdateSearchMode]);
 
   const handleScan = useCallback((result: string) => {
     // Se já houver algum modal aberto, ignora novas leituras para evitar sobreposição
@@ -948,6 +963,16 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     >
                       {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
                       <span className="text-[11px] font-bold uppercase tracking-widest">Todos</span>
+                    </button>
+                  )}
+                  
+                  {activeFilter === 'pending' && !isBatchMode && (
+                    <button 
+                      onClick={onOpenConsultation}
+                      className="p-3 bg-slate-100 text-slate-400 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all"
+                      title="Consultar Item"
+                    >
+                      <Search size={22} className="text-slate-500" />
                     </button>
                   )}
                   
