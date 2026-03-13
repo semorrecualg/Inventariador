@@ -66,7 +66,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
   
   return (
-    <div className="bg-white border-t border-slate-200 p-4 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
+    <div className="bg-white border-t border-slate-200 p-4 pb-10 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
       {keys.map((key) => (
         <button
           key={key}

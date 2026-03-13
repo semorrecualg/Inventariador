@@ -31,7 +31,7 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
   };
 
   return (
-    <div className="p-6 h-full flex flex-col justify-center animate-fadeIn bg-bg-main">
+    <div className="p-6 h-full flex flex-col justify-start pt-12 animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pb-20">
       <div className="mb-10 text-center">
         <div className="w-20 h-20 bg-white border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
           <LogIn className="text-blue-600" size={32} />

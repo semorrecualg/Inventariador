@@ -61,6 +61,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
 
+  useEffect(() => {
+    if (editingField) {
+      setTimeout(() => {
+        const activeInput = document.activeElement;
+        if (activeInput) {
+          activeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [editingField]);
+
   const qrCodeData = useMemo(() => {
     return qrCodeFields.map(field => workingAsset[field] || '').join('|');
   }, [qrCodeFields, workingAsset]);
@@ -234,7 +245,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
 
       {/* KARDEX BODY */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-28 bg-bg-main">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
           {isBatch && (
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">

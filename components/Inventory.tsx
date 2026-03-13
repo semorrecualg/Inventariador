@@ -75,7 +75,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-3 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-3 pb-10 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
       {keys.map((key) => (
         <button
           key={key}
@@ -1360,10 +1360,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
 
       {isManualEntryOpen && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 animate-fadeIn">
-          <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md" onClick={() => setIsManualEntryOpen(false)} />
-          <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-orange-500/30 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col max-h-[90vh]">
-            <div className="bg-orange-600 px-8 py-8 text-white shrink-0">
+        <div className="fixed inset-0 z-[10000] flex items-start justify-center p-4 sm:p-6 bg-slate-950/95 backdrop-blur-md animate-fadeIn overflow-y-auto pt-10 sm:pt-20">
+          <div className="absolute inset-0" onClick={() => setIsManualEntryOpen(false)} />
+          <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-orange-500/30 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col mb-20">
+            <div className="bg-orange-600 px-8 py-6 text-white shrink-0">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2 bg-black/20 px-4 py-2 rounded-full border border-white/10">
                   <FilePlus2 size={14} className="fill-white" />
@@ -1375,7 +1375,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               <p className="text-[10px] font-black text-white/60 uppercase tracking-widest mt-1">Preencha os dados do ativo encontrado</p>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar">
+            <div className="flex-1 p-8 space-y-6 pb-[40vh]">
                <div className="space-y-4">
                   <div>
                     <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
@@ -1433,7 +1433,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                </div>
             </div>
 
-            <div className="p-8 bg-slate-900 border-t border-slate-800 shrink-0">
+            <div className="p-8 bg-slate-900 border-t border-slate-800 shrink-0 sticky bottom-0">
                <button 
                  onClick={saveManualEntry}
                  className="w-full bg-orange-600 text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all border-b-4 border-orange-800"
@@ -1446,30 +1446,6 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         document.body
       )}
 
-      {/* Scanner Full-Screen (Apenas se não estiver no modo integrado ou se explicitamente aberto) */}
-      {isScannerOpen && searchMode !== 'SCANNER' && (
-        <Scanner 
-          mode={scannerMode}
-          onModeChange={onUpdateScannerMode}
-          onScan={handleScan}
-          onClose={() => setIsScannerOpen(false)}
-          onManualInput={() => {
-            setManualAsset({
-              ETIQUETA: "",
-              EMPRESA: selectedCompany || "",
-              STATUS: "ATIVO",
-              DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
-              AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
-              TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-              QT: 1,
-              DESCRICAODOATIVO: '',
-              SERIAL: '',
-              ENDERECO: selectedLocation || ""
-            });
-            setIsManualEntryOpen(true);
-          }}
-        />
-      )}
     </div>
   );
 };

@@ -16,7 +16,7 @@ import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 
-import { Building2, Maximize2, Minimize2, ShieldCheck } from 'lucide-react';
+import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory } from './services/persistenceService';
 
@@ -197,9 +197,6 @@ const App: React.FC = () => {
   });
 
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [buttonPos, setButtonPos] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragOffset = useRef({ x: 0, y: 0 });
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -215,25 +212,26 @@ const App: React.FC = () => {
   }, [inventory]);
 
   const toggleFullscreen = useCallback(() => {
-    if (isDragging) return;
     try {
       if (!document.fullscreenElement) {
         const docEl = document.documentElement as HTMLElement & {
-          webkitRequestFullScreen?: () => Promise<void>;
-          mozRequestFullScreen?: () => Promise<void>;
-          msRequestFullscreen?: () => Promise<void>;
+          webkitRequestFullScreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
+          mozRequestFullScreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
+          msRequestFullscreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
         };
         
+        const options = { navigationUI: 'hide' as const };
+
         if (docEl.requestFullscreen) {
-          docEl.requestFullscreen().catch((err: Error) => {
+          docEl.requestFullscreen(options).catch((err: Error) => {
             console.error(`Error attempting to enable full-screen mode: ${err.message}`);
           });
         } else if (docEl.webkitRequestFullScreen) {
-          docEl.webkitRequestFullScreen();
+          docEl.webkitRequestFullScreen(options);
         } else if (docEl.mozRequestFullScreen) {
-          docEl.mozRequestFullScreen();
+          docEl.mozRequestFullScreen(options);
         } else if (docEl.msRequestFullscreen) {
-          docEl.msRequestFullscreen();
+          docEl.msRequestFullscreen(options);
         }
       } else {
         const doc = document as Document & {
@@ -254,42 +252,28 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Fullscreen toggle failed", e);
     }
-  }, [isDragging]);
-
-  const handleStart = (clientX: number, clientY: number) => {
-    setIsDragging(false);
-    dragOffset.current = {
-      x: clientX - buttonPos.x,
-      y: clientY - buttonPos.y
-    };
-  };
-
-  const handleMove = (clientX: number, clientY: number) => {
-    const newX = clientX - dragOffset.current.x;
-    const newY = clientY - dragOffset.current.y;
-    
-    // Check if moved enough to be considered a drag
-    if (Math.abs(newX - buttonPos.x) > 5 || Math.abs(newY - buttonPos.y) > 5) {
-      setIsDragging(true);
-    }
-
-    // Keep within viewport boundaries
-    const boundedX = Math.max(20, Math.min(window.innerWidth - 60, newX));
-    const boundedY = Math.max(20, Math.min(window.innerHeight - 60, newY));
-    
-    setButtonPos({ x: boundedX, y: boundedY });
-  };
-
-  useEffect(() => {
-    const onResize = () => {
-      setButtonPos(prev => ({
-        x: Math.min(window.innerWidth - 80, prev.x),
-        y: Math.min(window.innerHeight - 80, prev.y)
-      }));
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // Auto-immersive mode on first interaction
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      if (!document.fullscreenElement) {
+        toggleFullscreen();
+      }
+      // Remove listeners after first interaction
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+
+    window.addEventListener('click', handleFirstInteraction);
+    window.addEventListener('touchstart', handleFirstInteraction);
+
+    return () => {
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+  }, [toggleFullscreen]);
+
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -721,7 +705,7 @@ const App: React.FC = () => {
           {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
           {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
           {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields, scannerMode: inventory.scannerMode, autoConfirmOnScan: inventory.autoConfirmOnScan, inventorySearchMode: inventory.inventorySearchMode }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} />}
+          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields, scannerMode: inventory.scannerMode, autoConfirmOnScan: inventory.autoConfirmOnScan, inventorySearchMode: inventory.inventorySearchMode }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />}
           {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
           {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} />}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} />}
@@ -734,27 +718,7 @@ const App: React.FC = () => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
         </div>
   
-        {/* Floating Immersive Mode Toggle (Draggable) */}
-        {user && (
-          <div className="fixed z-[999] flex flex-col items-center space-y-2" style={{ left: `${buttonPos.x}px`, top: `${buttonPos.y}px` }}>
-            {inventory.status !== DatabaseStatus.EMPTY && (
-              <div className="bg-emerald-500 text-white text-[11px] font-bold px-4 py-2 rounded-full shadow-lg animate-pulse uppercase tracking-tight border border-white/20">
-                Banco Protegido
-              </div>
-            )}
-            <button 
-              onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
-              onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
-              onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
-              onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
-              onClick={toggleFullscreen}
-              className="w-16 h-16 bg-slate-900/90 backdrop-blur-md text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform border border-white/10 touch-none select-none"
-              title={isFullscreen ? "Sair do Modo Imersivo" : "Entrar no Modo Imersivo"}
-            >
-              {isFullscreen ? <Minimize2 size={28} /> : <Maximize2 size={28} />}
-            </button>
-          </div>
-        )}
+        {/* Immersive Mode handled automatically on first interaction */}
       </div>
     </ErrorBoundary>
   );

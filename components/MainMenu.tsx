@@ -32,9 +32,11 @@ interface MainMenuProps {
   onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
   onUpdateAutoConfirm: (val: boolean) => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo, scannerMode, onUpdateScannerMode, autoConfirmOnScan, onUpdateAutoConfirm }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onClearDatabase, user, inventoryInfo, scannerMode, onUpdateScannerMode, autoConfirmOnScan, onUpdateAutoConfirm, isFullscreen, onToggleFullscreen }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
@@ -117,6 +119,22 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, onLogout, onExport, onC
             <p className="text-[9px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Busca de Ativo</p>
           </div>
           <ChevronRight size={16} className="text-slate-300 group-hover:text-emerald-400 transition-colors" />
+        </button>
+
+        <button
+          onClick={onToggleFullscreen}
+          className={`w-full flex items-center p-4 border rounded-2xl active:scale-[0.99] transition-all shadow-sm group ${isFullscreen ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
+        >
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center mr-4 transition-colors ${isFullscreen ? 'bg-white/10 text-white' : 'bg-slate-50 text-slate-600'}`}>
+            <ScanLine size={20} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className={`text-[14px] font-bold uppercase tracking-tight ${isFullscreen ? 'text-white' : 'text-slate-900'}`}>Modo Imersivo</h3>
+            <p className={`text-[9px] uppercase font-bold tracking-widest mt-0.5 ${isFullscreen ? 'text-white/50' : 'text-slate-400'}`}>{isFullscreen ? 'Ativado (Toque para Sair)' : 'Desativado (Toque para Ativar)'}</p>
+          </div>
+          <div className={`w-10 h-6 rounded-full relative transition-colors ${isFullscreen ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isFullscreen ? 'right-1' : 'left-1'}`} />
+          </div>
         </button>
 
         <button

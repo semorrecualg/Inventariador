@@ -26,7 +26,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   };
 
   return (
-    <div className="p-8 h-full flex flex-col justify-center animate-fadeIn bg-bg-main">
+    <div className="p-8 h-full flex flex-col justify-start pt-12 animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pb-20">
       <div className="mb-12 max-w-sm mx-auto w-full">
         <button onClick={onGoToLogin} className="mb-8 text-slate-400 flex items-center font-bold text-[10px] uppercase tracking-[0.2em] hover:text-sky-600 transition-colors">
           <ChevronLeft size={18} className="mr-2" /> Voltar ao Login
