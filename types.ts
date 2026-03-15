@@ -74,6 +74,7 @@ export interface Asset {
   ESTADO_CONSERVACAO?: ConservationState;
   _isNew?: boolean;
   _dataLeitura?: string;
+  _auditor?: string;
 }
 
 export enum AppScreen {

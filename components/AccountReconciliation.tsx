@@ -18,7 +18,8 @@ import {
   Plus,
   Hash,
   RefreshCw,
-  Calendar
+  Calendar,
+  User
 } from 'lucide-react';
 
 const formatMonthYearBR = (val: string | number | null | undefined): string => {
@@ -186,9 +187,17 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
 
         <div className="flex flex-wrap gap-1.5 pt-1">
           {asset._dataLeitura && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-slate-900 text-white border border-slate-700 flex items-center space-x-1">
-              <Calendar size={10} />
-              <span>{formatReadingTime(asset._dataLeitura)}</span>
+            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-slate-900 text-white border border-slate-700 flex items-center divide-x divide-slate-700">
+              <div className="flex items-center space-x-1 pr-2">
+                <Calendar size={10} className="text-blue-400" />
+                <span>{formatReadingTime(asset._dataLeitura)}</span>
+              </div>
+              {asset._auditor && (
+                <div className="flex items-center space-x-1 pl-2">
+                  <User size={10} className="text-emerald-400" />
+                  <span className="text-slate-300">{asset._auditor}</span>
+                </div>
+              )}
             </div>
           )}
           {isBaixado && (
@@ -276,9 +285,14 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       if (activeFilter === 'checked') return !!asset._conferido;
       return !asset._conferido;
     }).sort((a, b) => {
+      if (activeFilter === 'checked') {
+        const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
+        const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
+        if (dateA !== dateB) return dateB - dateA;
+      }
       const etqA = String(a.ETIQUETA || '').padStart(10, '0');
       const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-      return etqA.localeCompare(etqB, undefined, { numeric: true });
+      return etqB.localeCompare(etqA, undefined, { numeric: true });
     });
   }, [assets, selectedAccount, assetSearchTerm, activeFilter]);
 

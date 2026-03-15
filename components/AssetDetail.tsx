@@ -40,6 +40,19 @@ const formatCurrency = (val: string | number | null | undefined): string => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
 };
 
+const formatReadingTime = (isoStr?: string) => {
+  if (!isoStr) return '';
+  const date = new Date(isoStr);
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+};
+
 interface AssetDetailProps {
   assets: Asset[];
   onBack: () => void;
@@ -113,6 +126,14 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
         { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
         { key: 'CONTACONTABIL', label: 'CONTA CONTÁBIL', icon: Briefcase },
         { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar }
+      ]
+    },
+    {
+      title: 'DADOS DO INVENTÁRIO',
+      fields: [
+        { key: '_dataLeitura', label: 'DATA/HORA DO INVENTÁRIO', icon: Calendar },
+        { key: '_auditor', label: 'AUDITOR RESPONSÁVEL', icon: User },
+        { key: '_localMaster', label: 'LOCAL ONDE FOI ENCONTRADO', icon: MapPin }
       ]
     }
   ];
@@ -277,14 +298,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
               <div className="divide-y divide-slate-100">
                 {group.fields.map(({ key, label, icon: Icon }) => {
                   const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
+                  const isDateTime = key === '_dataLeitura';
                   const isCurrency = key === 'VLRAQUISIC';
                   const rawVal = workingAsset[key];
                   let displayVal = String(rawVal || '---');
                   if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
+                  if (isDateTime) displayVal = formatReadingTime(rawVal as string);
                   if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
                   const canEdit = editableFields.includes(key);
-                  if (!rawVal && key === 'DATABAIXA') return null;
+                  if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor')) return null;
 
                   return (
                     <div 

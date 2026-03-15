@@ -445,13 +445,18 @@ const App: React.FC = () => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
       
-      const targetLoc = inventoryLocation 
-        ? inventoryLocation.toUpperCase().trim() 
-        : (updatedAsset.ENDERECO || "SEM LOCAL").toString().toUpperCase().trim();
+      const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
+
+      const targetLoc = isReconciliationWorkflow
+        ? (updatedAsset.ENDERECO || "")
+        : (inventoryLocation 
+            ? inventoryLocation.toUpperCase().trim() 
+            : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
       
       const updates = { ...updatedAsset } as Asset;
       updates._conferido = true;
       updates._dataLeitura = new Date().toISOString();
+      updates._auditor = user?.username || user?.email || 'SISTEMA';
       
       const alteredFields = new Set<string>(updates._camposAlterados || []);
       
@@ -480,10 +485,10 @@ const App: React.FC = () => {
         }
       }
 
-      const targetLocNormalized = normalizeKey(targetLoc);
+      const targetLocNormalized = normalizeKey(String(targetLoc || ''));
       const existingLocNormalized = normalizeKey(String(existingAsset?.ENDERECO || ''));
 
-      if (existingLocNormalized !== targetLocNormalized) {
+      if (!isReconciliationWorkflow && existingLocNormalized !== targetLocNormalized) {
         alteredFields.add('ENDERECO');
         if (originalValues['ENDERECO'] === undefined && existingAsset) {
           originalValues['ENDERECO'] = existingAsset.ENDERECO;
@@ -504,7 +509,7 @@ const App: React.FC = () => {
       
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventoryLocation, determineTag, normalizeKey]);
+  }, [inventoryLocation, determineTag, normalizeKey, history]);
 
   const updateAsset = useCallback((updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -543,6 +548,7 @@ const App: React.FC = () => {
 
   const bulkUpdateAssets = useCallback((ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
+    const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
     setInventory(prev => ({
       ...prev,
@@ -551,12 +557,15 @@ const App: React.FC = () => {
           const updates = { ...a, ...(manualUpdates || {}) };
           
           // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
-          const targetLoc = inventoryLocation 
-            ? inventoryLocation.toUpperCase().trim() 
-            : (updates.ENDERECO || "SEM LOCAL").toString().toUpperCase().trim();
+          const targetLoc = isReconciliationWorkflow
+            ? (a.ENDERECO || "")
+            : (inventoryLocation 
+                ? inventoryLocation.toUpperCase().trim() 
+                : (updates.ENDERECO || "").toString().toUpperCase().trim());
 
           updates._conferido = true;
           updates._dataLeitura = new Date().toISOString();
+          updates._auditor = user?.username || user?.email || 'SISTEMA';
           
           // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
           const wasLabelingCandidate = 
@@ -581,7 +590,7 @@ const App: React.FC = () => {
             });
           }
           
-          if (normalizeKey(String(a.ENDERECO)) !== normalizeKey(targetLoc)) {
+          if (!isReconciliationWorkflow && normalizeKey(String(a.ENDERECO || '')) !== normalizeKey(String(targetLoc || ''))) {
             alteredFields.add('ENDERECO');
             if (originalValues['ENDERECO'] === undefined) {
               originalValues['ENDERECO'] = a.ENDERECO;
