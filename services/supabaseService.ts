@@ -51,17 +51,6 @@ export const signIn = async (email: string, password: string) => {
   return data;
 };
 
-export const signInWithMagicLink = async (email: string) => {
-  if (!isConfigured) throw new Error('Supabase não configurado.');
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: window.location.origin,
-    },
-  });
-  if (error) throw error;
-};
-
 export const signOut = async () => {
   if (!isConfigured) return;
   const { error } = await supabase.auth.signOut();
