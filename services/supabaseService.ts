@@ -15,7 +15,9 @@ export const supabase = createClient(
 // --- AUTH FUNCTIONS ---
 
 export const signUp = async (email: string, password: string, username: string) => {
-  if (!isConfigured) throw new Error('Supabase não configurado. Verifique as variáveis de ambiente.');
+  if (!isConfigured) {
+    throw new Error('Supabase não configurado. Por favor, configure as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas configurações do projeto.');
+  }
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -30,25 +32,48 @@ export const signUp = async (email: string, password: string, username: string) 
   
   // Create profile entry
   if (data.user) {
-    await supabase.from('profiles').insert({
+    const { error: profileError } = await supabase.from('profiles').insert({
       id: data.user.id,
       username,
       email,
       is_admin: email.toLowerCase() === 'semorr@gmail.com' // Default admin
     });
+    
+    if (profileError) {
+      console.error('Erro ao criar perfil:', profileError);
+      // Não lançamos erro aqui para não travar o cadastro se o Auth funcionou
+    }
   }
   
   return data;
 };
 
 export const signIn = async (email: string, password: string) => {
-  if (!isConfigured) throw new Error('Supabase não configurado. Verifique as variáveis de ambiente.');
+  if (!isConfigured) {
+    throw new Error('Supabase não configurado. Por favor, configure as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas configurações do projeto.');
+  }
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
-  if (error) throw error;
+  if (error) {
+    if (error.message === 'Invalid login credentials') {
+      throw new Error('E-mail ou senha incorretos. Se você acabou de se cadastrar, verifique se confirmou seu e-mail.');
+    }
+    throw error;
+  }
   return data;
+};
+
+export const signInWithMagicLink = async (email: string) => {
+  if (!isConfigured) throw new Error('Supabase não configurado.');
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.origin,
+    },
+  });
+  if (error) throw error;
 };
 
 export const signOut = async () => {

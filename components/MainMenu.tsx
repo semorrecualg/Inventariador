@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { AppScreen, User, ScannerMode, ScanFeedbackMode } from '../types';
+import Modal from './Modal';
 import { 
   Search, 
   BarChart3, 
@@ -22,7 +23,6 @@ import {
   Vibrate,
   Volume2,
   Battery,
-  RefreshCw,
   TrendingUp,
   ListChecks
 } from 'lucide-react';
@@ -42,7 +42,6 @@ interface MainMenuProps {
   onToggleFullscreen: () => void;
   scanFeedbackMode: ScanFeedbackMode;
   onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
-  isSyncing?: boolean;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -59,12 +58,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isFullscreen, 
   onToggleFullscreen,
   scanFeedbackMode,
-  onUpdateScanFeedbackMode,
-  isSyncing
+  onUpdateScanFeedbackMode
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
-  const isAdmin = user?.isAdmin || user?.email?.toLowerCase() === "semorr@gmail.com";
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   return (
@@ -97,12 +96,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             {hasData ? `${inventoryInfo.totalDatabase} Ativos` : 'Base Vazia'}
           </span>
-          {isSyncing && (
-            <div className="flex items-center space-x-1 ml-2">
-              <RefreshCw size={10} className="text-blue-500 animate-spin" />
-              <span className="text-[8px] font-bold text-blue-500 uppercase">Sincronizando...</span>
-            </div>
-          )}
         </div>
         <div className="text-[9px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 shadow-sm">v24.50 PRO</div>
       </div>
@@ -411,11 +404,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button onClick={() => { 
-                if (confirm("ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário. Deseja continuar?")) {
-                  setIsDataMenuOpen(false); 
-                  setIsAdminMenuOpen(false);
-                  onClearDatabase(); 
-                }
+                setIsClearConfirmOpen(true);
               }} className="w-full flex items-center p-6 bg-red-500/10 border border-red-500/20 rounded-3xl active:scale-[0.98] transition-all text-left">
                 <div className="w-12 h-12 bg-red-500 text-white rounded-xl flex items-center justify-center mr-5 shadow-lg shadow-red-500/20"><Trash2 size={24} /></div>
                 <div className="flex-1">
@@ -427,6 +416,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={isClearConfirmOpen}
+        onClose={() => setIsClearConfirmOpen(false)}
+        onConfirm={() => {
+          setIsDataMenuOpen(false); 
+          setIsAdminMenuOpen(false);
+          onClearDatabase();
+        }}
+        title="Limpar Banco de Dados"
+        message="ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário. Deseja continuar?"
+        type="confirm"
+        confirmText="Sim, Apagar Tudo"
+        cancelText="Cancelar"
+      />
     </div>
   );
 };

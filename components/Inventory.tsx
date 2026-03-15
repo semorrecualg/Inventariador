@@ -84,7 +84,7 @@ interface AssetCardProps {
   isBatchMode: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
-  confirmButtonRef?: React.RefObject<HTMLButtonElement>;
+  confirmButtonRef?: React.Ref<HTMLButtonElement>;
 }
 
 const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {

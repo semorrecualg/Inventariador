@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from './types';
+import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
 import MainMenu from './components/MainMenu';
@@ -20,9 +21,9 @@ import AccountReconciliation from './components/AccountReconciliation';
 
 import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import localforage from 'localforage';
 import { saveInventory, loadInventory, clearInventory } from './services/persistenceService';
-import { fetchAssetsFromCloud, fetchConfigFromCloud, supabase, getUserProfile, signOut } from './services/supabaseService';
+
+const ADMIN_EMAIL = "semorr@gmail.com";
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -75,26 +76,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 const App: React.FC = () => {
-  console.log("App component executing...");
-  
-  useEffect(() => {
-    // Remove o loader inicial quando o componente monta
-    const loader = document.getElementById('app-loader');
-    if (loader) {
-      loader.style.opacity = '0';
-      setTimeout(() => loader.remove(), 500);
-    }
-    (window as any).appStarted = true;
-
-    // Listener para erros globais que podem travar o app
-    const handleError = (e: ErrorEvent) => {
-      console.error("Global Error Caught:", e.error);
-    };
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_current_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
 
   const [history, setHistory] = useState<AppScreen[]>(() => {
     try {
@@ -125,50 +112,44 @@ const App: React.FC = () => {
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
 
-  // Load inventory from IndexedDB and Supabase on mount
+  // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
       try {
-        // 1. Carrega do IndexedDB (Rápido)
         const saved = await loadInventory();
         if (saved && saved.assets && saved.assets.length > 0) {
           setInventory(prev => ({
             ...prev,
-            ...saved
+            ...saved,
+            editableFields: saved.editableFields || prev.editableFields,
+            qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
+            autoConfirmOnScan: saved.autoConfirmOnScan ?? prev.autoConfirmOnScan,
+            scanFeedbackMode: saved.scanFeedbackMode || prev.scanFeedbackMode,
+            inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode
           }));
-        }
-
-        // 2. Tenta buscar da Nuvem (Supabase) para atualizar
-        setIsSyncing(true);
-        const cloudAssets = await fetchAssetsFromCloud();
-        const cloudConfig = await fetchConfigFromCloud();
-
-        if (cloudAssets.length > 0) {
-          setInventory(prev => {
-            const newState = {
-              ...prev,
-              ...cloudConfig,
-              assets: cloudAssets,
-              lastUpdated: new Date().toISOString(),
-              status: DatabaseStatus.LOADED
-            };
-            // Salva o que veio da nuvem localmente para uso offline futuro
-            localforage.setItem('inventory_data_v24', newState);
-            return newState;
-          });
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
+        } else {
+          // Fallback to localStorage for migration
+          const legacy = localStorage.getItem('inventory_data');
+          if (legacy) {
+            const parsed = JSON.parse(legacy);
+            if (parsed && parsed.assets && parsed.assets.length > 0) {
+              setInventory(prev => ({ ...prev, ...parsed }));
+              await saveInventory(parsed);
+              setShowRecoveryToast(true);
+              setTimeout(() => setShowRecoveryToast(false), 5000);
+            }
+          }
         }
       } catch (e) { 
-        console.error("Data load/sync failed", e); 
+        console.error("Data load failed", e); 
       } finally {
         setIsDataLoaded(true);
-        setIsSyncing(false);
       }
     };
     init();
@@ -203,32 +184,16 @@ const App: React.FC = () => {
     }
   }, [isDataLoaded, user, history, selectedAssets.length, selectedCompany]);
 
-  // Supabase Auth Listener
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const profile = await getUserProfile(session.user.id);
-        if (profile) {
-          // Garante que o e-mail venha da sessão se não estiver no perfil
-          setUser({
-            ...profile,
-            email: profile.email || session.user.email || ''
-          });
-        } else {
-          // Fallback se o perfil falhar mas houver sessão
-          setUser({
-            username: session.user.user_metadata?.username || 'Operador',
-            email: session.user.email || '',
-            isAdmin: session.user.email?.toLowerCase() === 'semorr@gmail.com'
-          });
-        }
-      } else {
-        setUser(null);
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_users');
+      const userList: User[] = saved ? JSON.parse(saved) : [];
+      if (!userList.find(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
+        userList.push({ username: "ADMIN GBR", email: ADMIN_EMAIL, password: "admin", isAdmin: true, mustChangePassword: false });
       }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+      return userList;
+    } catch { return []; }
+  });
 
   const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
     return localStorage.getItem('app_inventory_location') || null;
@@ -239,6 +204,12 @@ const App: React.FC = () => {
   });
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Estados para Modal de Duplicidade
+  const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
+
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -443,13 +414,15 @@ const App: React.FC = () => {
           await saveInventory(inventory);
         }
         localStorage.setItem('app_screen_history', JSON.stringify(history));
+        localStorage.setItem('app_current_user', JSON.stringify(user));
+        localStorage.setItem('app_users', JSON.stringify(users));
         localStorage.setItem('app_selected_company', selectedCompany || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
       } catch { console.warn("Storage cap reached"); }
     }, 1500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [inventory, history, user, selectedCompany, inventoryLocation, isInventorying, isDataLoaded]);
+  }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded]);
 
   const pushScreen = (s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
@@ -467,33 +440,11 @@ const App: React.FC = () => {
     });
   };
 
-  const updateAsset = useCallback((updatedAsset: Asset) => {
-    // ALERTA DE DUPLICIDADE DE ETIQUETA
-    const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
-    if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
-      const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
-      const oldEtiqueta = String(existing?.ETIQUETA || '').trim().toUpperCase();
-
-      // Só valida duplicidade se a etiqueta foi alterada ou é um novo item (manual)
-      if (newEtiqueta !== oldEtiqueta) {
-        const duplicate = inventory.assets.find(a => 
-          String(a.id) !== String(updatedAsset.id) && 
-          String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
-        );
-        if (duplicate) {
-          if (!confirm(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`)) {
-            return;
-          }
-        }
-      }
-    }
-
+  const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
     setInventory(prev => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
       
-      // REGRA DE OURO: Se o auditor está em um local específico (Inventory Mode), forçamos esse local.
-      // Se ele está em modo livre (Labeling/Consultation), respeitamos o endereço que está no objeto (que pode ter sido editado).
       const targetLoc = inventoryLocation 
         ? inventoryLocation.toUpperCase().trim() 
         : (updatedAsset.ENDERECO || "SEM LOCAL").toString().toUpperCase().trim();
@@ -508,7 +459,6 @@ const App: React.FC = () => {
       const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
 
       if (existingAsset) {
-        // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
         const wasLabelingCandidate = 
           String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
           String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
@@ -525,7 +475,6 @@ const App: React.FC = () => {
           }
         });
 
-        // Se era candidato a etiquetagem e foi conferido/alterado, marcamos como plaquetado
         if (wasLabelingCandidate) {
           updates._plaquetado = true;
         }
@@ -543,9 +492,7 @@ const App: React.FC = () => {
 
       updates._valoresOriginais = originalValues;
       updates._localMaster = targetLoc;
-      // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original (Regra Sênior v24.5)
       
-      // Adicionamos o status DE/PARA para relatórios
       const hasChanges = alteredFields.size > 0;
       updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
       
@@ -557,7 +504,31 @@ const App: React.FC = () => {
       
       return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
     });
-  }, [inventory.assets, inventoryLocation, determineTag, normalizeKey]);
+  }, [inventoryLocation, determineTag, normalizeKey]);
+
+  const updateAsset = useCallback((updatedAsset: Asset) => {
+    // ALERTA DE DUPLICIDADE DE ETIQUETA
+    const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
+    if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
+      const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
+      const oldEtiqueta = String(existing?.ETIQUETA || '').trim().toUpperCase();
+
+      if (newEtiqueta !== oldEtiqueta) {
+        const duplicate = inventory.assets.find(a => 
+          String(a.id) !== String(updatedAsset.id) && 
+          String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
+        );
+        if (duplicate) {
+          setPendingAssetUpdate(updatedAsset);
+          setDuplicateModalMessage(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`);
+          setIsDuplicateModalOpen(true);
+          return;
+        }
+      }
+    }
+
+    commitAssetUpdate(updatedAsset);
+  }, [inventory.assets, commitAssetUpdate]);
 
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
@@ -718,8 +689,6 @@ const App: React.FC = () => {
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
-  
-  console.log("App rendering screen:", screen);
 
   return (
     <ErrorBoundary>
@@ -746,10 +715,10 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
-          {screen === AppScreen.LOGIN && <Login onLogin={() => { /* Handled by auth listener */ }} />}
-          {screen === AppScreen.REGISTER && <Register onRegister={() => { /* Handled by auth listener */ }} onGoToLogin={popScreen} />}
-          {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={() => { /* Handled by auth listener */ }} />}
-          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={async () => { await signOut(); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields, scannerMode: inventory.scannerMode, autoConfirmOnScan: inventory.autoConfirmOnScan, scanFeedbackMode: inventory.scanFeedbackMode, inventorySearchMode: inventory.inventorySearchMode }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))} isSyncing={isSyncing} />}
+          {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
+          {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
+          {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
+          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields, scannerMode: inventory.scannerMode, autoConfirmOnScan: inventory.autoConfirmOnScan, scanFeedbackMode: inventory.scanFeedbackMode, inventorySearchMode: inventory.inventorySearchMode }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))} />}
           {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
           {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} />}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
@@ -757,7 +726,7 @@ const App: React.FC = () => {
           {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
           {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
           {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
-          {screen === AppScreen.USER_MANAGEMENT && <UserManagement onBack={popScreen} />}
+          {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
           {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={inventory.assets} onBack={popScreen} />}
@@ -766,6 +735,26 @@ const App: React.FC = () => {
   
         {/* Immersive Mode handled automatically on first interaction */}
       </div>
+
+      <Modal
+        isOpen={isDuplicateModalOpen}
+        onClose={() => {
+          setIsDuplicateModalOpen(false);
+          setPendingAssetUpdate(null);
+        }}
+        onConfirm={() => {
+          if (pendingAssetUpdate) {
+            commitAssetUpdate(pendingAssetUpdate);
+          }
+          setIsDuplicateModalOpen(false);
+          setPendingAssetUpdate(null);
+        }}
+        title="Duplicidade Detectada"
+        message={duplicateModalMessage}
+        type="confirm"
+        confirmText="Continuar"
+        cancelText="Cancelar"
+      />
     </ErrorBoundary>
   );
 };

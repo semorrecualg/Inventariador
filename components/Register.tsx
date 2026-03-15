@@ -15,6 +15,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [isSuccess, setIsSuccess] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -22,7 +24,10 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
 
     try {
       await signUp(email.trim(), password, username.toUpperCase());
-      onRegister();
+      setIsSuccess(true);
+      setTimeout(() => {
+        onRegister();
+      }, 5000);
     } catch (err: unknown) {
       const error = err as Error;
       setError(error.message || "Erro ao criar acesso.");
@@ -30,6 +35,26 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
       setIsLoading(false);
     }
   };
+
+  if (isSuccess) {
+    return (
+      <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
+        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-emerald-100">
+          <Loader2 size={32} className="animate-spin" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Acesso Criado!</h2>
+        <p className="text-slate-500 mt-4 text-xs font-medium leading-relaxed max-w-xs">
+          Seu acesso foi registrado com sucesso. <br/><br/>
+          <span className="text-amber-600 font-bold uppercase tracking-widest">Importante:</span> <br/>
+          Verifique seu e-mail (<span className="text-slate-900 font-bold">{email}</span>) para confirmar o cadastro. 
+          Não esqueça de olhar a pasta de <span className="text-amber-600 font-bold">SPAM</span>.
+        </p>
+        <p className="mt-8 text-[10px] text-slate-400 uppercase tracking-widest animate-pulse">
+          Redirecionando para o login...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 h-full flex flex-col justify-start pt-12 animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pb-20">
