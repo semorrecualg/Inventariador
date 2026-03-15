@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
+import BackButton from './BackButton';
 import { 
-  ArrowLeft, 
   Search, 
   Filter, 
   CheckCircle2, 
@@ -328,13 +328,9 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
         {/* Header */}
         <div className="bg-white border-b border-slate-200 shadow-sm z-20">
           <div className="px-4 pt-8 pb-4">
-            <button 
-              onClick={() => setSelectedAccount(null)}
-              className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-widest mb-4 active:scale-95 transition-all"
-            >
-              <ArrowLeft size={18} />
-              <span>Voltar às Contas</span>
-            </button>
+            <div className="mb-4">
+              <BackButton onClick={() => setSelectedAccount(null)} label="Voltar às Contas" subLabel="Conciliação por Conta" />
+            </div>
             
             <div className="flex items-center justify-between">
               <div className="flex-1">
@@ -435,13 +431,9 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     <div className="flex flex-col h-full bg-slate-50 animate-fadeIn">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 pt-10 pb-6 shadow-sm">
-        <button 
-          onClick={onBack}
-          className="flex items-center space-x-2 text-slate-400 font-bold text-xs uppercase tracking-widest mb-6 active:scale-95 transition-all"
-        >
-          <ArrowLeft size={18} />
-          <span>Voltar ao Menu</span>
-        </button>
+        <div className="mb-6">
+          <BackButton onClick={onBack} label="Voltar ao Menu" subLabel="Conciliação por Conta" />
+        </div>
         
         <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
           Conciliação por Conta

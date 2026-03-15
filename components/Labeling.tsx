@@ -2,9 +2,9 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Asset, TagInventario, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
+import BackButton from './BackButton';
 
 import { 
-  ArrowLeft, 
   Check,
   Filter,
   Trash2,
@@ -191,9 +191,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200 shadow-sm relative z-30">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={onBack} className="flex items-center space-x-3 text-slate-400 font-bold text-[12px] uppercase tracking-widest active:text-amber-600 transition-colors">
-            <ArrowLeft size={20} /> <span>Menu Principal</span>
-          </button>
+          <BackButton onClick={onBack} label="Menu Principal" subLabel="Etiquetagem de Ativos" />
           <div className="flex space-x-3">
             {isBatchMode && (
               <button 

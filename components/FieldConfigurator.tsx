@@ -2,16 +2,13 @@
 import React, { useState, useMemo } from 'react';
 import { Asset } from '../types';
 import { 
-  ArrowLeft, 
   SlidersHorizontal, 
   Lock, 
   Unlock, 
-
   Save, 
-
   CheckCircle2,
-
 } from 'lucide-react';
+import BackButton from './BackButton';
 
 interface FieldConfiguratorProps {
   assets: Asset[];
@@ -59,9 +56,7 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-8 bg-white border-b border-slate-200 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={onBack} className="flex items-center space-x-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest active:text-sky-600 transition-colors">
-            <ArrowLeft size={16} /> <span>Voltar ao Menu</span>
-          </button>
+          <BackButton onClick={onBack} label="Retornar ao Menu" subLabel="Autoridade de Escrita" />
           <div className="bg-sky-50 px-4 py-2 rounded-full border border-sky-100 text-sky-600 shadow-sm">
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Protocolo v24.40</span>
           </div>

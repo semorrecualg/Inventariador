@@ -203,7 +203,7 @@ const App: React.FC = () => {
     return localStorage.getItem('app_is_inventorying') === 'true';
   });
 
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(true);
   
   // Estados para Modal de Duplicidade
   const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
@@ -703,17 +703,29 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
         {showCompanyHeader && (
-          <div className="bg-white px-3 py-1.5 flex items-center space-x-3 border-b border-slate-200 shadow-sm z-[200]">
-             <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
-               <Building2 size={16} />
-             </div>
-             <div className="flex-1 min-w-0">
-               <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Empresa em Auditoria</p>
-               <h2 className="text-[11px] font-bold text-slate-900 uppercase truncate tracking-tight">{selectedCompany}</h2>
-             </div>
-             <div className="px-1.5 py-0.5 rounded-md bg-blue-50 border border-blue-100 shadow-sm">
-               <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
-             </div>
+          <div className="bg-white border-b border-slate-200 shadow-sm z-[200]">
+            <div className="px-3 py-1 flex items-center justify-between space-x-3">
+               <div className="flex items-center space-x-2">
+                 <div className="w-6 h-6 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
+                   <Building2 size={12} />
+                 </div>
+                 <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria</p>
+               </div>
+               <div className="flex items-center space-x-1.5">
+                 <div className="px-1.5 py-0.5 rounded-lg bg-emerald-50 border border-emerald-100 shadow-sm flex items-center space-x-1" title="Banco de Dados Protegido (IndexedDB)">
+                   <ShieldCheck size={10} className="text-emerald-600" />
+                   <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest">SAFE</span>
+                 </div>
+                 <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
+                   <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
+                 </div>
+               </div>
+            </div>
+            <div className="px-3 pb-1.5 pt-0.5 border-t border-slate-50">
+               <h2 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-tight">
+                 {selectedCompany}
+               </h2>
+            </div>
           </div>
         )}
         

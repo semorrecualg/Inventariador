@@ -1,6 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Asset } from '../types';
+import BackButton from './BackButton';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -9,7 +10,6 @@ import {
   CheckCircle2, 
   Clock, 
   BarChart3,
-  ArrowLeft
 } from 'lucide-react';
 
 interface GlobalPerformanceProps {
@@ -81,10 +81,7 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
       {/* Header */}
       <div className="bg-white px-6 py-6 border-b border-slate-200 shadow-sm shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="p-2 -ml-2 text-slate-400 hover:text-slate-600 active:scale-90 transition-all">
-            <ArrowLeft size={24} />
-          </button>
-          <h1 className="text-lg font-black text-slate-900 uppercase tracking-tighter italic">Análise de Rendimento</h1>
+          <BackButton onClick={onBack} label="Retornar" subLabel="Análise de Rendimento" />
           <div className="w-10" />
         </div>
 

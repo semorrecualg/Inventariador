@@ -4,9 +4,10 @@ import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
+import BackButton from './BackButton';
 
 import { 
-  ArrowLeft, 
+  ArrowLeft,
   MapPin, 
   Check,
   Zap, 
@@ -16,7 +17,6 @@ import {
   AlertOctagon,
   Square,
   CheckSquare,
-  ListChecks,
   Plus,
   Search,
   X,
@@ -511,10 +511,15 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
           const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
           if (dateA !== dateB) return dateB - dateA;
+          
+          const etqA = String(a.ETIQUETA || '').padStart(10, '0');
+          const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+          return etqB.localeCompare(etqA, undefined, { numeric: true });
         }
+        
         const etqA = String(a.ETIQUETA || '').padStart(10, '0');
         const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-        return etqB.localeCompare(etqA, undefined, { numeric: true });
+        return etqA.localeCompare(etqB, undefined, { numeric: true });
       });
     }
 
@@ -556,11 +561,15 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
         if (dateA !== dateB) return dateB - dateA;
+        
+        const etqA = String(a.ETIQUETA || '').padStart(10, '0');
+        const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+        return etqB.localeCompare(etqA, undefined, { numeric: true });
       }
 
       const etqA = String(a.ETIQUETA || '').padStart(10, '0');
       const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-      return etqB.localeCompare(etqA, undefined, { numeric: true });
+      return etqA.localeCompare(etqB, undefined, { numeric: true });
     });
   }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany, normalizeKey]);
 
@@ -925,9 +934,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         <>
           <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200">
             <div className="flex items-center justify-between mb-6">
-              <button onClick={onBack} className="flex items-center space-x-3 text-slate-400 font-bold text-[12px] uppercase tracking-[0.2em] active:scale-95 transition-all">
-                <ArrowLeft size={20} /> <span>Voltar ao Menu</span>
-              </button>
+              <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Analytics Precision V24" />
               <button 
                 onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
                 className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}
@@ -992,36 +999,41 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-3 pt-2 pb-2 bg-white border-b border-slate-200 shadow-sm z-20">
-            <div className="flex flex-col space-y-2 mb-1">
+          <div className="px-3 py-1.5 bg-white border-b border-slate-200 shadow-sm z-20">
+            <div className="flex flex-col space-y-1.5 mb-1">
               {/* Row 1: Action Buttons & SAFE Status */}
-              <div className="flex items-center justify-end space-x-2">
-                <div className="flex items-center space-x-2 bg-emerald-50 border border-emerald-100 px-4 py-2 rounded-lg shadow-sm" title="Banco de Dados Protegido (IndexedDB)">
-                  <ShieldCheck size={18} className="text-emerald-600" />
-                  <span className="text-[11px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
-                </div>
+              <div className="flex items-center justify-between space-x-2">
+                <button 
+                  onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
+                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:text-slate-900 active:scale-95 transition-all shadow-sm"
+                  title="Voltar para Seleção de Local"
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                
                 <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2">
                   {isBatchMode && (
                     <button 
                       onClick={toggleSelectAll} 
-                      className={`flex items-center space-x-2 px-3 py-2 rounded-xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                      className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
                     >
-                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
-                      <span className="text-[11px] font-bold uppercase tracking-widest">Todos</span>
+                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
                     </button>
                   )}
                   
                   {activeFilter === 'pending' && !isBatchMode && (
                     <button 
                       onClick={onOpenConsultation}
-                      className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shadow-sm active:scale-95 transition-all"
+                      className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shadow-sm active:scale-95 transition-all"
                       title="Consultar Item na Base"
                     >
-                      <Database size={22} strokeWidth={2.5} />
+                      <Database size={20} strokeWidth={2.5} />
                     </button>
                   )}
                   
-                  <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
+                  <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
                     <button 
                       onClick={() => {
                         if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
@@ -1033,9 +1045,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                           setShowNumericKeypad(true);
                         }
                       }} 
-                      className={`p-3 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
                     >
-                      <Keyboard size={22} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
+                      <Keyboard size={20} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
                     </button>
                     <button 
                       onClick={() => {
@@ -1043,29 +1055,23 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                         setIsSearchVisible(false);
                         setIsScannerOpen(true);
                       }} 
-                      className={`p-3 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
                     >
-                      <Camera size={22} strokeWidth={searchMode === InventorySearchMode.SCANNER ? 3 : 2} />
+                      <Camera size={20} strokeWidth={searchMode === InventorySearchMode.SCANNER ? 3 : 2} />
                     </button>
                   </div>
 
-                  <button 
-                    onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} 
-                    className={`p-3 rounded-xl border transition-all ${isBatchMode ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 text-slate-400'}`}
-                  >
-                    <ListChecks size={20} />
-                  </button>
                 </div>
               </div>
+            </div>
 
-              {/* Row 2: Location Field (Limited width on mobile) */}
-              <button 
-                onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }} 
-                className="w-full max-w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-3 text-slate-600 overflow-hidden active:bg-slate-100 transition-colors shadow-sm"
-              >
-                <MapPin size={18} className="text-blue-500 shrink-0" />
-                <span className="text-[12px] font-bold uppercase truncate italic tracking-tight flex-1 text-left">{selectedLocation}</span>
-              </button>
+            {/* Row 2: Location Field (Full width) */}
+              <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-3 text-slate-600 shadow-sm">
+                <MapPin size={16} className="text-blue-500 shrink-0" />
+                <span className="text-[11px] font-normal uppercase italic tracking-tight flex-1 text-left leading-tight">
+                  {selectedLocation}
+                </span>
+              </div>
             </div>
 
             {isSearchVisible && (

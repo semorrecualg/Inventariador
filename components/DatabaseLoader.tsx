@@ -3,7 +3,6 @@ import React, { useState, useRef } from 'react';
 import { 
   Loader2, 
   ArrowRight, 
-  ArrowLeft, 
   FileSpreadsheet, 
   Activity,
   CheckSquare,
@@ -11,6 +10,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
+import BackButton from './BackButton';
 
 interface LoadSummary {
   rows: number;
@@ -263,11 +263,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn w-full overflow-hidden">
       <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
         <div className="flex items-center space-x-4">
-          <button onClick={onBack} className="p-2.5 bg-slate-50 rounded-xl text-slate-400 active:scale-90 border border-slate-100 transition-all"><ArrowLeft size={18} /></button>
-          <div>
-            <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest leading-none">Protocolo v24.50</h2>
-            <p className="text-blue-600 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">Base de Dados</p>
-          </div>
+          <BackButton onClick={onBack} label="Protocolo v24.50" subLabel="Base de Dados" />
         </div>
         <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
       </div>

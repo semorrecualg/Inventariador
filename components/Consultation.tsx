@@ -2,10 +2,10 @@
 import React, { useState, useMemo } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
+import BackButton from './BackButton';
 import { 
   Search, 
   ChevronRight, 
-  ArrowLeft, 
   Check,
   Barcode,
   AlertCircle,
@@ -284,9 +284,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       {/* HEADER */}
       <div className="bg-white px-5 pt-8 pb-4 border-b border-slate-200 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900">
-            <ArrowLeft size={22} />
-          </button>
+          <BackButton onClick={onBack} label="Retornar" subLabel="Consulta de Ativos" />
           <div className="flex items-center space-x-3">
             <button 
               onClick={clearFilters}

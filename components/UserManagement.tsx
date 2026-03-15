@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import Modal from './Modal';
+import BackButton from './BackButton';
 import { 
-  ArrowLeft, 
   Plus, 
   Trash2, 
   X, 
@@ -154,13 +154,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       {/* Header */}
       <div className="p-6 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center space-x-4">
-          <button onClick={onBack} className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 active:scale-90 transition-all shadow-sm">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Gestão de Usuários</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Clique duplo para editar dados</p>
-          </div>
+          <BackButton onClick={onBack} label="Gestão de Usuários" subLabel="Controle de Acessos" />
         </div>
         <button 
           onClick={() => setIsAddModalOpen(true)}

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
-import { Building2, Search, ArrowLeft, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building } from 'lucide-react';
+import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building } from 'lucide-react';
+import BackButton from './BackButton';
 
 interface CompanySelectorProps {
   companies: string[];
@@ -38,13 +39,9 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn">
       {/* Header Fixo */}
       <div className="p-5 pt-10 bg-white border-b border-slate-200 shadow-sm">
-        <button 
-          onClick={onBack}
-          className="mb-6 flex items-center space-x-3 text-slate-400 text-[12px] font-bold uppercase tracking-widest hover:text-blue-600 transition-colors active:scale-95"
-        >
-          <ArrowLeft size={20} />
-          <span>Retornar ao Painel</span>
-        </button>
+        <div className="mb-6">
+          <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Seleção de Unidade" />
+        </div>
         
         <div className="flex items-center justify-between mb-6">
           <div>
