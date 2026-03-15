@@ -115,6 +115,7 @@ const App: React.FC = () => {
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
+  const [startWithDataMenu, setStartWithDataMenu] = useState(false);
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
@@ -322,7 +323,10 @@ const App: React.FC = () => {
       const assetCompKey = normalizeKey(a.EMPRESA || '');
       if (currentCompKey && assetCompKey !== currentCompKey) return;
 
-      const loc = String(a.ENDERECO || 'SEM LOCAL').trim().toUpperCase();
+      // REGRA SÊNIOR v24.5: Se o item já foi conferido, usamos o _localMaster (onde foi encontrado)
+      // Caso contrário, usamos o ENDERECO original.
+      const effectiveLoc = (a._conferido && a._localMaster) ? a._localMaster : (a.ENDERECO || 'SEM LOCAL');
+      const loc = String(effectiveLoc).trim().toUpperCase();
       if (loc) locationsSet.add(loc);
 
       const statusUpper = String(a.STATUS || '').toUpperCase();
@@ -736,21 +740,122 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
-          {screen === AppScreen.LOGIN && <Login users={users} onLogin={(u) => { setUser(u); if (u.mustChangePassword) { pushScreen(AppScreen.CHANGE_PASSWORD); } else { pushScreen(AppScreen.MAIN_MENU); } }} />}
-          {screen === AppScreen.REGISTER && <Register onRegister={(u) => { setUsers(p => [...p, u]); setUser(u); pushScreen(AppScreen.MAIN_MENU); }} onGoToLogin={popScreen} />}
-          {screen === AppScreen.CHANGE_PASSWORD && <ChangePassword onPasswordChanged={(p) => { const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); setUsers(upd); pushScreen(AppScreen.MAIN_MENU); }} />}
-          {screen === AppScreen.MAIN_MENU && <MainMenu onNavigate={pushScreen} onLogout={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} onExport={handleExport} onClearDatabase={async () => { await clearInventory(); setInventory({ assets: [], companies: [], lastUpdated: null, status: DatabaseStatus.EMPTY, editableFields: inventory.editableFields, qrCodeFields: inventory.qrCodeFields, scannerMode: inventory.scannerMode, autoConfirmOnScan: inventory.autoConfirmOnScan, scanFeedbackMode: inventory.scanFeedbackMode, inventorySearchMode: inventory.inventorySearchMode }); }} user={user} inventoryInfo={{ count: filteredAssetsByCompany.length, totalDatabase: inventory.assets.length, date: inventory.lastUpdated }} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))} />}
-          {screen === AppScreen.LOAD_DATABASE && <DatabaseLoader onBack={popScreen} onDataLoaded={(a, c) => { setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); pushScreen(AppScreen.MAIN_MENU); }} />}
+          {screen === AppScreen.LOGIN && (
+            <Login 
+              users={users} 
+              onLogin={(u) => { 
+                setUser(u); 
+                const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                const isEmpty = inventory.assets.length === 0;
+
+                if (u.mustChangePassword) { 
+                  pushScreen(AppScreen.CHANGE_PASSWORD); 
+                } else if (isEmpty && isAdmin) {
+                  setStartWithDataMenu(true);
+                  pushScreen(AppScreen.MAIN_MENU);
+                } else { 
+                  pushScreen(AppScreen.COMPANY_SELECTION); 
+                } 
+              }} 
+            />
+          )}
+          {screen === AppScreen.REGISTER && (
+            <Register 
+              onRegister={(u) => { 
+                setUsers(p => [...p, u]); 
+                setUser(u); 
+                const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                const isEmpty = inventory.assets.length === 0;
+
+                if (isEmpty && isAdmin) {
+                  setStartWithDataMenu(true);
+                  pushScreen(AppScreen.MAIN_MENU);
+                } else {
+                  pushScreen(AppScreen.COMPANY_SELECTION); 
+                }
+              }} 
+              onGoToLogin={popScreen} 
+            />
+          )}
+          {screen === AppScreen.CHANGE_PASSWORD && (
+            <ChangePassword 
+              onPasswordChanged={(p) => { 
+                const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); 
+                setUsers(upd); 
+                const isAdmin = user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                const isEmpty = inventory.assets.length === 0;
+
+                if (isEmpty && isAdmin) {
+                  setStartWithDataMenu(true);
+                  pushScreen(AppScreen.MAIN_MENU);
+                } else {
+                  pushScreen(AppScreen.COMPANY_SELECTION); 
+                }
+              }} 
+            />
+          )}
+          {screen === AppScreen.MAIN_MENU && (
+            <MainMenu 
+              onNavigate={pushScreen} 
+              onLogout={() => { 
+                setUser(null); 
+                setSelectedCompany(null); 
+                setStartWithDataMenu(false);
+                pushScreen(AppScreen.LOGIN); 
+              }} 
+              onExport={handleExport} 
+              onClearDatabase={async () => { 
+                await clearInventory(); 
+                setInventory({ 
+                  assets: [], 
+                  companies: [], 
+                  lastUpdated: null, 
+                  status: DatabaseStatus.EMPTY, 
+                  editableFields: inventory.editableFields, 
+                  qrCodeFields: inventory.qrCodeFields, 
+                  scannerMode: inventory.scannerMode, 
+                  autoConfirmOnScan: inventory.autoConfirmOnScan, 
+                  scanFeedbackMode: inventory.scanFeedbackMode, 
+                  inventorySearchMode: inventory.inventorySearchMode 
+                }); 
+              }} 
+              user={user} 
+              inventoryInfo={{ 
+                count: filteredAssetsByCompany.length, 
+                totalDatabase: inventory.assets.length, 
+                date: inventory.lastUpdated 
+              }} 
+              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+              autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+              onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} 
+              isFullscreen={isFullscreen} 
+              onToggleFullscreen={toggleFullscreen} 
+              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+              onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))}
+              initialDataMenuOpen={startWithDataMenu}
+            />
+          )}
+          {screen === AppScreen.LOAD_DATABASE && (
+            <DatabaseLoader 
+              onBack={popScreen} 
+              onDataLoaded={(a, c) => { 
+                setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); 
+                setStartWithDataMenu(false);
+                pushScreen(AppScreen.COMPANY_SELECTION); 
+              }} 
+            />
+          )}
           {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} />}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
           {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={() => { setIsConsultationFromInventory(false); popScreen(); }} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} isReturnMode={isConsultationFromInventory} onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }} />}
           {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
-          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.INVENTORY); }} onBack={popScreen} />}
+          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
           {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
           {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={inventory.assets} onBack={popScreen} />}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
         </div>
   

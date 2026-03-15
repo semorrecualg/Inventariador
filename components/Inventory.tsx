@@ -1151,6 +1151,38 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
             )}
 
+            {/* BARRA DE RESUMO DE AUDITORIA NO LOCAL */}
+            {activeFilter === 'checked' && filteredAssets.length > 0 && (
+              <div className="px-4 py-2 animate-fadeIn">
+                <div className="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                      <MapPin size={16} />
+                    </div>
+                    <div>
+                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Auditoria no Local</p>
+                      <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">{selectedLocation}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-4 pr-2">
+                    <div className="text-right">
+                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Adotados</p>
+                      <p className="text-sm font-black text-indigo-600 leading-none mt-0.5">
+                        {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') !== normalizeKey(selectedLocation || '')).length}
+                      </p>
+                    </div>
+                    <div className="w-px h-6 bg-slate-100" />
+                    <div className="text-right">
+                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Próprios</p>
+                      <p className="text-sm font-black text-emerald-600 leading-none mt-0.5">
+                        {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') === normalizeKey(selectedLocation || '')).length}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {filteredAssets.length > 0 ? (
               <Virtuoso
                 ref={virtuosoRef}

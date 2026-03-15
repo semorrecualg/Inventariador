@@ -43,6 +43,7 @@ interface MainMenuProps {
   onToggleFullscreen: () => void;
   scanFeedbackMode: ScanFeedbackMode;
   onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
+  initialDataMenuOpen?: boolean;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -59,11 +60,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isFullscreen, 
   onToggleFullscreen,
   scanFeedbackMode,
-  onUpdateScanFeedbackMode
+  onUpdateScanFeedbackMode,
+  initialDataMenuOpen = false
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
-  const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
+  const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
@@ -124,7 +126,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2 no-scrollbar">
         <button
           disabled={!hasData}
-          onClick={() => onNavigate(AppScreen.COMPANY_SELECTION)}
+          onClick={() => onNavigate(AppScreen.INVENTORY)}
           className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-blue-200"
         >
           <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-blue-100 transition-colors">

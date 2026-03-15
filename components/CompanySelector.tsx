@@ -40,7 +40,7 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
       {/* Header Fixo */}
       <div className="p-5 pt-10 bg-white border-b border-slate-200 shadow-sm">
         <div className="mb-6">
-          <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Seleção de Unidade" />
+          <BackButton onClick={onBack} label="Sair do Aplicativo" subLabel="Retornar ao Login" />
         </div>
         
         <div className="flex items-center justify-between mb-6">
