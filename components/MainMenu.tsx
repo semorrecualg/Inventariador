@@ -83,6 +83,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </div>
         <div className="flex items-center space-x-2">
+          {isAdmin && (
+            <button 
+              onClick={() => setIsDataMenuOpen(true)} 
+              className="p-3 bg-orange-50 border border-orange-100 rounded-xl text-orange-600 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-orange-700"
+              title="Gestão e Manutenção de Dados"
+            >
+              <DatabaseZap size={20} />
+            </button>
+          )}
           <button 
             onClick={() => setIsAnalyticsMenuOpen(true)} 
             className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-blue-600 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-blue-700"
@@ -94,6 +103,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <button 
               onClick={() => setIsAdminMenuOpen(true)} 
               className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900"
+              title="Configurações do Sistema"
             >
               <Settings size={20} />
             </button>
@@ -166,8 +176,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <ListChecks size={18} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Conciliação</h3>
-            <p className="text-[8px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Auditoria por Conta</p>
+            <h3 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Conciliação por Conta</h3>
+            <p className="text-[8px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
           </div>
           <ChevronRight size={14} className="text-slate-300 group-hover:text-emerald-400 transition-colors" />
         </button>
@@ -209,14 +219,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Configurar QR Code</h4>
                   <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Definir campos do QR</p>
-                </div>
-              </button>
-
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.ACCOUNT_RECONCILIATION); }} className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ListChecks size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Conciliação por Conta</h4>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
                 </div>
               </button>
 
@@ -334,20 +336,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </p>
                 </div>
               </div>
-
-              <button 
-                onClick={() => setIsDataMenuOpen(true)} 
-                className="w-full flex items-center p-4 bg-orange-50 border border-orange-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm"
-              >
-                <div className="w-8 h-8 bg-orange-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md">
-                  <ShieldCheck size={16} />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-orange-700 uppercase tracking-tight">Segurança de Dados</h4>
-                  <p className="text-[8px] font-bold text-orange-400 uppercase tracking-widest mt-0.5">Carga, Exportação e Limpeza</p>
-                </div>
-                <ChevronRight size={14} className="text-orange-300" />
-              </button>
             </div>
             <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Security Protocol</div>
           </div>
@@ -356,8 +344,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {isAnalyticsMenuOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fadeIn">
-          <button onClick={() => setIsAnalyticsMenuOpen(false)} className="absolute top-8 left-6 flex items-center text-white/60 font-bold uppercase text-[9px] tracking-widest active:scale-90">
-            <ChevronRight size={16} className="rotate-180 mr-2" />
+          <button 
+            onClick={() => setIsAnalyticsMenuOpen(false)} 
+            className="absolute top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[500] hover:bg-white/20"
+          >
+            <ChevronRight size={16} className="rotate-180" />
             Voltar
           </button>
           
@@ -407,18 +398,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {isDataMenuOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fadeIn">
-          <button onClick={() => setIsDataMenuOpen(false)} className="absolute top-8 left-6 flex items-center text-white/60 font-bold uppercase text-[9px] tracking-widest active:scale-90">
-            <ChevronRight size={16} className="rotate-180 mr-2" />
+          <button 
+            onClick={() => setIsDataMenuOpen(false)} 
+            className="absolute top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[500] hover:bg-white/20"
+          >
+            <ChevronRight size={16} className="rotate-180" />
             Voltar
           </button>
           
           <div className="w-full max-w-sm space-y-4">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-orange-500 text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-orange-400 shadow-xl shadow-orange-500/20">
-                <ShieldCheck size={32} />
+                <DatabaseZap size={32} />
               </div>
-              <h2 className="text-xl font-bold text-white uppercase tracking-tight">Gestão de Dados</h2>
-              <p className="text-[9px] font-bold text-orange-400 uppercase tracking-[0.3em] mt-1.5">Operações Sensíveis</p>
+              <h2 className="text-xl font-bold text-white uppercase tracking-tight">Gestão e Manutenção</h2>
+              <p className="text-[9px] font-bold text-orange-400 uppercase tracking-[0.3em] mt-1.5">Operações de Banco de Dados</p>
             </div>
 
             <div className="space-y-3">

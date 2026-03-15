@@ -68,6 +68,11 @@ const formatEtiqueta = (val: string | number | null | undefined): string => {
   return s.padStart(6, '0');
 };
 
+const isSixDigitNumeric = (val: string | number | null | undefined): boolean => {
+  const s = String(val || '').trim();
+  return /^\d{6}$/.test(s);
+};
+
 interface AssetCardProps {
   asset: Asset;
   onToggle: (a: Asset) => void;
@@ -75,6 +80,7 @@ interface AssetCardProps {
 
 const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
+  const isLocked = isSixDigitNumeric(asset.ETIQUETA);
   const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
@@ -149,24 +155,31 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
 
   return (
     <div 
-      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border}`} 
-      style={{ borderLeftColor: colors.hex }}
-      onClick={() => onToggle(asset)}
+      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card shadow-sm ${isLocked ? 'opacity-60 grayscale-[0.5] cursor-not-allowed bg-slate-50 border-slate-200' : `active:scale-[0.99] cursor-pointer ${colors.bg} ${colors.border}`}`} 
+      style={{ borderLeftColor: isLocked ? '#94a3b8' : colors.hex }}
+      onClick={() => !isLocked && onToggle(asset)}
     >
-      <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${colors.badge}`}>
-        {colors.icon && <colors.icon size={10} strokeWidth={3} />}
-        <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
+      <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${isLocked ? 'bg-slate-400 text-white' : colors.badge}`}>
+        {isLocked ? <AlertTriangle size={10} strokeWidth={3} /> : (colors.icon && <colors.icon size={10} strokeWidth={3} />)}
+        <span className="tracking-widest">
+          {isLocked ? 'BLOQUEADO | REGRA DE OURO' : `${asset.REGISTRO || '---'} | ${visualStatus}`}
+        </span>
       </div>
       
       <div className="pt-4 pr-8 flex flex-col space-y-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
-            <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
+            <span className={`text-lg font-bold font-mono tracking-tight ${isLocked ? 'text-slate-500' : colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
           </div>
-          {asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
+          {isLocked ? (
+            <div className="px-2 py-1 bg-slate-200 rounded-lg flex items-center space-x-1">
+              <AlertTriangle size={10} className="text-slate-500" />
+              <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">USAR TELA INVENTÁRIO</span>
+            </div>
+          ) : asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
             <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
               <Zap size={10} className="text-white fill-white" />
               <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
@@ -297,6 +310,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   }, [assets, selectedAccount, assetSearchTerm, activeFilter]);
 
   const handleToggleReconcile = useCallback((asset: Asset) => {
+    if (isSixDigitNumeric(asset.ETIQUETA)) return;
+    
     onUpdateAsset({
       ...asset,
       _conferido: !asset._conferido,
@@ -307,7 +322,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
 
   const handleReconcileAll = () => {
     const pendingIds = filteredAssets
-      .filter(a => !a._conferido)
+      .filter(a => !a._conferido && !isSixDigitNumeric(a.ETIQUETA))
       .map(a => String(a.id));
     
     if (pendingIds.length > 0) {
