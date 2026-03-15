@@ -73,6 +73,7 @@ export interface Asset {
   TAG_INVENTARIO?: TagInventario;
   ESTADO_CONSERVACAO?: ConservationState;
   _isNew?: boolean;
+  _dataLeitura?: string;
 }
 
 export enum AppScreen {
@@ -91,7 +92,9 @@ export enum AppScreen {
   CHANGE_PASSWORD = 'CHANGE_PASSWORD',
   FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR',
   QR_CODE_CONFIGURATOR = 'QR_CODE_CONFIGURATOR',
-  QR_CONFIGURATOR = 'QR_CONFIGURATOR'
+  QR_CONFIGURATOR = 'QR_CONFIGURATOR',
+  GLOBAL_PERFORMANCE = 'GLOBAL_PERFORMANCE',
+  ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION'
 }
 
 export enum ScannerMode {

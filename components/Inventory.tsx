@@ -25,6 +25,9 @@ import {
   RefreshCw,
   ShieldCheck,
   Camera,
+  Database,
+  Keyboard,
+  Calendar
 } from 'lucide-react';
 
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
@@ -53,6 +56,19 @@ const formatMonthYearBR = (val: string | number | null | undefined): string => {
   return String(val || '').toUpperCase();
 };
 
+const formatReadingTime = (isoStr?: string) => {
+  if (!isoStr) return '';
+  const date = new Date(isoStr);
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+};
+
 const formatEtiqueta = (val: string | number | null | undefined): string => {
   const s = String(val || '').trim();
   if (!s || s.toUpperCase() === 'ETIQUETAR') return s.toUpperCase();
@@ -68,7 +84,7 @@ interface AssetCardProps {
   isBatchMode: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
-  confirmButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  confirmButtonRef?: React.RefObject<HTMLButtonElement>;
 }
 
 const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
@@ -227,6 +243,12 @@ const AssetCard = React.memo(({
         </p>
 
         <div className="flex flex-wrap gap-1.5 pt-1">
+          {asset._dataLeitura && (
+            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-slate-900 text-white border border-slate-700 flex items-center space-x-1">
+              <Calendar size={10} />
+              <span>{formatReadingTime(asset._dataLeitura)}</span>
+            </div>
+          )}
           {isBaixado && (
             <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700">
               BAIXADO
@@ -328,6 +350,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
@@ -514,6 +537,13 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     });
 
     return combined.sort((a, b) => {
+      // Se estivermos vendo os inventariados, ordenar por data de leitura (mais recente primeiro)
+      if (activeFilter === 'checked') {
+        const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
+        const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
+        if (dateA !== dateB) return dateB - dateA;
+      }
+
       const etqA = String(a.ETIQUETA || '').padStart(10, '0');
       const etqB = String(b.ETIQUETA || '').padStart(10, '0');
       return etqA.localeCompare(etqB, undefined, { numeric: true });
@@ -579,6 +609,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedCompany, selectedLocation]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
+    setShowNumericKeypad(false);
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedCompany || '');
@@ -969,23 +1000,28 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   {activeFilter === 'pending' && !isBatchMode && (
                     <button 
                       onClick={onOpenConsultation}
-                      className="p-3 bg-slate-100 text-slate-400 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all"
-                      title="Consultar Item"
+                      className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shadow-sm active:scale-95 transition-all"
+                      title="Consultar Item na Base"
                     >
-                      <Search size={22} className="text-slate-500" />
+                      <Database size={22} strokeWidth={2.5} />
                     </button>
                   )}
                   
                   <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
                     <button 
                       onClick={() => {
-                        onUpdateSearchMode(InventorySearchMode.MANUAL);
-                        setIsSearchVisible(true);
-                        setIsScannerOpen(false);
+                        if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
+                          setShowNumericKeypad(!showNumericKeypad);
+                        } else {
+                          onUpdateSearchMode(InventorySearchMode.MANUAL);
+                          setIsSearchVisible(true);
+                          setIsScannerOpen(false);
+                          setShowNumericKeypad(true);
+                        }
                       }} 
                       className={`p-3 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
                     >
-                      <Search size={22} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
+                      <Keyboard size={22} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
                     </button>
                     <button 
                       onClick={() => {
@@ -1040,7 +1076,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden bg-bg-main relative">
+          <div 
+            className="flex-1 overflow-hidden bg-bg-main relative"
+            onClick={() => setShowNumericKeypad(false)}
+          >
             {isSearchResultBatch && (
               <div className="px-4 pt-3">
                 <button 
@@ -1138,19 +1177,19 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-slate-400">Aguardando Auditoria</p>
                 </div>
             )}
-
-            {showNumericKeypad && (
-              <div className="absolute inset-x-0 bottom-0 z-[100]">
-                <NumericKeypad 
-                  onInput={(val) => setDisplayValue(prev => prev + val)}
-                  onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
-                  onClose={() => setShowNumericKeypad(false)}
-                />
-              </div>
-            )}
           </div>
-        </>
-      )}
+
+        {showNumericKeypad && (
+          <div className="absolute inset-x-0 bottom-0 z-[100]">
+            <NumericKeypad 
+              onInput={(val) => setDisplayValue(prev => prev + val)}
+              onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
+              onClose={() => setShowNumericKeypad(false)}
+            />
+          </div>
+        )}
+      </>
+    )}
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 

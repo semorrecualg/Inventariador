@@ -21,7 +21,10 @@ import {
   ScanLine,
   Vibrate,
   Volume2,
-  Battery
+  Battery,
+  RefreshCw,
+  TrendingUp,
+  ListChecks
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -39,6 +42,7 @@ interface MainMenuProps {
   onToggleFullscreen: () => void;
   scanFeedbackMode: ScanFeedbackMode;
   onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
+  isSyncing?: boolean;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -55,11 +59,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isFullscreen, 
   onToggleFullscreen,
   scanFeedbackMode,
-  onUpdateScanFeedbackMode
+  onUpdateScanFeedbackMode,
+  isSyncing
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
-  const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
+  const isAdmin = user?.isAdmin || user?.email?.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   return (
@@ -92,6 +97,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             {hasData ? `${inventoryInfo.totalDatabase} Ativos` : 'Base Vazia'}
           </span>
+          {isSyncing && (
+            <div className="flex items-center space-x-1 ml-2">
+              <RefreshCw size={10} className="text-blue-500 animate-spin" />
+              <span className="text-[8px] font-bold text-blue-500 uppercase">Sincronizando...</span>
+            </div>
+          )}
         </div>
         <div className="text-[9px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 shadow-sm">v24.50 PRO</div>
       </div>
@@ -156,6 +167,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <ChevronRight size={16} className="text-slate-300 group-hover:text-cyan-400 transition-colors" />
         </button>
+
+        <button
+          disabled={!hasData}
+          onClick={() => onNavigate(AppScreen.GLOBAL_PERFORMANCE)}
+          className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-amber-200"
+        >
+          <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-amber-100 transition-colors">
+            <TrendingUp size={20} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className="text-[14px] font-bold text-slate-900 uppercase tracking-tight">Rendimento</h3>
+            <p className="text-[9px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Análise Diária Global</p>
+          </div>
+          <ChevronRight size={16} className="text-slate-300 group-hover:text-amber-400 transition-colors" />
+        </button>
       </div>
 
       <div className="p-6 bg-white border-t border-slate-200 flex items-center justify-between shadow-sm">
@@ -194,6 +220,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Configurar QR Code</h4>
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Definir campos do QR</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.ACCOUNT_RECONCILIATION); }} className="w-full flex items-center p-5 bg-white border border-slate-200 rounded-3xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 border border-emerald-100"><ListChecks size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Conciliação por Conta</h4>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Auditoria de Bens Não Etiquetáveis</p>
                 </div>
               </button>
 

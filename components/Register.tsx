@@ -1,10 +1,10 @@
 
 import React, { useState } from 'react';
-import { User } from '../types';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
+import { signUp } from '../services/supabaseService';
 
 interface RegisterProps {
-  onRegister: (user: User) => void;
+  onRegister: () => void;
   onGoToLogin: () => void;
 }
 
@@ -12,16 +12,22 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username && email && password) {
-      onRegister({ 
-        username: username.toUpperCase(), 
-        email: email.toLowerCase(),
-        password: password,
-        mustChangePassword: false
-      });
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      await signUp(email.trim(), password, username.toUpperCase());
+      onRegister();
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || "Erro ao criar acesso.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -36,6 +42,13 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6 max-w-sm mx-auto w-full">
+        {error && (
+          <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-[9px] font-bold uppercase flex items-center mb-4 tracking-widest shadow-sm">
+            <AlertCircle size={16} className="mr-2 shrink-0" />
+            {error}
+          </div>
+        )}
+
         <div className="space-y-2">
           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
           <input 
@@ -71,9 +84,17 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
         </div>
         <button 
           type="submit"
-          className="w-full bg-sky-600 text-white font-bold py-5 rounded-3xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-8 uppercase tracking-[0.2em] text-sm"
+          disabled={isLoading}
+          className="w-full bg-sky-600 text-white font-bold py-5 rounded-3xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-8 uppercase tracking-[0.2em] text-sm flex items-center justify-center space-x-2 disabled:opacity-70"
         >
-          Criar Meu Acesso
+          {isLoading ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Criando Acesso...</span>
+            </>
+          ) : (
+            <span>Criar Meu Acesso</span>
+          )}
         </button>
       </form>
     </div>
