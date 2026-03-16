@@ -31,6 +31,9 @@ const Scanner: React.FC<ScannerProps> = ({
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [availableCameras, setAvailableCameras] = useState<{ id: string, label: string }[]>([]);
+  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
@@ -97,55 +100,74 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: 10, // Reduzido de 20 para 10 para economizar bateria (CPU/GPU)
+      fps: 10,
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 350, height: 150 } 
         : { width: 280, height: 280 },
       formatsToSupport: formats,
+      aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778, // Ajusta conforme orientação
     };
 
     try {
+      setIsLoading(true);
+      setError(null);
+
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Seu navegador não suporta acesso à câmera ou você está em uma conexão não segura.");
+        throw new Error("Seu navegador não suporta acesso à câmera ou você está em uma conexão não segura (HTTPS necessário).");
       }
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Pequeno delay para garantir que o DOM está pronto
+      await new Promise(resolve => setTimeout(resolve, 500));
       if (!isMounted.current) return;
       
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
-      const cameras = await Html5Qrcode.getCameras().catch(() => []);
-      if (!isMounted.current) return;
+      const onScanSuccess = (decodedText: string) => {
+        if (isMounted.current) {
+          playBeep();
+          setIsFlashing(true);
+          setShowSuccess(true);
+          setTimeout(() => {
+            if (isMounted.current) {
+              setIsFlashing(false);
+              setTimeout(() => setShowSuccess(false), 1000);
+            }
+          }, 150);
+          onScan(decodedText);
+        }
+      };
 
-      let cameraIdOrConfig: string | { facingMode: string } = { facingMode: "environment" };
-      
-      if (cameras && cameras.length > 0) {
-        const backCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('traseira'));
-        if (backCamera) {
-          cameraIdOrConfig = backCamera.id;
+      const onScanFailure = () => {
+        // Ignora erros de leitura contínua
+      };
+
+      // Tenta listar as câmeras para permitir troca posterior
+      const cameras = await Html5Qrcode.getCameras().catch(() => []);
+      if (isMounted.current) {
+        setAvailableCameras(cameras);
+      }
+
+      // Tenta iniciar diretamente com a câmera traseira (mais robusto em mobile)
+      try {
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          onScanSuccess,
+          onScanFailure
+        );
+      } catch (e) {
+        console.warn("Direct start failed, trying getCameras", e);
+        if (cameras && cameras.length > 0) {
+          const bestCamera = cameras[cameras.length - 1];
+          setCurrentCameraIndex(cameras.length - 1);
+          await html5QrCode.start(bestCamera.id, config, onScanSuccess, onScanFailure);
+        } else {
+          throw new Error("Nenhuma câmera encontrada ou permissão negada.");
         }
       }
 
-      await html5QrCode.start(
-        cameraIdOrConfig,
-        config,
-        (decodedText) => {
-          if (isMounted.current) {
-            playBeep();
-            setIsFlashing(true);
-            setShowSuccess(true);
-            setTimeout(() => {
-              if (isMounted.current) {
-                setIsFlashing(false);
-                setTimeout(() => setShowSuccess(false), 1000);
-              }
-            }, 150);
-            onScan(decodedText);
-          }
-        },
-        () => {}
-      );
+      setIsLoading(false);
 
       if (!isMounted.current) {
         await html5QrCode.stop().catch(() => {});
@@ -170,7 +192,8 @@ const Scanner: React.FC<ScannerProps> = ({
     } catch (err) {
       if (isMounted.current) {
         console.error("Scanner start error", err);
-        setError("Erro ao acessar câmera. Verifique as permissões.");
+        setError(err instanceof Error ? err.message : "Erro ao acessar câmera. Verifique as permissões.");
+        setIsLoading(false);
       }
     }
   }, [mode, onScan]);
@@ -203,6 +226,47 @@ const Scanner: React.FC<ScannerProps> = ({
     };
   }, [startScanner, stopScanner, isPaused]);
 
+  const switchCamera = async () => {
+    if (availableCameras.length < 2 || !scannerRef.current) return;
+    
+    const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
+    setCurrentCameraIndex(nextIndex);
+    
+    setIsLoading(true);
+    await stopScanner();
+    
+    const formats = mode === ScannerMode.BARCODE 
+      ? [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E]
+      : [Html5QrcodeSupportedFormats.QR_CODE];
+
+    const config = {
+      fps: 10,
+      qrbox: mode === ScannerMode.BARCODE ? { width: 350, height: 150 } : { width: 280, height: 280 },
+      formatsToSupport: formats,
+      aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
+    };
+
+    const html5QrCode = new Html5Qrcode("reader");
+    scannerRef.current = html5QrCode;
+
+    try {
+      await html5QrCode.start(
+        availableCameras[nextIndex].id,
+        config,
+        (decodedText) => {
+          playBeep();
+          onScan(decodedText);
+        },
+        () => {}
+      );
+      setIsLoading(false);
+    } catch (e) {
+      console.error("Switch camera failed", e);
+      setError("Erro ao trocar de câmera.");
+      setIsLoading(false);
+    }
+  };
+
   const handleZoom = async (delta: number) => {
     if (!scannerRef.current) return;
     try {
@@ -228,6 +292,14 @@ const Scanner: React.FC<ScannerProps> = ({
 
   const scannerContent = (
     <div className={`${isInline ? 'relative w-full h-64 rounded-3xl' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-300`}>
+      {/* Loading State */}
+      {isLoading && !error && !isPaused && (
+        <div className="absolute inset-0 z-[100] bg-black flex flex-col items-center justify-center">
+          <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-white text-[10px] font-black uppercase tracking-widest animate-pulse">Iniciando Câmera...</p>
+        </div>
+      )}
+
       {/* Viewport Overlay */}
       <div id="reader" key={mode} className={`w-full h-full transition-all duration-500 ${isFlashing ? 'opacity-50' : 'opacity-100'} ${isPaused ? 'blur-xl opacity-40 scale-110' : 'blur-0 opacity-100 scale-100'}`}></div>
       
@@ -305,8 +377,16 @@ const Scanner: React.FC<ScannerProps> = ({
           )}
         </div>
 
-        {/* Lado Direito: Zoom (Lanterna Removida) */}
+        {/* Lado Direito: Zoom & Troca de Câmera */}
         <div className="flex-1 flex justify-end items-center space-x-2 pointer-events-auto">
+          {availableCameras.length > 1 && !isInline && (
+            <button 
+              onClick={switchCamera}
+              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 shadow-xl"
+            >
+              <Camera size={20} />
+            </button>
+          )}
           {!isInline && (
             <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl">
               <button onClick={() => handleZoom(-0.5)} className="p-2 text-white active:scale-90"><Minimize size={20} /></button>

@@ -80,7 +80,9 @@ interface AssetCardProps {
 
 const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
-  const isLocked = isSixDigitNumeric(asset.ETIQUETA);
+  const isSixDigit = isSixDigitNumeric(asset.ETIQUETA);
+  const isLabeling = String(asset.ETIQUETA || '').toUpperCase().trim() === 'ETIQUETAR';
+  const isLocked = isSixDigit || isLabeling;
   const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
@@ -162,7 +164,7 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
       <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${isLocked ? 'bg-slate-400 text-white' : colors.badge}`}>
         {isLocked ? <AlertTriangle size={10} strokeWidth={3} /> : (colors.icon && <colors.icon size={10} strokeWidth={3} />)}
         <span className="tracking-widest">
-          {isLocked ? 'BLOQUEADO | REGRA DE OURO' : `${asset.REGISTRO || '---'} | ${visualStatus}`}
+          {isLocked ? `BLOQUEADO | ${isSixDigit ? 'REGRA DE OURO' : 'ETIQUETAGEM'}` : `${asset.REGISTRO || '---'} | ${visualStatus}`}
         </span>
       </div>
       
@@ -177,7 +179,9 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
           {isLocked ? (
             <div className="px-2 py-1 bg-slate-200 rounded-lg flex items-center space-x-1">
               <AlertTriangle size={10} className="text-slate-500" />
-              <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">USAR TELA INVENTÁRIO</span>
+              <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">
+                {isSixDigit ? 'USAR TELA INVENTÁRIO' : 'USAR TELA ETIQUETAR'}
+              </span>
             </div>
           ) : asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
             <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
@@ -310,7 +314,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   }, [assets, selectedAccount, assetSearchTerm, activeFilter]);
 
   const handleToggleReconcile = useCallback((asset: Asset) => {
-    if (isSixDigitNumeric(asset.ETIQUETA)) return;
+    const etq = String(asset.ETIQUETA || '').toUpperCase().trim();
+    if (isSixDigitNumeric(etq) || etq === 'ETIQUETAR') return;
     
     onUpdateAsset({
       ...asset,
@@ -322,7 +327,10 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
 
   const handleReconcileAll = () => {
     const pendingIds = filteredAssets
-      .filter(a => !a._conferido && !isSixDigitNumeric(a.ETIQUETA))
+      .filter(a => {
+        const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+        return !a._conferido && !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
+      })
       .map(a => String(a.id));
     
     if (pendingIds.length > 0) {

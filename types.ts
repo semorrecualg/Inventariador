@@ -115,6 +115,12 @@ export enum InventorySearchMode {
   SCANNER = 'SCANNER'
 }
 
+export enum DatabaseMode {
+  INTERNAL = 'INTERNAL',
+  SUPABASE = 'SUPABASE',
+  PROTHEUS_SUPABASE = 'PROTHEUS_SUPABASE'
+}
+
 export interface InventoryState {
   assets: Asset[];
   companies: string[];

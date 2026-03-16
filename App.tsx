@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from './types';
+import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode } from './types';
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -116,6 +116,12 @@ const App: React.FC = () => {
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
+  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
+    try {
+      const saved = localStorage.getItem('app_database_mode');
+      return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+    } catch { return DatabaseMode.INTERNAL; }
+  });
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
@@ -151,6 +157,12 @@ const App: React.FC = () => {
         console.error("Data load failed", e); 
       } finally {
         setIsDataLoaded(true);
+        // Remove o loader do index.html
+        const loader = document.getElementById('app-loader');
+        if (loader) {
+          loader.classList.add('hidden');
+          setTimeout(() => loader.remove(), 500);
+        }
       }
     };
     init();
@@ -431,6 +443,11 @@ const App: React.FC = () => {
   const pushScreen = (s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
     else setHistory(prev => [...prev, s]);
+  };
+
+  const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
+    setDatabaseMode(mode);
+    localStorage.setItem('app_database_mode', mode);
   };
 
   const popScreen = () => {
@@ -734,15 +751,17 @@ const App: React.FC = () => {
         )}
         
         <div className="flex-1 relative overflow-hidden">
-          {showRecoveryToast && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce">
-              <ShieldCheck size={20} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Base de Dados Recuperada com Sucesso</span>
+      {showRecoveryToast && (
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs">
+              <ShieldCheck size={20} className="shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
           {screen === AppScreen.LOGIN && (
             <Login 
               users={users} 
+              databaseMode={databaseMode}
+              onUpdateDatabaseMode={handleUpdateDatabaseMode}
               onLogin={(u) => { 
                 setUser(u); 
                 const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
@@ -761,18 +780,9 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.REGISTER && (
             <Register 
-              onRegister={(u) => { 
-                setUsers(p => [...p, u]); 
-                setUser(u); 
-                const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
-                const isEmpty = inventory.assets.length === 0;
-
-                if (isEmpty && isAdmin) {
-                  setStartWithDataMenu(true);
-                  pushScreen(AppScreen.MAIN_MENU);
-                } else {
-                  pushScreen(AppScreen.COMPANY_SELECTION); 
-                }
+              databaseMode={databaseMode}
+              onRegister={() => { 
+                pushScreen(AppScreen.LOGIN);
               }} 
               onGoToLogin={popScreen} 
             />
@@ -820,6 +830,8 @@ const App: React.FC = () => {
                 }); 
               }} 
               user={user} 
+              databaseMode={databaseMode}
+              onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
                 count: filteredAssetsByCompany.length, 
                 totalDatabase: inventory.assets.length, 

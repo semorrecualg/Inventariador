@@ -44,7 +44,7 @@
                 const loader = document.getElementById('app-loader');
                 if (loader && !window.appStarted) {
                     console.warn("App taking too long to start, forcing loader removal...");
-                    // loader.classList.add('hidden');
+                    loader.classList.add('hidden');
                 }
             }, 5000);
         });

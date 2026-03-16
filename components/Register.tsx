@@ -2,13 +2,73 @@
 import React, { useState } from 'react';
 import { ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
 import { signUp } from '../services/supabaseService';
+import { DatabaseMode } from '../types';
 
 interface RegisterProps {
   onRegister: () => void;
   onGoToLogin: () => void;
+  databaseMode: DatabaseMode;
 }
 
-const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
+// Ícone SVG Customizado para Ativo Imobilizado
+const AssetIcon = ({ className }: { className?: string }) => (
+  <svg 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    xmlns="http://www.w3.org/2000/svg" 
+    className={className}
+  >
+    <path 
+      d="M2 22H22" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+    />
+    <path 
+      d="M17 22V7L12 2L7 7V22" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinejoin="round" 
+    />
+    <path 
+      d="M7 12H17" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+    />
+    <path 
+      d="M7 17H17" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+    />
+    <rect 
+      x="13" 
+      y="13" 
+      width="8" 
+      height="6" 
+      rx="1" 
+      fill="white" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M15 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M17 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M19 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+  </svg>
+);
+
+const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMode }) => {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,6 +96,28 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
     }
   };
 
+  if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
+    return (
+      <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
+        <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-blue-100">
+          <AlertCircle size={32} />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Registro via Protheus</h2>
+        <p className="text-slate-500 mt-4 text-xs font-medium leading-relaxed max-w-xs">
+          Nesta modalidade, o registro de novos usuários deve ser realizado diretamente no sistema <span className="text-blue-600 font-bold">Protheus</span>.
+          <br/><br/>
+          Utilize suas credenciais corporativas para entrar.
+        </p>
+        <button 
+          onClick={onGoToLogin}
+          className="mt-8 w-full max-w-xs bg-slate-900 text-white font-bold py-5 rounded-3xl shadow-lg hover:bg-slate-800 transition-all uppercase tracking-[0.2em] text-sm"
+        >
+          Voltar ao Login
+        </button>
+      </div>
+    );
+  }
+
   if (isSuccess) {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
@@ -57,64 +139,87 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   }
 
   return (
-    <div className="p-8 h-full flex flex-col justify-start pt-12 animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pb-20">
-      <div className="mb-12 max-w-sm mx-auto w-full">
-        <button onClick={onGoToLogin} className="mb-8 text-slate-400 flex items-center font-bold text-[10px] uppercase tracking-[0.2em] hover:text-sky-600 transition-colors">
-          <ChevronLeft size={18} className="mr-2" /> Voltar ao Login
-        </button>
-        <h1 className="text-3xl font-bold text-slate-900 uppercase tracking-tight">Novo Acesso</h1>
-        <p className="text-slate-400 mt-3 text-[11px] font-bold uppercase tracking-[0.2em]">Crie suas credenciais de inventariante</p>
+    <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
+      {/* Header compactado consistente com o Login */}
+      <div className="mb-3 text-center">
+        <div className="relative w-24 h-24 mx-auto mb-2">
+          {/* Ícone SVG Customizado de Ativo Imobilizado */}
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-700 to-indigo-900 rounded-3xl shadow-xl transform -rotate-3"></div>
+          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-slate-100">
+            <AssetIcon className="w-14 h-14 text-blue-600" />
+          </div>
+        </div>
+        <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">
+          GBR <span className="text-blue-600">AUDITORIA</span>
+        </h1>
+        <p className="text-slate-400 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+          INVENTÁRIO DE ATIVO IMOBILIZADO
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-sm mx-auto w-full">
+      <div className="max-w-sm mx-auto w-full">
+        <button onClick={onGoToLogin} className="mb-2 text-slate-400 flex items-center font-bold text-[7px] uppercase tracking-[0.2em] hover:text-sky-600 transition-colors">
+          <ChevronLeft size={12} className="mr-1" /> Voltar ao Login
+        </button>
+        
+        {databaseMode === DatabaseMode.INTERNAL && (
+          <div className="mb-2 p-2 bg-blue-50 border border-blue-100 rounded-xl">
+            <p className="text-[7px] font-bold text-blue-700 uppercase tracking-widest leading-relaxed">
+              Atenção: Área exclusiva para Administradores. Auditores são cadastrados no painel interno.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto w-full">
         {error && (
-          <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-[9px] font-bold uppercase flex items-center mb-4 tracking-widest shadow-sm">
-            <AlertCircle size={16} className="mr-2 shrink-0" />
+          <div className="bg-red-50 border border-red-100 text-red-600 p-2.5 rounded-xl text-[9px] font-bold uppercase flex items-center mb-3 tracking-widest shadow-sm">
+            <AlertCircle size={14} className="mr-2 shrink-0" />
             {error}
           </div>
         )}
 
-        <div className="space-y-2">
-          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
           <input 
             type="text" 
             required
             value={username}
             onChange={(e) => setUsername(e.target.value.toUpperCase())}
-            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold uppercase shadow-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold uppercase shadow-sm text-sm"
             placeholder="EX: JOAO.SILVA"
           />
         </div>
-        <div className="space-y-2">
-          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
           <input 
             type="email" 
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
             placeholder="contato@gbr.com.br"
           />
         </div>
-        <div className="space-y-2">
-          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Senha</label>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Senha</label>
           <input 
             type="password" 
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-6 py-5 rounded-3xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
             placeholder="••••••••"
           />
         </div>
         <button 
           type="submit"
           disabled={isLoading}
-          className="w-full bg-sky-600 text-white font-bold py-5 rounded-3xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-8 uppercase tracking-[0.2em] text-sm flex items-center justify-center space-x-2 disabled:opacity-70"
+          className="w-full bg-sky-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
             <>
-              <Loader2 size={16} className="animate-spin" />
+              <Loader2 size={14} className="animate-spin" />
               <span>Criando Acesso...</span>
             </>
           ) : (

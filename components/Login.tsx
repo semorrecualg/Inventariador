@@ -1,20 +1,87 @@
 
 import React, { useState } from 'react';
-import { LogIn, UserCircle, AlertCircle, Loader2, Mail, Key } from 'lucide-react';
-import { signIn, signInWithMagicLink } from '../services/supabaseService';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck } from 'lucide-react';
+import { getUserPermissions, signIn as supabaseSignIn } from '../services/supabaseService';
+import { authenticateWithProtheus } from '../services/protheusService';
+import { User, DatabaseMode } from '../types';
 
 interface LoginProps {
-  onLogin: () => void;
+  onLogin: (user: User) => void;
   onNavigateToRegister: () => void;
+  users: User[];
+  databaseMode: DatabaseMode;
+  onUpdateDatabaseMode: (mode: DatabaseMode) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister }) => {
-  const [email, setEmail] = useState('');
+// Ícone SVG Customizado para Ativo Imobilizado
+const AssetIcon = ({ className }: { className?: string }) => (
+  <svg 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    xmlns="http://www.w3.org/2000/svg" 
+    className={className}
+  >
+    <path 
+      d="M2 22H22" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+    />
+    <path 
+      d="M17 22V7L12 2L7 7V22" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinejoin="round" 
+    />
+    <path 
+      d="M7 12H17" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+    />
+    <path 
+      d="M7 17H17" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+    />
+    <rect 
+      x="13" 
+      y="13" 
+      width="8" 
+      height="6" 
+      rx="1" 
+      fill="white" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M15 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M17 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+    <path 
+      d="M19 15V17" 
+      stroke="currentColor" 
+      strokeWidth="1" 
+    />
+  </svg>
+);
+
+const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode }) => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [authMode, setAuthMode] = useState<'password' | 'magic'>('password');
+
+  // Reset loading state when database mode changes to prevent "stuck" UI
+  React.useEffect(() => {
+    setIsLoading(false);
+    setError(null);
+  }, [databaseMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,12 +89,55 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister }) => {
     setIsLoading(true);
     
     try {
-      if (authMode === 'password') {
-        await signIn(email.trim(), password);
-        onLogin();
+      let loggedUser: User | null = null;
+
+      if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
+        // 1. Autentica no Protheus
+        const authResult = await authenticateWithProtheus(username.trim(), password);
+        
+        if (!authResult.success) {
+          throw new Error(authResult.message || "Falha na autenticação Protheus.");
+        }
+
+        // 2. Busca permissões no Supabase
+        const permissions = await getUserPermissions(authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com.br`);
+        
+        loggedUser = {
+          username: authResult.user?.username || username.trim().toUpperCase(),
+          email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com.br`,
+          isAdmin: permissions.isAdmin || false,
+          mustChangePassword: false
+        };
+      } else if (databaseMode === DatabaseMode.SUPABASE) {
+        // Autenticação via Supabase Auth
+        const { user: sbUser, error: sbError } = await supabaseSignIn(username.trim(), password);
+        if (sbError) throw sbError;
+        if (!sbUser) throw new Error("Usuário não encontrado.");
+
+        loggedUser = {
+          username: sbUser.user_metadata?.username || sbUser.email?.split('@')[0].toUpperCase() || 'USUÁRIO',
+          email: sbUser.email || '',
+          isAdmin: sbUser.email?.toLowerCase() === "semorr@gmail.com",
+          mustChangePassword: false
+        };
       } else {
-        await signInWithMagicLink(email.trim());
-        setMagicLinkSent(true);
+        // Banco de Dados Interno (Independente)
+        const localUser = users.find(u => 
+          (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
+          u.password === password
+        );
+
+        if (!localUser) {
+          throw new Error("Credenciais internas inválidas.");
+        }
+
+        loggedUser = { ...localUser };
+      }
+
+      if (loggedUser) {
+        // Salva no localStorage para persistência
+        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        onLogin(loggedUser);
       }
     } catch (err: unknown) {
       const error = err as Error;
@@ -37,129 +147,176 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister }) => {
     }
   };
 
-  if (magicLinkSent) {
-    return (
-      <div className="p-6 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
-        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-emerald-100">
-          <Mail size={32} />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">E-mail Enviado!</h2>
-        <p className="text-slate-500 mt-4 text-xs font-medium leading-relaxed max-w-xs">
-          Enviamos um link de acesso para <span className="text-slate-900 font-bold">{email}</span>. 
-          Basta clicar no link no seu e-mail para entrar automaticamente.
-        </p>
-        <button 
-          onClick={() => setMagicLinkSent(false)}
-          className="mt-10 text-blue-600 font-bold uppercase text-[10px] tracking-widest"
-        >
-          Voltar para o Login
-        </button>
-      </div>
-    );
-  }
+  const getFieldConfig = () => {
+    switch (databaseMode) {
+      case DatabaseMode.PROTHEUS_SUPABASE:
+        return {
+          userLabel: "Usuário Protheus",
+          userPlaceholder: "MATRÍCULA OU USUÁRIO ERP",
+          passLabel: "Senha ERP",
+          passPlaceholder: "••••••••",
+          accentColor: "text-indigo-600",
+          focusColor: "focus:border-indigo-500"
+        };
+      case DatabaseMode.SUPABASE:
+        return {
+          userLabel: "E-mail Cloud",
+          userPlaceholder: "SEU-EMAIL@EXEMPLO.COM",
+          passLabel: "Senha Cloud",
+          passPlaceholder: "••••••••",
+          accentColor: "text-emerald-600",
+          focusColor: "focus:border-emerald-500"
+        };
+      default:
+        return {
+          userLabel: "Usuário / E-mail",
+          userPlaceholder: "DIGITE SEU USUÁRIO OU E-MAIL",
+          passLabel: "Senha",
+          passPlaceholder: "••••••••",
+          accentColor: "text-blue-600",
+          focusColor: "focus:border-blue-500"
+        };
+    }
+  };
+
+  const config = getFieldConfig();
 
   return (
-    <div className="p-6 h-full flex flex-col justify-start pt-12 animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pb-20">
-      <div className="mb-10 text-center">
-        <div className="w-20 h-20 bg-white border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
-          <LogIn className="text-blue-600" size={32} />
+    <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
+      {/* Header compactado e movido para cima (X) */}
+      <div className="mb-3 text-center">
+        <div className="relative w-24 h-24 mx-auto mb-2">
+          {/* Ícone SVG Customizado de Ativo Imobilizado */}
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-700 to-indigo-900 rounded-3xl shadow-xl transform -rotate-3"></div>
+          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-slate-100">
+            <AssetIcon className="w-14 h-14 text-blue-600" />
+          </div>
+          <div className="absolute -bottom-1 -right-1 bg-amber-400 w-4 h-4 rounded-full border-2 border-white shadow-sm animate-pulse"></div>
         </div>
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight uppercase">GBR Auditoria</h1>
-        <p className="text-slate-400 mt-2 text-[10px] font-bold uppercase tracking-[0.2em]">Inteligência Patrimonial</p>
+        <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">
+          GBR <span className="text-blue-600">AUDITORIA</span>
+        </h1>
+        <p className="text-slate-400 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+          INVENTÁRIO DE ATIVO IMOBILIZADO
+        </p>
       </div>
 
-      <div className="flex p-1 bg-slate-100 rounded-xl mb-8 max-w-sm mx-auto w-full border border-slate-200">
-        <button 
-          onClick={() => setAuthMode('password')}
-          className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${authMode === 'password' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
-        >
-          <Key size={14} />
-          <span>Senha</span>
-        </button>
-        <button 
-          onClick={() => setAuthMode('magic')}
-          className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${authMode === 'magic' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
-        >
-          <Mail size={14} />
-          <span>Link Mágico</span>
-        </button>
+      <div className="mb-3 max-w-sm mx-auto w-full">
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-2 ml-1">Modalidade de Acesso</p>
+        <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
+          <button 
+            onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+          >
+            <Server size={12} />
+            <span>Interno</span>
+          </button>
+          <button 
+            onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+          >
+            <Cloud size={12} />
+            <span>Supabase</span>
+          </button>
+          <button 
+            onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
+          >
+            <ShieldCheck size={12} />
+            <span>Protheus</span>
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto w-full">
+      <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
         {error && (
-          <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-[9px] font-bold uppercase flex items-center mb-4 tracking-widest shadow-sm">
-            <AlertCircle size={16} className="mr-2 shrink-0" />
+          <div className="bg-red-50 border border-red-100 text-red-600 p-2.5 rounded-xl text-[9px] font-bold uppercase flex items-center mb-3 tracking-widest shadow-sm">
+            <AlertCircle size={14} className="mr-2 shrink-0" />
             {error}
           </div>
         )}
         
-        <div className="space-y-1.5">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">E-mail</label>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">{config.userLabel}</label>
           <div className="relative">
             <input 
-              type="email" 
+              type="text" 
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 bg-white focus:border-blue-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
-              placeholder="SEU E-MAIL"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className={`w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm text-sm`}
+              placeholder={config.userPlaceholder}
             />
-            <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+            <UserCircle className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
           </div>
         </div>
         
-        {authMode === 'password' && (
-          <div className="space-y-1.5 animate-fadeIn">
-            <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">Senha</label>
-            <input 
-              type="password" 
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-white focus:border-blue-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
-              placeholder="••••••••"
-            />
-          </div>
-        )}
+        <div className="space-y-1 animate-fadeIn">
+          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">{config.passLabel}</label>
+          <input 
+            type="password" 
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={`w-full px-4 py-3 rounded-xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm text-sm`}
+            placeholder={config.passPlaceholder}
+          />
+        </div>
 
         <button 
           type="submit"
           disabled={isLoading}
-          className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-md active:scale-[0.98] transition-all mt-6 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
+          className={`w-full ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-600' : databaseMode === DatabaseMode.SUPABASE ? 'bg-emerald-600' : 'bg-indigo-600'} text-white font-bold py-3.5 rounded-xl shadow-md active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70`}
         >
           {isLoading ? (
             <>
-              <Loader2 size={16} className="animate-spin" />
-              <span>{authMode === 'password' ? 'Autenticando...' : 'Enviando Link...'}</span>
+              <Loader2 size={14} className="animate-spin" />
+              <span>Autenticando...</span>
             </>
           ) : (
-            <span>{authMode === 'password' ? 'Acessar Sistema' : 'Receber Link por E-mail'}</span>
+            <span>Acessar Sistema</span>
           )}
         </button>
       </form>
 
-      <div className="mt-8 text-center space-y-4">
+      <div className="mt-6 text-center space-y-3">
         <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Não tem uma conta?</p>
-          <button 
-            onClick={onNavigateToRegister}
-            className="mt-2 text-blue-600 font-bold uppercase text-[11px] tracking-widest hover:underline"
-          >
-            Cadastre-se Agora
-          </button>
+          {databaseMode === DatabaseMode.INTERNAL ? (
+            <div className="space-y-2">
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+                  <span className="text-blue-600">Auditores:</span> Solicitem suas credenciais ao Administrador.
+                </p>
+              </div>
+              <button 
+                onClick={onNavigateToRegister}
+                className="text-slate-400 font-bold uppercase text-[9px] tracking-widest hover:text-blue-600 transition-colors"
+              >
+                Administradores: <span className="underline">Registrar Unidade</span>
+              </button>
+            </div>
+          ) : databaseMode === DatabaseMode.SUPABASE ? (
+            <div className="space-y-1">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Novo no sistema Cloud?</p>
+              <button 
+                onClick={onNavigateToRegister}
+                className="text-emerald-600 font-bold uppercase text-[10px] tracking-widest hover:underline"
+              >
+                Cadastre-se Agora
+              </button>
+            </div>
+          ) : (
+            <div className="pt-1">
+              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Acesso Restrito ERP Protheus</p>
+            </div>
+          )}
         </div>
         
-        <div className="pt-4 border-t border-slate-100">
-          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
-            Atenção: Verifique sua pasta de <span className="text-amber-600">SPAM</span> ou <span className="text-amber-600">LIXO ELETRÔNICO</span> pelo e-mail de confirmação do Supabase.
+        <div className="pt-3 border-t border-slate-100">
+          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.3em]">
+            GBR Intelligent Systems
           </p>
         </div>
-      </div>
-
-      <div className="mt-12 text-center">
-        <p className="text-slate-300 text-[8px] font-bold uppercase tracking-[0.3em]">
-          GBR Intelligent Systems
-        </p>
       </div>
     </div>
   );
