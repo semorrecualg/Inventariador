@@ -196,7 +196,7 @@ const App: React.FC = () => {
               const todayStr = '2026-03-16';
               const yesterdayStr = '2026-03-15T12:00:00Z';
               
-              parsed.assets = parsed.assets.map(a => {
+              parsed.assets = parsed.assets.map((a: Asset) => {
                 const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
                 if (isConferido) {
                   let needsUpdate = false;

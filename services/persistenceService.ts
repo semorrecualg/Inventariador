@@ -1,5 +1,5 @@
 import localforage from 'localforage';
-import { InventoryState } from '../types';
+import { Asset, InventoryState } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 
 const INVENTORY_STORE_KEY = 'inventory_data_v24';
