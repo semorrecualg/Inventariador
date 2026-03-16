@@ -64,7 +64,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       const a = assets[i];
       const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
-      const isConferido = !!a._conferido;
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
       const tag = a.TAG_INVENTARIO;
       const etq = String(a.ETIQUETA || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();

@@ -31,7 +31,8 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
 
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
-      if (a._conferido) {
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      if (isConferido) {
         s.checked++;
         if (a._dataLeitura) {
           const date = new Date(a._dataLeitura).toLocaleDateString('en-CA');

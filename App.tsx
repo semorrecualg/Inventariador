@@ -129,6 +129,52 @@ const App: React.FC = () => {
       try {
         const saved = await loadInventory();
         if (saved && saved.assets && saved.assets.length > 0) {
+          // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
+          const todayStr = '2026-03-16';
+          const yesterdayStr = '2026-03-15T12:00:00Z';
+          let hasChanges = false;
+
+          const updatedAssets = saved.assets.map(a => {
+            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+            if (isConferido) {
+              let needsUpdate = false;
+              if (!a._dataLeitura) {
+                needsUpdate = true;
+              } else {
+                try {
+                  const d = new Date(a._dataLeitura);
+                  if (isNaN(d.getTime())) {
+                    needsUpdate = true;
+                  } else {
+                    const readingDate = d.toLocaleDateString('en-CA');
+                    if (readingDate < todayStr) {
+                      needsUpdate = true;
+                    }
+                  }
+                } catch {
+                  needsUpdate = true;
+                }
+              }
+
+              if (needsUpdate) {
+                hasChanges = true;
+                return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+              }
+              
+              // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
+              if (!a._conferido) {
+                hasChanges = true;
+                return { ...a, _conferido: true };
+              }
+            }
+            return a;
+          });
+
+          if (hasChanges) {
+            saved.assets = updatedAssets;
+            await saveInventory(saved);
+          }
+
           setInventory(prev => ({
             ...prev,
             ...saved,
@@ -146,6 +192,41 @@ const App: React.FC = () => {
           if (legacy) {
             const parsed = JSON.parse(legacy);
             if (parsed && parsed.assets && parsed.assets.length > 0) {
+              // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
+              const todayStr = '2026-03-16';
+              const yesterdayStr = '2026-03-15T12:00:00Z';
+              
+              parsed.assets = parsed.assets.map(a => {
+                const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+                if (isConferido) {
+                  let needsUpdate = false;
+                  if (!a._dataLeitura) {
+                    needsUpdate = true;
+                  } else {
+                    try {
+                      const d = new Date(a._dataLeitura);
+                      if (isNaN(d.getTime())) {
+                        needsUpdate = true;
+                      } else {
+                        const readingDate = d.toLocaleDateString('en-CA');
+                        if (readingDate < todayStr) {
+                          needsUpdate = true;
+                        }
+                      }
+                    } catch {
+                      needsUpdate = true;
+                    }
+                  }
+                  if (needsUpdate) {
+                    return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                  }
+                  if (!a._conferido) {
+                    return { ...a, _conferido: true };
+                  }
+                }
+                return a;
+              });
+
               setInventory(prev => ({ ...prev, ...parsed }));
               await saveInventory(parsed);
               setShowRecoveryToast(true);
@@ -343,20 +424,21 @@ const App: React.FC = () => {
       const assetCompKey = normalizeKey(a.EMPRESA || '');
       if (currentCompKey && assetCompKey !== currentCompKey) continue;
 
-      const effectiveLoc = (a._conferido && a._localMaster) ? a._localMaster : (a.ENDERECO || 'SEM LOCAL');
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const effectiveLoc = (isConferido && a._localMaster) ? a._localMaster : (a.ENDERECO || 'SEM LOCAL');
       const loc = String(effectiveLoc).trim().toUpperCase();
       if (loc) locationsSet.add(loc);
 
       const statusUpper = String(a.STATUS || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
       
-      if (isBaixado && !a._conferido) continue;
+      if (isBaixado && !isConferido) continue;
 
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       
       if (!isBaixado) stats[loc].total++;
       
-      if (a._conferido) {
+      if (isConferido) {
         stats[loc].checked++;
         if (isBaixado) stats[loc].total++;
       }
@@ -373,17 +455,18 @@ const App: React.FC = () => {
   const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
     const statusUpper = String(asset.STATUS || '').toUpperCase();
     const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+    const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
     
     // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
     // Se o item nasceu para ser etiquetado, o fato de ter sido etiquetado é a informação soberana.
     const originalEtq = normalizeKey(asset._plaquetaMaster || '');
     const needsLabel = originalEtq === 'ETIQUETAR';
     if (needsLabel) {
-      return asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
+      return isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
     }
 
     // 2. BAIXADO (Se não conferido)
-    if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
+    if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     
     // 3. ADOTADO EXTERNO (Empresa diferente)
     const assetCompKey = normalizeKey(asset.EMPRESA || '');

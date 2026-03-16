@@ -126,7 +126,7 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
 }: AssetCardProps) => {
-  const isConferido = !!asset._conferido;
+  const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
   const companyKey = useMemo(() => normalizeKeyFast(selectedCompany), [selectedCompany]);
   const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.EMPRESA), [asset.EMPRESA]);
@@ -139,10 +139,10 @@ const AssetCard = React.memo(({
   }, [statusUpper, asset.DATABAIXA]);
 
   const visualStatus = useMemo(() => {
-    if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
+    if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
 
-    if (!asset._conferido) {
+    if (!isConferido) {
       const needsLabel = normalizeKeyFast(asset.ETIQUETA) === 'ETIQUETAR';
       if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
       return TagInventario.PENDENTE;
@@ -510,13 +510,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+        const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
         
-        if (isBaixado && !a._conferido) continue;
+        if (isBaixado && !isConferido) continue;
 
         if (activeFilter === 'checked') {
-          if (a._conferido) result.push(a);
+          if (isConferido) result.push(a);
         } else {
-          if (!a._conferido) result.push(a);
+          if (!isConferido) result.push(a);
         }
       }
 

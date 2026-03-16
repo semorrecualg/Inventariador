@@ -206,16 +206,20 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
     return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
   }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
 
+  const isConferido = useMemo(() => {
+    return !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  }, [workingAsset._conferido, workingAsset.AUDITOR_STATUS_CONFERENCIA]);
+
   const tagColors = useMemo(() => {
     if (isBatch) return { bg: 'bg-amber-600', hex: '#d97706' };
-    const tag = workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE);
+    const tag = workingAsset.TAG_INVENTARIO || (isConferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE);
     const base = getTagColors(tag);
     // Se for baixado, vamos manter o cabeçalho vermelho ou com tom de alerta
     if (isBaixado) {
       return { bg: 'bg-red-600', hex: '#dc2626' };
     }
     return base;
-  }, [isBatch, workingAsset, isBaixado]);
+  }, [isBatch, workingAsset, isBaixado, isConferido]);
 
   const headerBg = tagColors.bg;
 
@@ -255,7 +259,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                 <div className={`w-1.5 h-1.5 rounded-full ${isBaixado ? 'bg-red-400 shadow-red-400/50' : 'bg-sky-400 shadow-sky-400/50'} shadow-sm`} />
                 <span className={`text-[10px] font-bold uppercase ${isBaixado ? 'text-red-100' : 'text-sky-300'} tracking-widest`}>
                   {isBaixado ? 'BAIXADO | ' : ''}
-                  {workingAsset.TAG_INVENTARIO || (workingAsset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
+                  {workingAsset.TAG_INVENTARIO || (isConferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
                 </span>
               </div>
             </div>
