@@ -372,6 +372,25 @@ const App: React.FC = () => {
   const toggleFullscreen = useCallback(() => {
     try {
       if (!document.fullscreenElement) {
+        // Verifica se o modo tela cheia é suportado/permitido no ambiente atual
+        const doc = document as Document & {
+          webkitFullscreenEnabled?: boolean;
+          mozFullScreenEnabled?: boolean;
+          msFullscreenEnabled?: boolean;
+        };
+
+        const isFullscreenEnabled = doc.fullscreenEnabled || 
+                                   doc.webkitFullscreenEnabled || 
+                                   doc.mozFullScreenEnabled || 
+                                   doc.msFullscreenEnabled;
+
+        if (!isFullscreenEnabled) {
+          console.warn("O modo tela cheia não está habilitado ou permitido neste ambiente (comum em visualizações dentro de iframes).");
+          // Ativamos o modo imersivo apenas no estado interno para ocultar elementos da UI se necessário
+          setInventory(prev => ({ ...prev, immersiveMode: true }));
+          return;
+        }
+
         const docEl = document.documentElement as HTMLElement & {
           webkitRequestFullScreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
           mozRequestFullScreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
@@ -382,7 +401,7 @@ const App: React.FC = () => {
 
         if (docEl.requestFullscreen) {
           docEl.requestFullscreen(options).catch((err: Error) => {
-            console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+            console.warn(`Falha ao solicitar tela cheia: ${err.message}. Isso pode ocorrer em ambientes de visualização.`);
           });
         } else if (docEl.webkitRequestFullScreen) {
           docEl.webkitRequestFullScreen(options);
