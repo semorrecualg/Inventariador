@@ -99,18 +99,18 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
   if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
-        <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-blue-100">
+        <div className="w-20 h-20 bg-accent-soft text-accent rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-accent/10">
           <AlertCircle size={32} />
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Registro via Protheus</h2>
-        <p className="text-slate-500 mt-4 text-xs font-medium leading-relaxed max-w-xs">
-          Nesta modalidade, o registro de novos usuários deve ser realizado diretamente no sistema <span className="text-blue-600 font-bold">Protheus</span>.
+        <h2 className="text-2xl font-bold text-ink uppercase tracking-tight">Registro via Protheus</h2>
+        <p className="text-ink-muted mt-4 text-xs font-medium leading-relaxed max-w-xs">
+          Nesta modalidade, o registro de novos usuários deve ser realizado diretamente no sistema <span className="text-accent font-bold">Protheus</span>.
           <br/><br/>
           Utilize suas credenciais corporativas para entrar.
         </p>
         <button 
           onClick={onGoToLogin}
-          className="mt-8 w-full max-w-xs bg-slate-900 text-white font-bold py-5 rounded-3xl shadow-lg hover:bg-slate-800 transition-all uppercase tracking-[0.2em] text-sm"
+          className="mt-8 w-full max-w-xs bg-accent text-white font-bold py-5 rounded-3xl shadow-lg hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
         >
           Voltar ao Login
         </button>
@@ -121,17 +121,17 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
   if (isSuccess) {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
-        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-emerald-100">
+        <div className="w-20 h-20 bg-accent-soft text-accent rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-accent/10">
           <Loader2 size={32} className="animate-spin" />
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Acesso Criado!</h2>
-        <p className="text-slate-500 mt-4 text-xs font-medium leading-relaxed max-w-xs">
+        <h2 className="text-2xl font-bold text-ink uppercase tracking-tight">Acesso Criado!</h2>
+        <p className="text-ink-muted mt-4 text-xs font-medium leading-relaxed max-w-xs">
           Seu acesso foi registrado com sucesso. <br/><br/>
           <span className="text-amber-600 font-bold uppercase tracking-widest">Importante:</span> <br/>
-          Verifique seu e-mail (<span className="text-slate-900 font-bold">{email}</span>) para confirmar o cadastro. 
+          Verifique seu e-mail (<span className="text-ink font-bold">{email}</span>) para confirmar o cadastro. 
           Não esqueça de olhar a pasta de <span className="text-amber-600 font-bold">SPAM</span>.
         </p>
-        <p className="mt-8 text-[10px] text-slate-400 uppercase tracking-widest animate-pulse">
+        <p className="mt-8 text-[10px] text-ink-muted uppercase tracking-widest animate-pulse">
           Redirecionando para o login...
         </p>
       </div>
@@ -144,27 +144,27 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
       <div className="mb-3 text-center">
         <div className="relative w-24 h-24 mx-auto mb-2">
           {/* Ícone SVG Customizado de Ativo Imobilizado */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-700 to-indigo-900 rounded-3xl shadow-xl transform -rotate-3"></div>
-          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-slate-100">
-            <AssetIcon className="w-14 h-14 text-blue-600" />
+          <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
+          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft">
+            <AssetIcon className="w-14 h-14 text-accent" />
           </div>
         </div>
-        <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">
-          GBR <span className="text-blue-600">AUDITORIA</span>
+        <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
+          GBR <span className="text-accent">AUDITORIA</span>
         </h1>
-        <p className="text-slate-400 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+        <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
           INVENTÁRIO DE ATIVO IMOBILIZADO
         </p>
       </div>
 
       <div className="max-w-sm mx-auto w-full">
-        <button onClick={onGoToLogin} className="mb-2 text-slate-400 flex items-center font-bold text-[7px] uppercase tracking-[0.2em] hover:text-sky-600 transition-colors">
+        <button onClick={onGoToLogin} className="mb-2 text-ink-muted flex items-center font-bold text-[7px] uppercase tracking-[0.2em] hover:text-accent transition-colors">
           <ChevronLeft size={12} className="mr-1" /> Voltar ao Login
         </button>
         
         {databaseMode === DatabaseMode.INTERNAL && (
-          <div className="mb-2 p-2 bg-blue-50 border border-blue-100 rounded-xl">
-            <p className="text-[7px] font-bold text-blue-700 uppercase tracking-widest leading-relaxed">
+          <div className="mb-2 p-2 bg-accent-soft border border-accent/10 rounded-xl">
+            <p className="text-[7px] font-bold text-accent uppercase tracking-widest leading-relaxed">
               Atenção: Área exclusiva para Administradores. Auditores são cadastrados no painel interno.
             </p>
           </div>
@@ -180,42 +180,42 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
         )}
 
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Username</label>
           <input 
             type="text" 
             required
             value={username}
             onChange={(e) => setUsername(e.target.value.toUpperCase())}
-            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold uppercase shadow-sm text-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold uppercase shadow-sm text-sm"
             placeholder="EX: JOAO.SILVA"
           />
         </div>
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
           <input 
             type="email" 
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
             placeholder="contato@gbr.com.br"
           />
         </div>
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Senha</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Senha</label>
           <input 
             type="password" 
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:border-sky-500 outline-none transition-all text-slate-900 font-bold shadow-sm text-sm"
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
             placeholder="••••••••"
           />
         </div>
         <button 
           type="submit"
           disabled={isLoading}
-          className="w-full bg-sky-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-sky-900/10 hover:bg-sky-700 active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
+          className="w-full bg-accent text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/10 hover:opacity-90 active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
             <>

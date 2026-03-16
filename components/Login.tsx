@@ -203,25 +203,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
       </div>
 
       <div className="mb-3 max-w-sm mx-auto w-full">
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-2 ml-1">Modalidade de Acesso</p>
-        <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
+        <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] mb-2 ml-1">Modalidade de Acesso</p>
+        <div className="flex p-1 bg-accent-soft rounded-2xl border border-accent/10">
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
           >
             <Server size={12} />
             <span>Interno</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
           >
             <Cloud size={12} />
             <span>Supabase</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
           >
             <ShieldCheck size={12} />
             <span>Protheus</span>
@@ -238,28 +238,28 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         )}
         
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">{config.userLabel}</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] ml-1">{config.userLabel}</label>
           <div className="relative">
             <input 
               type="text" 
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className={`w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm text-sm`}
+              className={`w-full pl-10 pr-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm`}
               placeholder={config.userPlaceholder}
             />
-            <UserCircle className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+            <UserCircle className="absolute left-3.5 top-1/2 -translate-y-1/2 text-accent/30" size={18} />
           </div>
         </div>
         
         <div className="space-y-1 animate-fadeIn">
-          <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] ml-1">{config.passLabel}</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] ml-1">{config.passLabel}</label>
           <input 
             type="password" 
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className={`w-full px-4 py-3 rounded-xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm text-sm`}
+            className={`w-full px-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm`}
             placeholder={config.passPlaceholder}
           />
         </div>
@@ -284,37 +284,37 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         <div>
           {databaseMode === DatabaseMode.INTERNAL ? (
             <div className="space-y-2">
-              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+              <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
                   <span className="text-accent">Auditores:</span> Solicitem suas credenciais ao Administrador.
                 </p>
               </div>
               <button 
                 onClick={onNavigateToRegister}
-                className="text-slate-400 font-bold uppercase text-[9px] tracking-widest hover:text-blue-600 transition-colors"
+                className="text-ink-muted font-bold uppercase text-[9px] tracking-widest hover:text-accent transition-colors"
               >
                 Administradores: <span className="underline">Registrar Unidade</span>
               </button>
             </div>
           ) : databaseMode === DatabaseMode.SUPABASE ? (
             <div className="space-y-1">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Novo no sistema Cloud?</p>
+              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Novo no sistema Cloud?</p>
               <button 
                 onClick={onNavigateToRegister}
-                className="text-emerald-600 font-bold uppercase text-[10px] tracking-widest hover:underline"
+                className="text-accent font-bold uppercase text-[10px] tracking-widest hover:underline"
               >
                 Cadastre-se Agora
               </button>
             </div>
           ) : (
             <div className="pt-1">
-              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Acesso Restrito ERP Protheus</p>
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Acesso Restrito ERP Protheus</p>
             </div>
           )}
         </div>
         
-        <div className="pt-3 border-t border-slate-100">
-          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.3em]">
+        <div className="pt-3 border-t border-accent/10">
+          <p className="text-[8px] font-bold text-ink-muted uppercase tracking-[0.3em]">
             GBR Intelligent Systems
           </p>
         </div>

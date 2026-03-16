@@ -206,21 +206,21 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
               <ListChecks size={20} />
             </button>
 
-            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-amber-50 text-amber-500 border-amber-200' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-accent-soft text-accent border-accent/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <Filter size={20} />
             </button>
           </div>
         </div>
 
-        <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight leading-none mb-6">Bens a Etiquetar</h1>
+        <h1 className="text-2xl font-bold text-ink uppercase tracking-tight leading-none mb-6">Bens a Etiquetar</h1>
 
         {isFilterOpen && (
-          <div className="space-y-4 mb-6 animate-slideUp bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-inner">
+          <div className="space-y-4 mb-6 animate-slideUp bg-accent-soft p-6 rounded-3xl border border-accent/10 shadow-inner">
             <div className="flex items-center justify-between mb-2 px-1">
-               <span className="text-[10px] font-bold uppercase text-amber-500 tracking-[0.2em]">Painel Inteligente</span>
+               <span className="text-[10px] font-bold uppercase text-accent tracking-[0.2em]">Painel Inteligente</span>
                <div className="flex space-x-3">
                  {activeTab === 'pending' && filteredAssets.length > 1 && !isBatchMode && (
-                    <button onClick={handleConfirmAllFiltered} className="text-[9px] font-bold text-violet-500 uppercase tracking-widest px-4 py-2 bg-violet-50 border border-violet-100 rounded-xl active:scale-95 transition-all shadow-sm">Conferir Todos</button>
+                    <button onClick={handleConfirmAllFiltered} className="text-[9px] font-bold text-accent uppercase tracking-widest px-4 py-2 bg-white border border-accent/10 rounded-xl active:scale-95 transition-all shadow-sm">Conferir Todos</button>
                  )}
                  <button onClick={() => { setAdvDesc(''); setAdvCC(''); setAdvSupplier(''); setAdvDateStart(''); setAdvDateEnd(''); }} className="flex items-center space-x-2 text-[10px] font-bold text-red-500 uppercase tracking-widest px-5 py-3 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all shadow-sm">
                    <Trash2 size={16} /> <span>Limpar</span>
@@ -231,26 +231,26 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             {/* BARRA DE AÇÃO LOTE ETIQUETAR - TOPO PARA FLUIDEZ */}
             {isBatchMode && selectedIds.size > 0 && (
               <div className="mb-4 animate-slideDown">
-                 <div className="bg-amber-400 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
+                 <div className="bg-accent p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
                     <div className="flex items-center space-x-3 pl-2">
                        <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
-                       <span className="text-[9px] font-bold text-amber-50 uppercase tracking-widest">Selecionados</span>
+                       <span className="text-[9px] font-bold text-white/80 uppercase tracking-widest">Selecionados</span>
                     </div>
                     <div className="flex items-center space-x-2">
                        <button onClick={() => setSelectedIds(new Set())} className="p-2 bg-black/20 text-white rounded-xl"><X size={16} /></button>
-                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-amber-500 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
+                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-accent rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
                     </div>
                  </div>
               </div>
             )}
 
             <div className="space-y-2">
-              <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Busca (Descrição/Serial/NF/Reg)</label>
+              <label className="text-[9px] font-bold uppercase text-ink-muted tracking-widest ml-1 block">Busca (Descrição/Serial/NF/Reg)</label>
               <div className="relative">
-                <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-slate-200 pl-4 pr-12 py-3 rounded-2xl text-[11px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm transition-all" />
+                <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-accent/10 pl-4 pr-12 py-3 rounded-2xl text-[11px] font-bold uppercase text-ink outline-none focus:border-accent shadow-sm transition-all" />
                 <button 
                   onClick={() => setIsScannerOpen(true)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-400 text-white rounded-xl shadow-md active:scale-95 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-accent text-white rounded-xl shadow-md active:scale-95 transition-all"
                 >
                   <Camera size={14} />
                 </button>
@@ -259,15 +259,15 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Centro de Custo</label>
-                <select value={advCC} onChange={(e) => setAdvCC(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm">
+                <label className="text-[9px] font-bold uppercase text-ink-muted tracking-widest ml-1 block">Centro de Custo</label>
+                <select value={advCC} onChange={(e) => setAdvCC(e.target.value)} className="w-full bg-white border border-accent/10 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-ink outline-none focus:border-accent shadow-sm">
                   <option value="">TODOS</option>
                   {restrictedCentrosDeCusto.map(cc => <option key={cc} value={cc}>{cc}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Fornecedor</label>
-                <select value={advSupplier} onChange={(e) => setAdvSupplier(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm">
+                <label className="text-[9px] font-bold uppercase text-ink-muted tracking-widest ml-1 block">Fornecedor</label>
+                <select value={advSupplier} onChange={(e) => setAdvSupplier(e.target.value)} className="w-full bg-white border border-accent/10 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-ink outline-none focus:border-accent shadow-sm">
                   <option value="">TODOS</option>
                   {restrictedSuppliersList.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -277,8 +277,8 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
         )}
 
         <div className="flex space-x-3">
-          <button onClick={() => setActiveTab('pending')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'pending' ? 'bg-amber-400 text-white border-amber-400 shadow-lg shadow-amber-900/10' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Pendentes</button>
-          <button onClick={() => setActiveTab('checked')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'checked' ? 'bg-violet-400 text-white border-violet-400 shadow-lg shadow-violet-900/10' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Etiquetados</button>
+          <button onClick={() => setActiveTab('pending')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'pending' ? 'bg-accent text-white border-accent shadow-lg shadow-accent/20' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Pendentes</button>
+          <button onClick={() => setActiveTab('checked')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'checked' ? 'bg-indigo-400 text-white border-indigo-400 shadow-lg shadow-indigo-900/10' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Etiquetados</button>
         </div>
       </div>
 
@@ -342,7 +342,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
                     TAG_INVENTARIO: TagInventario.ETIQUETADO,
                     _plaquetado: true
                   });
-                }} className="absolute bottom-6 right-6 w-14 h-14 bg-amber-600 text-white rounded-2xl flex items-center justify-center shadow-xl shadow-amber-900/20 active:scale-90 transition-all">
+                }} className="absolute bottom-6 right-6 w-14 h-14 bg-accent text-white rounded-2xl flex items-center justify-center shadow-xl shadow-accent/20 active:scale-90 transition-all">
                   <Check size={32} strokeWidth={3} />
                 </button>
               )}

@@ -767,9 +767,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       <>
         {/* Modal de Item Duplicado */}
         {duplicateAsset && createPortal(
-          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-amber-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-amber-600 p-8 text-white text-center">
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-amber-500 p-8 text-white text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                   <AlertTriangle size={40} className="text-white" />
                 </div>
@@ -778,24 +778,24 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
               
               <div className="p-8 space-y-4">
-                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className="text-xl font-black text-white font-mono">{duplicateAsset.ETIQUETA}</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
-                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local Registrado:</span>
-                    <span className="text-[9px] font-black text-amber-500 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
+                <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
+                  <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
+                  <p className="text-xl font-black text-ink font-mono">{duplicateAsset.ETIQUETA}</p>
+                  <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
+                  <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
+                    <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local Registrado:</span>
+                    <span className="text-[9px] font-black text-amber-600 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
                   </div>
                 </div>
 
-                <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-tight leading-relaxed">
+                <p className="text-[10px] font-bold text-ink-muted text-center uppercase tracking-tight leading-relaxed">
                   Deseja confirmar o registro novamente para a localização atual?
                 </p>
 
                 <div className="flex space-x-3 pt-2">
                   <button 
                     onClick={() => setDuplicateAsset(null)} 
-                    className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
                     Não
                   </button>
@@ -808,7 +808,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                       });
                       setDuplicateAsset(null);
                     }} 
-                    className="flex-1 py-4 bg-amber-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-amber-500 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
                   >
                     Sim, Confirmar
                   </button>
@@ -821,9 +821,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
         {/* Modal de Confirmação de Item Lido */}
         {scannedAsset && createPortal(
-          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-blue-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-blue-600 p-8 text-white text-center">
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-accent p-8 text-white text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                   <ShieldCheck size={40} className="text-white" />
                 </div>
@@ -832,20 +832,20 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
               
               <div className="p-8 space-y-4">
-                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className="text-xl font-black text-white font-mono">{scannedAsset.ETIQUETA}</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
-                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Localização Atual:</span>
-                    <span className="text-[9px] font-black text-blue-500 uppercase">{selectedLocation}</span>
+                <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
+                  <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
+                  <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
+                  <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                  <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
+                    <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Localização Atual:</span>
+                    <span className="text-[9px] font-black text-accent uppercase">{selectedLocation}</span>
                   </div>
                 </div>
 
                 <div className="flex space-x-3 pt-2">
                   <button 
                     onClick={() => setScannedAsset(null)} 
-                    className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
                     Cancelar
                   </button>
@@ -871,7 +871,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                       }
                       setScannedAsset(null);
                     }} 
-                    className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
                   >
                     Confirmar
                   </button>
@@ -884,9 +884,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
         {/* Modal de Item Não Localizado */}
         {scannedResult && !scannedAsset && createPortal(
-          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-            <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-orange-600 p-8 text-white text-center">
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-orange-500 p-8 text-white text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                   <AlertTriangle size={40} className="text-white" />
                 </div>
@@ -895,9 +895,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               </div>
               
               <div className="p-8 space-y-4">
-                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Código Lido</p>
-                  <p className="text-xl font-black text-white font-mono">{scannedResult}</p>
+                <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10 text-center">
+                  <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Código Lido</p>
+                  <p className="text-xl font-black text-ink font-mono">{scannedResult}</p>
                 </div>
 
                 <div className="flex flex-col space-y-3 pt-2">
@@ -917,14 +917,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                       setIsManualEntryOpen(true);
                       setScannedResult(null);
                     }} 
-                    className="w-full py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2"
+                    className="w-full py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2 shadow-lg shadow-accent/20"
                   >
                     <FilePlus2 size={16} />
                     <span>Incluir Manual</span>
                   </button>
                   <button 
                     onClick={() => setScannedResult(null)} 
-                    className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
                     Voltar ao Scanner
                   </button>
@@ -1491,10 +1491,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {/* REMOVIDO BARRA INFERIOR PARA EVITAR SCROLL */}
 
       {isManualEntryOpen && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-start justify-center p-4 sm:p-6 bg-slate-950/95 backdrop-blur-md animate-fadeIn overflow-y-auto pt-10 sm:pt-20">
+        <div className="fixed inset-0 z-[10000] flex items-start justify-center p-4 sm:p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn overflow-y-auto pt-10 sm:pt-20">
           <div className="absolute inset-0" onClick={() => setIsManualEntryOpen(false)} />
-          <div className="bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-orange-500/30 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col mb-20">
-            <div className="bg-orange-600 px-8 py-6 text-white shrink-0">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col mb-20">
+            <div className="bg-accent px-8 py-6 text-white shrink-0">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2 bg-black/20 px-4 py-2 rounded-full border border-white/10">
                   <FilePlus2 size={14} className="fill-white" />
@@ -1509,65 +1509,65 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             <div className="flex-1 p-8 space-y-6 pb-[40vh]">
                <div className="space-y-4">
                   <div>
-                    <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
+                    <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
                     <input 
                       type="text" 
                       value={manualAsset.ETIQUETA || ''} 
                       onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-black font-mono text-lg outline-none focus:border-orange-500"
+                      className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-black font-mono text-lg outline-none focus:border-accent"
                     />
                   </div>
                   <div>
-                    <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Descrição do Ativo</label>
+                    <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Descrição do Ativo</label>
                     <textarea 
                       rows={3}
                       value={manualAsset.DESCRICAODOATIVO || ''} 
                       onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500 uppercase"
+                      className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent uppercase"
                       placeholder="DESCREVA O BEM..."
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Nº de Série</label>
+                      <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Nº de Série</label>
                       <input 
                         type="text" 
                         value={manualAsset.SERIAL || ''} 
                         onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500"
+                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent"
                       />
                     </div>
                     <div>
-                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Quantidade</label>
+                      <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Quantidade</label>
                       <input 
                         type="number" 
                         value={manualAsset.QT || 1} 
                         onChange={(e) => setManualAsset({...manualAsset, QT: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold text-xs outline-none focus:border-orange-500"
+                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent"
                       />
                     </div>
                   </div>
-                  <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-2xl space-y-2">
+                  <div className="p-4 bg-accent-soft border border-accent/10 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Empresa:</span>
-                      <span className="text-[9px] font-black text-orange-500 uppercase">{manualAsset.EMPRESA}</span>
+                      <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Empresa:</span>
+                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.EMPRESA}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local:</span>
-                      <span className="text-[9px] font-black text-orange-500 uppercase">{manualAsset.ENDERECO}</span>
+                      <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local:</span>
+                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.ENDERECO}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Status:</span>
-                      <span className="text-[8px] font-black text-orange-500 uppercase text-right leading-tight">NOVO ITEM (MANUAL)</span>
+                      <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Status:</span>
+                      <span className="text-[8px] font-black text-accent uppercase text-right leading-tight">NOVO ITEM (MANUAL)</span>
                     </div>
                   </div>
                </div>
             </div>
 
-            <div className="p-8 bg-slate-900 border-t border-slate-800 shrink-0 sticky bottom-0">
+            <div className="p-8 bg-white border-t border-accent/10 shrink-0 sticky bottom-0">
                <button 
                  onClick={saveManualEntry}
-                 className="w-full bg-orange-600 text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all border-b-4 border-orange-800"
+                 className="w-full bg-accent text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all shadow-accent/20"
                >
                  Salvar e Conferir
                </button>

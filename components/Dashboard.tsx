@@ -225,34 +225,34 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         
         {/* BENTO GRID - KPI PRINCIPAIS */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2 bg-slate-900 rounded-[2rem] p-6 text-white relative overflow-hidden shadow-xl shadow-slate-900/20">
-            <div className="absolute top-0 right-0 w-48 h-48 bg-blue-500/10 rounded-full -mr-16 -mt-16 blur-3xl" />
+          <div className="col-span-2 bg-accent rounded-[2rem] p-6 text-white relative overflow-hidden shadow-xl shadow-accent/20">
+            <div className="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full -mr-16 -mt-16 blur-3xl" />
             <div className="relative z-10">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-2">
                   <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center backdrop-blur-md">
-                    <TrendingUp size={16} className="text-blue-400" />
+                    <TrendingUp size={16} className="text-white" />
                   </div>
-                  <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/50">Eficiência Global</span>
+                  <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/70">Eficiência Global</span>
                 </div>
-                <div className="bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">v24.50 PRO</span>
+                <div className="bg-white/20 px-2 py-0.5 rounded-full border border-white/30">
+                  <span className="text-[8px] font-bold text-white uppercase tracking-widest">v24.50 PRO</span>
                 </div>
               </div>
               
               <div className="flex items-end justify-between">
                 <div>
                   <h3 className="text-4xl font-bold tracking-tighter mb-1">{stats.percConferido}%</h3>
-                  <p className="text-[9px] font-bold text-white/40 uppercase tracking-widest">Progresso da Base Ativa</p>
+                  <p className="text-[9px] font-bold text-white/60 uppercase tracking-widest">Progresso da Base Ativa</p>
                 </div>
                 <div className="text-right">
                   <span className="text-2xl font-bold text-white/90">{stats.conferidoAtivos}</span>
-                  <span className="text-sm font-bold text-white/30 ml-1">/ {stats.totalAtivos}</span>
+                  <span className="text-sm font-bold text-white/40 ml-1">/ {stats.totalAtivos}</span>
                 </div>
               </div>
               
-              <div className="mt-6 h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-1000 ease-out" style={{ width: `${stats.percConferido}%` }} />
+              <div className="mt-6 h-2 w-full bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-white transition-all duration-1000 ease-out" style={{ width: `${stats.percConferido}%` }} />
               </div>
             </div>
           </div>
@@ -354,12 +354,12 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         {/* INTEGRIDADE DA BASE */}
         <section className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
           <div className="flex items-center space-x-2 mb-1">
-            <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-600">
+            <div className="w-8 h-8 bg-accent-soft rounded-lg flex items-center justify-center text-accent">
               <ShieldAlert size={16} />
             </div>
             <div>
-              <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Integridade da Base</h3>
-              <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Análise de Duplicidade v24</p>
+              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Integridade da Base</h3>
+              <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Análise de Duplicidade v24</p>
             </div>
           </div>
 
@@ -367,55 +367,55 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ÚNICO', 'PLAQUETAS_UNICAS')}>
               <div className="flex items-center space-x-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Plaquetas Únicas</span>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Plaquetas Únicas</span>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-900">{stats.unico}</span>
-                <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="text-xs font-bold text-ink">{stats.unico}</span>
+                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
 
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO', 'DUPLICIDADES_INTERNAS')}>
               <div className="flex items-center space-x-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Etiqueta +1 Registro</span>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Etiqueta +1 Registro</span>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-900">{stats.dupInterna}</span>
-                <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="text-xs font-bold text-ink">{stats.dupInterna}</span>
+                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
 
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => (a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && String(a.ETIQUETA || '').toUpperCase() !== 'ETIQUETAR') || !a.ETIQUETA, 'SEM_IDENTIFICACAO')}>
               <div className="flex items-center space-x-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Sem Identificação</span>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Sem Identificação</span>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-900">{stats.semId}</span>
-                <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="text-xs font-bold text-ink">{stats.semId}</span>
+                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           </div>
         </section>
 
         {/* RESUMO CONTÁBIL */}
-        <section className="bg-slate-50 border border-slate-200 rounded-[2rem] p-6 shadow-inner space-y-4">
+        <section className="bg-accent-soft border border-accent/10 rounded-[2rem] p-6 shadow-inner space-y-4">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-slate-600 border border-slate-200 shadow-sm">
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-accent border border-accent/10 shadow-sm">
               <Activity size={16} />
             </div>
-            <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Resumo Contábil</h3>
+            <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Resumo Contábil</h3>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col">
-              <span className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1">Registros Ativos</span>
-              <span className="text-xl font-bold text-slate-900">{stats.countAtivos}</span>
+              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Registros Ativos</span>
+              <span className="text-xl font-bold text-ink">{stats.countAtivos}</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1">Registros Baixados</span>
-              <span className="text-xl font-bold text-slate-900">{stats.countBaixados}</span>
+              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Registros Baixados</span>
+              <span className="text-xl font-bold text-ink">{stats.countBaixados}</span>
             </div>
           </div>
         </section>
@@ -424,37 +424,37 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       {/* OVERLAY EXPLICATIVO (HINT) */}
       {hintOverlay && (
         <div 
-          className="fixed inset-0 z-[500] bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-8 animate-fadeIn"
+          className="fixed inset-0 z-[500] bg-slate-950/40 backdrop-blur-md flex items-center justify-center p-8 animate-fadeIn"
           onClick={() => setHintOverlay(null)}
         >
           <div 
             className="bg-white w-full max-w-sm rounded-[2.5rem] p-10 shadow-2xl animate-slideUp relative overflow-hidden modern-card"
             onClick={e => e.stopPropagation()}
           >
-            <div className="absolute top-0 left-0 w-full h-2.5 bg-sky-600" />
+            <div className="absolute top-0 left-0 w-full h-2.5 bg-accent" />
             <button 
               onClick={() => setHintOverlay(null)}
-              className="absolute top-8 right-8 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-400 active:scale-90 shadow-sm"
+              className="absolute top-8 right-8 p-3 bg-accent-soft border border-accent/10 rounded-2xl text-accent active:scale-90 shadow-sm"
             >
               <X size={20} />
             </button>
             
             <div className="flex flex-col items-center text-center mb-8">
-              <div className="w-20 h-20 bg-sky-50 rounded-[2rem] flex items-center justify-center text-sky-600 mb-6 border border-sky-100 shadow-sm">
+              <div className="w-20 h-20 bg-accent-soft rounded-[2rem] flex items-center justify-center text-accent mb-6 border border-accent/10 shadow-sm">
                 <Info size={36} />
               </div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">Critério de Auditoria</span>
-              <h3 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">{hintOverlay.label}</h3>
+              <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-2">Critério de Auditoria</span>
+              <h3 className="text-2xl font-bold text-ink uppercase tracking-tight">{hintOverlay.label}</h3>
             </div>
 
-            <p className="text-sm font-medium text-slate-600 leading-relaxed text-center italic px-2">
+            <p className="text-sm font-medium text-ink-muted leading-relaxed text-center italic px-2">
               &quot;{hintOverlay.text}&quot;
             </p>
 
-            <div className="mt-10 pt-8 border-t border-slate-100 flex justify-center">
+            <div className="mt-10 pt-8 border-t border-accent/10 flex justify-center">
               <button 
                 onClick={() => setHintOverlay(null)}
-                className="w-full py-5 bg-slate-900 text-white rounded-2xl text-[11px] font-bold uppercase tracking-[0.2em] active:scale-95 shadow-lg"
+                className="w-full py-5 bg-accent text-white rounded-2xl text-[11px] font-bold uppercase tracking-[0.2em] active:scale-95 shadow-lg shadow-accent/20"
               >
                 Entendido
               </button>

@@ -117,6 +117,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <Settings size={20} />
             </button>
           )}
+          <button 
+            onClick={onLogout} 
+            className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-500 active:scale-90 transition-all shadow-sm hover:bg-white"
+            title="Sair do Sistema"
+          >
+            <LogOut size={20} />
+          </button>
         </div>
       </div>
 
@@ -192,12 +199,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </button>
       </div>
 
-      <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between shadow-sm">
-        <button onClick={onLogout} className="flex items-center text-slate-400 hover:text-red-500 transition-colors font-bold uppercase text-[9px] tracking-widest">
-          <LogOut size={16} className="mr-2" />
-          <span>Sair</span>
-        </button>
-        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.2em]">GBR Intelligent Systems</span>
+      <div className="p-3 bg-white border-t border-slate-100 flex items-center justify-center">
+        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">GBR Intelligent Systems</span>
       </div>
 
       {isAdminMenuOpen && (
@@ -207,7 +210,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <div className="w-full max-w-sm space-y-3">
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-sky-50 text-sky-600 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-sky-100 shadow-lg">
+              <div className="w-16 h-16 bg-accent-soft text-accent rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent/10 shadow-lg">
                 <ShieldCheck size={32} />
               </div>
               <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Painel Administrativo</h2>
@@ -216,7 +219,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center mr-4 border border-cyan-100"><SlidersHorizontal size={16} /></div>
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><SlidersHorizontal size={16} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Configurar Campos</h4>
                   <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Controle de Edição</p>
@@ -224,7 +227,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.QR_CODE_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center mr-4 border border-purple-100"><QrCode size={16} /></div>
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><QrCode size={16} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Configurar QR Code</h4>
                   <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Definir campos do QR</p>
@@ -363,11 +366,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
           
           <div className="w-full max-w-sm space-y-4">
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-blue-600 text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-blue-500 shadow-xl shadow-blue-500/20">
+              <div className="w-16 h-16 bg-accent text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent shadow-xl shadow-accent/20">
                 <BarChart3 size={32} />
               </div>
               <h2 className="text-xl font-bold text-white uppercase tracking-tight">Análise e Painéis</h2>
-              <p className="text-[9px] font-bold text-blue-400 uppercase tracking-[0.3em] mt-1.5">Indicadores de Performance</p>
+              <p className="text-[9px] font-bold text-accent uppercase tracking-[0.3em] mt-1.5 opacity-70">Indicadores de Performance</p>
             </div>
 
             <div className="space-y-3">
@@ -376,7 +379,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.DASHBOARD); }} 
                 className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
               >
-                <div className="w-10 h-10 bg-cyan-500/20 text-cyan-400 rounded-lg flex items-center justify-center mr-4 border border-cyan-500/30">
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
                   <BarChart3 size={20} />
                 </div>
                 <div className="flex-1">
@@ -391,7 +394,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.GLOBAL_PERFORMANCE); }} 
                 className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
               >
-                <div className="w-10 h-10 bg-amber-500/20 text-amber-400 rounded-lg flex items-center justify-center mr-4 border border-amber-500/30">
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
                   <TrendingUp size={20} />
                 </div>
                 <div className="flex-1">
@@ -417,18 +420,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
           
           <div className="w-full max-w-sm space-y-4">
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-orange-500 text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-orange-400 shadow-xl shadow-orange-500/20">
+              <div className="w-16 h-16 bg-accent text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent shadow-xl shadow-accent/20">
                 <DatabaseZap size={32} />
               </div>
               <h2 className="text-xl font-bold text-white uppercase tracking-tight">Gestão e Manutenção</h2>
-              <p className="text-[9px] font-bold text-orange-400 uppercase tracking-[0.3em] mt-1.5">Operações de Banco de Dados</p>
+              <p className="text-[9px] font-bold text-accent uppercase tracking-[0.3em] mt-1.5 opacity-70">Operações de Banco de Dados</p>
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
               {/* Modalidade de Acesso movida para cá */}
               <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl shadow-sm mb-3">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center mr-4 border border-blue-500 shadow-sm shadow-blue-500/20"><Database size={16} /></div>
+                  <div className="w-8 h-8 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30 shadow-sm"><Database size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Modalidade de Acesso</h4>
                     <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Configuração de Banco de Dados</p>
@@ -437,13 +440,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="space-y-2">
                   <button 
                     onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-slate-600/20 border-slate-500 text-slate-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
                   >
                     <div className="flex items-center">
                       <Server size={14} className="mr-3" />
                       <span>1) Banco Interno Independente</span>
                     </div>
-                    {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-blue-400 rounded-full shadow-[0_0_8px_rgba(96,165,250,0.8)]" />}
+                    {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />}
                   </button>
                   
                   <button 
@@ -468,15 +471,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     {databaseMode === DatabaseMode.PROTHEUS_SUPABASE && <div className="w-2 h-2 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(129,140,248,0.8)]" />}
                   </button>
                 </div>
-                <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                  <p className="text-[7px] font-bold text-blue-300 uppercase leading-relaxed tracking-wide">
+                <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">
+                  <p className="text-[7px] font-bold text-accent uppercase leading-relaxed tracking-wide opacity-80">
                     Nota: A alteração da modalidade afeta o método de login e a sincronização de dados.
                   </p>
                 </div>
               </div>
 
               <button onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
-                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><Users size={20} /></div>
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Users size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Acessos</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Gerir Usuários</p>
@@ -484,7 +487,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button disabled={!hasData} onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left">
-                <div className="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-lg flex items-center justify-center mr-4 border border-emerald-500/30"><Download size={20} /></div>
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Download size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar base de dados</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Exportar XLS</p>
@@ -495,11 +498,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 setIsDataMenuOpen(false); 
                 setIsAdminMenuOpen(false);
                 onNavigate(AppScreen.LOAD_DATABASE); 
-              }} className="w-full flex items-center p-4 bg-sky-600 text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-sky-600/20">
+              }} className="w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20">
                 <div className="w-10 h-10 bg-white/20 text-white rounded-lg flex items-center justify-center mr-4"><DatabaseZap size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold uppercase tracking-tight">Carga Expert</h4>
-                  <p className="text-[8px] font-bold text-sky-100 uppercase tracking-widest mt-0.5">Importar Base Master</p>
+                  <p className="text-[8px] font-bold text-white/70 uppercase tracking-widest mt-0.5">Importar Base Master</p>
                 </div>
               </button>
 

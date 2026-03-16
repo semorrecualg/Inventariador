@@ -21,21 +21,21 @@
 
 .theme-supabase {
   /* Supabase (Emerald) */
-  --accent: #059669;
+  --accent: #10B981;
   --accent-soft: #ECFDF5;
   --bg-main: #F0FDF4;
 }
 
 .theme-protheus {
   /* Protheus (Indigo) */
-  --accent: #4F46E5;
+  --accent: #6366F1;
   --accent-soft: #EEF2FF;
   --bg-main: #F5F7FF;
 }
 
 .theme-internal {
   /* Interno (Slate) */
-  --accent: #475569;
+  --accent: #64748B;
   --accent-soft: #F1F5F9;
   --bg-main: #F8FAFC;
 }
