@@ -114,14 +114,22 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   );
 };
 
+const normalizeKeyFast = (s: string | null | undefined) => {
+  if (!s) return '';
+  return s.toString().toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
+};
+
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
-  const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
-  const companyKey = normalize(selectedCompany || '');
-  const assetCompanyKey = normalize(asset.EMPRESA || '');
+  const companyKey = useMemo(() => normalizeKeyFast(selectedCompany), [selectedCompany]);
+  const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.EMPRESA), [asset.EMPRESA]);
   const isDifferentCompany = selectedCompany && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
@@ -135,32 +143,32 @@ const AssetCard = React.memo(({
     if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
 
     if (!asset._conferido) {
-      const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
+      const needsLabel = normalizeKeyFast(asset.ETIQUETA) === 'ETIQUETAR';
       if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
       return TagInventario.PENDENTE;
     }
 
-    const wasFaltaEtiquetar = normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
-    if (wasFaltaEtiquetar && normalize(asset.ETIQUETA || '') !== 'ETIQUETAR') {
+    const wasFaltaEtiquetar = normalizeKeyFast(asset._plaquetaMaster) === 'ETIQUETAR';
+    if (wasFaltaEtiquetar && normalizeKeyFast(asset.ETIQUETA) !== 'ETIQUETAR') {
       return TagInventario.ETIQUETADO;
     }
 
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
     if (asset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return TagInventario.RE_ADOTADO;
 
-    const currentEtq = normalize(asset.ETIQUETA || "");
-    const masterEtq = normalize(asset._plaquetaMaster || "");
+    const currentEtq = normalizeKeyFast(asset.ETIQUETA);
+    const masterEtq = normalizeKeyFast(asset._plaquetaMaster);
     if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
       return TagInventario.DIVERGENCIA;
     }
 
-    const targetLocKey = normalize(selectedLocation || "");
-    const effectiveLocKey = normalize(asset._localMaster || asset.ENDERECO || ""); 
+    const targetLocKey = normalizeKeyFast(selectedLocation);
+    const effectiveLocKey = normalizeKeyFast(asset._localMaster || asset.ENDERECO); 
 
-    if (effectiveLocKey === targetLocKey && normalize(asset.ENDERECO || "") === targetLocKey) return TagInventario.CONFERIDO;
+    if (effectiveLocKey === targetLocKey && normalizeKeyFast(asset.ENDERECO) === targetLocKey) return TagInventario.CONFERIDO;
     return TagInventario.ADOTADO;
 
-  }, [asset, selectedLocation, isDifferentCompany, normalize]);
+  }, [asset, selectedLocation, isDifferentCompany, isBaixado]);
 
   const getColors = (tag: TagInventario) => {
     switch (tag) {
@@ -487,91 +495,92 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
-    const term = normalizeKey(committedSearch);
-    const currentLocKey = normalizeKey(selectedLocation);
-    const currentCompKey = normalizeKey(selectedCompany || '');
+    const term = normalizeKeyFast(committedSearch);
+    const currentLocKey = normalizeKeyFast(selectedLocation);
+    const currentCompKey = normalizeKeyFast(selectedCompany || '');
 
-    // Se NÃO tem termo de busca, aplicamos Regra A: Esconde Baixados
     if (!term) {
-      return assets.filter(a => {
-        // REGRA SÊNIOR v24.5: Se o item já foi conferido, usamos o _localMaster (onde foi encontrado)
-        // Se não, usamos o ENDERECO original.
+      const result = [];
+      for (let i = 0; i < assets.length; i++) {
+        const a = assets[i];
         const effectiveLoc = a._localMaster || a.ENDERECO || "";
-        const locKey = normalizeKey(effectiveLoc);
+        const locKey = normalizeKeyFast(effectiveLoc);
+        
+        if (locKey !== currentLocKey) continue;
+
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         
-        // REGRA A: Baixado PENDENTE não aparece na listagem um clique
-        if (isBaixado && !a._conferido) return false; 
+        if (isBaixado && !a._conferido) continue;
 
-        if (activeFilter === 'checked') return !!a._conferido && locKey === currentLocKey;
-        return !a._conferido && locKey === currentLocKey;
-      }).sort((a, b) => {
+        if (activeFilter === 'checked') {
+          if (a._conferido) result.push(a);
+        } else {
+          if (!a._conferido) result.push(a);
+        }
+      }
+
+      return result.sort((a, b) => {
         if (activeFilter === 'checked') {
           const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
           const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
           if (dateA !== dateB) return dateB - dateA;
-          
-          const etqA = String(a.ETIQUETA || '').padStart(10, '0');
-          const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-          return etqB.localeCompare(etqA, undefined, { numeric: true });
         }
         
         const etqA = String(a.ETIQUETA || '').padStart(10, '0');
         const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-        return etqA.localeCompare(etqB, undefined, { numeric: true });
+        return activeFilter === 'checked' 
+          ? etqB.localeCompare(etqA, undefined, { numeric: true })
+          : etqA.localeCompare(etqB, undefined, { numeric: true });
       });
     }
 
-    // REGRA B e C: Quando há termo de busca
-    // 1. Tentar buscar na empresa atual (incluindo baixados agora que houve busca manual)
-    const companyMatches = assets.filter(a => 
-      normalizeKey(a.ETIQUETA || '') === term || // Busca exata por etiqueta tem prioridade
-      normalizeKey(a.ETIQUETA || '').includes(term)
-    );
+    const companyMatches = [];
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      const etq = normalizeKeyFast(a.ETIQUETA || '');
+      if (etq === term || etq.includes(term)) {
+        companyMatches.push(a);
+      }
+    }
 
-    // 2. REGRA C: Buscar em outras empresas se o número de ETIQUETA for idêntico
-    // Mesmo que tenha encontrado na empresa atual, se o usuário digitou uma etiqueta, 
-    // devemos mostrar se ela existe em outro lugar para análise de duplicidade/transferência.
-    let globalMatches: Asset[] = [];
+    const globalMatches: Asset[] = [];
     if (term.length >= 3) {
-      globalMatches = allAssets.filter(a => {
-        const etq = normalizeKey(a.ETIQUETA || '');
-        const assetCompKey = normalizeKey(a.EMPRESA || '');
-        
-        // Se for a mesma empresa, já tratamos em companyMatches
-        if (assetCompKey === currentCompKey) return false;
+      for (let i = 0; i < allAssets.length; i++) {
+        const a = allAssets[i];
+        const assetCompKey = normalizeKeyFast(a.EMPRESA || '');
+        if (assetCompKey === currentCompKey) continue;
 
-        // Busca exata por etiqueta em outras empresas
-        return etq === term;
-      });
+        const etq = normalizeKeyFast(a.ETIQUETA || '');
+        if (etq === term) {
+          globalMatches.push(a);
+        }
+      }
     }
 
-    // Combinar resultados, removendo duplicatas por ID (caso ocorra)
     const combined = [...companyMatches];
-    globalMatches.forEach(gm => {
-      if (!combined.find(c => String(c.id) === String(gm.id))) {
+    const seenIds = new Set(combined.map(c => String(c.id)));
+    for (let i = 0; i < globalMatches.length; i++) {
+      const gm = globalMatches[i];
+      if (!seenIds.has(String(gm.id))) {
         combined.push(gm);
       }
-    });
+    }
 
     return combined.sort((a, b) => {
-      // Se estivermos vendo os inventariados, ordenar por data de leitura (mais recente primeiro)
       if (activeFilter === 'checked') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
         if (dateA !== dateB) return dateB - dateA;
-        
-        const etqA = String(a.ETIQUETA || '').padStart(10, '0');
-        const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-        return etqB.localeCompare(etqA, undefined, { numeric: true });
       }
 
       const etqA = String(a.ETIQUETA || '').padStart(10, '0');
       const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-      return etqA.localeCompare(etqB, undefined, { numeric: true });
+      return activeFilter === 'checked'
+        ? etqB.localeCompare(etqA, undefined, { numeric: true })
+        : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany, normalizeKey]);
+  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;

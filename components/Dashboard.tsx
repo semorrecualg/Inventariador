@@ -37,72 +37,77 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
 
   const stats = useMemo(() => {
-    const getStatus = (a: Asset) => String(a.STATUS || a.SITUACAO || '').toUpperCase();
-    
-    // Base de cálculo para progresso (Ativos + Baixados Localizados)
-    const activeAssets = assets.filter(a => !getStatus(a).includes('BAIXADO'));
-    const baixadosLocalizados = assets.filter(a => getStatus(a).includes('BAIXADO') && !!a._conferido);
-    
-    const totalAtivos = activeAssets.length;
-    const conferidoAtivos = activeAssets.filter(a => !!a._conferido).length;
-    
-    const totalConferidoGeral = conferidoAtivos + baixadosLocalizados.length;
-    
-    const percConferido = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
-
-    const countAtivos = assets.filter(a => getStatus(a).includes('ATIVO')).length;
-    const countBaixados = assets.filter(a => getStatus(a).includes('BAIXADO')).length;
-
-    const comPlaqueta = assets.filter(a => !!a.ETIQUETA && String(a.ETIQUETA).toUpperCase() !== 'ETIQUETAR').length;
-    
-    const faltaEtiquetar = assets.filter(a => 
-      a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR || 
-      (String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' && !a._conferido)
-    ).length;
-
-    const jaEtiquetado = assets.filter(a => 
-      a.TAG_INVENTARIO === TagInventario.ETIQUETADO ||
-      (String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' && !!a._conferido)
-    ).length;
-    const divergencia = assets.filter(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA).length;
-    const novoItem = assets.filter(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM).length;
-    const adotado = assets.filter(a => a.TAG_INVENTARIO === TagInventario.ADOTADO || a.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO).length;
-    const readotado = assets.filter(a => a.TAG_INVENTARIO === TagInventario.RE_ADOTADO).length;
-    const conferidoOk = assets.filter(a => a.TAG_INVENTARIO === TagInventario.CONFERIDO).length;
-    const locChanges = assets.filter(a => a.DE_PARA === 'COM ALTERAÇÃO').length;
-
-    const unico = assets.filter(a => a.TAG_DUPLICIDADE === 'ÚNICO').length;
-    const dupInterna = assets.filter(a => a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO').length;
-    const dupExterna = assets.filter(a => a.TAG_DUPLICIDADE === 'DUPLICIDADE EXTERNA').length;
-    
-    const semId = assets.filter(a => 
-      a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && 
-      String(a.ETIQUETA || '').toUpperCase() !== 'ETIQUETAR' &&
-      (!a.ETIQUETA || String(a.ETIQUETA).trim() === "")
-    ).length;
-
-    return {
-      totalAtivos,
-      conferidoAtivos,
-      baixadosLocalizados: baixadosLocalizados.length,
-      totalConferidoGeral,
-      percConferido,
-      comPlaqueta,
-      faltaEtiquetar,
-      jaEtiquetado,
-      divergencia,
-      novoItem,
-      adotado,
-      readotado,
-      conferidoOk,
-      locChanges,
-      unico,
-      dupInterna,
-      dupExterna,
-      semId,
-      countAtivos,
-      countBaixados,
+    const s = {
+      totalAtivos: 0,
+      conferidoAtivos: 0,
+      baixadosLocalizados: 0,
+      totalConferidoGeral: 0,
+      percConferido: 0,
+      comPlaqueta: 0,
+      faltaEtiquetar: 0,
+      jaEtiquetado: 0,
+      divergencia: 0,
+      novoItem: 0,
+      adotado: 0,
+      readotado: 0,
+      conferidoOk: 0,
+      locChanges: 0,
+      unico: 0,
+      dupInterna: 0,
+      dupExterna: 0,
+      semId: 0,
+      countAtivos: 0,
+      countBaixados: 0,
     };
+
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXADO');
+      const isConferido = !!a._conferido;
+      const tag = a.TAG_INVENTARIO;
+      const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+      const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
+
+      if (!isBaixado) {
+        s.totalAtivos++;
+        if (isConferido) s.conferidoAtivos++;
+      } else if (isConferido) {
+        s.baixadosLocalizados++;
+      }
+
+      if (statusUpper.includes('ATIVO')) s.countAtivos++;
+      if (isBaixado) s.countBaixados++;
+
+      if (etq && etq !== 'ETIQUETAR') s.comPlaqueta++;
+
+      if (tag === TagInventario.FALTA_ETIQUETAR || (plaquetaMaster === 'ETIQUETAR' && !isConferido)) {
+        s.faltaEtiquetar++;
+      }
+      if (tag === TagInventario.ETIQUETADO || (plaquetaMaster === 'ETIQUETAR' && isConferido)) {
+        s.jaEtiquetado++;
+      }
+
+      if (tag === TagInventario.DIVERGENCIA) s.divergencia++;
+      if (tag === TagInventario.NOVO_ITEM || a._isNew) s.novoItem++;
+      if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO) s.adotado++;
+      if (tag === TagInventario.RE_ADOTADO) s.readotado++;
+      if (tag === TagInventario.CONFERIDO) s.conferidoOk++;
+      if (a.DE_PARA === 'COM ALTERAÇÃO') s.locChanges++;
+
+      if (a.TAG_DUPLICIDADE === 'ÚNICO') s.unico++;
+      if (a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO') s.dupInterna++;
+      if (a.TAG_DUPLICIDADE === 'DUPLICIDADE EXTERNA') s.dupExterna++;
+
+      if (a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && etq !== 'ETIQUETAR' && !etq) {
+        s.semId++;
+      }
+    }
+
+    s.totalConferidoGeral = s.conferidoAtivos + s.baixadosLocalizados;
+    s.percConferido = s.totalAtivos > 0 ? Math.round((s.conferidoAtivos / s.totalAtivos) * 100) : 0;
+
+    return s;
   }, [assets]);
 
   const exportFilteredData = (filterFn: (a: Asset) => boolean, fileName: string) => {

@@ -224,6 +224,7 @@ const App: React.FC = () => {
   const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyAssetsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -324,19 +325,24 @@ const App: React.FC = () => {
     } catch { return []; }
   });
 
-  const { locationsWithStats, allLocations } = useMemo(() => {
+  const { locationsWithStats, allLocations, uniqueCentrosDeCusto } = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
     const locationsSet = new Set<string>(manualLocations);
+    const centrosDeCustoSet = new Set<string>();
     
-    // Filtramos os ativos pela empresa selecionada para as estatísticas serem relevantes
     const currentCompKey = selectedCompany ? normalizeKey(selectedCompany) : '';
     
-    inventory.assets.forEach(a => {
-      const assetCompKey = normalizeKey(a.EMPRESA || '');
-      if (currentCompKey && assetCompKey !== currentCompKey) return;
+    for (let i = 0; i < inventory.assets.length; i++) {
+      const a = inventory.assets[i];
+      
+      // Centro de Custo
+      if (a.CENTRODECUSTO) {
+        centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
+      }
 
-      // REGRA SÊNIOR v24.5: Se o item já foi conferido, usamos o _localMaster (onde foi encontrado)
-      // Caso contrário, usamos o ENDERECO original.
+      const assetCompKey = normalizeKey(a.EMPRESA || '');
+      if (currentCompKey && assetCompKey !== currentCompKey) continue;
+
       const effectiveLoc = (a._conferido && a._localMaster) ? a._localMaster : (a.ENDERECO || 'SEM LOCAL');
       const loc = String(effectiveLoc).trim().toUpperCase();
       if (loc) locationsSet.add(loc);
@@ -344,32 +350,24 @@ const App: React.FC = () => {
       const statusUpper = String(a.STATUS || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
       
-      // REGRA A: Baixado PENDENTE não entra nas estatísticas de total/checked
-      if (isBaixado && !a._conferido) return;
+      if (isBaixado && !a._conferido) continue;
 
       if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
       
-      // Se for um item ativo, conta no total
       if (!isBaixado) stats[loc].total++;
       
       if (a._conferido) {
         stats[loc].checked++;
-        // Se for um item baixado que foi localizado, adicionamos ao total para manter a coerência do progresso
         if (isBaixado) stats[loc].total++;
       }
-    });
+    }
 
     return { 
       locationsWithStats: stats, 
-      allLocations: Array.from(locationsSet).sort() 
+      allLocations: Array.from(locationsSet).sort(),
+      uniqueCentrosDeCusto: Array.from(centrosDeCustoSet).sort()
     };
   }, [inventory.assets, selectedCompany, normalizeKey, manualLocations]);
-
-  const uniqueCentrosDeCusto = useMemo(() => {
-    const set = new Set<string>();
-    inventory.assets.forEach(a => { if (a.CENTRODECUSTO) set.add(String(a.CENTRODECUSTO).trim().toUpperCase()); });
-    return Array.from(set).sort();
-  }, [inventory.assets]);
 
   // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
   const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
@@ -427,7 +425,11 @@ const App: React.FC = () => {
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         if (isDataLoaded) {
-          await saveInventory(inventory);
+          const dirtyIds = Array.from(dirtyAssetsRef.current);
+          const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
+          
+          await saveInventory(inventory, dirtyAssets);
+          dirtyAssetsRef.current.clear();
         }
         localStorage.setItem('app_screen_history', JSON.stringify(history));
         localStorage.setItem('app_current_user', JSON.stringify(user));
@@ -436,7 +438,7 @@ const App: React.FC = () => {
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
       } catch { console.warn("Storage cap reached"); }
-    }, 1500);
+    }, 2000);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded]);
 
@@ -462,6 +464,7 @@ const App: React.FC = () => {
   };
 
   const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
+    dirtyAssetsRef.current.add(String(updatedAsset.id));
     setInventory(prev => {
       const newAssets = [...prev.assets];
       const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
@@ -569,6 +572,7 @@ const App: React.FC = () => {
 
   const bulkUpdateAssets = useCallback((ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
+    ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
     setInventory(prev => ({
@@ -713,7 +717,14 @@ const App: React.FC = () => {
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return inventory.assets; 
     const selKey = normalizeKey(selectedCompany);
-    return inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === selKey);
+    const filtered = [];
+    for (let i = 0; i < inventory.assets.length; i++) {
+      const a = inventory.assets[i];
+      if (normalizeKey(a.EMPRESA || '') === selKey) {
+        filtered.push(a);
+      }
+    }
+    return filtered;
   }, [inventory.assets, selectedCompany, normalizeKey]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
@@ -750,8 +761,8 @@ const App: React.FC = () => {
           </div>
         )}
         
-        <div className="flex-1 relative overflow-hidden">
-      {showRecoveryToast && (
+        <div className="flex-1 relative overflow-hidden z-[500]">
+          {showRecoveryToast && (
             <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs">
               <ShieldCheck size={20} className="shrink-0" />
               <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>

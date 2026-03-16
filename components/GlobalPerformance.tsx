@@ -20,29 +20,35 @@ interface GlobalPerformanceProps {
 const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // Agrupar leituras por data
-  const readingsByDate = useMemo(() => {
+  const { readingsByDate, stats } = useMemo(() => {
     const groups: Record<string, number> = {};
-    assets.forEach(asset => {
-      if (asset._conferido && asset._dataLeitura) {
-        const date = new Date(asset._dataLeitura).toLocaleDateString('en-CA'); // YYYY-MM-DD
-        groups[date] = (groups[date] || 0) + 1;
-      }
-    });
-    return groups;
-  }, [assets]);
-
-  const stats = useMemo(() => {
-    const total = assets.length;
-    const checked = assets.filter(a => a._conferido).length;
-    const percentage = total > 0 ? Math.round((checked / total) * 100) : 0;
-    
-    // Leituras hoje
+    const s = {
+      total: assets.length,
+      checked: 0,
+      todayCount: 0
+    };
     const todayStr = new Date().toLocaleDateString('en-CA');
-    const todayCount = readingsByDate[todayStr] || 0;
 
-    return { total, checked, percentage, todayCount };
-  }, [assets, readingsByDate]);
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      if (a._conferido) {
+        s.checked++;
+        if (a._dataLeitura) {
+          const date = new Date(a._dataLeitura).toLocaleDateString('en-CA');
+          groups[date] = (groups[date] || 0) + 1;
+          if (date === todayStr) s.todayCount++;
+        }
+      }
+    }
+
+    return { 
+      readingsByDate: groups, 
+      stats: { 
+        ...s, 
+        percentage: s.total > 0 ? Math.round((s.checked / s.total) * 100) : 0 
+      } 
+    };
+  }, [assets]);
 
   // Lógica do Calendário
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();

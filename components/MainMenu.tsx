@@ -201,8 +201,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
       {isAdminMenuOpen && (
-        <div className="fixed inset-0 z-[300] bg-white/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-fadeIn">
-          <div className="absolute top-8 left-6">
+        <div className="fixed inset-0 z-[10000] bg-white/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
+          <div className="fixed top-8 left-6 z-[10001]">
             <BackButton onClick={() => setIsAdminMenuOpen(false)} label="Retornar" />
           </div>
           <div className="w-full max-w-sm space-y-3">
@@ -352,10 +352,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
       )}
 
       {isAnalyticsMenuOpen && (
-        <div className="fixed inset-0 z-[400] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fadeIn">
+        <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
           <button 
             onClick={() => setIsAnalyticsMenuOpen(false)} 
-            className="absolute top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[500] hover:bg-white/20"
+            className="fixed top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
           >
             <ChevronRight size={16} className="rotate-180" />
             Voltar
@@ -406,10 +406,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
       )}
 
       {isDataMenuOpen && (
-        <div className="fixed inset-0 z-[400] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fadeIn">
+        <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
           <button 
             onClick={() => setIsDataMenuOpen(false)} 
-            className="absolute top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[500] hover:bg-white/20"
+            className="fixed top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
           >
             <ChevronRight size={16} className="rotate-180" />
             Voltar
