@@ -215,55 +215,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
-              <div className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm">
-                <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center mr-4 border border-blue-500 shadow-sm"><Database size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Modalidade de Acesso</h4>
-                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Configuração de Banco de Dados</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white border-blue-600 text-blue-600 shadow-sm' : 'bg-white border-slate-200 text-slate-400'}`}
-                  >
-                    <div className="flex items-center">
-                      <Server size={14} className="mr-3" />
-                      <span>1) Banco Interno Independente</span>
-                    </div>
-                    {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-blue-600 rounded-full" />}
-                  </button>
-                  
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white border-emerald-600 text-emerald-600 shadow-sm' : 'bg-white border-slate-200 text-slate-400'}`}
-                  >
-                    <div className="flex items-center">
-                      <Cloud size={14} className="mr-3" />
-                      <span>2) Banco Externo - Supabase</span>
-                    </div>
-                    {databaseMode === DatabaseMode.SUPABASE && <div className="w-2 h-2 bg-emerald-600 rounded-full" />}
-                  </button>
-
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white border-indigo-600 text-indigo-600 shadow-sm' : 'bg-white border-slate-200 text-slate-400'}`}
-                  >
-                    <div className="flex items-center">
-                      <ShieldCheck size={14} className="mr-3" />
-                      <span>3) Protheus + Supabase</span>
-                    </div>
-                    {databaseMode === DatabaseMode.PROTHEUS_SUPABASE && <div className="w-2 h-2 bg-indigo-600 rounded-full" />}
-                  </button>
-                </div>
-                <div className="mt-3 p-2 bg-blue-50 border border-blue-100 rounded-lg">
-                  <p className="text-[7px] font-bold text-blue-700 uppercase leading-relaxed tracking-wide">
-                    Nota: A alteração da modalidade afeta o método de login e a sincronização de dados.
-                  </p>
-                </div>
-              </div>
-
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center mr-4 border border-cyan-100"><SlidersHorizontal size={16} /></div>
                 <div className="flex-1">
@@ -473,7 +424,57 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <p className="text-[9px] font-bold text-orange-400 uppercase tracking-[0.3em] mt-1.5">Operações de Banco de Dados</p>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
+              {/* Modalidade de Acesso movida para cá */}
+              <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl shadow-sm mb-3">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center mr-4 border border-blue-500 shadow-sm shadow-blue-500/20"><Database size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Modalidade de Acesso</h4>
+                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Configuração de Banco de Dados</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                  >
+                    <div className="flex items-center">
+                      <Server size={14} className="mr-3" />
+                      <span>1) Banco Interno Independente</span>
+                    </div>
+                    {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-blue-400 rounded-full shadow-[0_0_8px_rgba(96,165,250,0.8)]" />}
+                  </button>
+                  
+                  <button 
+                    onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.SUPABASE ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                  >
+                    <div className="flex items-center">
+                      <Cloud size={14} className="mr-3" />
+                      <span>2) Banco Externo - Supabase</span>
+                    </div>
+                    {databaseMode === DatabaseMode.SUPABASE && <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />}
+                  </button>
+
+                  <button 
+                    onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                  >
+                    <div className="flex items-center">
+                      <ShieldCheck size={14} className="mr-3" />
+                      <span>3) Protheus + Supabase</span>
+                    </div>
+                    {databaseMode === DatabaseMode.PROTHEUS_SUPABASE && <div className="w-2 h-2 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(129,140,248,0.8)]" />}
+                  </button>
+                </div>
+                <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                  <p className="text-[7px] font-bold text-blue-300 uppercase leading-relaxed tracking-wide">
+                    Nota: A alteração da modalidade afeta o método de login e a sincronização de dados.
+                  </p>
+                </div>
+              </div>
+
               <button onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><Users size={20} /></div>
                 <div className="flex-1">

@@ -110,8 +110,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         };
       } else if (databaseMode === DatabaseMode.SUPABASE) {
         // Autenticação via Supabase Auth
-        const { user: sbUser, error: sbError } = await supabaseSignIn(username.trim(), password);
-        if (sbError) throw sbError;
+        const { user: sbUser } = await supabaseSignIn(username.trim(), password);
         if (!sbUser) throw new Error("Usuário não encontrado.");
 
         loggedUser = {

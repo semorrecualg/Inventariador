@@ -762,6 +762,7 @@ const App: React.FC = () => {
               users={users} 
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
+              onNavigateToRegister={() => pushScreen(AppScreen.REGISTER)}
               onLogin={(u) => { 
                 setUser(u); 
                 const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
