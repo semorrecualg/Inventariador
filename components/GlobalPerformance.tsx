@@ -84,16 +84,16 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
   const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
+    <div className="h-[100dvh] flex flex-col bg-bg-main overflow-hidden">
       {/* Header */}
-      <div className="bg-white px-6 py-6 border-b border-slate-200 shadow-sm shrink-0">
+      <div className="bg-white px-6 pt-12 pb-6 border-b border-slate-200 shadow-sm shrink-0">
         <div className="flex items-center justify-between mb-4">
           <BackButton onClick={onBack} label="Retornar" subLabel="Análise de Rendimento" />
           <div className="w-10" />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-blue-600 p-4 rounded-2xl text-white shadow-lg shadow-blue-200">
+          <div className="bg-accent p-4 rounded-2xl text-white shadow-lg shadow-accent/20">
             <div className="flex items-center space-x-2 mb-1 opacity-80">
               <CheckCircle2 size={12} />
               <span className="text-[8px] font-black uppercase tracking-widest">Total Geral</span>
@@ -103,7 +103,7 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
               <span className="text-[10px] font-bold opacity-60">/ {stats.total}</span>
             </div>
           </div>
-          <div className="bg-emerald-500 p-4 rounded-2xl text-white shadow-lg shadow-emerald-200">
+          <div className="bg-accent p-4 rounded-2xl text-white shadow-lg shadow-accent/20">
             <div className="flex items-center space-x-2 mb-1 opacity-80">
               <TrendingUp size={12} />
               <span className="text-[8px] font-black uppercase tracking-widest">Progresso</span>
@@ -148,16 +148,16 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
                 }`}>
                   {day && (
                     <>
-                      <span className={`text-[10px] font-bold ${day.count > 0 ? 'text-blue-600' : 'text-slate-400'}`}>
+                      <span className={`text-[10px] font-bold ${day.count > 0 ? 'text-accent' : 'text-slate-400'}`}>
                         {day.day}
                       </span>
                       {day.count > 0 && (
-                        <div className="mt-1 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[7px] font-black">
+                        <div className="mt-1 px-1.5 py-0.5 bg-accent-soft text-accent rounded-md text-[7px] font-black">
                           {day.count}
                         </div>
                       )}
                       {day.date === new Date().toLocaleDateString('en-CA') && (
-                        <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full border border-white" />
+                        <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-accent rounded-full border border-white" />
                       )}
                     </>
                   )}
@@ -168,15 +168,15 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
         </div>
 
         {/* Resumo do Dia Selecionado ou Hoje */}
-        <div className="p-6 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+        <div className="p-6 bg-accent rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <BarChart3 size={120} />
           </div>
           
           <div className="relative z-10">
             <div className="flex items-center space-x-3 mb-6">
-              <div className="p-3 bg-white/10 rounded-2xl">
-                <Clock size={24} className="text-emerald-400" />
+              <div className="p-3 bg-white/20 rounded-2xl">
+                <Clock size={24} className="text-white" />
               </div>
               <div>
                 <h3 className="text-sm font-black uppercase tracking-tight">Atividade de Hoje</h3>
@@ -187,7 +187,7 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <p className="text-[8px] font-black text-white/40 uppercase tracking-widest mb-1">Itens Processados</p>
-                <p className="text-3xl font-black text-emerald-400">{stats.todayCount}</p>
+                <p className="text-3xl font-black text-white">{stats.todayCount}</p>
               </div>
               <div>
                 <p className="text-[8px] font-black text-white/40 uppercase tracking-widest mb-1">Status</p>
@@ -199,8 +199,8 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
           </div>
         </div>
 
-        <div className="p-6 bg-blue-50 rounded-[2.5rem] border border-blue-100 text-center">
-          <p className="text-[10px] font-bold text-blue-800 uppercase leading-relaxed italic">
+        <div className="p-6 bg-accent-soft rounded-[2.5rem] border border-accent/10 text-center">
+          <p className="text-[10px] font-bold text-accent uppercase leading-relaxed italic">
             &quot;A visão macro permite entender o ritmo do projeto e antecipar prazos.&quot;
           </p>
         </div>

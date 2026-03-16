@@ -156,8 +156,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           userPlaceholder: "MATRÍCULA OU USUÁRIO ERP",
           passLabel: "Senha ERP",
           passPlaceholder: "••••••••",
-          accentColor: "text-indigo-600",
-          focusColor: "focus:border-indigo-500"
+          accentColor: "text-accent",
+          focusColor: "focus:border-accent"
         };
       case DatabaseMode.SUPABASE:
         return {
@@ -165,8 +165,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           userPlaceholder: "SEU-EMAIL@EXEMPLO.COM",
           passLabel: "Senha Cloud",
           passPlaceholder: "••••••••",
-          accentColor: "text-emerald-600",
-          focusColor: "focus:border-emerald-500"
+          accentColor: "text-accent",
+          focusColor: "focus:border-accent"
         };
       default:
         return {
@@ -174,8 +174,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           userPlaceholder: "DIGITE SEU USUÁRIO OU E-MAIL",
           passLabel: "Senha",
           passPlaceholder: "••••••••",
-          accentColor: "text-blue-600",
-          focusColor: "focus:border-blue-500"
+          accentColor: "text-accent",
+          focusColor: "focus:border-accent"
         };
     }
   };
@@ -188,14 +188,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
       <div className="mb-3 text-center">
         <div className="relative w-24 h-24 mx-auto mb-2">
           {/* Ícone SVG Customizado de Ativo Imobilizado */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-700 to-indigo-900 rounded-3xl shadow-xl transform -rotate-3"></div>
-          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-slate-100">
-            <AssetIcon className="w-14 h-14 text-blue-600" />
+          <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
+          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft">
+            <AssetIcon className="w-14 h-14 text-accent" />
           </div>
-          <div className="absolute -bottom-1 -right-1 bg-amber-400 w-4 h-4 rounded-full border-2 border-white shadow-sm animate-pulse"></div>
+          <div className="absolute -bottom-1 -right-1 bg-accent w-4 h-4 rounded-full border-2 border-white shadow-sm"></div>
         </div>
         <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">
-          GBR <span className="text-blue-600">AUDITORIA</span>
+          GBR <span className="text-accent">AUDITORIA</span>
         </h1>
         <p className="text-slate-400 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
           INVENTÁRIO DE ATIVO IMOBILIZADO
@@ -207,21 +207,21 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
           >
             <Server size={12} />
             <span>Interno</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
           >
             <Cloud size={12} />
             <span>Supabase</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
+            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
           >
             <ShieldCheck size={12} />
             <span>Protheus</span>
@@ -267,7 +267,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         <button 
           type="submit"
           disabled={isLoading}
-          className={`w-full ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-600' : databaseMode === DatabaseMode.SUPABASE ? 'bg-emerald-600' : 'bg-indigo-600'} text-white font-bold py-3.5 rounded-xl shadow-md active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70`}
+          className="w-full bg-accent text-white font-bold py-3.5 rounded-xl shadow-md active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
             <>
@@ -286,7 +286,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
             <div className="space-y-2">
               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
-                  <span className="text-blue-600">Auditores:</span> Solicitem suas credenciais ao Administrador.
+                  <span className="text-accent">Auditores:</span> Solicitem suas credenciais ao Administrador.
                 </p>
               </div>
               <button 

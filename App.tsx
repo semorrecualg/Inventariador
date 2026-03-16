@@ -108,7 +108,8 @@ const App: React.FC = () => {
     scannerMode: ScannerMode.BARCODE,
     autoConfirmOnScan: false,
     scanFeedbackMode: ScanFeedbackMode.BOTH,
-    inventorySearchMode: InventorySearchMode.MANUAL
+    inventorySearchMode: InventorySearchMode.MANUAL,
+    immersiveMode: true
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -122,6 +123,20 @@ const App: React.FC = () => {
       return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
     } catch { return DatabaseMode.INTERNAL; }
   });
+
+  // Apply theme class to body based on databaseMode
+  useEffect(() => {
+    const body = document.body;
+    body.classList.remove('theme-internal', 'theme-supabase', 'theme-protheus');
+    
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      body.classList.add('theme-supabase');
+    } else if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
+      body.classList.add('theme-protheus');
+    } else {
+      body.classList.add('theme-internal');
+    }
+  }, [databaseMode]);
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
@@ -182,7 +197,8 @@ const App: React.FC = () => {
             qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
             autoConfirmOnScan: saved.autoConfirmOnScan ?? prev.autoConfirmOnScan,
             scanFeedbackMode: saved.scanFeedbackMode || prev.scanFeedbackMode,
-            inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode
+            inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
+            immersiveMode: saved.immersiveMode ?? prev.immersiveMode
           }));
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
@@ -297,7 +313,41 @@ const App: React.FC = () => {
     return localStorage.getItem('app_is_inventorying') === 'true';
   });
 
-  const [isFullscreen, setIsFullscreen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Auto-immersive mode on first interaction
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      if (inventory.immersiveMode && !document.fullscreenElement) {
+        toggleFullscreen();
+      }
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+
+    if (inventory.immersiveMode) {
+      window.addEventListener('click', handleFirstInteraction);
+      window.addEventListener('touchstart', handleFirstInteraction);
+    }
+
+    return () => {
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+  }, [inventory.immersiveMode]);
+
+  // Sync isFullscreen state with document
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
   
   // Estados para Modal de Duplicidade
   const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
@@ -341,6 +391,8 @@ const App: React.FC = () => {
         } else if (docEl.msRequestFullscreen) {
           docEl.msRequestFullscreen(options);
         }
+        
+        setInventory(prev => ({ ...prev, immersiveMode: true }));
       } else {
         const doc = document as Document & {
           webkitExitFullscreen?: () => Promise<void>;
@@ -356,6 +408,8 @@ const App: React.FC = () => {
         } else if (doc.msExitFullscreen) {
           doc.msExitFullscreen();
         }
+        
+        setInventory(prev => ({ ...prev, immersiveMode: false }));
       }
     } catch (e) {
       console.error("Fullscreen toggle failed", e);
@@ -816,7 +870,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-screen bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
+      <div className="w-full h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
         {showCompanyHeader && (
           <div className="bg-white border-b border-slate-200 shadow-sm z-[200]">
             <div className="px-3 py-1 flex items-center justify-between space-x-3">

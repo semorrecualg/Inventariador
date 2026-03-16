@@ -150,9 +150,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header */}
-      <div className="p-6 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+      <div className="pt-12 pb-6 px-6 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center space-x-4">
           <BackButton onClick={onBack} label="Gestão de Usuários" subLabel="Controle de Acessos" />
         </div>

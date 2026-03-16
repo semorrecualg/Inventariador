@@ -78,10 +78,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const hasData = inventoryInfo.totalDatabase > 0;
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn relative overflow-hidden">
-      <div className="px-5 pt-6 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
+      <div className="px-5 pt-12 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-center text-slate-600 shadow-sm">
+          <div className="w-10 h-10 bg-bg-main border border-slate-200 rounded-lg flex items-center justify-center text-slate-600 shadow-sm">
             <Shield size={20} />
           </div>
           <div>
@@ -95,7 +95,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           {isAdmin && (
             <button 
               onClick={() => setIsDataMenuOpen(true)} 
-              className="p-3 bg-orange-50 border border-orange-100 rounded-xl text-orange-600 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-orange-700"
+              className="p-3 bg-accent-soft border border-accent/10 rounded-xl text-accent active:scale-90 transition-all shadow-sm hover:bg-white"
               title="Gestão e Manutenção de Dados"
             >
               <DatabaseZap size={20} />
@@ -103,7 +103,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           )}
           <button 
             onClick={() => setIsAnalyticsMenuOpen(true)} 
-            className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-blue-600 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-blue-700"
+            className="p-3 bg-accent-soft border border-accent/10 rounded-xl text-accent active:scale-90 transition-all shadow-sm hover:bg-white"
             title="Painéis e Rendimento"
           >
             <BarChart3 size={20} />
@@ -111,7 +111,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           {isAdmin && (
             <button 
               onClick={() => setIsAdminMenuOpen(true)} 
-              className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900"
+              className="p-3 bg-bg-main border border-slate-200 rounded-xl text-slate-400 active:scale-90 transition-all shadow-sm hover:bg-white hover:text-slate-900"
               title="Configurações do Sistema"
             >
               <Settings size={20} />
@@ -120,75 +120,75 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       </div>
 
-      <div className="px-5 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+      <div className="px-5 py-2 bg-bg-main border-b border-slate-200 flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full ${hasData ? 'bg-emerald-500 shadow-sm shadow-emerald-200' : 'bg-slate-300'}`} />
+          <div className={`w-2 h-2 rounded-full ${hasData ? 'bg-accent shadow-sm shadow-accent/20' : 'bg-slate-300'}`} />
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             {hasData ? `${inventoryInfo.totalDatabase} Ativos` : 'Base Vazia'}
           </span>
         </div>
-        <div className="text-[9px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 shadow-sm">v24.50 PRO</div>
+        <div className="text-[9px] font-bold text-accent uppercase tracking-widest bg-accent-soft px-2 py-1 rounded-lg border border-accent/10 shadow-sm">v24.50 PRO</div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2 no-scrollbar">
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.INVENTORY)}
-          className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-blue-200"
+          className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
         >
-          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-blue-100 transition-colors">
+          <div className="w-10 h-10 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
             <ClipboardList size={20} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-[14px] font-bold text-slate-900 uppercase tracking-tight">Inventário</h3>
             <p className="text-[9px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Conferência Física</p>
           </div>
-          <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
+          <ChevronRight size={16} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.LABELING)}
-          className="w-full flex items-center p-4 bg-amber-50 border border-amber-100 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-amber-200"
+          className="w-full flex items-center p-4 bg-accent-soft border border-accent/10 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
         >
-          <div className="w-10 h-10 bg-amber-500 text-white rounded-xl flex items-center justify-center mr-4 shadow-md">
+          <div className="w-10 h-10 bg-accent text-white rounded-xl flex items-center justify-center mr-4 shadow-md">
             <Tag size={20} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-amber-700 uppercase tracking-tight">ETIQUETAR</h3>
-            <p className="text-[9px] text-amber-600 font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
+            <h3 className="text-[14px] font-bold text-accent uppercase tracking-tight">ETIQUETAR</h3>
+            <p className="text-[9px] text-accent font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
           </div>
-          <ChevronRight size={16} className="text-amber-300 group-hover:text-amber-500 transition-colors" />
+          <ChevronRight size={16} className="text-accent group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-3.5 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-emerald-200"
+          className="w-full flex items-center p-3.5 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
         >
-          <div className="w-9 h-9 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-emerald-100 transition-colors">
+          <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
             <Search size={18} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Consulta</h3>
             <p className="text-[8px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Busca de Ativo</p>
           </div>
-          <ChevronRight size={14} className="text-slate-300 group-hover:text-emerald-400 transition-colors" />
+          <ChevronRight size={14} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
-          className="w-full flex items-center p-3.5 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-emerald-200"
+          className="w-full flex items-center p-3.5 bg-white border border-slate-200 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
         >
-          <div className="w-9 h-9 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-4 group-hover:bg-emerald-100 transition-colors">
+          <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
             <ListChecks size={18} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Conciliação por Conta</h3>
             <p className="text-[8px] text-slate-400 uppercase font-bold tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
           </div>
-          <ChevronRight size={14} className="text-slate-300 group-hover:text-emerald-400 transition-colors" />
+          <ChevronRight size={14} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
       </div>
 
@@ -235,7 +235,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 onClick={onToggleFullscreen}
                 className={`w-full flex items-center p-4 border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm ${isFullscreen ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
               >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-4 transition-colors ${isFullscreen ? 'bg-white/10 text-white' : 'bg-slate-50 text-slate-600'}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-4 transition-colors ${isFullscreen ? 'bg-white/10 text-white' : 'bg-bg-main text-slate-600'}`}>
                   <ScanLine size={16} />
                 </div>
                 <div className="flex-1">
@@ -247,9 +247,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              <div className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm">
+              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mr-4 border border-blue-100"><ScanLine size={16} /></div>
+                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><ScanLine size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Modo do Scanner</h4>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Otimização de Leitura</p>
@@ -258,22 +258,22 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex p-1 bg-white border border-slate-200 rounded-xl">
                   <button 
                     onClick={() => onUpdateScannerMode(ScannerMode.BARCODE)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.BARCODE ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.BARCODE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     Código de Barras
                   </button>
                   <button 
                     onClick={() => onUpdateScannerMode(ScannerMode.QRCODE)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.QRCODE ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.QRCODE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     QR Code
                   </button>
                 </div>
               </div>
 
-              <div className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm">
+              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ShieldCheck size={16} /></div>
+                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><ShieldCheck size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Auto-Conferência</h4>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Registro Automático no Scan</p>
@@ -282,7 +282,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex p-1 bg-white border border-slate-200 rounded-xl">
                   <button 
                     onClick={() => onUpdateAutoConfirm(true)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     SIM
                   </button>
@@ -296,9 +296,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
               
 
-              <div className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm">
+              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center mr-4 border border-indigo-100"><Vibrate size={16} /></div>
+                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Vibrate size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Feedback do Scanner</h4>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Confirmação de Leitura</p>
@@ -307,21 +307,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="grid grid-cols-2 gap-2 p-1 bg-white border border-slate-200 rounded-xl mb-2">
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.VIBRATE)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.VIBRATE ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.VIBRATE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     <Vibrate size={12} />
                     <span>Vibrar</span>
                   </button>
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.SOUND)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.SOUND ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.SOUND ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     <Volume2 size={12} />
                     <span>Som (Bip)</span>
                   </button>
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.BOTH)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.BOTH ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.BOTH ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
                   >
                     <div className="flex space-x-1">
                       <Vibrate size={10} />
@@ -355,7 +355,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
           <button 
             onClick={() => setIsAnalyticsMenuOpen(false)} 
-            className="fixed top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
+            className="fixed top-14 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
           >
             <ChevronRight size={16} className="rotate-180" />
             Voltar

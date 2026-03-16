@@ -132,4 +132,5 @@ export interface InventoryState {
   autoConfirmOnScan?: boolean;
   scanFeedbackMode?: ScanFeedbackMode;
   inventorySearchMode?: InventorySearchMode;
+  immersiveMode?: boolean;
 }

@@ -184,14 +184,14 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group"
       >
         <div className="flex items-center justify-between mb-2">
-          <div className={`w-8 h-8 rounded-lg ${colorClass} bg-opacity-10 flex items-center justify-center`}>
-            <Icon size={16} className={colorClass.replace('bg-', 'text-')} />
+          <div className={`w-8 h-8 rounded-lg ${colorClass} bg-opacity-20 flex items-center justify-center`}>
+            <Icon size={16} className={colorClass.replace('bg-', 'text-').replace('400', '500')} />
           </div>
           <div className="text-right flex flex-col items-end">
             <div className="flex items-center space-x-1">
               <span className="text-lg font-bold text-slate-900">{value}</span>
               {DASHBOARD_HINTS[label] && (
-                <button onClick={handleHintTrigger} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
+                <button onClick={handleHintTrigger} className="p-1 text-slate-300 hover:text-accent transition-colors">
                   <Info size={8} />
                 </button>
               )}
@@ -201,7 +201,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         </div>
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{label}</span>
-          <Download size={8} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
+          <Download size={8} className="text-slate-300 group-hover:text-accent transition-colors" />
         </div>
         <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
           <div className={`h-full ${colorClass} transition-all duration-1000`} style={{ width: `${percentage}%` }} />
@@ -211,8 +211,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
-      <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+      <div className="pt-12 pb-4 px-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
           <BackButton onClick={onBack} label="Relatórios" subLabel="Analytics Precision V24" />
         </div>
@@ -304,7 +304,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Falta Etiquetar" 
               value={stats.faltaEtiquetar} 
               total={stats.totalAtivos} 
-              colorClass="bg-amber-500" 
+              colorClass="bg-amber-400" 
               icon={AlertTriangle} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR || (String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' && !a._conferido), 'FALTA_ETIQUETAR')}
             />
@@ -312,7 +312,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Etiquetado" 
               value={stats.jaEtiquetado} 
               total={stats.totalAtivos} 
-              colorClass="bg-violet-600" 
+              colorClass="bg-violet-400" 
               icon={Palette} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ETIQUETADO, 'ETIQUETADOS_EM_CAMPO')}
             />
@@ -320,7 +320,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Divergência" 
               value={stats.divergencia} 
               total={stats.totalAtivos} 
-              colorClass="bg-rose-600" 
+              colorClass="bg-rose-400" 
               icon={ShieldAlert} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS')}
             />
@@ -328,7 +328,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Adotado / Transferido" 
               value={stats.adotado} 
               total={stats.totalAtivos} 
-              colorClass="bg-sky-600" 
+              colorClass="bg-sky-400" 
               icon={MapPin} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ADOTADO || a.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO, 'ADOTADOS')}
             />
@@ -336,7 +336,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Conferido OK" 
               value={stats.conferidoOk} 
               total={stats.totalAtivos} 
-              colorClass="bg-emerald-600" 
+              colorClass="bg-emerald-400" 
               icon={CheckCircle2} 
               onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.CONFERIDO, 'CONFERIDOS_OK')}
             />
@@ -344,7 +344,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               label="Alterações de Local (DE/PARA)" 
               value={stats.locChanges} 
               total={stats.totalConferidoGeral} 
-              colorClass="bg-indigo-600" 
+              colorClass="bg-indigo-400" 
               icon={TrendingUp} 
               onClick={() => exportFilteredData(a => a.DE_PARA === 'COM ALTERAÇÃO', 'ALTERACOES_LOCAL')}
             />

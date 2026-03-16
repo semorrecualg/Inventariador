@@ -1,21 +1,54 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-main: #F8FAFC;
+  --color-bg-main: var(--bg-main, #F8FAFC);
   --color-surface: #FFFFFF;
-  --color-ink: #0F172A;
-  --color-ink-muted: #64748B;
-  --color-accent: #0284C7;
+  --color-ink: var(--ink, #0F172A);
+  --color-ink-muted: var(--ink-muted, #64748B);
+  --color-accent: var(--accent, #0284C7);
+  --color-accent-soft: var(--accent-soft, #F1F5F9);
   --color-border: #E2E8F0;
+}
+
+:root {
+  /* Default / Interno (Slate) */
+  --accent: #475569;
+  --accent-soft: #F1F5F9;
+  --bg-main: #F8FAFC;
+  --ink: #0F172A;
+  --ink-muted: #64748B;
+}
+
+.theme-supabase {
+  /* Supabase (Emerald) */
+  --accent: #059669;
+  --accent-soft: #ECFDF5;
+  --bg-main: #F0FDF4;
+}
+
+.theme-protheus {
+  /* Protheus (Indigo) */
+  --accent: #4F46E5;
+  --accent-soft: #EEF2FF;
+  --bg-main: #F5F7FF;
+}
+
+.theme-internal {
+  /* Interno (Slate) */
+  --accent: #475569;
+  --accent-soft: #F1F5F9;
+  --bg-main: #F8FAFC;
 }
 
 @layer base {
   body {
-    @apply bg-bg-main text-ink font-sans overflow-hidden h-screen w-screen fixed;
+    @apply bg-bg-main text-ink font-sans overflow-hidden h-[100dvh] w-screen fixed;
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
     overscroll-behavior-y: contain;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   #root {

@@ -90,7 +90,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val
       ))}
       <button 
         onClick={onSearch}
-        className="col-span-3 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center text-sm font-bold uppercase tracking-widest shadow-md active:scale-95 transition-all mt-1"
+        className="col-span-3 h-12 bg-accent text-white rounded-xl flex items-center justify-center text-sm font-bold uppercase tracking-widest shadow-md active:scale-95 transition-all mt-1"
       >
         <Search size={16} className="mr-2" /> Confirmar Busca
       </button>
@@ -230,7 +230,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       <div className="space-y-1.5">
         <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">{label}</label>
         <div className="relative group">
-          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-accent transition-colors">
             {icon}
           </div>
           <input 
@@ -255,13 +255,13 @@ const Consultation: React.FC<ConsultationProps> = ({
                 setShowNumericKeypad(true);
               }
             }}
-            className={`w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
+            className={`w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner ${(isNumeric || isSelectable) ? 'cursor-pointer' : ''}`}
             placeholder={isSelectable ? `Selecionar...` : `Buscar...`}
           />
           {field === 'ETIQUETA' && (
             <button 
               onClick={() => setIsScannerOpen(true)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-blue-600 text-white rounded-xl shadow-sm active:scale-95 transition-all"
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-accent text-white rounded-xl shadow-sm active:scale-95 transition-all"
             >
               <Camera size={20} />
             </button>
@@ -280,9 +280,9 @@ const Consultation: React.FC<ConsultationProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-bg-main animate-fadeIn relative overflow-hidden">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
       {/* HEADER */}
-      <div className="bg-white px-5 pt-8 pb-4 border-b border-slate-200 relative z-20 shadow-sm">
+      <div className="bg-white px-5 pt-12 pb-4 border-b border-slate-200 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <BackButton onClick={onBack} label="Retornar" subLabel="Consulta de Ativos" />
           <div className="flex items-center space-x-3">
@@ -321,14 +321,14 @@ const Consultation: React.FC<ConsultationProps> = ({
             <div className="space-y-1.5">
               <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (De)</label>
               <div className="relative group">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-accent transition-colors">
                   <Calendar size={16} />
                 </div>
                 <input 
                   type="date"
                   value={filters.DATAAQUSIC_START}
                   onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
                 />
               </div>
             </div>
@@ -336,14 +336,14 @@ const Consultation: React.FC<ConsultationProps> = ({
             <div className="space-y-1.5">
               <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
               <div className="relative group">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-accent transition-colors">
                   <Calendar size={16} />
                 </div>
                 <input 
                   type="date"
                   value={filters.DATAAQUSIC_END}
                   onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-slate-900 shadow-inner"
                 />
               </div>
             </div>
@@ -351,7 +351,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
           <button 
             onClick={triggerSearch}
-            className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[11px] tracking-[0.1em] shadow-md active:scale-[0.98] transition-all flex items-center justify-center space-x-2 mt-2"
+            className="w-full bg-accent text-white py-4 rounded-xl font-bold uppercase text-[11px] tracking-[0.1em] shadow-md active:scale-[0.98] transition-all flex items-center justify-center space-x-2 mt-2"
           >
             <Search size={18} strokeWidth={2.5} />
             <span>Executar Consulta</span>
@@ -365,11 +365,11 @@ const Consultation: React.FC<ConsultationProps> = ({
               <div className="space-y-3">
                 <div className="flex items-center justify-between px-1 mb-1">
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Resultados</span>
-                  <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[9px] font-bold">{filteredAssets.length}</span>
+                  <span className="bg-accent-soft text-accent px-2 py-0.5 rounded-full text-[9px] font-bold">{filteredAssets.length}</span>
                 </div>
                 {filteredAssets.map((asset) => (
-                  <div key={asset.id} onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-3 bg-white rounded-xl border border-slate-200 shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer hover:border-blue-200 group">
-                    <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 mr-4 shrink-0 border border-slate-100 transition-colors">
+                  <div key={asset.id} onClick={() => onSelectAsset(asset)} className="w-full flex items-center p-3 bg-white rounded-xl border border-slate-200 shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer hover:border-accent/30 group">
+                    <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-accent-soft group-hover:text-accent mr-4 shrink-0 border border-slate-100 transition-colors">
                       <Barcode size={20} />
                     </div>
                     <div className="flex-1 min-w-0 pr-2">

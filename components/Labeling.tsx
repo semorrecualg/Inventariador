@@ -179,16 +179,16 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
   const getColors = (tag: string) => {
     switch (tag) {
       case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-600', hex: '#7c3aed' };
+        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-400', hex: '#a78bfa' };
       case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-600', hex: '#d97706' };
+        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-400', hex: '#fbbf24' };
       default:
-        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-600', hex: '#e2e8f0' };
+        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-400', hex: '#94a3b8' };
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200 shadow-sm relative z-30">
         <div className="flex items-center justify-between mb-6">
           <BackButton onClick={onBack} label="Menu Principal" subLabel="Etiquetagem de Ativos" />
@@ -196,17 +196,17 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             {isBatchMode && (
               <button 
                 onClick={toggleSelectAll} 
-                className={`flex items-center space-x-3 px-4 py-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                className={`flex items-center space-x-3 px-4 py-3 rounded-2xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-amber-400 border-amber-400 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
               >
                 {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
                 <span className="text-[11px] font-bold uppercase tracking-widest">Todos</span>
               </button>
             )}
-            <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-900/20' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <button onClick={() => { setIsBatchMode(!isBatchMode); setSelectedIds(new Set()); }} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isBatchMode ? 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-900/10' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <ListChecks size={20} />
             </button>
 
-            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-4 rounded-2xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-amber-50 text-amber-500 border-amber-200' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <Filter size={20} />
             </button>
           </div>
@@ -217,12 +217,12 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
         {isFilterOpen && (
           <div className="space-y-4 mb-6 animate-slideUp bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-inner">
             <div className="flex items-center justify-between mb-2 px-1">
-               <span className="text-[10px] font-bold uppercase text-amber-600 tracking-[0.2em]">Painel Inteligente</span>
+               <span className="text-[10px] font-bold uppercase text-amber-500 tracking-[0.2em]">Painel Inteligente</span>
                <div className="flex space-x-3">
                  {activeTab === 'pending' && filteredAssets.length > 1 && !isBatchMode && (
-                    <button onClick={handleConfirmAllFiltered} className="text-[9px] font-bold text-violet-600 uppercase tracking-widest px-4 py-2 bg-violet-50 border border-violet-100 rounded-xl active:scale-95 transition-all shadow-sm">Conferir Todos</button>
+                    <button onClick={handleConfirmAllFiltered} className="text-[9px] font-bold text-violet-500 uppercase tracking-widest px-4 py-2 bg-violet-50 border border-violet-100 rounded-xl active:scale-95 transition-all shadow-sm">Conferir Todos</button>
                  )}
-                 <button onClick={() => { setAdvDesc(''); setAdvCC(''); setAdvSupplier(''); setAdvDateStart(''); setAdvDateEnd(''); }} className="flex items-center space-x-2 text-[10px] font-bold text-red-600 uppercase tracking-widest px-5 py-3 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all shadow-sm">
+                 <button onClick={() => { setAdvDesc(''); setAdvCC(''); setAdvSupplier(''); setAdvDateStart(''); setAdvDateEnd(''); }} className="flex items-center space-x-2 text-[10px] font-bold text-red-500 uppercase tracking-widest px-5 py-3 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all shadow-sm">
                    <Trash2 size={16} /> <span>Limpar</span>
                  </button>
                </div>
@@ -231,14 +231,14 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             {/* BARRA DE AÇÃO LOTE ETIQUETAR - TOPO PARA FLUIDEZ */}
             {isBatchMode && selectedIds.size > 0 && (
               <div className="mb-4 animate-slideDown">
-                 <div className="bg-amber-600 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
+                 <div className="bg-amber-400 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
                     <div className="flex items-center space-x-3 pl-2">
                        <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
-                       <span className="text-[9px] font-bold text-amber-100 uppercase tracking-widest">Selecionados</span>
+                       <span className="text-[9px] font-bold text-amber-50 uppercase tracking-widest">Selecionados</span>
                     </div>
                     <div className="flex items-center space-x-2">
                        <button onClick={() => setSelectedIds(new Set())} className="p-2 bg-black/20 text-white rounded-xl"><X size={16} /></button>
-                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-amber-600 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
+                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-amber-500 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
                     </div>
                  </div>
               </div>
@@ -247,10 +247,10 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             <div className="space-y-2">
               <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Busca (Descrição/Serial/NF/Reg)</label>
               <div className="relative">
-                <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-slate-200 pl-4 pr-12 py-3 rounded-2xl text-[11px] font-bold uppercase text-slate-900 outline-none focus:border-amber-500 shadow-sm transition-all" />
+                <input type="text" value={advDesc} onChange={(e) => setAdvDesc(e.target.value)} placeholder="PESQUISAR..." className="w-full bg-white border border-slate-200 pl-4 pr-12 py-3 rounded-2xl text-[11px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm transition-all" />
                 <button 
                   onClick={() => setIsScannerOpen(true)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-600 text-white rounded-xl shadow-md active:scale-95 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-400 text-white rounded-xl shadow-md active:scale-95 transition-all"
                 >
                   <Camera size={14} />
                 </button>
@@ -260,14 +260,14 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Centro de Custo</label>
-                <select value={advCC} onChange={(e) => setAdvCC(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-500 shadow-sm">
+                <select value={advCC} onChange={(e) => setAdvCC(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm">
                   <option value="">TODOS</option>
                   {restrictedCentrosDeCusto.map(cc => <option key={cc} value={cc}>{cc}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
                 <label className="text-[9px] font-bold uppercase text-slate-400 tracking-widest ml-1 block">Fornecedor</label>
-                <select value={advSupplier} onChange={(e) => setAdvSupplier(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-500 shadow-sm">
+                <select value={advSupplier} onChange={(e) => setAdvSupplier(e.target.value)} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-2xl text-[10px] font-bold uppercase text-slate-900 outline-none focus:border-amber-400 shadow-sm">
                   <option value="">TODOS</option>
                   {restrictedSuppliersList.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -277,8 +277,8 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
         )}
 
         <div className="flex space-x-3">
-          <button onClick={() => setActiveTab('pending')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'pending' ? 'bg-amber-600 text-white border-amber-600 shadow-lg shadow-amber-900/20' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Pendentes</button>
-          <button onClick={() => setActiveTab('checked')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'checked' ? 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-900/20' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Etiquetados</button>
+          <button onClick={() => setActiveTab('pending')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'pending' ? 'bg-amber-400 text-white border-amber-400 shadow-lg shadow-amber-900/10' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Pendentes</button>
+          <button onClick={() => setActiveTab('checked')} className={`flex-1 py-4 rounded-2xl text-[11px] font-bold uppercase border transition-all shadow-sm ${activeTab === 'checked' ? 'bg-violet-400 text-white border-violet-400 shadow-lg shadow-violet-900/10' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>Etiquetados</button>
         </div>
       </div>
 

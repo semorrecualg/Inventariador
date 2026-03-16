@@ -204,28 +204,28 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
 
         <div className="flex flex-wrap gap-1.5 pt-1">
           {asset._dataLeitura && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-slate-900 text-white border border-slate-700 flex items-center divide-x divide-slate-700">
+            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-accent text-white border border-accent/20 flex items-center divide-x divide-white/20">
               <div className="flex items-center space-x-1 pr-2">
-                <Calendar size={10} className="text-blue-400" />
+                <Calendar size={10} className="text-white/80" />
                 <span>{formatReadingTime(asset._dataLeitura)}</span>
               </div>
               {asset._auditor && (
                 <div className="flex items-center space-x-1 pl-2">
-                  <User size={10} className="text-emerald-400" />
-                  <span className="text-slate-300">{asset._auditor}</span>
+                  <User size={10} className="text-white/80" />
+                  <span className="text-white/90">{asset._auditor}</span>
                 </div>
               )}
             </div>
           )}
           {isBaixado && (
-            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700">
+            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-400 text-white border border-red-500/20">
               BAIXADO
             </span>
           )}
         </div>
       </div>
 
-      <div className={`absolute bottom-3 right-3 w-8 h-8 ${isConferido ? (isBaixado ? 'bg-red-500' : 'bg-emerald-500') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
+      <div className={`absolute bottom-3 right-3 w-8 h-8 ${isConferido ? (isBaixado ? 'bg-red-400' : 'bg-accent') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
         {isConferido ? <Check size={16} strokeWidth={3} className="text-white" /> : <Circle size={16} />}
       </div>
     </div>
@@ -347,10 +347,10 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
 
     return (
-      <div className="flex flex-col h-full bg-slate-50 animate-fadeIn">
+      <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
         {/* Header */}
         <div className="bg-white border-b border-slate-200 shadow-sm z-20">
-          <div className="px-4 pt-8 pb-4">
+          <div className="px-4 pt-12 pb-4">
             <div className="mb-4">
               <BackButton onClick={() => setSelectedAccount(null)} label="Voltar às Contas" subLabel="Conciliação por Conta" />
             </div>
@@ -363,11 +363,11 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                 <div className="flex items-center space-x-2 mt-1">
                   <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-emerald-500 transition-all duration-500" 
+                      className="h-full bg-accent transition-all duration-500" 
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  <span className="text-[10px] font-black text-emerald-600 uppercase">
+                  <span className="text-[10px] font-black text-accent uppercase">
                     {stats.checked}/{stats.total} ({progress}%)
                   </span>
                 </div>
@@ -382,13 +382,13 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                   value={assetSearchTerm}
                   onChange={(e) => setAssetSearchTerm(e.target.value)}
                   placeholder="PESQUISAR ITEM NA CONTA..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 transition-all"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-accent transition-all"
                 />
               </div>
               <button 
                 onClick={handleReconcileAll}
                 disabled={stats.checked === stats.total}
-                className="w-12 h-12 bg-emerald-600 text-white rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                className="w-12 h-12 bg-accent text-white rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
                 title="Conciliar Pendentes"
               >
                 <ListChecks size={20} />
@@ -400,17 +400,17 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
           <div className="flex border-t border-slate-100">
             <button 
               onClick={() => setActiveFilter('pending')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'pending' ? 'text-blue-600' : 'text-slate-400'}`}
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'pending' ? 'text-accent' : 'text-slate-400'}`}
             >
               Pendentes ({stats.total - stats.checked})
-              {activeFilter === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />}
+              {activeFilter === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
             </button>
             <button 
               onClick={() => setActiveFilter('checked')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'checked' ? 'text-emerald-600' : 'text-slate-400'}`}
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'checked' ? 'text-accent' : 'text-slate-400'}`}
             >
               Inventariado ({stats.checked})
-              {activeFilter === 'checked' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-600 rounded-t-full" />}
+              {activeFilter === 'checked' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
             </button>
           </div>
         </div>
@@ -451,9 +451,9 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 animate-fadeIn">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 pt-10 pb-6 shadow-sm">
+      <div className="bg-white border-b border-slate-200 px-6 pt-14 pb-6 shadow-sm">
         <div className="mb-6">
           <BackButton onClick={onBack} label="Voltar ao Menu" subLabel="Conciliação por Conta" />
         </div>
@@ -488,18 +488,18 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
             <button 
               key={account}
               onClick={() => setSelectedAccount(account)}
-              className="w-full bg-white border border-slate-200 rounded-2xl p-5 flex items-center justify-between active:scale-[0.98] transition-all shadow-sm hover:border-blue-200 group relative overflow-hidden"
+              className="w-full bg-white border border-slate-200 rounded-2xl p-5 flex items-center justify-between active:scale-[0.98] transition-all shadow-sm hover:border-accent/20 group relative overflow-hidden"
             >
               {/* Progress Background */}
               <div 
-                className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out opacity-10 ${isComplete ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out opacity-10 ${isComplete ? 'bg-accent' : 'bg-accent'}`}
                 style={{ width: `${progress}%` }}
               />
 
               <div className="flex items-center space-x-4 relative z-10">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-all ${
                   isComplete 
-                    ? 'bg-emerald-500 text-white border-emerald-400 shadow-lg shadow-emerald-100' 
+                    ? 'bg-accent text-white border-accent/20 shadow-lg shadow-accent/10' 
                     : 'bg-slate-50 text-slate-400 border-slate-200'
                 }`}>
                   <Building2 size={22} />
@@ -510,7 +510,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                   </h3>
                   <div className="flex items-center space-x-2">
                     <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                      isComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                      isComplete ? 'bg-accent-soft text-accent' : 'bg-slate-100 text-slate-500'
                     }`}>
                       {stats.checked} / {stats.total} ITENS
                     </span>
@@ -522,8 +522,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
               </div>
 
               <div className="flex items-center space-x-2 relative z-10">
-                {isComplete && <CheckCircle2 size={18} className="text-emerald-500" />}
-                <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
+                {isComplete && <CheckCircle2 size={18} className="text-accent" />}
+                <ChevronRight size={18} className="text-slate-300 group-hover:text-accent transition-colors" />
               </div>
             </button>
           );

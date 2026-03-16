@@ -188,16 +188,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
   const getTagColors = (tag: TagInventario | string) => {
     switch (tag) {
-      case TagInventario.BAIXADO: return { bg: 'bg-red-600', hex: '#dc2626' };
-      case TagInventario.ADOTADO_EXTERNO: return { bg: 'bg-sky-600', hex: '#0284c7' };
-      case TagInventario.ADOTADO: return { bg: 'bg-indigo-600', hex: '#4f46e5' };
-      case TagInventario.RE_ADOTADO: return { bg: 'bg-fuchsia-600', hex: '#c026d3' };
-      case TagInventario.CONFERIDO: return { bg: 'bg-emerald-600', hex: '#059669' };
-      case TagInventario.FALTA_ETIQUETAR: return { bg: 'bg-amber-600', hex: '#d97706' };
-      case TagInventario.ETIQUETADO: return { bg: 'bg-violet-600', hex: '#7c3aed' };
-      case TagInventario.NOVO_ITEM: return { bg: 'bg-orange-600', hex: '#ea580c' };
-      case TagInventario.DIVERGENCIA: return { bg: 'bg-rose-600', hex: '#e11d48' };
-      default: return { bg: 'bg-slate-900', hex: '#0f172a' };
+      case TagInventario.BAIXADO: return { bg: 'bg-red-400', hex: '#f87171' };
+      case TagInventario.ADOTADO_EXTERNO: return { bg: 'bg-sky-400', hex: '#38bdf8' };
+      case TagInventario.ADOTADO: return { bg: 'bg-indigo-400', hex: '#818cf8' };
+      case TagInventario.RE_ADOTADO: return { bg: 'bg-fuchsia-400', hex: '#e879f9' };
+      case TagInventario.CONFERIDO: return { bg: 'bg-emerald-400', hex: '#34d399' };
+      case TagInventario.FALTA_ETIQUETAR: return { bg: 'bg-amber-400', hex: '#fbbf24' };
+      case TagInventario.ETIQUETADO: return { bg: 'bg-violet-400', hex: '#a78bfa' };
+      case TagInventario.NOVO_ITEM: return { bg: 'bg-orange-400', hex: '#fb923c' };
+      case TagInventario.DIVERGENCIA: return { bg: 'bg-rose-400', hex: '#fb7185' };
+      default: return { bg: 'bg-slate-400', hex: '#94a3b8' };
     }
   };
 
@@ -211,12 +211,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
   }, [workingAsset._conferido, workingAsset.AUDITOR_STATUS_CONFERENCIA]);
 
   const tagColors = useMemo(() => {
-    if (isBatch) return { bg: 'bg-amber-600', hex: '#d97706' };
+    if (isBatch) return { bg: 'bg-amber-400', hex: '#fbbf24' };
     const tag = workingAsset.TAG_INVENTARIO || (isConferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE);
     const base = getTagColors(tag);
     // Se for baixado, vamos manter o cabeçalho vermelho ou com tom de alerta
     if (isBaixado) {
-      return { bg: 'bg-red-600', hex: '#dc2626' };
+      return { bg: 'bg-red-400', hex: '#f87171' };
     }
     return base;
   }, [isBatch, workingAsset, isBaixado, isConferido]);
@@ -273,9 +273,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] flex items-center">
-                  <AlertCircle size={12} className="mr-1.5 text-amber-500" /> REGISTROS NO LOTE
+                  <AlertCircle size={12} className="mr-1.5 text-amber-400" /> REGISTROS NO LOTE
                 </p>
-                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
+                <span className="text-[9px] font-bold text-amber-500 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
               </div>
               <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar pr-1">
                 {assets.map((a, idx) => (

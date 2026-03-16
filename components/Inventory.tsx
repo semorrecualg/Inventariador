@@ -173,23 +173,23 @@ const AssetCard = React.memo(({
   const getColors = (tag: TagInventario) => {
     switch (tag) {
       case TagInventario.BAIXADO: 
-        return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-600 text-white', btn: 'bg-red-600', hex: '#dc2626', icon: AlertOctagon };
+        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-500 text-white', btn: 'bg-rose-500', hex: '#B5838D', icon: AlertOctagon };
       case TagInventario.ADOTADO_EXTERNO: 
-        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-600 text-white', btn: 'bg-sky-600', hex: '#0284c7', icon: Building2 };
+        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-500', hex: '#81B29A', icon: Building2 };
       case TagInventario.ADOTADO: 
-        return { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-600 text-white', btn: 'bg-indigo-600', hex: '#4f46e5', icon: MapPin };
+        return { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-500 text-white', btn: 'bg-indigo-500', hex: '#3D405B', icon: MapPin };
       case TagInventario.RE_ADOTADO: 
-        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-600 text-white', btn: 'bg-fuchsia-600', hex: '#c026d3', icon: RefreshCw };
+        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-500 text-white', btn: 'bg-fuchsia-500', hex: '#9B89B3', icon: RefreshCw };
       case TagInventario.CONFERIDO: 
-        return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-600 text-white', btn: 'bg-emerald-600', hex: '#059669', icon: Check };
+        return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-500 text-white', btn: 'bg-emerald-500', hex: '#76885B', icon: Check };
       case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-600 text-white', btn: 'bg-amber-600', hex: '#d97706', icon: Hash };
+        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-500 text-white', btn: 'bg-amber-500', hex: '#D4A373', icon: Hash };
       case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-600 text-white', btn: 'bg-violet-600', hex: '#7c3aed', icon: Check };
+        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-500 text-white', btn: 'bg-violet-500', hex: '#8E7AB5', icon: Check };
       case TagInventario.NOVO_ITEM: 
-        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-600 text-white', btn: 'bg-orange-600', hex: '#ea580c', icon: Plus };
+        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-500', hex: '#E5989B', icon: Plus };
       case TagInventario.DIVERGENCIA:
-        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-600 text-white', btn: 'bg-rose-700', hex: '#e11d48', icon: AlertTriangle };
+        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-500 text-white', btn: 'bg-rose-500', hex: '#B5838D', icon: AlertTriangle };
       case TagInventario.PENDENTE:
         return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-200 text-slate-600', btn: 'bg-slate-600', hex: '#e2e8f0', icon: Check };
       default: 
@@ -942,7 +942,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
         <>
-          <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200">
+          <div className="px-5 pt-12 pb-4 bg-white border-b border-slate-200">
             <div className="flex items-center justify-between mb-6">
               <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Analytics Precision V24" />
               <button 

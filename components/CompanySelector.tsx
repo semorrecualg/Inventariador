@@ -36,9 +36,9 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn">
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header Fixo */}
-      <div className="p-5 pt-10 bg-white border-b border-slate-200 shadow-sm">
+      <div className="p-5 pt-14 bg-white border-b border-slate-200 shadow-sm">
         <div className="mb-6">
           <BackButton onClick={onBack} label="Sair do Aplicativo" subLabel="Retornar ao Login" />
         </div>
