@@ -19,7 +19,6 @@ import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 import GlobalPerformance from './components/GlobalPerformance';
 import AccountReconciliation from './components/AccountReconciliation';
-import AssetReports from './components/AssetReports';
 
 import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -123,7 +122,7 @@ const App: React.FC = () => {
     autoConfirmOnScan: false,
     scanFeedbackMode: ScanFeedbackMode.BOTH,
     inventorySearchMode: InventorySearchMode.MANUAL,
-    immersiveMode: true
+    immersiveMode: false
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -467,40 +466,6 @@ const App: React.FC = () => {
       console.error("Fullscreen toggle failed", e);
     }
   }, []);
-
-  // Auto-immersive mode on first interaction
-  useEffect(() => {
-    const handleFirstInteraction = () => {
-      if (inventory.immersiveMode && !document.fullscreenElement) {
-        toggleFullscreen();
-      }
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
-    };
-
-    if (inventory.immersiveMode) {
-      window.addEventListener('click', handleFirstInteraction);
-      window.addEventListener('touchstart', handleFirstInteraction);
-    }
-
-    return () => {
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
-    };
-  }, [inventory.immersiveMode, toggleFullscreen]);
-
-  // Request fullscreen when starting inventory if immersiveMode is enabled
-  useEffect(() => {
-    if (isInventorying && inventory.immersiveMode && !document.fullscreenElement) {
-      // Small delay to ensure it's called after the transition/render
-      const timer = setTimeout(() => {
-        if (!document.fullscreenElement) {
-          toggleFullscreen();
-        }
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isInventorying, inventory.immersiveMode, toggleFullscreen]);
 
   // Sync isFullscreen state with document
   useEffect(() => {
@@ -967,7 +932,7 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
-  const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
+  const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION && screen !== AppScreen.MAIN_MENU;
 
   if (publicAsset) {
     return (
@@ -1117,8 +1082,6 @@ const App: React.FC = () => {
                 totalDatabase: inventory.assets.length, 
                 date: inventory.lastUpdated 
               }} 
-              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
-              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
               autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
               onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} 
               isFullscreen={isFullscreen} 
@@ -1126,6 +1089,7 @@ const App: React.FC = () => {
               scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
               onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))}
               initialDataMenuOpen={startWithDataMenu}
+              selectedCompany={selectedCompany}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -1177,7 +1141,6 @@ const App: React.FC = () => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
-          {screen === AppScreen.ASSET_REPORTS && <AssetReports onBack={popScreen} />}
         </div>
   
         {/* Immersive Mode handled automatically on first interaction */}

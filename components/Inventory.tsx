@@ -63,23 +63,23 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-2 pb-4 grid grid-cols-3 gap-1.5 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-1.5 pb-3 grid grid-cols-3 gap-1 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.25rem]">
       {keys.map((key) => (
         <button
           key={key}
           onClick={(e) => {
-            e.stopPropagation(); // Evita que o clique no teclado feche ele mesmo pelo evento do pai
+            e.stopPropagation();
             if (key === 'OK') onClose();
             else if (key === '⌫') onDelete();
             else onInput(key);
           }}
-          className={`h-11 rounded-xl flex items-center justify-center text-lg font-bold transition-all active:scale-90 ${
+          className={`h-10 rounded-lg flex items-center justify-center text-base font-bold transition-all active:scale-90 ${
             key === 'OK' ? 'bg-accent text-white shadow-md' : 
             key === '⌫' ? 'bg-bg-main text-ink-muted' : 
             'bg-white border border-border text-ink shadow-sm'
           }`}
         >
-          {key === 'OK' ? 'PRONTO' : key}
+          {key === 'OK' ? 'OK' : key}
         </button>
       ))}
     </div>

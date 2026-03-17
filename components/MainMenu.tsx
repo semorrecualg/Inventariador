@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppScreen, User, ScannerMode, ScanFeedbackMode, DatabaseMode } from '../types';
+import { AppScreen, User, ScanFeedbackMode, DatabaseMode } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -27,8 +27,7 @@ import {
   ListChecks,
   Database,
   Cloud,
-  Server,
-  AlertTriangle
+  Server
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -38,8 +37,6 @@ interface MainMenuProps {
   onClearDatabase: () => void;
   user: User | null;
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
-  scannerMode: ScannerMode;
-  onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
   onUpdateAutoConfirm: (val: boolean) => void;
   isFullscreen: boolean;
@@ -49,6 +46,7 @@ interface MainMenuProps {
   initialDataMenuOpen?: boolean;
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
+  selectedCompany: string | null;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -58,8 +56,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onClearDatabase, 
   user, 
   inventoryInfo, 
-  scannerMode, 
-  onUpdateScannerMode, 
   autoConfirmOnScan, 
   onUpdateAutoConfirm, 
   isFullscreen, 
@@ -68,7 +64,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateScanFeedbackMode,
   initialDataMenuOpen = false,
   databaseMode,
-  onUpdateDatabaseMode
+  onUpdateDatabaseMode,
+  selectedCompany
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
@@ -79,58 +76,65 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
-      <div className="px-5 pt-12 pb-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-white border border-accent/10 rounded-lg flex items-center justify-center overflow-hidden shadow-sm p-0.5">
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="w-full h-full object-contain"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const icon = document.createElement('div');
-                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
-                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
-              }}
-            />
+      {/* TOP STATUS BAR */}
+      <div className="px-5 pt-8 pb-2 bg-white flex items-center justify-between z-30">
+        <div className="flex items-center space-x-2">
+          <div className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center">
+            <Database size={12} className="text-slate-400" />
           </div>
-          <div>
-            <p className="text-[8px] font-bold text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
-            <h1 className="text-base font-bold text-ink truncate max-w-[180px] tracking-tight">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AUDITORIA</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md flex items-center space-x-1">
+            <ShieldCheck size={10} className="text-emerald-500" />
+            <span className="text-[8px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
+          </div>
+          <div className="px-2 py-0.5 bg-accent-soft border border-accent/10 rounded-md">
+            <span className="text-[8px] font-black text-accent uppercase tracking-tighter">v24.50 PRO</span>
+          </div>
+        </div>
+      </div>
+
+      {/* COMPANY NAME BAR */}
+      <div className="px-5 py-2 bg-white border-b border-border z-30">
+        <h2 className="text-[11px] font-black text-ink uppercase tracking-tight truncate">
+          {selectedCompany || 'NENHUMA EMPRESA SELECIONADA'}
+        </h2>
+      </div>
+
+      {/* USER PROFILE & IMMERSIVE TOGGLE (GREEN AREA MOVED UP) */}
+      <div className="px-5 py-4 bg-white border-b border-border flex items-center justify-between z-20 shadow-sm">
+        <div className="flex items-center p-1 border-2 border-emerald-500 rounded-2xl bg-white shadow-sm">
+          <div className="w-12 h-12 bg-white border border-accent/10 rounded-xl flex items-center justify-center shadow-sm">
+            <ShieldCheck size={24} className="text-accent" />
+          </div>
+          <div className="ml-3 pr-4">
+            <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
+            <h1 className="text-base font-black text-ink truncate max-w-[140px] tracking-tight uppercase">
               {user?.username || 'Operador'}
             </h1>
           </div>
         </div>
+
         <div className="flex items-center space-x-2">
-          {isAdmin && (
-            <button 
-              onClick={() => setIsDataMenuOpen(true)} 
-              className="p-3 bg-accent-soft border border-accent/10 rounded-xl text-accent active:scale-90 transition-all shadow-sm hover:bg-white"
-              title="Gestão e Manutenção de Dados"
-            >
-              <DatabaseZap size={20} />
-            </button>
-          )}
+          {/* IMMERSIVE MODE "LIGHT" BUTTON */}
           <button 
-            onClick={() => setIsAnalyticsMenuOpen(true)} 
-            className="p-3 bg-accent-soft border border-accent/10 rounded-xl text-accent active:scale-90 transition-all shadow-sm hover:bg-white"
-            title="Painéis e Rendimento"
+            onClick={onToggleFullscreen}
+            className="flex flex-col items-center group active:scale-95 transition-all"
           >
-            <BarChart3 size={20} />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 transition-all shadow-lg ${isFullscreen ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/30' : 'bg-red-500 border-red-400 shadow-red-500/30'}`}>
+              <ScanLine size={20} className="text-white" />
+            </div>
+            <span className={`text-[7px] font-black uppercase tracking-widest mt-1.5 ${isFullscreen ? 'text-emerald-600' : 'text-red-600'}`}>
+              {isFullscreen ? 'ON' : 'OFF'}
+            </span>
           </button>
-          {isAdmin && (
-            <button 
-              onClick={() => setIsAdminMenuOpen(true)} 
-              className="p-3 bg-bg-main border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:bg-white hover:text-ink"
-              title="Configurações do Sistema"
-            >
-              <Settings size={20} />
-            </button>
-          )}
+
+          <div className="h-10 w-px bg-border mx-1" />
+
           <button 
             onClick={onLogout} 
-            className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-500 active:scale-90 transition-all shadow-sm hover:bg-white"
+            className="w-10 h-10 bg-red-50 border border-red-100 rounded-xl text-red-500 flex items-center justify-center active:scale-90 transition-all shadow-sm hover:bg-white"
             title="Sair do Sistema"
           >
             <LogOut size={20} />
@@ -138,14 +142,46 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       </div>
 
-      <div className="px-5 py-2 bg-bg-main border-b border-border flex items-center justify-between">
+      {/* ACTION BUTTONS BAR */}
+      <div className="px-5 py-3 bg-bg-main border-b border-border flex items-center justify-between overflow-x-auto no-scrollbar">
         <div className="flex items-center space-x-2">
-          <div className={`w-2 h-2 rounded-full ${hasData ? 'bg-success shadow-sm shadow-success/20' : 'bg-slate-300'}`} />
-          <span className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">
-            {hasData ? `${inventoryInfo.count} Ativos` : 'Base Vazia'}
-          </span>
+          {isAdmin && (
+            <button 
+              onClick={() => setIsDataMenuOpen(true)} 
+              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
+              title="Gestão e Manutenção de Dados"
+            >
+              <DatabaseZap size={20} />
+            </button>
+          )}
+          <button 
+            onClick={() => setIsAnalyticsMenuOpen(true)} 
+            className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
+            title="Painéis e Rendimento"
+          >
+            <BarChart3 size={20} />
+          </button>
+          {isAdmin && (
+            <button 
+              onClick={() => setIsAdminMenuOpen(true)} 
+              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
+              title="Configurações do Sistema"
+            >
+              <Settings size={20} />
+            </button>
+          )}
         </div>
-        <div className="text-[9px] font-bold text-accent uppercase tracking-widest bg-accent-soft px-2 py-1 rounded-lg border border-accent/10 shadow-sm">v24.50 PRO</div>
+
+        <div className="flex items-center space-x-3">
+          <div className="flex flex-col items-end">
+            <div className="flex items-center space-x-1.5">
+              <div className={`w-2 h-2 rounded-full ${hasData ? 'bg-success shadow-sm shadow-success/20' : 'bg-slate-300'}`} />
+              <span className="text-[10px] font-black text-ink uppercase tracking-widest">
+                {hasData ? `${inventoryInfo.count} ATIVOS` : 'BASE VAZIA'}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2 no-scrollbar">
@@ -244,54 +280,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Definir campos do QR</p>
                 </div>
               </button>
-
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.ASSET_REPORTS); }} className="w-full flex items-center p-4 bg-amber-50 border border-amber-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-amber-100 text-amber-600 rounded-lg flex items-center justify-center mr-4 border border-amber-200"><AlertTriangle size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-amber-900 uppercase tracking-tight">Reportes de Campo</h4>
-                  <p className="text-[8px] font-bold text-amber-600 uppercase tracking-widest mt-0.5">Divergências Recebidas</p>
-                </div>
-              </button>
-
-              <button
-                onClick={onToggleFullscreen}
-                className={`w-full flex items-center p-4 border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm ${isFullscreen ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
-              >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-4 transition-colors ${isFullscreen ? 'bg-white/10 text-white' : 'bg-bg-main text-slate-600'}`}>
-                  <ScanLine size={16} />
-                </div>
-                <div className="flex-1">
-                  <h4 className={`text-[13px] font-bold uppercase tracking-tight ${isFullscreen ? 'text-white' : 'text-slate-900'}`}>Modo Imersivo</h4>
-                  <p className={`text-[8px] font-bold uppercase tracking-widest mt-0.5 ${isFullscreen ? 'text-white/50' : 'text-slate-400'}`}>{isFullscreen ? 'Ativado' : 'Desativado'}</p>
-                </div>
-                <div className={`w-9 h-5 rounded-full relative transition-colors ${isFullscreen ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${isFullscreen ? 'right-0.5' : 'left-0.5'}`} />
-                </div>
-              </button>
-
-              <div className="w-full p-4 bg-bg-main border border-border rounded-2xl shadow-sm">
-                <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><ScanLine size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Modo do Scanner</h4>
-                    <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Otimização de Leitura</p>
-                  </div>
-                </div>
-                <div className="flex p-1 bg-white border border-border rounded-xl">
-                  <button 
-                    onClick={() => onUpdateScannerMode(ScannerMode.BARCODE)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.BARCODE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
-                  >
-                    Código de Barras
-                  </button>
-                  <button 
-                    onClick={() => onUpdateScannerMode(ScannerMode.QRCODE)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${scannerMode === ScannerMode.QRCODE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
-                  >
-                    QR Code
-                  </button>
-                </div>
-              </div>
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Asset } from '../types';
 import { 
   ShieldCheck, 
@@ -8,15 +8,8 @@ import {
   Calendar, 
   CheckCircle2,
   Clock,
-  Tag,
-  AlertTriangle,
-  Send,
-  User,
-  MessageSquare,
-  ChevronDown,
-  ChevronUp
+  Tag
 } from 'lucide-react';
-import { submitAssetReport } from '../services/supabaseService';
 
 interface PublicKardexProps {
   asset: Asset;
@@ -35,40 +28,8 @@ const formatDateBR = (val: string | number | null | undefined): string => {
 };
 
 const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
-  const [showReportForm, setShowReportForm] = useState(false);
-  const [reportData, setReportData] = useState({
-    reporter_name: '',
-    reason: 'LOCAL_DIVERGENTE',
-    comment: '',
-    location_found: ''
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
-
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   const isBaixado = String(asset.STATUS || '').toUpperCase().includes('BAIXA') || !!asset.DATABAIXA;
-
-  const handleSubmitReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    try {
-      await submitAssetReport({
-        asset_id: asset.id ? String(asset.id) : 'OFFLINE_QR',
-        tag: asset.ETIQUETA || '',
-        ...reportData
-      });
-      setSubmitSuccess(true);
-      setTimeout(() => {
-        setShowReportForm(false);
-        setSubmitSuccess(false);
-        setReportData({ reporter_name: '', reason: 'LOCAL_DIVERGENTE', comment: '', location_found: '' });
-      }, 3000);
-    } catch {
-      alert('Erro ao enviar reporte. Tente novamente.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 font-sans animate-fadeIn">
@@ -189,106 +150,6 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
               </div>
             );
           })}
-        </div>
-
-        {/* REPORT SECTION */}
-        <div className="px-8 py-4 border-t border-slate-100">
-          <button 
-            onClick={() => setShowReportForm(!showReportForm)}
-            className="w-full flex items-center justify-between py-3 text-slate-500 hover:text-accent transition-colors"
-          >
-            <div className="flex items-center space-x-2">
-              <AlertTriangle size={16} className="text-amber-500" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Reportar Divergência</span>
-            </div>
-            {showReportForm ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-
-          {showReportForm && (
-            <div className="mt-4 animate-slideIn">
-              {submitSuccess ? (
-                <div className="bg-emerald-50 text-emerald-600 p-4 rounded-2xl text-center border border-emerald-100">
-                  <CheckCircle2 size={24} className="mx-auto mb-2" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">Reporte enviado com sucesso!</p>
-                </div>
-              ) : (
-                <form onSubmit={handleSubmitReport} className="space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Seu Nome / Matrícula</label>
-                    <div className="relative">
-                      <User size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-                      <input 
-                        required
-                        type="text"
-                        value={reportData.reporter_name}
-                        onChange={e => setReportData({...reportData, reporter_name: e.target.value})}
-                        placeholder="Ex: João Silva"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Motivo do Reporte</label>
-                    <select 
-                      value={reportData.reason}
-                      onChange={e => setReportData({...reportData, reason: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all appearance-none"
-                    >
-                      <option value="LOCAL_DIVERGENTE">Localização Divergente</option>
-                      <option value="DANIFICADO">Item Danificado</option>
-                      <option value="NAO_ENCONTRADO">Item Não Encontrado</option>
-                      <option value="OUTRO">Outro Motivo</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Local onde o item está agora</label>
-                    <div className="relative">
-                      <MapPin size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-                      <input 
-                        required
-                        type="text"
-                        value={reportData.location_found}
-                        onChange={e => setReportData({...reportData, location_found: e.target.value})}
-                        placeholder="Ex: Bloco B - Sala 202"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Observações Adicionais</label>
-                    <div className="relative">
-                      <MessageSquare size={14} className="absolute left-4 top-4 text-slate-300" />
-                      <textarea 
-                        value={reportData.comment}
-                        onChange={e => setReportData({...reportData, comment: e.target.value})}
-                        placeholder="Descreva o problema..."
-                        rows={3}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all resize-none"
-                      />
-                    </div>
-                  </div>
-
-                  <button 
-                    disabled={isSubmitting}
-                    type="submit"
-                    className="w-full py-4 bg-amber-500 text-white rounded-2xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
-                  >
-                    {isSubmitting ? (
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <Send size={14} />
-                        <span>Enviar Reporte</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-              )}
-            </div>
-          )}
         </div>
 
         {/* AUDIT STATUS FOOTER */}
