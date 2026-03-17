@@ -40,18 +40,18 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   render() {
     if (this.state.hasError) {
       return (
-        <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-slate-50 text-center">
-          <div className="w-20 h-20 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6">
+        <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center">
+          <div className="w-20 h-20 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
             <ShieldCheck size={40} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
-          <p className="text-sm text-slate-500 mb-8 max-w-xs">
+          <h1 className="text-2xl font-bold text-ink mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
+          <p className="text-sm text-ink-muted mb-8 max-w-xs">
             Ocorreu um erro inesperado na interface. Tente reiniciar o aplicativo ou limpar o cache.
           </p>
           <div className="space-y-3 w-full max-w-xs">
             <button 
               onClick={() => window.location.reload()} 
-              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+              className="w-full py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
             >
               Recarregar App
             </button>
@@ -60,12 +60,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
                 localStorage.clear();
                 window.location.href = '/';
               }} 
-              className="w-full py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all"
+              className="w-full py-4 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all"
             >
               Limpar Tudo e Sair
             </button>
           </div>
-          <pre className="mt-8 p-4 bg-slate-100 rounded-lg text-[10px] text-slate-400 overflow-auto max-w-full text-left">
+          <pre className="mt-8 p-4 bg-white border border-border rounded-lg text-[10px] text-ink-muted overflow-auto max-w-full text-left">
             {String(this.state.error)}
           </pre>
         </div>
@@ -877,7 +877,12 @@ const App: React.FC = () => {
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
       if (normalizeKey(a.EMPRESA || '') === selKey) {
-        filtered.push(a);
+        const statusUpper = String(a.STATUS || '').toUpperCase();
+        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+        // Registro Ativo: Não pode estar baixado
+        if (!isBaixado) {
+          filtered.push(a);
+        }
       }
     }
     return filtered;

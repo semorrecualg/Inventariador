@@ -38,29 +38,29 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header Fixo */}
-      <div className="p-5 pt-14 bg-white border-b border-slate-200 shadow-sm">
+      <div className="p-5 pt-14 bg-white border-b border-border shadow-sm">
         <div className="mb-6">
           <BackButton onClick={onBack} label="Sair do Aplicativo" subLabel="Retornar ao Login" />
         </div>
         
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight leading-none">Unidade Operacional</h2>
-            <p className="text-blue-600 text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
+            <h2 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Unidade Operacional</h2>
+            <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
-          <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-lg">
+          <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
             <LayoutGrid size={24} />
           </div>
         </div>
 
         <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
           <input 
             type="text"
             placeholder="PESQUISAR UNIDADE..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-            className="w-full pl-12 pr-6 py-3.5 bg-slate-50 rounded-xl text-[11px] font-bold uppercase border border-slate-200 focus:border-blue-500 outline-none transition-all shadow-inner placeholder:text-slate-300"
+            className="w-full pl-12 pr-6 py-3.5 bg-bg-main rounded-xl text-[11px] font-bold uppercase border border-border focus:border-accent outline-none transition-all shadow-inner placeholder:text-ink-muted/30"
           />
         </div>
       </div>
@@ -74,21 +74,21 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
                 <button
                   key={company}
                   onClick={() => onSelect(company)}
-                  className="bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border border-slate-200 hover:border-blue-300 active:scale-[0.99] transition-all group overflow-hidden relative modern-card"
+                  className="bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border border-border hover:border-accent active:scale-[0.99] transition-all group overflow-hidden relative modern-card"
                 >
                   <div className="flex items-center space-x-4 relative z-10">
                     <div className={`w-12 h-12 ${style} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border`}>
                       <Icon size={24} strokeWidth={2.5} />
                     </div>
                     <div className="text-left">
-                      <h4 className="font-bold text-slate-900 text-sm uppercase leading-tight tracking-tight">{company}</h4>
+                      <h4 className="font-bold text-ink text-sm uppercase leading-tight tracking-tight">{company}</h4>
                       <div className="flex items-center space-x-1.5 mt-1">
-                         <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-sm shadow-emerald-500/50"></div>
-                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Base Master Disponível</span>
+                         <div className="w-1.5 h-1.5 bg-success rounded-full shadow-sm shadow-success/50"></div>
+                         <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Base Master Disponível</span>
                       </div>
                     </div>
                   </div>
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-slate-100 group-hover:text-blue-500 transition-colors relative z-10">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-slate-100 group-hover:text-accent transition-colors relative z-10">
                     <CheckCircle2 size={24} />
                   </div>
                 </button>
@@ -104,12 +104,12 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
       </div>
 
       {/* Info Bar Técnica */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-xl border-t border-slate-200 flex justify-between items-center z-50 shadow-lg">
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-xl border-t border-border flex justify-between items-center z-50 shadow-lg">
          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-blue-500 rounded-full shadow-sm shadow-blue-500/50"></div>
-            <p className="text-[9px] text-slate-900 font-bold uppercase tracking-widest">Pipeline Ativo</p>
+            <div className="w-2 h-2 bg-accent rounded-full shadow-sm shadow-accent/50"></div>
+            <p className="text-[9px] text-ink font-bold uppercase tracking-widest">Pipeline Ativo</p>
          </div>
-         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+         <p className="text-[9px] text-ink-muted font-bold uppercase tracking-widest">
            {companies.length} Entidades
          </p>
       </div>

@@ -8,12 +8,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        'bg-main': '#F8FAFC',
+        'bg-main': 'var(--bg-main, #F8FAFC)',
         'surface': '#FFFFFF',
-        'ink': '#0F172A',
-        'ink-muted': '#64748B',
-        'accent': '#0284C7',
+        'ink': 'var(--ink, #0F172A)',
+        'ink-muted': 'var(--ink-muted, #475569)',
+        'accent': 'var(--accent, #2563EB)',
+        'accent-soft': 'var(--accent-soft, #EFF6FF)',
         'border': '#E2E8F0',
+        'success': '#10B981',
+        'warning': '#F59E0B',
+        'danger': '#EF4444',
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

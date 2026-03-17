@@ -181,7 +181,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     return (
       <div 
         onClick={onClick}
-        className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group"
+        className="bg-white border border-border rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group"
       >
         <div className="flex items-center justify-between mb-2">
           <div className={`w-8 h-8 rounded-lg ${colorClass} bg-opacity-20 flex items-center justify-center`}>
@@ -189,21 +189,21 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
           </div>
           <div className="text-right flex flex-col items-end">
             <div className="flex items-center space-x-1">
-              <span className="text-lg font-bold text-slate-900">{value}</span>
+              <span className="text-lg font-bold text-ink">{value}</span>
               {DASHBOARD_HINTS[label] && (
-                <button onClick={handleHintTrigger} className="p-1 text-slate-300 hover:text-accent transition-colors">
+                <button onClick={handleHintTrigger} className="p-1 text-ink-muted/30 hover:text-accent transition-colors">
                   <Info size={8} />
                 </button>
               )}
             </div>
-            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">{percentage}%</p>
+            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">{percentage}%</p>
           </div>
         </div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{label}</span>
-          <Download size={8} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">{label}</span>
+          <Download size={8} className="text-ink-muted/30 group-hover:text-accent transition-colors" />
         </div>
-        <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-1 w-full bg-bg-main rounded-full overflow-hidden">
           <div className={`h-full ${colorClass} transition-all duration-1000`} style={{ width: `${percentage}%` }} />
         </div>
       </div>
@@ -212,11 +212,11 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
-      <div className="pt-12 pb-4 px-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm z-20">
+      <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
           <BackButton onClick={onBack} label="Relatórios" subLabel="Analytics Precision V24" />
         </div>
-        <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
+        <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
           <BarChart3 size={20} />
         </div>
       </div>
@@ -259,29 +259,29 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
           <div 
             onClick={() => exportFilteredData(a => String(a.STATUS || '').toUpperCase().includes('BAIXADO') && !!a._conferido, 'BAIXADOS_LOCALIZADOS')}
-            className="bg-white border border-slate-200 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
+            className="bg-white border border-border rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
           >
-            <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center text-red-600 mb-3 group-hover:bg-red-600 group-hover:text-white transition-colors">
+            <div className="w-8 h-8 bg-danger/10 rounded-lg flex items-center justify-center text-danger mb-3 group-hover:bg-danger group-hover:text-white transition-colors">
               <AlertTriangle size={16} />
             </div>
-            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Baixados Localizados</span>
+            <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-0.5">Baixados Localizados</span>
             <div className="flex items-baseline space-x-2">
-              <span className="text-xl font-bold text-slate-900">{stats.baixadosLocalizados}</span>
-              <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="text-xl font-bold text-ink">{stats.baixadosLocalizados}</span>
+              <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
           </div>
 
           <div 
             onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM, 'NOVOS_ITENS')}
-            className="bg-white border border-slate-200 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
+            className="bg-white border border-border rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
           >
-            <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center text-orange-600 mb-3 group-hover:bg-orange-600 group-hover:text-white transition-colors">
+            <div className="w-8 h-8 bg-warning/10 rounded-lg flex items-center justify-center text-warning mb-3 group-hover:bg-warning group-hover:text-white transition-colors">
               <CheckCircle2 size={16} />
             </div>
-            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Novos Itens (Campo)</span>
+            <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-0.5">Novos Itens (Campo)</span>
             <div className="flex items-baseline space-x-2">
-              <span className="text-xl font-bold text-slate-900">{stats.novoItem}</span>
-              <Download size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="text-xl font-bold text-ink">{stats.novoItem}</span>
+              <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
           </div>
         </div>
@@ -290,10 +290,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         <section className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center space-x-2">
-              <div className="w-1 h-3 bg-blue-600 rounded-full" />
-              <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Distribuição por Tags</h3>
+              <div className="w-1 h-3 bg-accent rounded-full" />
+              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Distribuição por Tags</h3>
             </div>
-            <button onClick={() => exportFilteredData(() => true, 'BASE_COMPLETA')} className="text-[8px] font-bold text-blue-600 uppercase tracking-widest flex items-center space-x-1">
+            <button onClick={() => exportFilteredData(() => true, 'BASE_COMPLETA')} className="text-[8px] font-bold text-accent uppercase tracking-widest flex items-center space-x-1">
               <Download size={10} />
               <span>Exportar Tudo</span>
             </button>
@@ -352,7 +352,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         </section>
 
         {/* INTEGRIDADE DA BASE */}
-        <section className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
+        <section className="bg-white border border-border rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
           <div className="flex items-center space-x-2 mb-1">
             <div className="w-8 h-8 bg-accent-soft rounded-lg flex items-center justify-center text-accent">
               <ShieldAlert size={16} />
@@ -366,7 +366,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
           <div className="space-y-4">
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ÚNICO', 'PLAQUETAS_UNICAS')}>
               <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <div className="w-1.5 h-1.5 rounded-full bg-success" />
                 <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Plaquetas Únicas</span>
               </div>
               <div className="flex items-center space-x-2">
@@ -377,7 +377,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO', 'DUPLICIDADES_INTERNAS')}>
               <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                <div className="w-1.5 h-1.5 rounded-full bg-warning" />
                 <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Etiqueta +1 Registro</span>
               </div>
               <div className="flex items-center space-x-2">
@@ -388,7 +388,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
 
             <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => (a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && String(a.ETIQUETA || '').toUpperCase() !== 'ETIQUETAR') || !a.ETIQUETA, 'SEM_IDENTIFICACAO')}>
               <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                 <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Sem Identificação</span>
               </div>
               <div className="flex items-center space-x-2">

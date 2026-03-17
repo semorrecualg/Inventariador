@@ -92,7 +92,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-slate-200 p-3 pb-10 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-3 pb-10 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
       {keys.map((key) => (
         <button
           key={key}
@@ -102,9 +102,9 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
             else onInput(key);
           }}
           className={`h-14 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 ${
-            key === 'OK' ? 'bg-blue-600 text-white shadow-md' : 
-            key === '⌫' ? 'bg-slate-100 text-slate-500' : 
-            'bg-white border border-slate-200 text-slate-900 shadow-sm'
+            key === 'OK' ? 'bg-accent text-white shadow-md' : 
+            key === '⌫' ? 'bg-bg-main text-ink-muted' : 
+            'bg-white border border-border text-ink shadow-sm'
           }`}
         >
           {key === 'OK' ? 'PRONTO' : key}
@@ -173,27 +173,27 @@ const AssetCard = React.memo(({
   const getColors = (tag: TagInventario) => {
     switch (tag) {
       case TagInventario.BAIXADO: 
-        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-500 text-white', btn: 'bg-rose-500', hex: '#B5838D', icon: AlertOctagon };
+        return { bg: 'bg-danger/5', border: 'border-danger/20', text: 'text-danger', badge: 'bg-danger text-white', btn: 'bg-danger', hex: 'var(--danger)', icon: AlertOctagon };
       case TagInventario.ADOTADO_EXTERNO: 
-        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-500', hex: '#81B29A', icon: Building2 };
+        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-500', hex: '#38bdf8', icon: Building2 };
       case TagInventario.ADOTADO: 
-        return { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-500 text-white', btn: 'bg-indigo-500', hex: '#3D405B', icon: MapPin };
+        return { bg: 'bg-accent-soft', border: 'border-accent/20', text: 'text-accent', badge: 'bg-accent text-white', btn: 'bg-accent', hex: 'var(--accent)', icon: MapPin };
       case TagInventario.RE_ADOTADO: 
-        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-500 text-white', btn: 'bg-fuchsia-500', hex: '#9B89B3', icon: RefreshCw };
+        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-500 text-white', btn: 'bg-fuchsia-500', hex: '#e879f9', icon: RefreshCw };
       case TagInventario.CONFERIDO: 
-        return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-500 text-white', btn: 'bg-emerald-500', hex: '#76885B', icon: Check };
+        return { bg: 'bg-success/5', border: 'border-success/20', text: 'text-success', badge: 'bg-success text-white', btn: 'bg-success', hex: 'var(--success)', icon: Check };
       case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-500 text-white', btn: 'bg-amber-500', hex: '#D4A373', icon: Hash };
+        return { bg: 'bg-warning/5', border: 'border-warning/20', text: 'text-warning', badge: 'bg-warning text-white', btn: 'bg-warning', hex: 'var(--warning)', icon: Hash };
       case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-500 text-white', btn: 'bg-violet-500', hex: '#8E7AB5', icon: Check };
+        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-500 text-white', btn: 'bg-violet-500', hex: '#a78bfa', icon: Check };
       case TagInventario.NOVO_ITEM: 
-        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-500', hex: '#E5989B', icon: Plus };
+        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-500', hex: '#fb923c', icon: Plus };
       case TagInventario.DIVERGENCIA:
-        return { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-500 text-white', btn: 'bg-rose-500', hex: '#B5838D', icon: AlertTriangle };
+        return { bg: 'bg-danger/5', border: 'border-danger/20', text: 'text-danger', badge: 'bg-danger text-white', btn: 'bg-danger', hex: 'var(--danger)', icon: AlertTriangle };
       case TagInventario.PENDENTE:
-        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-200 text-slate-600', btn: 'bg-slate-600', hex: '#e2e8f0', icon: Check };
+        return { bg: 'bg-white', border: 'border-border', text: 'text-ink', badge: 'bg-bg-main text-ink-muted', btn: 'bg-ink-muted', hex: 'var(--border)', icon: Check };
       default: 
-        return { bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-900', badge: 'bg-slate-200 text-slate-600', btn: 'bg-slate-600', hex: '#e2e8f0', icon: Check };
+        return { bg: 'bg-white', border: 'border-border', text: 'text-ink', badge: 'bg-bg-main text-ink-muted', btn: 'bg-ink-muted', hex: 'var(--border)', icon: Check };
     }
   };
 
@@ -201,7 +201,7 @@ const AssetCard = React.memo(({
     const baseColors = getColors(visualStatus);
     // Se for baixado e conferido, vamos usar um tom de vermelho mais suave ou manter o alerta
     if (isBaixado && isConferido) {
-      return { ...baseColors, bg: 'bg-red-50', border: 'border-red-200' };
+      return { ...baseColors, bg: 'bg-danger/5', border: 'border-danger/20' };
     }
     return baseColors;
   }, [visualStatus, isBaixado, isConferido]);
@@ -218,9 +218,15 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
+      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       style={{ borderLeftColor: colors.hex }}
-      onClick={() => isBatchMode ? onToggleSelect(String(asset.id)) : onSelect(asset)}
+      onClick={() => {
+        if (isBatchMode) {
+          if (!isConferido) onToggleSelect(String(asset.id));
+        } else {
+          onSelect(asset);
+        }
+      }}
     >
       <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${colors.badge}`}>
         {isBatchMode ? (
@@ -234,58 +240,58 @@ const AssetCard = React.memo(({
       <div className="pt-4 pr-8 flex flex-col space-y-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
+            <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Patrimônio:</span>
             <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
           </div>
           {isBatch && (
-            <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
+            <div className="px-2 py-1 bg-warning rounded-lg flex items-center space-x-1 shadow-md">
               <Zap size={10} className="text-white fill-white" />
               <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
             </div>
           )}
         </div>
 
-        <p className="text-[11px] font-medium text-slate-600 uppercase leading-tight tracking-tight line-clamp-2">
+        <p className="text-[11px] font-medium text-ink-muted uppercase leading-tight tracking-tight line-clamp-2">
           {fullDescription}
         </p>
 
         <div className="flex flex-wrap gap-1.5 pt-1">
           {asset._dataLeitura && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-slate-900 text-white border border-slate-700 flex items-center divide-x divide-slate-700">
+            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-ink text-white border border-border flex items-center divide-x divide-border">
               <div className="flex items-center space-x-1 pr-2">
-                <Calendar size={10} className="text-blue-400" />
+                <Calendar size={10} className="text-accent" />
                 <span>{formatReadingTime(asset._dataLeitura)}</span>
               </div>
               {asset._auditor && (
                 <div className="flex items-center space-x-1 pl-2">
-                  <User size={10} className="text-emerald-400" />
-                  <span className="text-slate-300">{asset._auditor}</span>
+                  <User size={10} className="text-success" />
+                  <span className="text-ink-muted">{asset._auditor}</span>
                 </div>
               )}
             </div>
           )}
           {isBaixado && (
-            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700">
+            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-danger text-white border border-danger/20">
               BAIXADO
             </span>
           )}
           {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
-            <span key={index} className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-blue-100 text-blue-600 border border-blue-200' : index === 1 ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-purple-100 text-purple-600 border border-purple-200'}`}>
+            <span key={index} className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-accent-soft text-accent border border-accent/20' : index === 1 ? 'bg-warning/10 text-warning border border-warning/20' : 'bg-purple-100 text-purple-600 border border-purple-200'}`}>
               {String(tag)}
             </span>
           ))}
         </div>
 
         {asset.DE_PARA === 'COM ALTERAÇÃO' && (
-          <div className="mt-2 pt-2 border-t border-slate-100/50">
-            <div className="flex items-center space-x-2 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100/30">
+          <div className="mt-2 pt-2 border-t border-border/50">
+            <div className="flex items-center space-x-2 bg-accent-soft/50 p-2 rounded-xl border border-accent/10">
               <div className="flex-1">
-                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Localização DE/PARA:</p>
+                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Localização DE/PARA:</p>
                 <div className="flex items-center justify-between mt-1">
-                  <span className="text-[8px] font-bold text-red-500 uppercase italic">DE: {asset.ENDERECO || '---'}</span>
-                  <span className="text-[8px] font-bold text-indigo-600 uppercase">PARA: {asset._localMaster || '---'}</span>
+                  <span className="text-[8px] font-bold text-danger uppercase italic">DE: {asset.ENDERECO || '---'}</span>
+                  <span className="text-[8px] font-bold text-accent uppercase">PARA: {asset._localMaster || '---'}</span>
                 </div>
               </div>
             </div>
@@ -293,21 +299,21 @@ const AssetCard = React.memo(({
         )}
 
         {asset._camposAlterados && asset._camposAlterados.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-slate-100/50 space-y-1.5">
-            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Outras Alterações:</p>
+          <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
+            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Outras Alterações:</p>
             {asset._camposAlterados.filter(f => f !== 'ENDERECO').slice(0, 5).map(field => (
-              <div key={field} className="flex flex-col bg-slate-50/50 p-1 rounded-md border border-slate-100/30">
+              <div key={field} className="flex flex-col bg-bg-main/50 p-1 rounded-md border border-border/30">
                 <div className="flex items-center justify-between">
-                  <span className="text-[7px] font-bold text-slate-400 uppercase">{String(field)}</span>
-                  <span className="text-[8px] font-bold text-emerald-600 uppercase">PARA: {String(asset[field] || '---')}</span>
+                  <span className="text-[7px] font-bold text-ink-muted uppercase">{String(field)}</span>
+                  <span className="text-[8px] font-bold text-success uppercase">PARA: {String(asset[field] || '---')}</span>
                 </div>
                 {asset._valoresOriginais?.[field] !== undefined && (
-                  <span className="text-[7px] text-red-500 font-bold uppercase italic mt-0.5">DE: {String(asset._valoresOriginais[field] || '---')}</span>
+                  <span className="text-[7px] text-danger font-bold uppercase italic mt-0.5">DE: {String(asset._valoresOriginais[field] || '---')}</span>
                 )}
               </div>
             ))}
             {asset._camposAlterados.length > 10 && (
-              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 10} campos alterados</p>
+              <p className="text-[7px] text-ink-muted font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 10} campos alterados</p>
             )}
           </div>
         )}
@@ -317,14 +323,14 @@ const AssetCard = React.memo(({
         <button 
           ref={confirmButtonRef}
           onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
-          className={`absolute bottom-3 right-3 w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg active:scale-90 transition-all ${colors.btn} shadow-blue-900/10`}
+          className={`absolute bottom-3 right-3 w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg active:scale-90 transition-all ${colors.btn} shadow-accent/10`}
         >
           <Check size={20} strokeWidth={3} />
         </button>
       )}
 
       {isConferido && !isBatchMode && (
-        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isBaixado ? 'bg-red-500' : 'bg-emerald-500'} text-white rounded-lg flex items-center justify-center shadow-md`}>
+        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isBaixado ? 'bg-danger' : 'bg-success'} text-white rounded-lg flex items-center justify-center shadow-md`}>
           <Check size={16} strokeWidth={3} />
         </div>
       )}
@@ -648,6 +654,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     const currentCompKey = normalizeKey(selectedCompany || '');
     const assetCompKey = normalizeKey(asset.EMPRESA || '');
     
+    // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
+    if (asset._conferido) {
+      setDuplicateAsset(asset);
+      return;
+    }
+
     // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       onUpdateAsset({ 
@@ -690,8 +702,15 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const handleBatchConfirm = () => {
     if (selectedIds.size === 0) return;
     
-    const ids = Array.from(selectedIds);
-    onBulkUpdateAssets(ids);
+    // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
+    const ids = Array.from(selectedIds).filter(id => {
+      const asset = allAssets.find(a => String(a.id) === id);
+      return asset && !asset._conferido;
+    });
+
+    if (ids.length > 0) {
+      onBulkUpdateAssets(ids);
+    }
     
     setSelectedIds(new Set());
     setIsBatchMode(false);
@@ -768,52 +787,57 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         {/* Modal de Item Duplicado */}
         {duplicateAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
-            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-amber-500 p-8 text-white text-center">
-                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
-                  <AlertTriangle size={40} className="text-white" />
-                </div>
-                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Item já Inventariado</h3>
-                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Este patrimônio já possui registro de conferência</p>
-              </div>
-              
-              <div className="p-8 space-y-4">
-                <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
-                  <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className="text-xl font-black text-ink font-mono">{duplicateAsset.ETIQUETA}</p>
-                  <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
-                  <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
-                    <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local Registrado:</span>
-                    <span className="text-[9px] font-black text-amber-600 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
-                  </div>
-                </div>
+            <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+              {(() => {
+                const isSameLocation = normalizeKey(duplicateAsset._localMaster || "") === normalizeKey(selectedLocation || "");
+                return (
+                  <>
+                    <div className={`${isSameLocation ? 'bg-success' : 'bg-warning'} p-8 text-white text-center transition-colors`}>
+                      <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                        {isSameLocation ? <Check size={40} className="text-white" /> : <AlertTriangle size={40} className="text-white" />}
+                      </div>
+                      <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">
+                        {isSameLocation ? 'Item já Conferido' : 'Conflito de Localização'}
+                      </h3>
+                      <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">
+                        {isSameLocation ? 'Registro Confirmado neste Local' : 'Bloqueio: Item em outro endereço'}
+                      </p>
+                    </div>
+                    
+                    <div className="p-8 space-y-4">
+                      <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
+                        <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
+                        <p className="text-xl font-black text-ink font-mono">{duplicateAsset.ETIQUETA}</p>
+                        <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
+                        <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
+                          <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local do Registro:</span>
+                          <span className={`text-[9px] font-black uppercase ${isSameLocation ? 'text-success' : 'text-warning'}`}>
+                            {duplicateAsset._localMaster || duplicateAsset.ENDERECO}
+                          </span>
+                        </div>
+                      </div>
 
-                <p className="text-[10px] font-bold text-ink-muted text-center uppercase tracking-tight leading-relaxed">
-                  Deseja confirmar o registro novamente para a localização atual?
-                </p>
+                      <div className={`${isSameLocation ? 'bg-success/5 border-success/20' : 'bg-warning/5 border-warning/20'} p-4 rounded-2xl border`}>
+                        <p className={`text-[10px] font-bold uppercase tracking-tight leading-relaxed text-center ${isSameLocation ? 'text-success' : 'text-warning'}`}>
+                          {isSameLocation 
+                            ? "Este item já foi processado e conferido neste mesmo endereço. O registro está seguro e não precisa de nova ação."
+                            : "Este item já foi registrado em OUTRO endereço durante este inventário. Para preservar a integridade do relatório De/Para, o primeiro registro foi mantido."
+                          }
+                        </p>
+                      </div>
 
-                <div className="flex space-x-3 pt-2">
-                  <button 
-                    onClick={() => setDuplicateAsset(null)} 
-                    className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
-                  >
-                    Não
-                  </button>
-                  <button 
-                    onClick={() => {
-                      onUpdateAsset({
-                        ...duplicateAsset,
-                        _conferido: true,
-                        _localMaster: selectedLocation || duplicateAsset.ENDERECO
-                      });
-                      setDuplicateAsset(null);
-                    }} 
-                    className="flex-1 py-4 bg-amber-500 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
-                  >
-                    Sim, Confirmar
-                  </button>
-                </div>
-              </div>
+                      <div className="pt-2">
+                        <button 
+                          onClick={() => setDuplicateAsset(null)} 
+                          className={`w-full py-4 ${isSameLocation ? 'bg-success' : 'bg-accent'} text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all`}
+                        >
+                          Entendido
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>,
           document.body
@@ -822,7 +846,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         {/* Modal de Confirmação de Item Lido */}
         {scannedAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
-            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
               <div className="bg-accent p-8 text-white text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                   <ShieldCheck size={40} className="text-white" />
@@ -845,7 +869,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                 <div className="flex space-x-3 pt-2">
                   <button 
                     onClick={() => setScannedAsset(null)} 
-                    className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
                     Cancelar
                   </button>
@@ -885,8 +909,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         {/* Modal de Item Não Localizado */}
         {scannedResult && !scannedAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
-            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-orange-500 p-8 text-white text-center">
+            <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+              <div className="bg-warning p-8 text-white text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                   <AlertTriangle size={40} className="text-white" />
                 </div>
@@ -924,7 +948,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   </button>
                   <button 
                     onClick={() => setScannedResult(null)} 
-                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
                     Voltar ao Scanner
                   </button>
@@ -942,18 +966,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
         <>
-          <div className="px-5 pt-12 pb-4 bg-white border-b border-slate-200">
+          <div className="px-5 pt-12 pb-4 bg-white border-b border-border">
             <div className="flex items-center justify-between mb-6">
               <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Analytics Precision V24" />
               <button 
                 onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
-                className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'bg-bg-main text-ink-muted'}`}
               >
                 <Search size={20} />
               </button>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">Mapeamento Geográfico</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
+            <h1 className="text-2xl font-bold text-ink uppercase tracking-tight">Mapeamento Geográfico</h1>
+            <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
             
             {isLocationSearchVisible && (
               <div className="mt-4 relative animate-fadeIn">
@@ -961,14 +985,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   type="text"
                   value={locationSearchTerm}
                   onChange={(e) => setLocationSearchTerm(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 font-bold text-sm rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all"
+                  className="w-full bg-bg-main border border-border px-4 py-3 font-bold text-sm rounded-xl text-ink outline-none focus:border-accent transition-all"
                   placeholder="PESQUISAR LOCAL..."
                   autoFocus
                 />
                 {locationSearchTerm && (
                   <button 
                     onClick={() => setLocationSearchTerm('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted"
                   >
                     <X size={16} />
                   </button>
@@ -990,18 +1014,18 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               const isStarted = stats.checked > 0;
               
               return (
-                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-slate-200 rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
-                  <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-emerald-50' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
+                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
+                  <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-success/5' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
                   <div className="flex items-center space-x-4 relative z-10">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-success text-white border-success/20 shadow-sm' : 'bg-bg-main text-ink-muted border-border'}`}>
                       <MapPin size={20} />
                     </div>
                     <div className="text-left">
-                      <span className="text-[13px] font-bold uppercase block leading-none text-slate-900">{loc}</span>
-                      <span className={`text-[9px] font-bold uppercase mt-2 block ${isStarted ? 'text-emerald-600' : 'text-slate-400'}`}>{stats.checked} / {stats.total} ITENS ({progress}%)</span>
+                      <span className="text-[13px] font-bold uppercase block leading-none text-ink">{loc}</span>
+                      <span className={`text-[9px] font-bold uppercase mt-2 block ${isStarted ? 'text-success' : 'text-ink-muted'}`}>{stats.checked} / {stats.total} ITENS ({progress}%)</span>
                     </div>
                   </div>
-                  <ChevronRight size={16} className="text-slate-300 relative z-10" />
+                  <ChevronRight size={16} className="text-ink-muted/30 relative z-10" />
                 </button>
               );
             })}
@@ -1009,13 +1033,13 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         </>
       ) : (
         <>
-          <div className="px-3 py-1.5 bg-white border-b border-slate-200 shadow-sm z-20">
+          <div className="px-3 py-1.5 bg-white border-b border-border shadow-sm z-20">
             <div className="flex flex-col space-y-1.5 mb-1">
               {/* Row 1: Action Buttons & SAFE Status */}
               <div className="flex items-center justify-between space-x-2">
                 <button 
                   onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
-                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:text-slate-900 active:scale-95 transition-all shadow-sm"
+                  className="p-2.5 bg-bg-main border border-border rounded-xl text-ink-muted active:text-ink active:scale-95 transition-all shadow-sm"
                   title="Voltar para Seleção de Local"
                 >
                   <ArrowLeft size={16} />
@@ -1026,7 +1050,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   {isBatchMode && (
                     <button 
                       onClick={toggleSelectAll} 
-                      className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+                      className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent border-accent text-white' : 'bg-white border-border text-ink-muted'}`}
                     >
                       {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
                       <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
@@ -1036,14 +1060,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   {activeFilter === 'pending' && !isBatchMode && (
                     <button 
                       onClick={onOpenConsultation}
-                      className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shadow-sm active:scale-95 transition-all"
+                      className="p-2.5 bg-accent-soft text-accent rounded-xl border border-accent/10 shadow-sm active:scale-95 transition-all"
                       title="Consultar Item na Base"
                     >
                       <Database size={20} strokeWidth={2.5} />
                     </button>
                   )}
                   
-                  <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
+                  <div className="flex p-0.5 bg-bg-main rounded-xl border border-border shadow-inner">
                     <button 
                       onClick={() => {
                         if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
@@ -1055,7 +1079,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                           setShowNumericKeypad(true);
                         }
                       }} 
-                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
                     >
                       <Keyboard size={20} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
                     </button>
@@ -1065,7 +1089,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                         setIsSearchVisible(false);
                         setIsScannerOpen(true);
                       }} 
-                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
                     >
                       <Camera size={20} strokeWidth={searchMode === InventorySearchMode.SCANNER ? 3 : 2} />
                     </button>
@@ -1076,8 +1100,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             </div>
 
             {/* Row 2: Location Field (Full width) */}
-              <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-3 text-slate-600 shadow-sm">
-                <MapPin size={16} className="text-blue-500 shrink-0" />
+              <div className="w-full px-3 py-2 bg-bg-main border border-border rounded-xl flex items-center space-x-3 text-ink-muted shadow-sm">
+                <MapPin size={16} className="text-accent shrink-0" />
                 <span className="text-[11px] font-normal uppercase italic tracking-tight flex-1 text-left leading-tight">
                   {selectedLocation}
                 </span>
@@ -1093,16 +1117,16 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                   inputMode="none"
                   onFocus={() => setShowNumericKeypad(true)}
                   value={displayValue} 
-                  className="w-full bg-slate-50 border border-slate-200 px-4 py-2 font-bold font-mono text-lg text-center rounded-xl text-slate-900 outline-none focus:border-blue-500 transition-all cursor-pointer" 
+                  className="w-full bg-bg-main border border-border px-4 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
                   placeholder="DIGITE ETIQUETA..." 
                 />
-                <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-900"><X size={20} /></button>
+                <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted active:text-ink"><X size={20} /></button>
               </div>
             )}
 
             <div className="flex space-x-1.5">
-              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Pendentes</button>
-              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'text-slate-400 border-slate-200'}`}>Inventariado</button>
+              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-ink text-white border-ink shadow-sm' : 'text-ink-muted border-border'}`}>Pendentes</button>
+              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-accent text-white border-accent shadow-sm' : 'text-ink-muted border-border'}`}>Inventariado</button>
             </div>
           </div>
 
@@ -1114,7 +1138,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               <div className="px-4 pt-3">
                 <button 
                   onClick={handleConfirmSearchBatch} 
-                  className="w-full mb-3 bg-amber-500 text-white py-3 rounded-xl font-bold uppercase text-[9px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-2 border-b-4 border-amber-700"
+                  className="w-full mb-3 bg-warning text-white py-3 rounded-xl font-bold uppercase text-[9px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-2 border-b-4 border-black/20"
                 >
                   <Zap size={16} className="fill-white" />
                   <span>Confirmar Lote Completo ({filteredAssets.filter(a => !a._conferido).length} itens)</span>
@@ -1125,14 +1149,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             {/* BARRA DE AÇÃO LOTE INVENTARIO - TOPO PARA FLUIDEZ */}
             {isBatchMode && selectedIds.size > 0 && (
               <div className="px-4 pb-2 animate-slideDown">
-                 <div className="bg-emerald-600 p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
+                 <div className="bg-success p-3 rounded-2xl shadow-lg flex items-center justify-between border border-white/20">
                     <div className="flex items-center space-x-3 pl-2">
                        <span className="text-xl font-black text-white tracking-tighter">{selectedIds.size}</span>
-                       <span className="text-[9px] font-bold text-emerald-100 uppercase tracking-widest">Selecionados</span>
+                       <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Selecionados</span>
                     </div>
                     <div className="flex items-center space-x-2">
                        <button onClick={() => setSelectedIds(new Set())} className="p-2 bg-black/20 text-white rounded-xl"><X size={16} /></button>
-                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
+                       <button onClick={handleBatchConfirm} className="px-6 py-2 bg-white text-success rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all">Confirmar Lote</button>
                     </div>
                  </div>
               </div>
@@ -1152,7 +1176,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     scanFeedbackMode={scanFeedbackMode}
                   />
                   <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
-                    <div className="px-3 py-1 bg-emerald-500/80 backdrop-blur-md rounded-full flex items-center space-x-2">
+                    <div className="px-3 py-1 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-2">
                       <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
                       <span className="text-[10px] font-black text-white uppercase tracking-widest">Scanner Ativo</span>
                     </div>
@@ -1164,27 +1188,27 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             {/* BARRA DE RESUMO DE AUDITORIA NO LOCAL */}
             {activeFilter === 'checked' && filteredAssets.length > 0 && (
               <div className="px-4 py-2 animate-fadeIn">
-                <div className="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm">
+                <div className="bg-white border border-border rounded-2xl p-3 flex items-center justify-between shadow-sm">
                   <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                    <div className="w-8 h-8 bg-accent-soft rounded-lg flex items-center justify-center text-accent">
                       <MapPin size={16} />
                     </div>
                     <div>
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Auditoria no Local</p>
-                      <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">{selectedLocation}</p>
+                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Auditoria no Local</p>
+                      <p className="text-[10px] font-bold text-ink uppercase tracking-tight">{selectedLocation}</p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-4 pr-2">
                     <div className="text-right">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Adotados</p>
-                      <p className="text-sm font-black text-indigo-600 leading-none mt-0.5">
+                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Adotados</p>
+                      <p className="text-sm font-black text-accent leading-none mt-0.5">
                         {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') !== normalizeKey(selectedLocation || '')).length}
                       </p>
                     </div>
-                    <div className="w-px h-6 bg-slate-100" />
+                    <div className="w-px h-6 bg-border" />
                     <div className="text-right">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Próprios</p>
-                      <p className="text-sm font-black text-emerald-600 leading-none mt-0.5">
+                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Próprios</p>
+                      <p className="text-sm font-black text-success leading-none mt-0.5">
                         {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') === normalizeKey(selectedLocation || '')).length}
                       </p>
                     </div>
@@ -1222,21 +1246,21 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               />
             ) : committedSearch ? (
                 <div className="py-20 flex flex-col items-center justify-center text-center animate-fadeIn px-10">
-                    <div className="w-24 h-24 bg-orange-50 border border-orange-100 rounded-full flex items-center justify-center text-orange-500 mb-6 shadow-sm">
+                    <div className="w-24 h-24 bg-warning/5 border border-warning/20 rounded-full flex items-center justify-center text-warning mb-6 shadow-sm">
                         <AlertTriangle size={40} />
                     </div>
-                    <h3 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Nenhum Registro</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3 leading-relaxed">Etiqueta &quot;{committedSearch}&quot; não localizada na base v24</p>
+                    <h3 className="text-xl font-bold text-ink uppercase tracking-tight">Nenhum Registro</h3>
+                    <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mt-3 leading-relaxed">Etiqueta &quot;{committedSearch}&quot; não localizada na base v24</p>
                     
-                    <button onClick={handleCreateNew} className="mt-10 w-full py-5 bg-orange-500 text-white rounded-2xl flex items-center justify-center space-x-3 shadow-lg active:scale-95 transition-all font-bold uppercase text-[10px] tracking-widest">
+                    <button onClick={handleCreateNew} className="mt-10 w-full py-5 bg-warning text-white rounded-2xl flex items-center justify-center space-x-3 shadow-lg active:scale-95 transition-all font-bold uppercase text-[10px] tracking-widest">
                         <FilePlus2 size={18} />
                         <span>Incluir Manual</span>
                     </button>
                 </div>
             ) : (
                 <div className="py-24 flex flex-col items-center justify-center opacity-30 text-center">
-                    <Search size={64} className="mb-6 text-slate-300" />
-                    <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-slate-400">Aguardando Auditoria</p>
+                    <Search size={64} className="mb-6 text-ink-muted" />
+                    <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-ink-muted">Aguardando Auditoria</p>
                 </div>
             )}
           </div>
@@ -1288,96 +1312,57 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-sky-500/30 shadow-2xl p-8">
-            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Criar Nova Localidade</h3>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-6">Insira o nome para o novo local de auditoria.</p>
-            <input 
-              type="text"
-              value={newLocationName}
-              onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
-              className="w-full bg-slate-950 border-2 border-slate-800 rounded-xl px-5 py-4 font-black text-lg text-center text-white outline-none focus:border-sky-500 transition-all mb-6"
-              placeholder="NOME DO LOCAL"
-            />
-            <div className="flex space-x-3">
-              <button onClick={() => setIsNewLocationModalOpen(false)} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest">Cancelar</button>
-              <button 
-                onClick={() => {
-                  onAddNewLocation(newLocationName);
-                  setNewLocationName('');
-                  setIsNewLocationModalOpen(false);
-                }}
-                disabled={!newLocationName.trim()}
-                className="flex-1 py-4 bg-sky-600 text-white rounded-xl font-black uppercase text-xs tracking-widest disabled:opacity-30"
-              >
-                Criar
-              </button>
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-accent p-8 text-white text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                <MapPin size={40} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Nova Localidade</h3>
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Mapeamento de Endereço</p>
+            </div>
+            
+            <div className="p-8 space-y-6">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-ink-muted uppercase tracking-widest ml-1">Nome do Local</label>
+                <input 
+                  type="text" 
+                  value={newLocationName} 
+                  onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
+                  className="w-full bg-bg-main border border-border p-4 rounded-2xl text-sm font-bold text-ink outline-none focus:border-accent transition-all"
+                  placeholder="EX: SALA 101, ALMOXARIFADO..."
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <button 
+                  onClick={() => {
+                    onAddNewLocation(newLocationName);
+                    setNewLocationName('');
+                    setIsNewLocationModalOpen(false);
+                  }}
+                  disabled={!newLocationName.trim()}
+                  className="w-full py-4 bg-accent disabled:bg-ink-muted/20 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+                >
+                  Confirmar Criação
+                </button>
+                <button 
+                  onClick={() => { setIsNewLocationModalOpen(false); setNewLocationName(''); }} 
+                  className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {duplicateAsset && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-amber-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-            <div className="bg-amber-600 p-8 text-white text-center">
-              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
-                <AlertTriangle size={40} className="text-white" />
-              </div>
-              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Item já Inventariado</h3>
-              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Este patrimônio já possui registro de conferência</p>
-            </div>
-            
-            <div className="p-8 space-y-4">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
-                <p className="text-xl font-black text-white font-mono">{duplicateAsset.ETIQUETA}</p>
-                <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
-                <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Local Registrado:</span>
-                  <span className="text-[9px] font-black text-amber-500 uppercase">{duplicateAsset._localMaster || duplicateAsset.ENDERECO}</span>
-                </div>
-              </div>
-
-              <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-tight leading-relaxed">
-                Deseja confirmar o registro novamente para a localização atual?
-              </p>
-
-              <div className="flex space-x-3 pt-2">
-                <button 
-                  onClick={() => {
-                    setDuplicateAsset(null);
-                    // Não fecha o scanner se estiver no modo scanner
-                  }} 
-                  className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
-                >
-                  Não
-                </button>
-                <button 
-                  onClick={() => {
-                    onUpdateAsset({
-                      ...duplicateAsset,
-                      _conferido: true,
-                      _localMaster: selectedLocation || duplicateAsset.ENDERECO
-                    });
-                    setDuplicateAsset(null);
-                    // Não fecha o scanner se estiver no modo scanner
-                  }} 
-                  className="flex-1 py-4 bg-amber-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
-                >
-                  Sim, Confirmar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
       {scannedAsset && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-blue-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-            <div className="bg-blue-600 p-8 text-white text-center">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-accent p-8 text-white text-center">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                 <ShieldCheck size={40} className="text-white" />
               </div>
@@ -1386,20 +1371,20 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             </div>
             
             <div className="p-8 space-y-4">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Patrimônio</p>
-                <p className="text-xl font-black text-white font-mono">{scannedAsset.ETIQUETA}</p>
-                <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
-                <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Localização Atual:</span>
-                  <span className="text-[9px] font-black text-blue-500 uppercase">{selectedLocation}</span>
+              <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
+                <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
+                <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
+                <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
+                  <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Localização Atual:</span>
+                  <span className="text-[9px] font-black text-accent uppercase">{selectedLocation}</span>
                 </div>
               </div>
 
               <div className="flex space-x-3 pt-2">
                 <button 
                   onClick={() => setScannedAsset(null)} 
-                  className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                  className="flex-1 py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                 >
                   Cancelar
                 </button>
@@ -1425,7 +1410,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     }
                     setScannedAsset(null);
                   }} 
-                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 active:scale-95 transition-all"
+                  className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
                 >
                   Confirmar
                 </button>
@@ -1438,8 +1423,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
       {scannedResult && !scannedAsset && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[2.5rem] border border-orange-500/50 shadow-2xl overflow-hidden relative animate-scaleIn">
-            <div className="bg-orange-600 p-8 text-white text-center">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-warning p-8 text-white text-center">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                 <AlertTriangle size={40} className="text-white" />
               </div>
@@ -1448,9 +1433,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
             </div>
             
             <div className="p-8 space-y-4">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Código Lido</p>
-                <p className="text-xl font-black text-white font-mono">{scannedResult}</p>
+              <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10 text-center">
+                <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Código Lido</p>
+                <p className="text-xl font-black text-ink font-mono">{scannedResult}</p>
               </div>
 
               <div className="flex flex-col space-y-3 pt-2">
@@ -1470,14 +1455,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     setIsManualEntryOpen(true);
                     setScannedResult(null);
                   }} 
-                  className="w-full py-4 bg-orange-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2"
+                  className="w-full py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2 shadow-lg shadow-accent/20"
                 >
                   <FilePlus2 size={16} />
                   <span>Incluir Manual</span>
                 </button>
                 <button 
                   onClick={() => setScannedResult(null)} 
-                  className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                  className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                 >
                   Voltar ao Scanner
                 </button>
@@ -1493,10 +1478,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {isManualEntryOpen && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-start justify-center p-4 sm:p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn overflow-y-auto pt-10 sm:pt-20">
           <div className="absolute inset-0" onClick={() => setIsManualEntryOpen(false)} />
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] border border-accent/20 shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col mb-20">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative z-10 animate-scaleIn flex flex-col mb-20">
             <div className="bg-accent px-8 py-6 text-white shrink-0">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-2 bg-black/20 px-4 py-2 rounded-full border border-white/10">
+                <div className="flex items-center space-x-2 bg-white/20 px-4 py-2 rounded-full border border-white/10">
                   <FilePlus2 size={14} className="fill-white" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Inclusão Manual</span>
                 </div>

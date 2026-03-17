@@ -270,21 +270,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
           {isBatch && (
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm modern-card">
+            <div className="bg-white border border-border rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] flex items-center">
-                  <AlertCircle size={12} className="mr-1.5 text-amber-400" /> REGISTROS NO LOTE
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] flex items-center">
+                  <AlertCircle size={12} className="mr-1.5 text-warning" /> REGISTROS NO LOTE
                 </p>
-                <span className="text-[9px] font-bold text-amber-500 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
+                <span className="text-[9px] font-bold text-warning bg-warning/10 border border-warning/20 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
               </div>
               <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar pr-1">
                 {assets.map((a, idx) => (
-                  <div key={a.id} className="bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between shadow-sm">
+                  <div key={a.id} className="bg-bg-main border border-border p-3 rounded-lg flex items-center justify-between shadow-sm">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-slate-800 truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
-                      <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.1em] mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
+                      <p className="text-[10px] font-bold text-ink truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
+                      <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.1em] mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
                     </div>
-                    <span className="text-[9px] font-bold text-slate-300 font-mono ml-2">#{String(idx + 1).padStart(2, '0')}</span>
+                    <span className="text-[9px] font-bold text-ink-muted/30 font-mono ml-2">#{String(idx + 1).padStart(2, '0')}</span>
                   </div>
                 ))}
               </div>
@@ -292,12 +292,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
           )}
 
           {fieldGroups.map((group) => (
-            <div key={group.title} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm modern-card">
-              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em]">{group.title}</span>
+            <div key={group.title} className="bg-white border border-border rounded-xl overflow-hidden shadow-sm modern-card">
+              <div className="bg-bg-main px-4 py-2 border-b border-border">
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em]">{group.title}</span>
               </div>
               
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-border">
                 {group.fields.map(({ key, label, icon: Icon }) => {
                   const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
@@ -315,20 +315,20 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                     <div 
                       key={key} 
                       onClick={(e) => { e.stopPropagation(); if (canEdit) { setEditingField(key); setEditValue(String(rawVal || '')); } }} 
-                      className={`px-4 py-3 flex flex-col transition-all active:bg-slate-50 ${editingField === key ? 'bg-blue-50 ring-1 ring-inset ring-blue-500' : ''}`}
+                      className={`px-4 py-3 flex flex-col transition-all active:bg-bg-main ${editingField === key ? 'bg-accent-soft ring-1 ring-inset ring-accent' : ''}`}
                     >
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center space-x-1.5">
-                          {Icon && <Icon size={10} className="text-slate-400" />}
-                          <label className="text-[7px] font-bold uppercase tracking-[0.1em] text-slate-400">{label}</label>
+                          {Icon && <Icon size={10} className="text-ink-muted/30" />}
+                          <label className="text-[7px] font-bold uppercase tracking-[0.1em] text-ink-muted">{label}</label>
                         </div>
-                        {canEdit && <Edit2 size={10} className="text-blue-500" />}
+                        {canEdit && <Edit2 size={10} className="text-accent" />}
                       </div>
                       
                       {editingField === key ? (
                         <div className="mt-2 flex flex-col space-y-2">
                           {workingAsset._valoresOriginais?.[key] !== undefined && (
-                            <p className="text-[8px] text-red-500 font-bold uppercase tracking-wider px-1">
+                            <p className="text-[8px] text-danger font-bold uppercase tracking-wider px-1">
                               ORIGINAL (DE): {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
                             </p>
                           )}
@@ -338,10 +338,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                               value={editValue} 
                               onChange={(e) => setEditValue(e.target.value)} 
                               onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
-                              className="flex-1 bg-white px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold uppercase text-slate-900 outline-none shadow-sm focus:ring-2 focus:ring-blue-500/20" 
+                              className="flex-1 bg-white px-3 py-2 border border-accent/30 rounded-lg text-xs font-bold uppercase text-ink outline-none shadow-sm focus:ring-2 focus:ring-accent/20" 
                               placeholder={`NOVO VALOR (PARA) ${label}`}
                             />
-                            <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
+                            <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-accent text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
                               <Check size={20}/>
                             </button>
                           </div>
@@ -350,20 +350,20 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                         <div className="flex flex-col">
                           {key === 'ENDERECO' && workingAsset.DE_PARA === 'COM ALTERAÇÃO' ? (
                             <>
-                              <p className="text-xs font-bold uppercase leading-tight font-mono tracking-tight text-indigo-600">
+                              <p className="text-xs font-bold uppercase leading-tight font-mono tracking-tight text-accent">
                                 PARA: {workingAsset._localMaster || '---'}
                               </p>
-                              <p className="text-[8px] text-red-500 font-bold uppercase mt-1 tracking-wider">
+                              <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
                                 DE: {workingAsset.ENDERECO || '---'}
                               </p>
                             </>
                           ) : (
                             <>
-                              <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-slate-900' : 'text-slate-300'}`}>
+                              <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-ink' : 'text-ink-muted/30'}`}>
                                 {workingAsset._valoresOriginais?.[key] !== undefined ? `PARA: ${displayVal}` : displayVal}
                               </p>
                               {workingAsset._valoresOriginais?.[key] !== undefined && (
-                                <p className="text-[8px] text-red-500 font-bold uppercase mt-1 tracking-wider">
+                                <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
                                   DE: {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
                                 </p>
                               )}
@@ -373,17 +373,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                       )}
                       
                       {editingField === key && suggestions.length > 0 && (
-                        <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl shadow-inner">
+                        <div className="mt-3 p-3 bg-bg-main border border-border rounded-2xl shadow-inner">
                           <div className="flex items-center justify-between mb-2 px-1">
-                            <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em]">Sugestões Disponíveis</p>
-                            <span className="text-[7px] font-bold text-blue-500 uppercase">{suggestions.length} encontrados</span>
+                            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.2em]">Sugestões Disponíveis</p>
+                            <span className="text-[7px] font-bold text-accent uppercase">{suggestions.length} encontrados</span>
                           </div>
                           <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar py-1">
                             {suggestions.map(s => (
                               <button 
                                 key={s} 
                                 onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} 
-                                className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-bold text-slate-700 uppercase active:bg-blue-600 active:text-white active:border-blue-600 transition-all shadow-sm hover:border-blue-300"
+                                className="px-3 py-1.5 rounded-xl bg-white border border-border text-[10px] font-bold text-ink uppercase active:bg-accent active:text-white active:border-accent transition-all shadow-sm hover:border-accent"
                               >
                                 {s}
                               </button>
@@ -400,10 +400,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
       
       {/* KARDEX FOOTER */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
          <div className="flex flex-col">
-           <span className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-           <span className="text-[9px] font-bold text-slate-900 uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
+           <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
+           <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
          </div>
          <button 
            onClick={handleFinalize} 
@@ -416,16 +416,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
 
       {isQrModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
-          <div className="bg-white w-full max-w-sm rounded-[3rem] border border-slate-200 shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xl font-bold text-slate-900 uppercase tracking-tight font-mono mb-6">{workingAsset.EMPRESA}</p>
-            <div className="bg-white p-6 border-2 border-slate-900 rounded-3xl shadow-inner mb-8">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
+            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.EMPRESA}</p>
+            <div className="bg-white p-6 border-2 border-ink rounded-3xl shadow-inner mb-8">
               <QRCodeSVG value={qrCodeData} size={240} />
             </div>
             <div className="text-center w-full">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
-              <p className="bg-slate-900 text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.ETIQUETA}</p>
+              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
+              <p className="bg-ink text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.ETIQUETA}</p>
             </div>
-            <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-slate-100 text-slate-900 rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
+            <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-bg-main text-ink rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
           </div>
         </div>
       )}

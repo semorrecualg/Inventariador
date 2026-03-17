@@ -70,13 +70,40 @@ export const syncAssetsToCloud = async (assets: Asset[]) => {
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) => {
   if (!supabase) return;
-  // Tenta salvar configurações globais ou da sessão
-  // Assumindo uma tabela 'inventory_config'
+  
+  // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
+  const allowedKeys = [
+    'id', 
+    'companies', 
+    'lastUpdated', 
+    'status', 
+    'editableFields', 
+    'qrCodeFields', 
+    'scannerMode', 
+    'autoConfirmOnScan', 
+    'scanFeedbackMode', 
+    'inventorySearchMode', 
+    'immersiveMode'
+  ];
+
+  const filteredConfig: any = { id: 'global_config' };
+  
+  Object.keys(config).forEach(key => {
+    if (allowedKeys.includes(key)) {
+      filteredConfig[key] = (config as any)[key];
+    }
+  });
+
   const { error } = await supabase
     .from('inventory_config')
-    .upsert([{ id: 'global_config', ...config }], { onConflict: 'id' });
+    .upsert([filteredConfig], { onConflict: 'id' });
 
   if (error) {
+    // Se o erro for de coluna inexistente, logamos mas não travamos o app
+    if (error.code === 'PGRST204') {
+      console.warn('Coluna inexistente no Supabase (inventory_config). Por favor, atualize o esquema do banco.', error.message);
+      return;
+    }
     console.error('Error syncing config to Supabase:', error);
     throw error;
   }

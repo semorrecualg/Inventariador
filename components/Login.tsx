@@ -71,6 +71,7 @@ const AssetIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+// Login Component
 const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -194,10 +195,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           </div>
           <div className="absolute -bottom-1 -right-1 bg-accent w-4 h-4 rounded-full border-2 border-white shadow-sm"></div>
         </div>
-        <h1 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">
+        <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
           GBR <span className="text-accent">AUDITORIA</span>
         </h1>
-        <p className="text-slate-400 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+        <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
           INVENTÁRIO DE ATIVO IMOBILIZADO
         </p>
       </div>
@@ -314,7 +315,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         </div>
         
         <div className="pt-3 border-t border-accent/10">
-          <p className="text-[8px] font-bold text-ink-muted uppercase tracking-[0.3em]">
+          <p className="text-[8px] font-bold text-accent uppercase tracking-[0.3em]">
             GBR Intelligent Systems
           </p>
         </div>

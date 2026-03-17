@@ -68,6 +68,7 @@ const AssetIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+// Register Component
 const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMode }) => {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
