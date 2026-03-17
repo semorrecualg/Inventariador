@@ -13,64 +13,6 @@ interface LoginProps {
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
 }
 
-// Ícone SVG Customizado para Ativo Imobilizado
-const AssetIcon = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    xmlns="http://www.w3.org/2000/svg" 
-    className={className}
-  >
-    <path 
-      d="M2 22H22" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-    />
-    <path 
-      d="M17 22V7L12 2L7 7V22" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinejoin="round" 
-    />
-    <path 
-      d="M7 12H17" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-    />
-    <path 
-      d="M7 17H17" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-    />
-    <rect 
-      x="13" 
-      y="13" 
-      width="8" 
-      height="6" 
-      rx="1" 
-      fill="white" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M15 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M17 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M19 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-  </svg>
-);
-
 // Login Component
 const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode }) => {
   const [username, setUsername] = useState('');
@@ -188,10 +130,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
       {/* Header compactado e movido para cima (X) */}
       <div className="mb-3 text-center">
         <div className="relative w-24 h-24 mx-auto mb-2">
-          {/* Ícone SVG Customizado de Ativo Imobilizado */}
+          {/* Logo AI AUDITPRO */}
           <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
-          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft">
-            <AssetIcon className="w-14 h-14 text-accent" />
+          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft p-1">
+            <img 
+              src="/logo.png" 
+              alt="AI AUDITPRO Logo" 
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.classList.add('bg-accent-soft');
+                const icon = document.createElement('div');
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
+              }}
+            />
           </div>
           <div className="absolute -bottom-1 -right-1 bg-accent w-4 h-4 rounded-full border-2 border-white shadow-sm"></div>
         </div>

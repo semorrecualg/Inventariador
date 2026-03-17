@@ -11,7 +11,6 @@ import {
   Download, 
   Users,
   Settings,
-  Shield,
   X,
   ShieldCheck,
   ChevronRight,
@@ -28,7 +27,8 @@ import {
   ListChecks,
   Database,
   Cloud,
-  Server
+  Server,
+  AlertTriangle
 } from 'lucide-react';
 
 interface MainMenuProps {
@@ -81,8 +81,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
       <div className="px-5 pt-12 pb-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-lg flex items-center justify-center text-accent shadow-sm">
-            <Shield size={20} />
+          <div className="w-10 h-10 bg-white border border-accent/10 rounded-lg flex items-center justify-center overflow-hidden shadow-sm p-0.5">
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const icon = document.createElement('div');
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
+              }}
+            />
           </div>
           <div>
             <p className="text-[8px] font-bold text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
@@ -231,6 +242,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Configurar QR Code</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Definir campos do QR</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.ASSET_REPORTS); }} className="w-full flex items-center p-4 bg-amber-50 border border-amber-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-amber-100 text-amber-600 rounded-lg flex items-center justify-center mr-4 border border-amber-200"><AlertTriangle size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-amber-900 uppercase tracking-tight">Reportes de Campo</h4>
+                  <p className="text-[8px] font-bold text-amber-600 uppercase tracking-widest mt-0.5">Divergências Recebidas</p>
                 </div>
               </button>
 

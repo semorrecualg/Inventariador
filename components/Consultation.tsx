@@ -3,6 +3,8 @@ import React, { useState, useMemo } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
+import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
+import { formatDateBR, formatCurrency, parseAssetDate } from '../utils/formatUtils';
 import { 
   Search, 
   ChevronRight, 
@@ -40,50 +42,66 @@ interface ConsultationProps {
   onUpdateCommittedFilters: (filters: SearchFilters | null) => void;
 }
 
-const parseAssetDate = (val: string | number | null | undefined): Date | null => {
-  if (!val) return null;
-  const s = String(val).trim();
-  if (s === "" || s.toUpperCase() === "NULL") return null;
-  if (!isNaN(Number(s)) && Number(s) > 10000) {
-    return new Date(Math.round((Number(s) - 25569) * 86400 * 1000));
-  }
-  const parts = s.split(/[/-]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-    if (parts[2].length === 4) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-  }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-};
-
-const NumericKeypad = ({ onInput, onDelete, onClose, onSearch }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void, onSearch: () => void }) => {
+const NumericKeypad = ({ 
+  value, 
+  label, 
+  onInput, 
+  onDelete, 
+  onClose, 
+  onSearch 
+}: { 
+  value: string, 
+  label: string, 
+  onInput: (val: string) => void, 
+  onDelete: () => void, 
+  onClose: () => void, 
+  onSearch: () => void 
+}) => {
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
   
   return (
-    <div className="bg-white border-t border-slate-200 p-4 pb-10 grid grid-cols-3 gap-3 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[2rem]">
-      {keys.map((key) => (
-        <button
-          key={key}
-          onClick={() => {
-            if (key === 'C') onClose();
-            else if (key === '⌫') onDelete();
-            else onInput(key);
-          }}
-          className={`h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all active:scale-90 ${
-            key === 'C' ? 'bg-slate-100 text-slate-400' : 
-            key === '⌫' ? 'bg-slate-100 text-slate-400' : 
-            'bg-white border border-slate-200 text-slate-900 shadow-sm'
-          }`}
+    <div className="bg-white border-t border-slate-200 p-4 pb-8 flex flex-col animate-slideUp z-[100] shadow-[0_-20px_50px_rgba(0,0,0,0.15)] rounded-t-[2.5rem]">
+      {/* Keypad Header - Context for the user */}
+      <div className="flex flex-col items-center mb-4 px-2">
+        <div className="w-12 h-1.5 bg-slate-200 rounded-full mb-4" />
+        <div className="w-full flex items-center justify-between mb-1">
+          <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{label}</span>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 px-4 flex items-center justify-center min-h-[56px] shadow-inner">
+          <span className="text-2xl font-mono font-bold text-slate-900 tracking-wider">
+            {value || <span className="text-slate-300">---</span>}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {keys.map((key) => (
+          <button
+            key={key}
+            onClick={() => {
+              if (key === '⌫') onDelete();
+              else if (key === 'C') onClose();
+              else onInput(key);
+            }}
+            className={`h-14 rounded-2xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 ${
+              key === 'C' ? 'bg-slate-100 text-slate-400' : 
+              key === '⌫' ? 'bg-slate-100 text-slate-400' : 
+              'bg-white border border-slate-200 text-slate-900 shadow-sm'
+            }`}
+          >
+            {key === 'C' ? <X size={20} /> : key}
+          </button>
+        ))}
+        <button 
+          onClick={onSearch}
+          className="col-span-3 h-14 bg-accent text-white rounded-2xl flex items-center justify-center text-sm font-bold uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all mt-1 border-b-4 border-black/20"
         >
-          {key}
+          <Search size={18} className="mr-3" strokeWidth={3} /> Confirmar Busca
         </button>
-      ))}
-      <button 
-        onClick={onSearch}
-        className="col-span-3 h-12 bg-accent text-white rounded-xl flex items-center justify-center text-sm font-bold uppercase tracking-widest shadow-md active:scale-95 transition-all mt-1"
-      >
-        <Search size={16} className="mr-2" /> Confirmar Busca
-      </button>
+      </div>
     </div>
   );
 };
@@ -92,7 +110,6 @@ const Consultation: React.FC<ConsultationProps> = ({
   assets, 
   onBack, 
   onSelectAsset, 
-  qrCodeFields, 
   scannerMode, 
   onUpdateScannerMode, 
   scanFeedbackMode,
@@ -101,13 +118,38 @@ const Consultation: React.FC<ConsultationProps> = ({
   filters,
   onUpdateFilters,
   committedFilters,
-  onUpdateCommittedFilters
+  onUpdateCommittedFilters,
+  qrCodeFields
 }) => {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   const [activeField, setActiveField] = useState<keyof SearchFilters | null>(null);
+  
+  const qrCodeData = useMemo(() => {
+    if (!selectedAssetForQr) return '';
+    const lines: string[] = [];
+    
+    // Filtra os campos selecionados que existem no ativo e os ordena conforme a regra oficial
+    const activeFields = QR_FIELD_ORDER.filter(field => 
+      qrCodeFields.includes(field) && 
+      selectedAssetForQr[field as keyof Asset] !== undefined && 
+      selectedAssetForQr[field as keyof Asset] !== null && 
+      selectedAssetForQr[field as keyof Asset] !== ''
+    );
+
+    activeFields.forEach(field => {
+      let value = String(selectedAssetForQr[field as keyof Asset]);
+      
+      if (field === 'DATAAQUSIC' || field === 'DATABAIXA') value = formatDateBR(value);
+      if (field === 'VLRAQUISIC') value = formatCurrency(value);
+      
+      lines.push(value);
+    });
+    return lines.join('\n');
+  }, [selectedAssetForQr, qrCodeFields]);
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(true);
   
   // Selection list state
   const [selectionModal, setSelectionModal] = useState<{ field: 'CONTACONTABIL' | 'CENTRODECUSTO' | null, searchTerm: string }>({ field: null, searchTerm: '' });
@@ -174,6 +216,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     onUpdateCommittedFilters({ ...filters });
     setShowNumericKeypad(false);
     setActiveField(null);
+    setIsFilterOpen(false);
   };
 
   const handleInputChange = (field: keyof SearchFilters, value: string) => {
@@ -267,75 +310,96 @@ const Consultation: React.FC<ConsultationProps> = ({
           <div className="flex items-center space-x-3">
             <button 
               onClick={clearFilters}
-              className="px-4 py-2.5 rounded-xl bg-accent-soft text-accent border border-accent/10 text-[11px] font-bold uppercase tracking-widest active:scale-95 transition-all"
+              className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-400 border border-slate-200 text-[11px] font-bold uppercase tracking-widest active:scale-95 transition-all"
             >
               Limpar
             </button>
-            <div className="w-12 h-12 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
-              <Search size={24} />
-            </div>
+            <button 
+              onClick={() => setIsFilterOpen(!isFilterOpen)}
+              className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm transition-all active:scale-90 ${isFilterOpen ? 'bg-accent text-white' : 'bg-accent-soft text-accent border border-accent/10'}`}
+              title={isFilterOpen ? "Fechar Filtros" : "Abrir Filtros"}
+            >
+              {isFilterOpen ? <X size={24} /> : <Filter size={24} />}
+            </button>
           </div>
         </div>
 
-        <div>
-          <h1 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Consulta Expert</h1>
-          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-1.5">Formulário Multifunção v24</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Consulta Expert</h1>
+            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-1.5">Formulário Multifunção v24</p>
+          </div>
+          {!isFilterOpen && committedFilters && (
+            <button 
+              onClick={() => setIsFilterOpen(true)}
+              className="flex items-center space-x-2 px-3 py-2 bg-accent-soft rounded-lg border border-accent/10 animate-pulse"
+            >
+              <div className="w-2 h-2 bg-accent rounded-full"></div>
+              <span className="text-[10px] font-bold text-accent uppercase tracking-widest">Filtro Ativo</span>
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar">
-        {/* SEARCH FORM */}
-        <div className="p-5 space-y-4 bg-white border-b border-accent/10 shadow-sm">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {renderInput('ETIQUETA', 'Etiqueta', <Barcode size={16} />)}
-            {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={16} />)}
-            {renderInput('SERIAL', 'Serial', <Hash size={16} />)}
-            {renderInput('CNPJ', 'CNPJ', <Building2 size={16} />)}
-            {renderInput('NOMEFORNECEDOR', 'Fornecedor', <User size={16} />)}
-            {renderInput('NOTAFISCAL', 'Nota Fiscal', <FileText size={16} />)}
-            {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
-            {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
-            {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
-            
-            <div className="space-y-1.5">
-              <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (De)</label>
-              <div className="relative group">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
-                  <Calendar size={16} />
-                </div>
-                <input 
-                  type="date"
-                  value={filters.DATAAQUSIC_START}
-                  onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
-                />
-              </div>
+        {/* SEARCH FORM - DYNAMIC PANEL */}
+        {isFilterOpen && (
+          <div className="p-5 space-y-4 bg-white border-b border-accent/10 shadow-lg animate-slideDown relative z-10">
+            <div className="flex items-center mb-4">
+              <button 
+                onClick={triggerSearch}
+                className="bg-accent text-white px-4 py-2.5 rounded-xl font-bold uppercase text-[10px] tracking-widest shadow-md active:scale-95 transition-all flex items-center space-x-2 mr-4 shrink-0"
+              >
+                <Search size={16} strokeWidth={3} />
+                <span>Executar Consulta</span>
+              </button>
+              <span className="text-[10px] font-bold text-accent uppercase tracking-[0.2em] whitespace-nowrap">Parâmetros de Busca</span>
+              <div className="h-px flex-1 bg-accent/10 ml-4"></div>
             </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
-              <div className="relative group">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
-                  <Calendar size={16} />
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renderInput('ETIQUETA', 'Etiqueta', <Barcode size={16} />)}
+              {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={16} />)}
+              {renderInput('SERIAL', 'Serial', <Hash size={16} />)}
+              {renderInput('CNPJ', 'CNPJ', <Building2 size={16} />)}
+              {renderInput('NOMEFORNECEDOR', 'Fornecedor', <User size={16} />)}
+              {renderInput('NOTAFISCAL', 'Nota Fiscal', <FileText size={16} />)}
+              {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
+              {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
+              {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
+              
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (De)</label>
+                <div className="relative group">
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
+                    <Calendar size={16} />
+                  </div>
+                  <input 
+                    type="date"
+                    value={filters.DATAAQUSIC_START}
+                    onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
+                  />
                 </div>
-                <input 
-                  type="date"
-                  value={filters.DATAAQUSIC_END}
-                  onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
-                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
+                <div className="relative group">
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
+                    <Calendar size={16} />
+                  </div>
+                  <input 
+                    type="date"
+                    value={filters.DATAAQUSIC_END}
+                    onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
+                  />
+                </div>
               </div>
             </div>
           </div>
-
-          <button 
-            onClick={triggerSearch}
-            className="w-full bg-accent text-white py-4 rounded-xl font-bold uppercase text-[11px] tracking-[0.1em] shadow-md active:scale-[0.98] transition-all flex items-center justify-center space-x-2 mt-2"
-          >
-            <Search size={18} strokeWidth={2.5} />
-            <span>Executar Consulta</span>
-          </button>
-        </div>
+        )}
 
         {/* RESULTS */}
         <div className="px-5 py-6 pb-28">
@@ -410,7 +474,12 @@ const Consultation: React.FC<ConsultationProps> = ({
           <div className="bg-white w-full max-w-sm rounded-[3rem] border border-accent/20 shadow-2xl p-10 flex flex-col items-center text-center" onClick={(e) => e.stopPropagation()}>
             <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{selectedAssetForQr.EMPRESA}</p>
             <div className="bg-white p-6 border-2 border-accent rounded-3xl shadow-inner mb-8">
-              <QRCodeSVG value={qrCodeFields.map(field => selectedAssetForQr[field] || '').join('|')} size={240} />
+              <QRCodeSVG 
+                value={qrCodeData} 
+                size={280} 
+                level="M"
+                includeMargin={true}
+              />
             </div>
             <div className="text-center w-full">
               <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
@@ -424,6 +493,12 @@ const Consultation: React.FC<ConsultationProps> = ({
       {showNumericKeypad && activeField && (
         <div className="fixed bottom-0 left-0 right-0 z-[600]">
           <NumericKeypad 
+            value={filters[activeField]}
+            label={
+              activeField === 'ETIQUETA' ? 'Etiqueta Patrimonial' :
+              activeField === 'CNPJ' ? 'CNPJ do Fornecedor' :
+              activeField === 'NOTAFISCAL' ? 'Número da Nota Fiscal' : 'Campo Numérico'
+            }
             onInput={(val) => handleInputChange(activeField, filters[activeField] + val)}
             onDelete={() => handleInputChange(activeField, filters[activeField].slice(0, -1))}
             onClose={() => setShowNumericKeypad(false)}
@@ -500,7 +575,8 @@ const Consultation: React.FC<ConsultationProps> = ({
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
           onScan={(result) => {
-            onUpdateFilters({ ...filters, ETIQUETA: result });
+            const extracted = extractEtiquetaFromQrData(result);
+            onUpdateFilters({ ...filters, ETIQUETA: extracted });
             setIsScannerOpen(false);
           }}
           onClose={() => setIsScannerOpen(false)}

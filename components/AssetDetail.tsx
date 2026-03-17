@@ -2,6 +2,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario } from '../types';
 import BackButton from './BackButton';
+import { formatDateBR, formatCurrency } from '../utils/formatUtils';
+import { QR_FIELD_ORDER } from '../utils/qrUtils';
 
 import { 
   Edit2, 
@@ -22,24 +24,6 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
-const formatDateBR = (val: string | number | null | undefined): string => {
-  if (!val) return "";
-  const s = String(val).trim();
-  if (s === "" || s.toUpperCase() === "NULL") return "";
-  if (!isNaN(Number(s)) && Number(s) > 10000) {
-    const date = new Date(Math.round((Number(s) - 25569) * 86400 * 1000));
-    return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
-  }
-  return s.toUpperCase();
-};
-
-const formatCurrency = (val: string | number | null | undefined): string => {
-  if (!val) return "R$ 0,00";
-  const num = parseFloat(String(val).replace(/[^\d.-]/g, ''));
-  if (isNaN(num)) return String(val).toUpperCase();
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
-};
-
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
   const date = new Date(isoStr);
@@ -59,12 +43,13 @@ interface AssetDetailProps {
   onUpdate: (asset: Asset) => void;
   onBulkUpdate: (ids: string[], updates?: Partial<Asset>) => void;
   editableFields: string[];
-  qrCodeFields: string[];
   uniqueEnderecos: string[];
   uniqueCentrosDeCusto: string[];
+  qrCodeFields: string[];
+  readOnly?: boolean;
 }
 
-const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onBulkUpdate, editableFields, qrCodeFields, uniqueEnderecos, uniqueCentrosDeCusto }) => {
+const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onBulkUpdate, editableFields, uniqueEnderecos, uniqueCentrosDeCusto, qrCodeFields, readOnly = false }) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -86,8 +71,29 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
   }, [editingField]);
 
   const qrCodeData = useMemo(() => {
-    return qrCodeFields.map(field => workingAsset[field] || '').join('|');
-  }, [qrCodeFields, workingAsset]);
+    // Criar uma string de texto apenas com os valores dos campos selecionados seguindo a ordem oficial
+    const lines: string[] = [];
+    
+    // Filtra os campos selecionados que existem no ativo e os ordena conforme a regra
+    const activeFields = QR_FIELD_ORDER.filter(field => 
+      qrCodeFields.includes(field) && 
+      workingAsset[field] !== undefined && 
+      workingAsset[field] !== null && 
+      workingAsset[field] !== ''
+    );
+
+    activeFields.forEach(field => {
+      let value = String(workingAsset[field]);
+      
+      // Formatações básicas
+      if (field === 'DATAAQUSIC' || field === 'DATABAIXA') value = formatDateBR(value);
+      if (field === 'VLRAQUISIC') value = formatCurrency(value);
+      
+      lines.push(value);
+    });
+
+    return lines.join('\n');
+  }, [workingAsset, qrCodeFields]);
 
   const fieldGroups = [
     {
@@ -235,9 +241,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
             <button onClick={() => setIsQrModalOpen(true)} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
               <QrCode size={22} />
             </button>
-            <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md">
+            <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md flex items-center space-x-2">
+              {readOnly && <Lock size={14} className="text-white/70" />}
               <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">
-                {isBatch ? 'LOTE' : 'KARDEK v24.50'}
+                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'KARDEK v24.50')}
               </span>
             </div>
           </div>
@@ -308,7 +315,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
                   if (isDateTime) displayVal = formatReadingTime(rawVal as string);
                   if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
-                  const canEdit = editableFields.includes(key);
+                  const canEdit = !readOnly && editableFields.includes(key);
                   if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor')) return null;
 
                   return (
@@ -400,26 +407,33 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       </div>
       
       {/* KARDEX FOOTER */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-         <div className="flex flex-col">
-           <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-           <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
-         </div>
-         <button 
-           onClick={handleFinalize} 
-           className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
-         >
-            <Check size={20} strokeWidth={3} />
-            <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
-         </button>
-      </div>
+      {!readOnly && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+           <div className="flex flex-col">
+             <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
+             <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
+           </div>
+           <button 
+             onClick={handleFinalize} 
+             className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
+           >
+              <Check size={20} strokeWidth={3} />
+              <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
+           </button>
+        </div>
+      )}
 
       {isQrModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
             <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.EMPRESA}</p>
             <div className="bg-white p-6 border-2 border-ink rounded-3xl shadow-inner mb-8">
-              <QRCodeSVG value={qrCodeData} size={240} />
+              <QRCodeSVG 
+                value={qrCodeData} 
+                size={280} 
+                level="M"
+                includeMargin={true}
+              />
             </div>
             <div className="text-center w-full">
               <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>

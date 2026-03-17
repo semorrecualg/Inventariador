@@ -13,15 +13,18 @@ import Consultation from './components/Consultation';
 import CompanySelector from './components/CompanySelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
+import PublicKardex from './components/PublicKardex';
 import ChangePassword from './components/ChangePassword';
 import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 import GlobalPerformance from './components/GlobalPerformance';
 import AccountReconciliation from './components/AccountReconciliation';
+import AssetReports from './components/AssetReports';
 
 import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory } from './services/persistenceService';
+import { getAssetByTag } from './services/supabaseService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -41,8 +44,19 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     if (this.state.hasError) {
       return (
         <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center">
-          <div className="w-20 h-20 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
-            <ShieldCheck size={40} />
+          <div className="w-20 h-20 bg-white border border-border rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10 overflow-hidden p-1">
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const icon = document.createElement('div');
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
+              }}
+            />
           </div>
           <h1 className="text-2xl font-bold text-ink mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
           <p className="text-sm text-ink-muted mb-8 max-w-xs">
@@ -313,6 +327,35 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isDataLoaded) return;
 
+    // Check for URL parameters (e.g., ?etq=006731 or ?d=base64)
+    const params = new URLSearchParams(window.location.search);
+    const etqParam = params.get('etq');
+    const dataParam = params.get('d');
+
+    if (dataParam && !publicAsset) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(escape(atob(dataParam))));
+        if (decoded && decoded.ETIQUETA) {
+          setPublicAsset(decoded as Asset);
+        }
+      } catch (e) {
+        console.error('Erro ao decodificar dados do QR Code:', e);
+      }
+    } else if (etqParam && !publicAsset) {
+      // 1. Tenta encontrar no inventário local primeiro (mais rápido)
+      const foundLocal = inventory.assets.find(a => normalizeKey(a.ETIQUETA || "") === normalizeKey(etqParam));
+      if (foundLocal) {
+        setPublicAsset(foundLocal);
+      } else {
+        // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
+        getAssetByTag(etqParam).then(foundCloud => {
+          if (foundCloud) {
+            setPublicAsset(foundCloud);
+          }
+        });
+      }
+    }
+
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
 
     // 1. If no user, must be at LOGIN or REGISTER
@@ -355,76 +398,9 @@ const App: React.FC = () => {
     return localStorage.getItem('app_is_inventorying') === 'true';
   });
 
+  const [isReadOnlyDetail, setIsReadOnlyDetail] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  
-  // Duplicate removed
-
-  // Auto-immersive mode on first interaction
-  useEffect(() => {
-    const handleFirstInteraction = () => {
-      if (inventory.immersiveMode && !document.fullscreenElement) {
-        toggleFullscreen();
-      }
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
-    };
-
-    if (inventory.immersiveMode) {
-      window.addEventListener('click', handleFirstInteraction);
-      window.addEventListener('touchstart', handleFirstInteraction);
-    }
-
-    return () => {
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
-    };
-  }, [inventory.immersiveMode, toggleFullscreen]);
-
-  // Request fullscreen when starting inventory if immersiveMode is enabled
-  useEffect(() => {
-    if (isInventorying && inventory.immersiveMode && !document.fullscreenElement) {
-      // Small delay to ensure it's called after the transition/render
-      const timer = setTimeout(() => {
-        if (!document.fullscreenElement) {
-          toggleFullscreen();
-        }
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isInventorying, inventory.immersiveMode, toggleFullscreen]);
-
-  // Sync isFullscreen state with document
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-    };
-  }, []);
-  
-  // Estados para Modal de Duplicidade
-  const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
-  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
-  const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
-
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyAssetsRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (inventory.assets.length > 0 && inventory.status !== DatabaseStatus.EMPTY) {
-        e.preventDefault();
-        e.returnValue = 'Inventário em curso. Deseja realmente sair? Seus dados estão salvos no dispositivo.';
-        return e.returnValue;
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [inventory]);
+  const [publicAsset, setPublicAsset] = useState<Asset | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     try {
@@ -495,31 +471,69 @@ const App: React.FC = () => {
   // Auto-immersive mode on first interaction
   useEffect(() => {
     const handleFirstInteraction = () => {
-      if (!document.fullscreenElement) {
+      if (inventory.immersiveMode && !document.fullscreenElement) {
         toggleFullscreen();
       }
-      // Remove listeners after first interaction
       window.removeEventListener('click', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
     };
 
-    window.addEventListener('click', handleFirstInteraction);
-    window.addEventListener('touchstart', handleFirstInteraction);
+    if (inventory.immersiveMode) {
+      window.addEventListener('click', handleFirstInteraction);
+      window.addEventListener('touchstart', handleFirstInteraction);
+    }
 
     return () => {
       window.removeEventListener('click', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
     };
-  }, [toggleFullscreen]);
+  }, [inventory.immersiveMode, toggleFullscreen]);
 
+  // Request fullscreen when starting inventory if immersiveMode is enabled
+  useEffect(() => {
+    if (isInventorying && inventory.immersiveMode && !document.fullscreenElement) {
+      // Small delay to ensure it's called after the transition/render
+      const timer = setTimeout(() => {
+        if (!document.fullscreenElement) {
+          toggleFullscreen();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isInventorying, inventory.immersiveMode, toggleFullscreen]);
 
+  // Sync isFullscreen state with document
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
   }, []);
+  
+  // Estados para Modal de Duplicidade
+  const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
+
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyAssetsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (inventory.assets.length > 0 && inventory.status !== DatabaseStatus.EMPTY) {
+        e.preventDefault();
+        e.returnValue = 'Inventário em curso. Deseja realmente sair? Seus dados estão salvos no dispositivo.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [inventory]);
 
   const normalizeKey = useCallback((s: string) => {
     return s.toString().toUpperCase()
@@ -861,6 +875,10 @@ const App: React.FC = () => {
   }, [inventoryLocation, determineTag, normalizeKey]);
 
   const handleSelectAsset = useCallback((asset: Asset) => {
+    // Se viemos da tela de consulta, o detalhe deve ser apenas leitura
+    const currentScreen = history[history.length - 1];
+    setIsReadOnlyDetail(currentScreen === AppScreen.CONSULTATION);
+
     const etq = normalizeKey(asset.ETIQUETA || "");
     if (etq && etq !== "ETIQUETAR") {
       const related = inventory.assets.filter(a => normalizeKey(a.ETIQUETA || "") === etq);
@@ -950,6 +968,22 @@ const App: React.FC = () => {
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION;
+
+  if (publicAsset) {
+    return (
+      <ErrorBoundary>
+        <PublicKardex 
+          asset={publicAsset} 
+          onClose={() => {
+            setPublicAsset(null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('etq');
+            window.history.replaceState({}, document.title, url.pathname + url.search);
+          }} 
+        />
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary>
@@ -1123,7 +1157,19 @@ const App: React.FC = () => {
               onUpdateCommittedFilters={setCommittedConsultationFilters}
             />
           )}
-          {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
+          {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && (
+            <AssetDetail 
+              assets={selectedAssets} 
+              onBack={popScreen} 
+              onUpdate={updateAsset} 
+              onBulkUpdate={bulkUpdateAssets} 
+              editableFields={inventory.editableFields || []} 
+              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
+              uniqueEnderecos={allLocations} 
+              uniqueCentrosDeCusto={uniqueCentrosDeCusto} 
+              readOnly={isReadOnlyDetail}
+            />
+          )}
           {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
           {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
@@ -1131,6 +1177,7 @@ const App: React.FC = () => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
+          {screen === AppScreen.ASSET_REPORTS && <AssetReports onBack={popScreen} />}
         </div>
   
         {/* Immersive Mode handled automatically on first interaction */}

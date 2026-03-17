@@ -95,7 +95,8 @@ export enum AppScreen {
   QR_CODE_CONFIGURATOR = 'QR_CODE_CONFIGURATOR',
   QR_CONFIGURATOR = 'QR_CONFIGURATOR',
   GLOBAL_PERFORMANCE = 'GLOBAL_PERFORMANCE',
-  ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION'
+  ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION',
+  ASSET_REPORTS = 'ASSET_REPORTS'
 }
 
 export enum ScannerMode {
@@ -147,4 +148,16 @@ export interface InventoryState {
   scanFeedbackMode?: ScanFeedbackMode;
   inventorySearchMode?: InventorySearchMode;
   immersiveMode?: boolean;
+}
+
+export interface AssetReport {
+  id: string;
+  asset_id: string;
+  tag: string;
+  reporter_name: string;
+  reason: string;
+  comment: string;
+  location_found: string;
+  created_at: string;
+  resolved?: boolean;
 }

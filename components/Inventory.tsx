@@ -5,6 +5,8 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
+import { extractEtiquetaFromQrData } from '../utils/qrUtils';
+import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 
 import { 
   ArrowLeft,
@@ -31,32 +33,6 @@ import {
   User
 } from 'lucide-react';
 
-const parseAssetDate = (val: string | number | null | undefined): Date | null => {
-  if (!val) return null;
-  const s = String(val).trim();
-  if (s === "" || s.toUpperCase() === "NULL") return null;
-  if (!isNaN(Number(s)) && Number(s) > 10000) {
-    return new Date(Math.round((Number(s) - 25569) * 86400 * 1000));
-  }
-  const parts = s.split(/[/-]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-    if (parts[2].length === 4) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-  }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-};
-
-const formatMonthYearBR = (val: string | number | null | undefined): string => {
-  const date = parseAssetDate(val);
-  if (date) {
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${month}/${year}`;
-  }
-  return String(val || '').toUpperCase();
-};
-
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
   const date = new Date(isoStr);
@@ -68,12 +44,6 @@ const formatReadingTime = (isoStr?: string) => {
     minute: '2-digit',
     second: '2-digit'
   });
-};
-
-const formatEtiqueta = (val: string | number | null | undefined): string => {
-  const s = String(val || '').trim();
-  if (!s || s.toUpperCase() === 'ETIQUETAR') return s.toUpperCase();
-  return s.padStart(6, '0');
 };
 
 interface AssetCardProps {
@@ -449,9 +419,10 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     lastScanTime.current = now;
     lastScanResult.current = result;
 
-    const term = normalizeKey(result);
-    setCommittedSearch(result);
-    setDisplayValue(result);
+    const extractedEtiqueta = extractEtiquetaFromQrData(result);
+    const term = normalizeKey(extractedEtiqueta);
+    setCommittedSearch(extractedEtiqueta);
+    setDisplayValue(extractedEtiqueta);
     
     // Buscar o ativo na base total usando o Ref para estabilidade
     const foundAsset = allAssetsRef.current.find(a => normalizeKey(a.ETIQUETA || '') === term);

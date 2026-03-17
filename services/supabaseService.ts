@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState } from '../types';
+import { Asset, InventoryState, AssetReport } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -153,5 +153,104 @@ export const getUserPermissions = async (email: string) => {
   } catch (err) {
     console.error('Unexpected error fetching permissions:', err);
     return { isAdmin: false };
+  }
+};
+
+/**
+ * Busca um ativo específico pela etiqueta no Supabase (para consulta pública via QR Code)
+ */
+export const getAssetByTag = async (tag: string): Promise<Asset | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('assets')
+      .select('*')
+      .eq('ETIQUETA', tag.toUpperCase().trim())
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') {
+        console.error('Erro ao buscar ativo por etiqueta:', error);
+      }
+      return null;
+    }
+
+    return data as Asset;
+  } catch (err) {
+    console.error('Erro inesperado ao buscar ativo:', err);
+    return null;
+  }
+};
+
+/**
+ * Envia um reporte/divergência de um ativo (usado na consulta pública)
+ */
+export const submitAssetReport = async (report: {
+  asset_id: string;
+  tag: string;
+  reporter_name: string;
+  reason: string;
+  comment: string;
+  location_found: string;
+}) => {
+  if (!supabase) {
+    // Fallback local se não houver Supabase (apenas log para demo)
+    console.log('Reporte recebido (Modo Offline):', report);
+    return { success: true };
+  }
+
+  try {
+    const { error } = await supabase
+      .from('asset_reports')
+      .insert([{
+        ...report,
+        created_at: new Date().toISOString()
+      }]);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err) {
+    console.error('Erro ao enviar reporte:', err);
+    throw err;
+  }
+};
+
+/**
+ * Busca todos os reportes de ativos (para o admin)
+ */
+export const getAssetReports = async (): Promise<AssetReport[]> => {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('asset_reports')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data as AssetReport[];
+  } catch (err) {
+    console.error('Erro ao buscar reportes:', err);
+    return [];
+  }
+};
+
+/**
+ * Marca um reporte como resolvido
+ */
+export const resolveAssetReport = async (reportId: string) => {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase
+      .from('asset_reports')
+      .update({ resolved: true })
+      .eq('id', reportId);
+
+    if (error) throw error;
+  } catch (err) {
+    console.error('Erro ao resolver reporte:', err);
+    throw err;
   }
 };
