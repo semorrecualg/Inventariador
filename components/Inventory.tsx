@@ -30,7 +30,8 @@ import {
   Database,
   Keyboard,
   Calendar,
-  User
+  User,
+  Mic
 } from 'lucide-react';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -62,16 +63,17 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
   
   return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-3 pb-10 grid grid-cols-3 gap-2 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
+    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-2 pb-4 grid grid-cols-3 gap-1.5 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.5rem]">
       {keys.map((key) => (
         <button
           key={key}
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation(); // Evita que o clique no teclado feche ele mesmo pelo evento do pai
             if (key === 'OK') onClose();
             else if (key === '⌫') onDelete();
             else onInput(key);
           }}
-          className={`h-14 rounded-xl flex items-center justify-center text-xl font-bold transition-all active:scale-90 ${
+          className={`h-11 rounded-xl flex items-center justify-center text-lg font-bold transition-all active:scale-90 ${
             key === 'OK' ? 'bg-accent text-white shadow-md' : 
             key === '⌫' ? 'bg-bg-main text-ink-muted' : 
             'bg-white border border-border text-ink shadow-sm'
@@ -345,6 +347,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [isListening, setIsListening] = useState<string | null>(null);
 
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
@@ -721,6 +724,46 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         SERIAL: ''
     });
     setIsManualEntryOpen(true);
+  };
+
+  const handleVoiceTyping = (field: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert('Seu navegador não suporta reconhecimento de voz.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(field);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setManualAsset(prev => ({
+        ...prev,
+        [field]: (prev[field as keyof Asset] || '') + transcript.toUpperCase()
+      }));
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (event: any) => {
+      console.error('Erro no reconhecimento de voz:', event.error);
+      setIsListening(null);
+    };
+
+    recognition.onend = () => {
+      setIsListening(null);
+    };
+
+    recognition.start();
   };
 
   const saveManualEntry = () => {
@@ -1132,7 +1175,9 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
 
           <div 
             className="flex-1 overflow-hidden bg-bg-main relative"
-            onClick={() => setShowNumericKeypad(false)}
+            onPointerDown={() => {
+              if (showNumericKeypad) setShowNumericKeypad(false);
+            }}
           >
             {isSearchResultBatch && (
               <div className="px-4 pt-3">
@@ -1507,32 +1552,56 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                <div className="space-y-4">
                   <div>
                     <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
-                    <input 
-                      type="text" 
-                      value={manualAsset.ETIQUETA || ''} 
-                      onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
-                      className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-black font-mono text-lg outline-none focus:border-accent"
-                    />
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={manualAsset.ETIQUETA || ''} 
+                        onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
+                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-black font-mono text-lg outline-none focus:border-accent"
+                      />
+                      <button 
+                        onClick={() => handleVoiceTyping('ETIQUETA')}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'ETIQUETA' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                      >
+                        <Mic size={18} />
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Descrição do Ativo</label>
-                    <textarea 
-                      rows={3}
-                      value={manualAsset.DESCRICAODOATIVO || ''} 
-                      onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
-                      className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent uppercase"
-                      placeholder="DESCREVA O BEM..."
-                    />
+                    <div className="relative">
+                      <textarea 
+                        rows={3}
+                        value={manualAsset.DESCRICAODOATIVO || ''} 
+                        onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
+                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent uppercase"
+                        placeholder="DESCREVA O BEM..."
+                      />
+                      <button 
+                        onClick={() => handleVoiceTyping('DESCRICAODOATIVO')}
+                        className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${isListening === 'DESCRICAODOATIVO' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                      >
+                        <Mic size={18} />
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Nº de Série</label>
-                      <input 
-                        type="text" 
-                        value={manualAsset.SERIAL || ''} 
-                        onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
-                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent"
-                      />
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          value={manualAsset.SERIAL || ''} 
+                          onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
+                          className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent"
+                        />
+                        <button 
+                          onClick={() => handleVoiceTyping('SERIAL')}
+                          className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'SERIAL' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                        >
+                          <Mic size={18} />
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Quantidade</label>
