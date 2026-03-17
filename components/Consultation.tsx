@@ -40,20 +40,6 @@ interface ConsultationProps {
   onUpdateCommittedFilters: (filters: SearchFilters | null) => void;
 }
 
-interface SearchFilters {
-  ETIQUETA: string;
-  DESCRICAODOATIVO: string;
-  SERIAL: string;
-  CNPJ: string;
-  NOMEFORNECEDOR: string;
-  NOTAFISCAL: string;
-  ENDERECO: string;
-  CONTACONTABIL: string;
-  CENTRODECUSTO: string;
-  DATAAQUSIC_START: string;
-  DATAAQUSIC_END: string;
-}
-
 const parseAssetDate = (val: string | number | null | undefined): Date | null => {
   if (!val) return null;
   const s = String(val).trim();

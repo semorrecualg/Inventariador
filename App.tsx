@@ -356,6 +356,8 @@ const App: React.FC = () => {
   });
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Duplicate removed
 
   // Auto-immersive mode on first interaction
   useEffect(() => {
@@ -376,7 +378,20 @@ const App: React.FC = () => {
       window.removeEventListener('click', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
     };
-  }, [inventory.immersiveMode]);
+  }, [inventory.immersiveMode, toggleFullscreen]);
+
+  // Request fullscreen when starting inventory if immersiveMode is enabled
+  useEffect(() => {
+    if (isInventorying && inventory.immersiveMode && !document.fullscreenElement) {
+      // Small delay to ensure it's called after the transition/render
+      const timer = setTimeout(() => {
+        if (!document.fullscreenElement) {
+          toggleFullscreen();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isInventorying, inventory.immersiveMode, toggleFullscreen]);
 
   // Sync isFullscreen state with document
   useEffect(() => {
@@ -1089,7 +1104,7 @@ const App: React.FC = () => {
               }} 
             />
           )}
-          {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} />}
+          {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} immersiveMode={inventory.immersiveMode || false} onToggleFullscreen={toggleFullscreen} />}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
           {screen === AppScreen.CONSULTATION && (
             <Consultation 

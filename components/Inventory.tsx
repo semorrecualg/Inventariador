@@ -363,9 +363,11 @@ interface InventoryProps {
   onOpenConsultation: () => void;
   inventorySearchValue: string | null;
   clearInventorySearchValue: () => void;
+  immersiveMode: boolean;
+  onToggleFullscreen: () => void;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue, immersiveMode, onToggleFullscreen }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -1035,7 +1037,13 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               const isStarted = stats.checked > 0;
               
               return (
-                <button key={loc} onClick={() => { setSelectedLocation(loc); setIsInventorying(true); }} className="w-full bg-white border border-border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
+                <button key={loc} onClick={() => { 
+                  setSelectedLocation(loc); 
+                  setIsInventorying(true); 
+                  if (immersiveMode && !document.fullscreenElement) {
+                    onToggleFullscreen();
+                  }
+                }} className="w-full bg-white border border-border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
                   <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-success/5' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
                   <div className="flex items-center space-x-4 relative z-10">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-success text-white border-success/20 shadow-sm' : 'bg-bg-main text-ink-muted border-border'}`}>
