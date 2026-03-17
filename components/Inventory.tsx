@@ -414,6 +414,16 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
     isModalOpenRef.current = !!(scannedAsset || scannedResult || duplicateAsset || isManualEntryOpen);
   }, [scannedAsset, scannedResult, duplicateAsset, isManualEntryOpen]);
 
+  // Auto-close duplicate asset modal after 1 second to avoid user interaction
+  useEffect(() => {
+    if (duplicateAsset) {
+      const timer = setTimeout(() => {
+        setDuplicateAsset(null);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [duplicateAsset]);
+
   // Handle returned search value from Consultation
   useEffect(() => {
     if (inventorySearchValue) {
@@ -788,6 +798,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
         {duplicateAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
             <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+              <button 
+                onClick={() => setDuplicateAsset(null)}
+                className="absolute top-4 right-4 z-10 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
               {(() => {
                 const isSameLocation = normalizeKey(duplicateAsset._localMaster || "") === normalizeKey(selectedLocation || "");
                 return (
@@ -834,6 +850,11 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                           Entendido
                         </button>
                       </div>
+                    </div>
+                    
+                    {/* Barra de progresso para auto-fechamento */}
+                    <div className="absolute bottom-0 left-0 h-1.5 w-full bg-bg-main overflow-hidden">
+                      <div className={`h-full animate-progress ${isSameLocation ? 'bg-success' : 'bg-warning'}`} style={{ animationDuration: '1s' }} />
                     </div>
                   </>
                 );
@@ -1362,6 +1383,12 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       {scannedAsset && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <button 
+              onClick={() => setScannedAsset(null)}
+              className="absolute top-4 right-4 z-10 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
             <div className="bg-accent p-8 text-white text-center">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                 <ShieldCheck size={40} className="text-white" />
@@ -1422,8 +1449,14 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
       )}
 
       {scannedResult && !scannedAsset && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <button 
+              onClick={() => setScannedResult(null)}
+              className="absolute top-4 right-4 z-10 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
             <div className="bg-warning p-8 text-white text-center">
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                 <AlertTriangle size={40} className="text-white" />

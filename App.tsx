@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode } from './types';
+import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters } from './types';
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -117,6 +117,46 @@ const App: React.FC = () => {
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
+  const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
+    try {
+      const saved = localStorage.getItem('app_consultation_filters');
+      return saved ? JSON.parse(saved) : {
+        ETIQUETA: '',
+        DESCRICAODOATIVO: '',
+        SERIAL: '',
+        CNPJ: '',
+        NOMEFORNECEDOR: '',
+        NOTAFISCAL: '',
+        ENDERECO: '',
+        CONTACONTABIL: '',
+        CENTRODECUSTO: '',
+        DATAAQUSIC_START: '',
+        DATAAQUSIC_END: ''
+      };
+    } catch {
+      return {
+        ETIQUETA: '',
+        DESCRICAODOATIVO: '',
+        SERIAL: '',
+        CNPJ: '',
+        NOMEFORNECEDOR: '',
+        NOTAFISCAL: '',
+        ENDERECO: '',
+        CONTACONTABIL: '',
+        CENTRODECUSTO: '',
+        DATAAQUSIC_START: '',
+        DATAAQUSIC_END: ''
+      };
+    }
+  });
+  const [committedConsultationFilters, setCommittedConsultationFilters] = useState<SearchFilters | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_committed_consultation_filters');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     try {
       const saved = localStorage.getItem('app_database_mode');
@@ -254,6 +294,8 @@ const App: React.FC = () => {
         console.error("Data load failed", e); 
       } finally {
         setIsDataLoaded(true);
+        // @ts-expect-error - appStarted is a custom property for the loader fallback
+        window.appStarted = true;
         // Remove o loader do index.html
         const loader = document.getElementById('app-loader');
         if (loader) {
@@ -593,10 +635,12 @@ const App: React.FC = () => {
         localStorage.setItem('app_selected_company', selectedCompany || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
+        localStorage.setItem('app_consultation_filters', JSON.stringify(consultationFilters));
+        localStorage.setItem('app_committed_consultation_filters', JSON.stringify(committedConsultationFilters));
       } catch { console.warn("Storage cap reached"); }
     }, 2000);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded]);
+  }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
 
   const pushScreen = (s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
@@ -984,6 +1028,20 @@ const App: React.FC = () => {
                 setUser(null); 
                 setSelectedCompany(null); 
                 setStartWithDataMenu(false);
+                setConsultationFilters({
+                  ETIQUETA: '',
+                  DESCRICAODOATIVO: '',
+                  SERIAL: '',
+                  CNPJ: '',
+                  NOMEFORNECEDOR: '',
+                  NOTAFISCAL: '',
+                  ENDERECO: '',
+                  CONTACONTABIL: '',
+                  CENTRODECUSTO: '',
+                  DATAAQUSIC_START: '',
+                  DATAAQUSIC_END: ''
+                });
+                setCommittedConsultationFilters(null);
                 pushScreen(AppScreen.LOGIN); 
               }} 
               onExport={handleExport} 
@@ -1033,7 +1091,23 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} />}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
-          {screen === AppScreen.CONSULTATION && <Consultation assets={filteredAssetsByCompany} onBack={() => { setIsConsultationFromInventory(false); popScreen(); }} onSelectAsset={handleSelectAsset} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} isReturnMode={isConsultationFromInventory} onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }} />}
+          {screen === AppScreen.CONSULTATION && (
+            <Consultation 
+              assets={filteredAssetsByCompany} 
+              onBack={() => { setIsConsultationFromInventory(false); popScreen(); }} 
+              onSelectAsset={handleSelectAsset} 
+              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
+              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+              isReturnMode={isConsultationFromInventory} 
+              onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }} 
+              filters={consultationFilters}
+              onUpdateFilters={setConsultationFilters}
+              committedFilters={committedConsultationFilters}
+              onUpdateCommittedFilters={setCommittedConsultationFilters}
+            />
+          )}
           {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && <AssetDetail assets={selectedAssets} onBack={popScreen} onUpdate={updateAsset} onBulkUpdate={bulkUpdateAssets} editableFields={inventory.editableFields || []} qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} uniqueEnderecos={allLocations} uniqueCentrosDeCusto={uniqueCentrosDeCusto} />}
           {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
           {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}

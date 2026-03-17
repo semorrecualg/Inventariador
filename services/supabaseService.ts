@@ -57,12 +57,23 @@ export const syncAssetsToCloud = async (assets: Asset[]) => {
   if (!supabase || !assets || assets.length === 0) return;
 
   // Tenta fazer upsert dos ativos
-  // Assumindo que a tabela se chama 'assets' e tem 'id' como PK
   const { error } = await supabase
     .from('assets')
     .upsert(assets, { onConflict: 'id' });
 
   if (error) {
+    // Se o erro for de coluna inexistente, apenas avisamos no console
+    if (error.code === 'PGRST204') {
+      console.warn('Coluna inexistente na tabela assets. Sincronização parcial.', error.message);
+      return;
+    }
+    
+    // Handle network errors gracefully
+    if (error.message === 'Failed to fetch') {
+      console.warn('Supabase sync failed: Network error or invalid URL. Check your VITE_SUPABASE_URL.');
+      return;
+    }
+
     console.error('Error syncing assets to Supabase:', error);
     throw error;
   }
@@ -86,11 +97,11 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) 
     'immersiveMode'
   ];
 
-  const filteredConfig: any = { id: 'global_config' };
+  const filteredConfig: Record<string, unknown> = { id: 'global_config' };
   
   Object.keys(config).forEach(key => {
     if (allowedKeys.includes(key)) {
-      filteredConfig[key] = (config as any)[key];
+      filteredConfig[key] = (config as Record<string, unknown>)[key];
     }
   });
 
@@ -104,6 +115,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) 
       console.warn('Coluna inexistente no Supabase (inventory_config). Por favor, atualize o esquema do banco.', error.message);
       return;
     }
+
+    // Handle network errors gracefully
+    if (error.message === 'Failed to fetch') {
+      console.warn('Supabase sync failed: Network error or invalid URL. Check your VITE_SUPABASE_URL.');
+      return;
+    }
+
     console.error('Error syncing config to Supabase:', error);
     throw error;
   }

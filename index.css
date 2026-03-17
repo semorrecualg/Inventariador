@@ -8,6 +8,9 @@
   --color-accent: var(--accent, #0284C7);
   --color-accent-soft: var(--accent-soft, #F1F5F9);
   --color-border: #E2E8F0;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
 }
 
 :root {
@@ -107,6 +110,15 @@
 
 .animate-scaleIn {
   animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.animate-progress {
+  animation: progress linear forwards;
 }
 
 .font-data {

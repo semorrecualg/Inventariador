@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Asset, ScannerMode, ScanFeedbackMode } from '../types';
+import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { 
@@ -34,6 +34,10 @@ interface ConsultationProps {
   scanFeedbackMode: ScanFeedbackMode;
   isReturnMode?: boolean;
   onReturnToInventory?: (etiqueta: string) => void;
+  filters: SearchFilters;
+  onUpdateFilters: (filters: SearchFilters) => void;
+  committedFilters: SearchFilters | null;
+  onUpdateCommittedFilters: (filters: SearchFilters | null) => void;
 }
 
 interface SearchFilters {
@@ -107,23 +111,12 @@ const Consultation: React.FC<ConsultationProps> = ({
   onUpdateScannerMode, 
   scanFeedbackMode,
   isReturnMode = false,
-  onReturnToInventory
+  onReturnToInventory,
+  filters,
+  onUpdateFilters,
+  committedFilters,
+  onUpdateCommittedFilters
 }) => {
-  const [filters, setFilters] = useState<SearchFilters>({
-    ETIQUETA: '',
-    DESCRICAODOATIVO: '',
-    SERIAL: '',
-    CNPJ: '',
-    NOMEFORNECEDOR: '',
-    NOTAFISCAL: '',
-    ENDERECO: '',
-    CONTACONTABIL: '',
-    CENTRODECUSTO: '',
-    DATAAQUSIC_START: '',
-    DATAAQUSIC_END: ''
-  });
-  
-  const [committedFilters, setCommittedFilters] = useState<SearchFilters | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   const [activeField, setActiveField] = useState<keyof SearchFilters | null>(null);
@@ -192,13 +185,13 @@ const Consultation: React.FC<ConsultationProps> = ({
   }, [assets, committedFilters]);
 
   const triggerSearch = () => {
-    setCommittedFilters({ ...filters });
+    onUpdateCommittedFilters({ ...filters });
     setShowNumericKeypad(false);
     setActiveField(null);
   };
 
   const handleInputChange = (field: keyof SearchFilters, value: string) => {
-    setFilters(prev => ({ ...prev, [field]: value }));
+    onUpdateFilters({ ...filters, [field]: value });
   };
 
   const isNumericField = (field: keyof SearchFilters) => {
@@ -206,7 +199,7 @@ const Consultation: React.FC<ConsultationProps> = ({
   };
 
   const clearFilters = () => {
-    setFilters({
+    onUpdateFilters({
       ETIQUETA: '',
       DESCRICAODOATIVO: '',
       SERIAL: '',
@@ -219,7 +212,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       DATAAQUSIC_START: '',
       DATAAQUSIC_END: ''
     });
-    setCommittedFilters(null);
+    onUpdateCommittedFilters(null);
   };
 
   const renderInput = (field: keyof SearchFilters, label: string, icon: React.ReactNode) => {
@@ -521,7 +514,7 @@ const Consultation: React.FC<ConsultationProps> = ({
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
           onScan={(result) => {
-            setFilters({ ...filters, ETIQUETA: result });
+            onUpdateFilters({ ...filters, ETIQUETA: result });
             setIsScannerOpen(false);
           }}
           onClose={() => setIsScannerOpen(false)}

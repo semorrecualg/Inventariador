@@ -121,6 +121,20 @@ export enum DatabaseMode {
   PROTHEUS_SUPABASE = 'PROTHEUS_SUPABASE'
 }
 
+export interface SearchFilters {
+  ETIQUETA: string;
+  DESCRICAODOATIVO: string;
+  SERIAL: string;
+  CNPJ: string;
+  NOMEFORNECEDOR: string;
+  NOTAFISCAL: string;
+  ENDERECO: string;
+  CONTACONTABIL: string;
+  CENTRODECUSTO: string;
+  DATAAQUSIC_START: string;
+  DATAAQUSIC_END: string;
+}
+
 export interface InventoryState {
   assets: Asset[];
   companies: string[];
