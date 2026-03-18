@@ -15,6 +15,7 @@ interface ScannerProps {
   isPaused?: boolean;
   children?: React.ReactNode;
   scanFeedbackMode?: ScanFeedbackMode;
+  batterySaver?: boolean;
 }
 
 const Scanner: React.FC<ScannerProps> = ({ 
@@ -26,10 +27,14 @@ const Scanner: React.FC<ScannerProps> = ({
   isInline = false,
   isPaused = false,
   children,
-  scanFeedbackMode = ScanFeedbackMode.BOTH
+  scanFeedbackMode = ScanFeedbackMode.BOTH,
+  batterySaver = false
 }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const currentModeRef = useRef<ScannerMode>(mode);
+  const isStoppingRef = useRef(false);
+  const isStartingRef = useRef(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [availableCameras, setAvailableCameras] = useState<{ id: string, label: string }[]>([]);
@@ -78,15 +83,56 @@ const Scanner: React.FC<ScannerProps> = ({
       }
       
       if (shouldVibrate && navigator.vibrate) {
-        navigator.vibrate(100);
+        navigator.vibrate(batterySaver ? 50 : 100);
       }
     } catch (e) {
       console.error('Feedback failed', e);
     }
   };
 
+  const stopScanner = useCallback(async () => {
+    // Se estiver iniciando, espera um pouco para não interromper o play()
+    if (isStartingRef.current) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    if (scannerRef.current && !isStoppingRef.current) {
+      isStoppingRef.current = true;
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current = null;
+        
+        if (trackRef.current) {
+          trackRef.current.stop();
+          trackRef.current = null;
+        }
+        // Pequeno delay para o hardware liberar a câmera
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (err) {
+        console.warn("Scanner stop error (might already be stopped)", err);
+        scannerRef.current = null;
+      } finally {
+        isStoppingRef.current = false;
+      }
+    }
+  }, []);
+
   const startScanner = useCallback(async () => {
-    if (scannerRef.current) return;
+    if (isStoppingRef.current) {
+      // Se estiver parando, espera um pouco e tenta de novo
+      setTimeout(startScanner, 100);
+      return;
+    }
+
+    // Se já estiver rodando no mesmo modo, não faz nada
+    if (scannerRef.current && currentModeRef.current === mode) return;
+
+    // Se o modo mudou ou já existe uma instância, limpa antes
+    if (scannerRef.current) {
+      await stopScanner();
+    }
+
+    currentModeRef.current = mode;
 
     const formats = mode === ScannerMode.BARCODE 
       ? [
@@ -100,7 +146,7 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: 10,
+      fps: batterySaver ? 5 : 10,
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 350, height: 150 } 
         : { width: 280, height: 280 },
@@ -111,6 +157,7 @@ const Scanner: React.FC<ScannerProps> = ({
     try {
       setIsLoading(true);
       setError(null);
+      isStartingRef.current = true;
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Seu navegador não suporta acesso à câmera ou você está em uma conexão não segura (HTTPS necessário).");
@@ -142,32 +189,42 @@ const Scanner: React.FC<ScannerProps> = ({
         // Ignora erros de leitura contínua
       };
 
-      // Tenta listar as câmeras para permitir troca posterior
-      const cameras = await Html5Qrcode.getCameras().catch(() => []);
-      if (isMounted.current) {
-        setAvailableCameras(cameras);
-      }
-
-      // Tenta iniciar diretamente com a câmera traseira (mais robusto em mobile)
+      // Tenta iniciar com a câmera selecionada ou facingMode
       try {
-        await html5QrCode.start(
-          { facingMode: "environment" },
-          config,
-          onScanSuccess,
-          onScanFailure
-        );
-      } catch (e) {
-        console.warn("Direct start failed, trying getCameras", e);
-        if (cameras && cameras.length > 0) {
-          const bestCamera = cameras[cameras.length - 1];
-          setCurrentCameraIndex(cameras.length - 1);
-          await html5QrCode.start(bestCamera.id, config, onScanSuccess, onScanFailure);
+        // Se já temos câmeras listadas, usamos o index
+        if (availableCameras.length > 0 && currentCameraIndex !== -1 && availableCameras[currentCameraIndex]) {
+          await html5QrCode.start(
+            availableCameras[currentCameraIndex].id,
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
         } else {
-          throw new Error("Nenhuma câmera encontrada ou permissão negada.");
+          // Caso contrário, tenta o padrão ou busca câmeras
+          const cameras = await Html5Qrcode.getCameras().catch(() => []);
+          if (isMounted.current && cameras.length > 0) {
+            setAvailableCameras(cameras);
+            // Inicia com a última câmera (geralmente a traseira principal)
+            const lastIndex = cameras.length - 1;
+            setCurrentCameraIndex(lastIndex);
+            await html5QrCode.start(cameras[lastIndex].id, config, onScanSuccess, onScanFailure);
+          } else {
+            // Fallback para facingMode se getCameras falhar ou não retornar nada
+            await html5QrCode.start(
+              { facingMode: "environment" },
+              config,
+              onScanSuccess,
+              onScanFailure
+            );
+          }
         }
+      } catch (e) {
+        console.warn("Scanner start failed", e);
+        throw e;
       }
 
       setIsLoading(false);
+      isStartingRef.current = false;
 
       if (!isMounted.current) {
         await html5QrCode.stop().catch(() => {});
@@ -190,30 +247,14 @@ const Scanner: React.FC<ScannerProps> = ({
       }
 
     } catch (err) {
+      isStartingRef.current = false;
       if (isMounted.current) {
         console.error("Scanner start error", err);
         setError(err instanceof Error ? err.message : "Erro ao acessar câmera. Verifique as permissões.");
         setIsLoading(false);
       }
     }
-  }, [mode, onScan]);
-
-  const stopScanner = useCallback(async () => {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current = null;
-        
-        // Gestão de bateria: parar o track explicitamente
-        if (trackRef.current) {
-          trackRef.current.stop();
-          trackRef.current = null;
-        }
-      } catch (err) {
-        console.error("Scanner stop error", err);
-      }
-    }
-  }, []);
+  }, [mode, onScan, batterySaver, currentCameraIndex]);
 
   useEffect(() => {
     if (!isPaused) {
@@ -227,44 +268,13 @@ const Scanner: React.FC<ScannerProps> = ({
   }, [startScanner, stopScanner, isPaused]);
 
   const switchCamera = async () => {
-    if (availableCameras.length < 2 || !scannerRef.current) return;
+    if (availableCameras.length < 2) return;
     
     const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
     setCurrentCameraIndex(nextIndex);
     
     setIsLoading(true);
-    await stopScanner();
-    
-    const formats = mode === ScannerMode.BARCODE 
-      ? [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E]
-      : [Html5QrcodeSupportedFormats.QR_CODE];
-
-    const config = {
-      fps: 10,
-      qrbox: mode === ScannerMode.BARCODE ? { width: 350, height: 150 } : { width: 280, height: 280 },
-      formatsToSupport: formats,
-      aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
-    };
-
-    const html5QrCode = new Html5Qrcode("reader");
-    scannerRef.current = html5QrCode;
-
-    try {
-      await html5QrCode.start(
-        availableCameras[nextIndex].id,
-        config,
-        (decodedText) => {
-          playBeep();
-          onScan(decodedText);
-        },
-        () => {}
-      );
-      setIsLoading(false);
-    } catch (e) {
-      console.error("Switch camera failed", e);
-      setError("Erro ao trocar de câmera.");
-      setIsLoading(false);
-    }
+    // O useEffect cuidará de parar e reiniciar o scanner pois currentCameraIndex mudou
   };
 
   const handleZoom = async (delta: number) => {

@@ -47,6 +47,10 @@ interface MainMenuProps {
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   selectedCompany: string | null;
+  darkMode: boolean;
+  onUpdateDarkMode: (val: boolean) => void;
+  batterySaver: boolean;
+  onUpdateBatterySaver: (val: boolean) => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -65,7 +69,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
   initialDataMenuOpen = false,
   databaseMode,
   onUpdateDatabaseMode,
-  selectedCompany
+  selectedCompany,
+  darkMode,
+  onUpdateDarkMode,
+  batterySaver,
+  onUpdateBatterySaver
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
@@ -346,6 +354,47 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     <X size={12} />
                     <span>Nenhum</span>
                   </button>
+                </div>
+
+                <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
+                  <div className="flex items-center mb-3">
+                    <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Battery size={16} /></div>
+                    <div className="flex-1">
+                      <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Otimização de Energia</h4>
+                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Performance e Bateria</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <button 
+                      onClick={() => onUpdateDarkMode(!darkMode)}
+                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${darkMode ? 'bg-slate-800 border-slate-700 text-white shadow-md' : 'bg-white border-slate-200 text-slate-500'}`}
+                    >
+                      <div className="flex items-center">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center mr-3 ${darkMode ? 'bg-slate-700 text-yellow-400' : 'bg-slate-100 text-slate-400'}`}>
+                          {darkMode ? '🌙' : '☀️'}
+                        </div>
+                        <span>Modo Escuro (OLED)</span>
+                      </div>
+                      <div className={`w-10 h-5 rounded-full relative transition-colors ${darkMode ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${darkMode ? 'left-6' : 'left-1'}`} />
+                      </div>
+                    </button>
+
+                    <button 
+                      onClick={() => onUpdateBatterySaver(!batterySaver)}
+                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${batterySaver ? 'bg-amber-50 border-amber-200 text-amber-700 shadow-md' : 'bg-white border-slate-200 text-slate-500'}`}
+                    >
+                      <div className="flex items-center">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center mr-3 ${batterySaver ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+                          <Battery size={14} />
+                        </div>
+                        <span>Economia de Bateria</span>
+                      </div>
+                      <div className={`w-10 h-5 rounded-full relative transition-colors ${batterySaver ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${batterySaver ? 'left-6' : 'left-1'}`} />
+                      </div>
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 flex items-start space-x-2">

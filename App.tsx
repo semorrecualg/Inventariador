@@ -122,7 +122,9 @@ const App: React.FC = () => {
     autoConfirmOnScan: false,
     scanFeedbackMode: ScanFeedbackMode.BOTH,
     inventorySearchMode: InventorySearchMode.MANUAL,
-    immersiveMode: false
+    immersiveMode: false,
+    darkMode: localStorage.getItem('app_dark_mode') === 'true',
+    batterySaver: localStorage.getItem('app_battery_saver') === 'true'
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -177,19 +179,23 @@ const App: React.FC = () => {
     } catch { return DatabaseMode.INTERNAL; }
   });
 
-  // Apply theme class to body based on databaseMode
+  // Apply theme class to body based on databaseMode and darkMode
   useEffect(() => {
     const body = document.body;
-    body.classList.remove('theme-internal', 'theme-supabase', 'theme-protheus');
+    body.classList.remove('theme-internal', 'theme-supabase', 'theme-protheus', 'theme-dark');
     
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      body.classList.add('theme-supabase');
-    } else if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
-      body.classList.add('theme-protheus');
+    if (inventory.darkMode) {
+      body.classList.add('theme-dark');
     } else {
-      body.classList.add('theme-internal');
+      if (databaseMode === DatabaseMode.SUPABASE) {
+        body.classList.add('theme-supabase');
+      } else if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
+        body.classList.add('theme-protheus');
+      } else {
+        body.classList.add('theme-internal');
+      }
     }
-  }, [databaseMode]);
+  }, [databaseMode, inventory.darkMode]);
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
@@ -631,6 +637,8 @@ const App: React.FC = () => {
         localStorage.setItem('app_is_inventorying', String(isInventorying));
         localStorage.setItem('app_consultation_filters', JSON.stringify(consultationFilters));
         localStorage.setItem('app_committed_consultation_filters', JSON.stringify(committedConsultationFilters));
+        localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
+        localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
       } catch { console.warn("Storage cap reached"); }
     }, 2000);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
@@ -1090,6 +1098,10 @@ const App: React.FC = () => {
               onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))}
               initialDataMenuOpen={startWithDataMenu}
               selectedCompany={selectedCompany}
+              darkMode={inventory.darkMode || false}
+              onUpdateDarkMode={(val) => setInventory(prev => ({ ...prev, darkMode: val }))}
+              batterySaver={inventory.batterySaver || false}
+              onUpdateBatterySaver={(val) => setInventory(prev => ({ ...prev, batterySaver: val }))}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -1102,7 +1114,35 @@ const App: React.FC = () => {
               }} 
             />
           )}
-          {screen === AppScreen.INVENTORY && <Inventory assets={filteredAssetsByCompany} allAssets={inventory.assets} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} selectedLocation={inventoryLocation} setSelectedLocation={setInventoryLocation} isInventorying={isInventorying} setIsInventorying={setIsInventorying} selectedCompany={selectedCompany} onAddNewLocation={addNewLocation} locationsWithStats={locationsWithStats} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} autoConfirmOnScan={inventory.autoConfirmOnScan || false} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} inventorySearchValue={inventorySearchValue} clearInventorySearchValue={() => setInventorySearchValue(null)} immersiveMode={inventory.immersiveMode || false} onToggleFullscreen={toggleFullscreen} />}
+          {screen === AppScreen.INVENTORY && (
+            <Inventory 
+              assets={filteredAssetsByCompany} 
+              allAssets={inventory.assets} 
+              onBack={popScreen} 
+              onUpdateAsset={updateAsset} 
+              onBulkUpdateAssets={bulkUpdateAssets} 
+              onSelectAsset={handleSelectAsset} 
+              selectedLocation={inventoryLocation} 
+              setSelectedLocation={setInventoryLocation} 
+              isInventorying={isInventorying} 
+              setIsInventorying={setIsInventorying} 
+              selectedCompany={selectedCompany} 
+              onAddNewLocation={addNewLocation} 
+              locationsWithStats={locationsWithStats} 
+              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+              searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
+              onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
+              autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+              onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
+              inventorySearchValue={inventorySearchValue} 
+              clearInventorySearchValue={() => setInventorySearchValue(null)} 
+              immersiveMode={inventory.immersiveMode || false} 
+              onToggleFullscreen={toggleFullscreen}
+              batterySaver={inventory.batterySaver || false}
+            />
+          )}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
           {screen === AppScreen.CONSULTATION && (
             <Consultation 

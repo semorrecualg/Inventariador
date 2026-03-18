@@ -146,4 +146,6 @@ export interface InventoryState {
   scanFeedbackMode?: ScanFeedbackMode;
   inventorySearchMode?: InventorySearchMode;
   immersiveMode?: boolean;
+  darkMode?: boolean;
+  batterySaver?: boolean;
 }

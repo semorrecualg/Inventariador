@@ -337,9 +337,10 @@ interface InventoryProps {
   clearInventorySearchValue: () => void;
   immersiveMode: boolean;
   onToggleFullscreen: () => void;
+  batterySaver: boolean;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue, immersiveMode, onToggleFullscreen }) => {
+const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue, immersiveMode, onToggleFullscreen, batterySaver }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -1219,6 +1220,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     onClose={() => setIsScannerOpen(false)}
                     isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
                     scanFeedbackMode={scanFeedbackMode}
+                    batterySaver={batterySaver}
                   />
                   <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
                     <div className="px-3 py-1 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-2">
@@ -1333,6 +1335,7 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           onClose={() => setIsScannerOpen(false)}
           isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
           scanFeedbackMode={scanFeedbackMode}
+          batterySaver={batterySaver}
           onManualInput={() => {
             setIsScannerOpen(false);
             setManualAsset({
