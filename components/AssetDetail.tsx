@@ -4,6 +4,7 @@ import { Asset, TagInventario } from '../types';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
+import { updateAssetInProtheus } from '../services/protheusService';
 
 import { 
   Edit2, 
@@ -20,7 +21,8 @@ import {
   Info,
   Briefcase,
   Wallet,
-  QrCode
+  QrCode,
+  Loader2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -47,14 +49,30 @@ interface AssetDetailProps {
   uniqueCentrosDeCusto: string[];
   qrCodeFields: string[];
   readOnly?: boolean;
+  protheusIntegrationEnabled?: boolean;
+  protheusApiUrl?: string;
 }
 
-const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onBulkUpdate, editableFields, uniqueEnderecos, uniqueCentrosDeCusto, qrCodeFields, readOnly = false }) => {
+const AssetDetail: React.FC<AssetDetailProps> = ({ 
+  assets, 
+  onBack, 
+  onUpdate, 
+  onBulkUpdate, 
+  editableFields, 
+  uniqueEnderecos, 
+  uniqueCentrosDeCusto, 
+  qrCodeFields, 
+  readOnly = false,
+  protheusIntegrationEnabled = false,
+  protheusApiUrl = ''
+}) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
+  const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
 
 
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
@@ -131,7 +149,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       fields: [
         { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
         { key: 'CONTACONTABIL', label: 'CONTA CONTÁBIL', icon: Briefcase },
-        { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar }
+        { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
+        { key: 'Sn1_recno', label: 'ID PROTHEUS (RECNO)', icon: Hash }
       ]
     },
     {
@@ -190,6 +209,30 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       onUpdate({ ...finalAsset, _conferido: true });
     }
     onBack();
+  };
+
+  const handleProtheusSync = async () => {
+    if (!protheusApiUrl || isBatch) return;
+    
+    setIsSyncingProtheus(true);
+    setProtheusSyncResult(null);
+    
+    try {
+      const result = await updateAssetInProtheus(workingAsset, protheusApiUrl);
+      setProtheusSyncResult(result);
+      
+      if (result.success) {
+        // Opcional: Atualizar o status local se necessário
+        // onUpdate({ ...workingAsset, _protheusSynced: true });
+      }
+    } catch {
+      setProtheusSyncResult({
+        success: false,
+        message: 'Erro inesperado na comunicação com Protheus.'
+      });
+    } finally {
+      setIsSyncingProtheus(false);
+    }
   };
 
   const getTagColors = (tag: TagInventario | string) => {
@@ -408,18 +451,43 @@ const AssetDetail: React.FC<AssetDetailProps> = ({ assets, onBack, onUpdate, onB
       
       {/* KARDEX FOOTER */}
       {!readOnly && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex items-center justify-between z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-           <div className="flex flex-col">
-             <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-             <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
-           </div>
-           <button 
-             onClick={handleFinalize} 
-             className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
-           >
-              <Check size={20} strokeWidth={3} />
-              <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
-           </button>
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex flex-col space-y-3 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+          {protheusIntegrationEnabled && !isBatch && (
+            <div className="flex flex-col space-y-2">
+              {protheusSyncResult && (
+                <div className={`p-3 rounded-xl text-[10px] font-bold uppercase tracking-tight flex items-center space-x-2 animate-fadeIn ${protheusSyncResult.success ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}>
+                  {protheusSyncResult.success ? <Check size={14} /> : <AlertCircle size={14} />}
+                  <span>{protheusSyncResult.message}</span>
+                </div>
+              )}
+              <button 
+                onClick={handleProtheusSync}
+                disabled={isSyncingProtheus}
+                className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase flex items-center justify-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-indigo-700/20 bg-indigo-600 text-white shadow-lg active:scale-95 disabled:opacity-50 disabled:active:scale-100`}
+              >
+                {isSyncingProtheus ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <ShieldCheck size={20} strokeWidth={3} />
+                )}
+                <span>{isSyncingProtheus ? 'SINCRONIZANDO...' : 'SINCRONIZAR PROTHEUS'}</span>
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
+              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
+            </div>
+            <button 
+              onClick={handleFinalize} 
+              className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
+            >
+               <Check size={20} strokeWidth={3} />
+               <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
+            </button>
+          </div>
         </div>
       )}
 

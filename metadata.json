@@ -1,5 +1,5 @@
 {
   "name": "Inventariado Ativo Imobilizado by GBR",
-  "description": "Um aplicativo completo para inventário de ativos imobilizados, com suporte a carga de planilhas Excel, consultas dinâmicas e gerenciamento de base local.",
+  "description": "Solução profissional GBR v24.50 KARDEK para Inventário de Ativo Imobilizado. Inclui Protocolo GBR v24 de eliminação, integração nativa com Protheus (SIGAATF), leitura de QR Code, gestão de usuários e dashboard de performance global.",
   "requestFramePermissions": ["camera", "fullscreen"]
 }

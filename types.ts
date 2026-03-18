@@ -1,10 +1,25 @@
 
+export enum UserRole {
+  ADMIN = 'ADMIN',
+  AUDITOR = 'AUDITOR'
+}
+
 export interface User {
   username: string;
   email: string;
   password?: string;
-  isAdmin?: boolean;
+  role: UserRole;
+  isAdmin?: boolean; // Mantido para compatibilidade
   mustChangePassword?: boolean;
+  tenantId?: string;
+}
+
+export interface AuditLogEntry {
+  timestamp: string;
+  user: string;
+  action: string;
+  details?: string;
+  tenantId?: string;
 }
 
 export enum DatabaseStatus {
@@ -34,7 +49,8 @@ export enum ConservationState {
 }
 
 export interface Asset {
-  [key: string]: string | number | boolean | string[] | Record<string, string | number | boolean | string[] | null | undefined> | undefined | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any; 
   id: string | number;
   
   // Estrutura Mestre v24
@@ -56,6 +72,7 @@ export interface Asset {
   PRIMARYKEY?: string;
   CENTRODECUSTO?: string;
   VLRAQUISIC?: string | number;
+  Sn1_recno?: number; // Identificador único do registro no Protheus
 
   // Campos de Controle Interno
   _conferido?: boolean;
@@ -75,6 +92,9 @@ export interface Asset {
   _isNew?: boolean;
   _dataLeitura?: string;
   _auditor?: string;
+  _history?: AuditLogEntry[];
+  _photoUrl?: string;
+  _tenantId?: string;
 }
 
 export enum AppScreen {
@@ -132,6 +152,7 @@ export interface SearchFilters {
   CENTRODECUSTO: string;
   DATAAQUSIC_START: string;
   DATAAQUSIC_END: string;
+  Sn1_recno?: string;
 }
 
 export interface InventoryState {
@@ -148,4 +169,6 @@ export interface InventoryState {
   immersiveMode?: boolean;
   darkMode?: boolean;
   batterySaver?: boolean;
+  protheusIntegrationEnabled?: boolean;
+  protheusApiUrl?: string;
 }

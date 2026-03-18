@@ -373,7 +373,7 @@ const Scanner: React.FC<ScannerProps> = ({
         </div>
 
         {/* Centro: Modo de Leitura */}
-        <div className="flex-1 flex justify-center">
+        <div className="flex-1 flex justify-center space-x-2">
           {onModeChange && (
             <button 
               onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}
@@ -385,6 +385,19 @@ const Scanner: React.FC<ScannerProps> = ({
               </span>
             </button>
           )}
+          
+          <button 
+            onClick={() => {
+              stopScanner().then(() => startScanner());
+            }}
+            className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
+            title="Reiniciar Câmera"
+          >
+            <Camera size={isInline ? 16 : 20} className={`mb-1 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
+              Reset
+            </span>
+          </button>
         </div>
 
         {/* Lado Direito: Zoom & Troca de Câmera */}

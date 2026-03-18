@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck } from 'lucide-react';
 import { getUserPermissions, signIn as supabaseSignIn } from '../services/supabaseService';
 import { authenticateWithProtheus } from '../services/protheusService';
-import { User, DatabaseMode } from '../types';
+import { User, DatabaseMode, UserRole } from '../types';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -48,8 +48,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         loggedUser = {
           username: authResult.user?.username || username.trim().toUpperCase(),
           email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com.br`,
+          role: permissions.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR,
           isAdmin: permissions.isAdmin || false,
-          mustChangePassword: false
+          mustChangePassword: false,
+          tenantId: permissions.tenantId || 'default'
         };
       } else if (databaseMode === DatabaseMode.SUPABASE) {
         // Autenticação via Supabase Auth
@@ -58,11 +60,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         
         if (!sbUser) throw new Error("Usuário não encontrado.");
 
+        const isAdmin = sbUser.email?.toLowerCase() === "semorr@gmail.com";
         loggedUser = {
           username: sbUser.user_metadata?.username || sbUser.email?.split('@')[0].toUpperCase() || 'USUÁRIO',
           email: sbUser.email || '',
-          isAdmin: sbUser.email?.toLowerCase() === "semorr@gmail.com",
-          mustChangePassword: false
+          role: sbUser.user_metadata?.role || (isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
+          isAdmin: isAdmin,
+          mustChangePassword: false,
+          tenantId: sbUser.user_metadata?.tenantId || 'default'
         };
       } else {
         // Banco de Dados Interno (Independente)

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
 import { signUp } from '../services/supabaseService';
-import { DatabaseMode } from '../types';
+import { DatabaseMode, UserRole } from '../types';
 
 interface RegisterProps {
   onRegister: () => void;
@@ -84,7 +84,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
     setIsLoading(true);
 
     try {
-      await signUp(email.trim(), password, username.toUpperCase());
+      await signUp(email.trim(), password, username.toUpperCase(), UserRole.ADMIN);
       setIsSuccess(true);
       setTimeout(() => {
         onRegister();

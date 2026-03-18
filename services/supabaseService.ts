@@ -10,7 +10,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-export const signUp = async (email: string, password: string, username: string) => {
+export const signUp = async (email: string, password: string, username: string, role: string = 'ADMIN') => {
   if (!supabase) throw new Error("Supabase não configurado.");
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -18,6 +18,7 @@ export const signUp = async (email: string, password: string, username: string) 
     options: {
       data: {
         username,
+        role,
       },
     },
   });
@@ -53,25 +54,31 @@ export const signOut = async () => {
   if (error) throw error;
 };
 
-export const syncAssetsToCloud = async (assets: Asset[]) => {
+export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
   if (!supabase || !assets || assets.length === 0) return;
+
+  // Garante que todos os ativos tenham o tenantId antes de subir
+  const assetsWithTenant = assets.map(a => ({
+    ...a,
+    _tenantId: tenantId || a._tenantId || 'default'
+  }));
 
   // Tenta fazer upsert dos ativos
   const { error } = await supabase
     .from('assets')
-    .upsert(assets, { onConflict: 'id' });
+    .upsert(assetsWithTenant, { onConflict: 'id' });
 
   if (error) {
     // Se o erro for de coluna inexistente, apenas avisamos no console
     if (error.code === 'PGRST204') {
       console.warn('Coluna inexistente na tabela assets. Sincronização parcial.', error.message);
-      return;
+      throw new Error('Esquema do banco desatualizado');
     }
     
     // Handle network errors gracefully
     if (error.message === 'Failed to fetch') {
-      console.warn('Supabase sync failed: Network error or invalid URL. Check your VITE_SUPABASE_URL.');
-      return;
+      console.warn('Supabase sync failed: Network error or invalid URL.');
+      throw new Error('Erro de conexão');
     }
 
     console.error('Error syncing assets to Supabase:', error);
@@ -79,7 +86,7 @@ export const syncAssetsToCloud = async (assets: Asset[]) => {
   }
 };
 
-export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) => {
+export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantId?: string) => {
   if (!supabase) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
@@ -94,10 +101,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) 
     'autoConfirmOnScan', 
     'scanFeedbackMode', 
     'inventorySearchMode', 
-    'immersiveMode'
+    'immersiveMode',
+    '_tenantId'
   ];
 
-  const filteredConfig: Record<string, unknown> = { id: 'global_config' };
+  const configId = tenantId ? `config_${tenantId}` : 'global_config';
+  const filteredConfig: Record<string, unknown> = { id: configId };
+  if (tenantId) filteredConfig._tenantId = tenantId;
   
   Object.keys(config).forEach(key => {
     if (allowedKeys.includes(key)) {
@@ -113,13 +123,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>) 
     // Se o erro for de coluna inexistente, logamos mas não travamos o app
     if (error.code === 'PGRST204') {
       console.warn('Coluna inexistente no Supabase (inventory_config). Por favor, atualize o esquema do banco.', error.message);
-      return;
+      throw new Error('Esquema do banco desatualizado');
     }
 
     // Handle network errors gracefully
     if (error.message === 'Failed to fetch') {
-      console.warn('Supabase sync failed: Network error or invalid URL. Check your VITE_SUPABASE_URL.');
-      return;
+      console.warn('Supabase sync failed: Network error or invalid URL.');
+      throw new Error('Erro de conexão');
     }
 
     console.error('Error syncing config to Supabase:', error);
@@ -159,15 +169,20 @@ export const getUserPermissions = async (email: string) => {
 /**
  * Busca um ativo específico pela etiqueta no Supabase (para consulta pública via QR Code)
  */
-export const getAssetByTag = async (tag: string): Promise<Asset | null> => {
+export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Asset | null> => {
   if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('assets')
       .select('*')
-      .eq('ETIQUETA', tag.toUpperCase().trim())
-      .single();
+      .eq('ETIQUETA', tag.toUpperCase().trim());
+    
+    if (tenantId) {
+      query = query.eq('_tenantId', tenantId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) {
       if (error.code !== 'PGRST116') {
@@ -180,5 +195,123 @@ export const getAssetByTag = async (tag: string): Promise<Asset | null> => {
   } catch (err) {
     console.error('Erro inesperado ao buscar ativo:', err);
     return null;
+  }
+};
+
+/**
+ * Busca todo o inventário (ativos e configuração) do Supabase
+ */
+/**
+ * Busca todo o inventário (ativos e configuração) do Supabase
+ */
+export const fetchFullInventory = async (tenantId?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+  if (!supabase) return null;
+
+  try {
+    // 1. Busca todos os ativos filtrados por tenantId
+    let assetsQuery = supabase.from('assets').select('*');
+    if (tenantId) {
+      assetsQuery = assetsQuery.eq('_tenantId', tenantId);
+    }
+    const { data: assets, error: assetsError } = await assetsQuery;
+
+    if (assetsError) {
+      console.error('Erro ao buscar ativos do Supabase:', assetsError);
+      throw assetsError;
+    }
+
+    // 2. Busca a configuração (pode ser global ou por tenant)
+    let configQuery = supabase.from('inventory_config').select('*');
+    if (tenantId) {
+      configQuery = configQuery.eq('id', `config_${tenantId}`);
+    } else {
+      configQuery = configQuery.eq('id', 'global_config');
+    }
+    
+    const { data: configData, error: configError } = await configQuery.single();
+
+    let config = {};
+    if (configError) {
+      if (configError.code !== 'PGRST116') { // Se não for apenas "não encontrado"
+        console.warn('Erro ao buscar configuração do Supabase:', configError);
+      }
+    } else {
+      config = configData;
+    }
+
+    return {
+      assets: (assets as Asset[]) || [],
+      config: config as Partial<InventoryState>
+    };
+  } catch (err) {
+    console.error('Erro inesperado ao buscar inventário completo:', err);
+    return null;
+  }
+};
+
+/**
+ * Assina mudanças em tempo real na tabela de configuração do inventário
+ */
+export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<InventoryState>) => void) => {
+  if (!supabase) return null;
+
+  const channel = supabase
+    .channel('inventory_config_changes')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'inventory_config',
+        filter: 'id=eq.global_config'
+      },
+      (payload) => {
+        onUpdate(payload.new);
+      }
+    )
+    .subscribe();
+
+  return channel;
+};
+
+/**
+ * Limpa todos os ativos e configurações do Supabase (ou apenas de uma empresa específica)
+ */
+export const clearCloudInventory = async (companyToClear?: string): Promise<void> => {
+  if (!supabase) return;
+
+  try {
+    // 1. Limpa os ativos
+    let query = supabase.from('assets').delete();
+    
+    if (companyToClear) {
+      // Se for por empresa, filtramos pela coluna EMPRESA
+      query = query.eq('EMPRESA', companyToClear.toUpperCase().trim());
+    } else {
+      // Se for tudo, usamos o truque do neq id 0
+      query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+    }
+
+    const { error: assetsError } = await query;
+
+    if (assetsError) {
+      console.error('Erro ao limpar ativos na nuvem:', assetsError);
+      throw assetsError;
+    }
+
+    // 2. Limpa a configuração global (apenas se estiver limpando TUDO)
+    if (!companyToClear) {
+      const { error: configError } = await supabase
+        .from('inventory_config')
+        .delete()
+        .eq('id', 'global_config');
+
+      if (configError) {
+        console.warn('Erro ao limpar configuração na nuvem (pode não existir):', configError);
+      }
+    }
+  } catch (err) {
+    console.error('Erro inesperado ao limpar nuvem:', err);
+    throw err;
   }
 };

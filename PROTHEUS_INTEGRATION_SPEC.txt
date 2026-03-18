@@ -1,0 +1,78 @@
+# ESPECIFICAÇÃO DE INTEGRAÇÃO: MÓDULO GBR -> ERP PROTHEUS (SIGAATF)
+# Versão: 1.0 - Simulação de Validação e Update
+
+[CONFIGURAÇÃO DO MÓDULO]
+MODO_INTEGRACAO: ATIVO
+ENDPOINT: ${VITE_PROTHEUS_API_URL}/api/v1/assets
+SEGURANÇA: DELETE_NOT_ALLOWED (Apenas GET/PATCH)
+
+--------------------------------------------------------------------------------
+[CENÁRIO 01: SUCESSO NA VALIDAÇÃO]
+--------------------------------------------------------------------------------
+
+DATOS NO APP (COLETADOS):
+- ID Interno: 1025
+- EMPRESA: "000001 - MATRIZ SÃO PAULO"
+- REGISTRO: "000450"
+- SUBREG: "01"
+- STATUS: "01"
+- ENDERECO: "ALMOX01 - ALMOXARIFADO CENTRAL"
+- CENTRODECUSTO: "10105 - TI OPERACIONAL"
+- Sn1_recno: 55820 (Identificador Único Protheus)
+
+PROCESSO DE NORMALIZAÇÃO (DE-PARA):
+1. EMPRESA (6 dig): "000001"
+2. REGISTRO: "000450"
+3. SUBREG: "01"
+4. STATUS: "01"
+5. ENDERECO (6 dig): "ALMOX0"
+6. CCUSTO (5 dig): "10105"
+
+CHECAGEM NO PROTHEUS (VIA API):
+- N1_FILIAL: "000001" (OK)
+- N1_CBASE: "000450" (OK)
+- N1_ITEM: "01" (OK)
+- N1_STATUS: "01" (OK)
+
+RESULTADO: TUDO CHECADO.
+AÇÃO: ENVIAR ATUALIZAÇÃO PARA PROTHEUS (PATCH Sn1_recno: 55820)
+CAMPOS ATUALIZADOS:
+- N1_LOCAL <- "ALMOX0"
+- N3_CUSTBEM <- "10105" (Assumindo conta igual ao CC ou mapeada)
+- N3_CCUSTO <- "10105"
+
+--------------------------------------------------------------------------------
+[CENÁRIO 02: FALHA NA VALIDAÇÃO (CAMPO VAZIO)]
+--------------------------------------------------------------------------------
+
+DATOS NO APP (COLETADOS):
+- ID Interno: 1026
+- Sn1_recno: 55821
+- ENDERECO: "PRODUCAO"
+- CENTRODECUSTO: "" (Vazio ou não selecionado)
+
+PROCESSO DE VALIDAÇÃO:
+- Verificando N3_CCUSTO... [ERRO: VALOR VAZIO DETECTADO]
+
+AÇÃO: BLOQUEAR ATUALIZAÇÃO NO ERP.
+LOG GERADO PARA AUDITOR:
+{
+  "timestamp": "2026-03-18T15:10:00Z",
+  "item": "REG: 000451 / SUB: 01",
+  "status": "REJEITADO_ERP",
+  "motivo": "Centro de Custo (N3_CCUSTO) não pode ser vazio para integração Protheus.",
+  "auditor": "PEDRO.GBR",
+  "acao_requerida": "Corrigir Centro de Custo no detalhe do ativo antes de sincronizar."
+}
+
+--------------------------------------------------------------------------------
+[CENÁRIO 03: FALHA NA VALIDAÇÃO (DIVERGÊNCIA DE CHAVE)]
+--------------------------------------------------------------------------------
+
+DATOS NO APP: Empresa "000001"
+DATOS NO PROTHEUS (Sn1_recno 55822): Empresa "000002"
+
+RESULTADO: DIVERGÊNCIA DE FILIAL.
+AÇÃO: BLOQUEAR ATUALIZAÇÃO.
+MOTIVO: "Sn1_recno pertence a uma filial diferente da selecionada no app."
+--------------------------------------------------------------------------------

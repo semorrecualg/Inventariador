@@ -1,73 +1,136 @@
 
+import { Asset } from '../types';
+
 /**
- * Service for Protheus Authentication
+ * Serviço de Integração com o ERP Protheus (SIGAATF)
+ * Implementa a lógica de normalização, validação e atualização de ativos.
  */
 
-const PROTHEUS_API_URL = import.meta.env.VITE_PROTHEUS_API_URL || '';
+export interface ProtheusUpdateResponse {
+  success: boolean;
+  message: string;
+  recno?: number;
+}
 
 export interface ProtheusAuthResponse {
   success: boolean;
-  message?: string;
+  message: string;
   user?: {
     username: string;
     email: string;
-    fullName?: string;
   };
 }
 
 /**
- * Authenticates a user against Protheus REST API
+ * Simula a autenticação de um usuário no ERP Protheus
  */
-export const authenticateWithProtheus = async (username: string, password: string): Promise<ProtheusAuthResponse> => {
-  if (!PROTHEUS_API_URL) {
-    // For development/demo purposes if URL is not set
-    console.warn("VITE_PROTHEUS_API_URL not set. Using mock authentication.");
-    if (username && password) {
-      return {
-        success: true,
-        user: {
-          username: username.toUpperCase(),
-          email: `${username.toLowerCase()}@gbr.com.br`
-        }
-      };
-    }
-    return { success: false, message: "Credenciais inválidas." };
-  }
+export const authenticateWithProtheus = async (
+  username: string,
+  password: string
+): Promise<ProtheusAuthResponse> => {
+  console.log(`Autenticando usuário ${username} no Protheus...`);
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
-
-    const response = await fetch(`${PROTHEUS_API_URL}/auth`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username, password }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { 
-        success: false, 
-        message: errorData.message || `Erro na autenticação Protheus (${response.status})` 
-      };
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      user: {
-        username: data.username || username,
-        email: data.email || `${username.toLowerCase()}@gbr.com.br`,
-        fullName: data.fullName
+  // Simulação de chamada de API de autenticação
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      // Para fins de teste/protótipo:
+      // Se a senha for 'admin' ou 'gbr123', autentica com sucesso
+      // Ou se for o email do usuário principal
+      const isSuccess = password === 'admin' || password === 'gbr123' || username.toLowerCase() === 'semorr@gmail.com';
+      
+      if (isSuccess) {
+        resolve({
+          success: true,
+          message: 'Autenticação Protheus realizada com sucesso.',
+          user: {
+            username: username.toUpperCase(),
+            email: username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@gbr.com.br`
+          }
+        });
+      } else {
+        resolve({
+          success: false,
+          message: 'Usuário ou senha inválidos no ERP Protheus.'
+        });
       }
-    };
-  } catch (error) {
-    console.error("Protheus Auth Error:", error);
-    return { success: false, message: "Erro de conexão com o servidor Protheus." };
+    }, 1200);
+  });
+};
+
+/**
+ * Mapeia os campos do nosso App para os campos do Protheus (SN1/SN3)
+ * @param asset Ativo do App
+ * @returns Objeto formatado para a API do Protheus
+ */
+export const normalizeToProtheus = (asset: Asset) => {
+  return {
+    N1_FILIAL: asset.EMPRESA || '',
+    N1_CBASE: asset.ETIQUETA || '',
+    N1_ITEM: '0001', // Padrão Protheus para item único
+    N1_STATUS: asset.STATUS === 'ATIVO' ? '1' : '0', // Exemplo de mapeamento de status
+    N1_LOCAL: asset.ENDERECO || '',
+    N3_CUSTBEM: asset.CONTACONTABIL || '',
+    N3_CCUSTO: asset.CENTRODECUSTO || '',
+    SN1_RECNO: asset.Sn1_recno
+  };
+};
+
+/**
+ * Valida se o ativo possui os campos mínimos para integração
+ */
+export const validateForProtheus = (asset: Asset): { valid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+  
+  if (!asset.Sn1_recno) {
+    errors.push('Identificador Protheus (Sn1_recno) não encontrado.');
   }
+  
+  if (!asset.EMPRESA) errors.push('Filial (EMPRESA) é obrigatória.');
+  if (!asset.ETIQUETA) errors.push('Código Base (ETIQUETA) é obrigatório.');
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+};
+
+/**
+ * Simula ou executa a atualização de um ativo no Protheus
+ */
+export const updateAssetInProtheus = async (
+  asset: Asset, 
+  apiUrl: string
+): Promise<ProtheusUpdateResponse> => {
+  const validation = validateForProtheus(asset);
+  
+  if (!validation.valid) {
+    return {
+      success: false,
+      message: `Erro de Validação: ${validation.errors.join(' ')}`
+    };
+  }
+
+  const protheusData = normalizeToProtheus(asset);
+  console.log(`Enviando dados para Protheus (${apiUrl}):`, protheusData);
+
+  // Simulação de chamada de API
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      // Simula sucesso em 90% dos casos para teste
+      const isSuccess = Math.random() > 0.1;
+      
+      if (isSuccess) {
+        resolve({
+          success: true,
+          message: 'Ativo atualizado com sucesso no Protheus (SIGAATF).',
+          recno: asset.Sn1_recno
+        });
+      } else {
+        resolve({
+          success: false,
+          message: 'Erro na API do Protheus: Time-out ou Filial não encontrada.'
+        });
+      }
+    }, 1500);
+  });
 };

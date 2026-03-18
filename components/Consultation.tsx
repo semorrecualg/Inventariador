@@ -367,6 +367,7 @@ const Consultation: React.FC<ConsultationProps> = ({
               {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
               {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
               {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
+              {renderInput('Sn1_recno', 'ID Protheus (RECNO)', <Hash size={16} />)}
               
               <div className="space-y-1.5">
                 <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (De)</label>
@@ -493,14 +494,14 @@ const Consultation: React.FC<ConsultationProps> = ({
       {showNumericKeypad && activeField && (
         <div className="fixed bottom-0 left-0 right-0 z-[600]">
           <NumericKeypad 
-            value={filters[activeField]}
+            value={filters[activeField] || ''}
             label={
               activeField === 'ETIQUETA' ? 'Etiqueta Patrimonial' :
               activeField === 'CNPJ' ? 'CNPJ do Fornecedor' :
               activeField === 'NOTAFISCAL' ? 'Número da Nota Fiscal' : 'Campo Numérico'
             }
-            onInput={(val) => handleInputChange(activeField, filters[activeField] + val)}
-            onDelete={() => handleInputChange(activeField, filters[activeField].slice(0, -1))}
+            onInput={(val) => handleInputChange(activeField, (filters[activeField] || '') + val)}
+            onDelete={() => handleInputChange(activeField, (filters[activeField] || '').slice(0, -1))}
             onClose={() => setShowNumericKeypad(false)}
             onSearch={triggerSearch}
           />

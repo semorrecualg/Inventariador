@@ -54,7 +54,7 @@ const Modal: React.FC<ModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-[20000] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-sm animate-fadeIn">
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn border border-slate-200">
         <div className={`p-8 flex flex-col items-center text-center ${getHeaderColor()} border-b`}>
           <div className="mb-4 p-4 bg-white rounded-2xl shadow-sm">

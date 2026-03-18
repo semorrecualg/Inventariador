@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { User } from '../types';
+import { User, UserRole } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -51,12 +51,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>(UserRole.AUDITOR);
   const [showEditPassword, setShowEditPassword] = useState(false);
 
   const handleAddUser = (e: React.FormEvent) => {
@@ -77,8 +79,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       username,
       email,
       password,
-      isAdmin: false,
-      mustChangePassword: true
+      role: newRole,
+      isAdmin: newRole === UserRole.ADMIN,
+      mustChangePassword: true,
+      tenantId: 'default' // Por enquanto, todos na mesma base interna
     };
 
     setUsers(prev => {
@@ -90,6 +94,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setNewUsername('');
     setNewEmail('');
     setNewPassword('');
+    setNewRole(UserRole.AUDITOR);
     setIsAddModalOpen(false);
   };
 
@@ -98,6 +103,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditUsername(user.username);
     setEditEmail(user.email);
     setEditPassword(user.password || '');
+    setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
     setIsEditModalOpen(true);
   };
 
@@ -118,7 +124,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setUsers(prev => {
       const updated = prev.map(u => 
         u.email === selectedUser.email 
-          ? { ...u, username, email, password } 
+          ? { ...u, username, email, password, role: editRole, isAdmin: editRole === UserRole.ADMIN } 
           : u
       );
       localStorage.setItem('app_users', JSON.stringify(updated));
@@ -233,6 +239,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
               <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Perfil de Acesso</label>
+                <div className="flex p-1 bg-bg-main rounded-2xl border border-border">
+                  <button 
+                    type="button"
+                    onClick={() => setEditRole(UserRole.AUDITOR)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Auditor
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setEditRole(UserRole.ADMIN)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
+                  >
+                    Admin
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail</label>
                 <div className="relative">
                   <input type="email" required autoComplete="off" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
@@ -265,6 +290,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail</label>
                 <input type="email" required autoComplete="off" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Perfil de Acesso</label>
+                <div className="flex p-1 bg-bg-main rounded-2xl border border-border">
+                  <button 
+                    type="button"
+                    onClick={() => setNewRole(UserRole.AUDITOR)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Auditor
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setNewRole(UserRole.ADMIN)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
+                  >
+                    Admin
+                  </button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Senha</label>

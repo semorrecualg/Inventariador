@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppScreen, User, ScanFeedbackMode, DatabaseMode } from '../types';
+import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -27,13 +27,18 @@ import {
   ListChecks,
   Database,
   Cloud,
-  Server
+  Server,
+  BookOpen
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen) => void;
   onLogout: () => void;
   onExport: () => void;
+  onBackup: () => void;
+  onDownloadCloudData: () => void;
+  onRestore: (file: File) => void;
   onClearDatabase: () => void;
   user: User | null;
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
@@ -51,12 +56,24 @@ interface MainMenuProps {
   onUpdateDarkMode: (val: boolean) => void;
   batterySaver: boolean;
   onUpdateBatterySaver: (val: boolean) => void;
+  onSyncCloud?: () => void;
+  isSyncing?: boolean;
+  lastSyncTime?: string | null;
+  syncError?: string | null;
+  hasSupabase?: boolean;
+  protheusIntegrationEnabled: boolean;
+  onUpdateProtheusIntegration: (val: boolean) => void;
+  protheusApiUrl: string;
+  onUpdateProtheusApiUrl: (val: string) => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
   onNavigate, 
   onLogout, 
   onExport, 
+  onBackup,
+  onDownloadCloudData,
+  onRestore,
   onClearDatabase, 
   user, 
   inventoryInfo, 
@@ -73,13 +90,23 @@ const MainMenu: React.FC<MainMenuProps> = ({
   darkMode,
   onUpdateDarkMode,
   batterySaver,
-  onUpdateBatterySaver
+  onUpdateBatterySaver,
+  onSyncCloud,
+  isSyncing = false,
+  lastSyncTime,
+  syncError,
+  hasSupabase = false,
+  protheusIntegrationEnabled,
+  onUpdateProtheusIntegration,
+  protheusApiUrl,
+  onUpdateProtheusApiUrl
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
-  const isAdmin = user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   return (
@@ -93,10 +120,41 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AUDITORIA</span>
         </div>
         <div className="flex items-center space-x-2">
-          <div className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md flex items-center space-x-1">
-            <ShieldCheck size={10} className="text-emerald-500" />
-            <span className="text-[8px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
-          </div>
+          {hasSupabase && (
+            <div className={`px-2 py-0.5 rounded-md flex items-center space-x-1 border ${
+              isSyncing 
+                ? 'bg-blue-50 border-blue-100 text-blue-500 animate-pulse' 
+                : syncError 
+                  ? 'bg-red-50 border-red-100 text-red-500' 
+                  : 'bg-emerald-50 border-emerald-100 text-emerald-500'
+            }`}>
+              {isSyncing ? (
+                <Cloud size={10} className="animate-bounce" />
+              ) : syncError ? (
+                <X size={10} />
+              ) : (
+                <ShieldCheck size={10} />
+              )}
+              <span className="text-[8px] font-black uppercase tracking-tighter">
+                {isSyncing ? 'SYNCING' : syncError ? 'ERROR' : 'SYNC OK'}
+              </span>
+            </div>
+          )}
+          {hasSupabase && (
+            <button 
+              onClick={onSyncCloud}
+              disabled={isSyncing}
+              className={`p-1 rounded-md transition-all active:scale-90 ${isSyncing ? 'opacity-50' : 'hover:bg-slate-100'}`}
+              title="Sincronizar Agora"
+            >
+              <DatabaseZap size={12} className={`${isSyncing ? 'animate-spin text-blue-500' : 'text-slate-400'}`} />
+            </button>
+          )}
+          {lastSyncTime && !isSyncing && !syncError && (
+            <span className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter">
+              {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           <div className="px-2 py-0.5 bg-accent-soft border border-accent/10 rounded-md">
             <span className="text-[8px] font-black text-accent uppercase tracking-tighter">v24.50 PRO</span>
           </div>
@@ -396,12 +454,67 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* DOCUMENTAÇÃO */}
+                <button 
+                  onClick={() => setIsDocModalOpen(true)}
+                  className="w-full flex items-center p-4 bg-emerald-50 border border-emerald-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm mt-4"
+                >
+                  <div className="w-8 h-8 bg-emerald-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><BookOpen size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-emerald-900 uppercase tracking-tight">Manual do Sistema</h4>
+                    <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-0.5">Documentação v24.50</p>
+                  </div>
+                  <ChevronRight size={14} className="text-emerald-300" />
+                </button>
                 
                 <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 flex items-start space-x-2">
                   <Battery size={14} className="text-amber-500 shrink-0 mt-0.5" />
                   <p className="text-[7px] font-bold text-amber-700 uppercase leading-relaxed tracking-wide">
                     Dica: O uso de <span className="text-amber-900">SOM</span> consome menos bateria que o <span className="text-amber-900">VIBRAR</span>.
                   </p>
+                </div>
+
+                {/* CONFIGURAÇÃO PROTHEUS */}
+                <div className="w-full p-4 bg-indigo-50 border border-indigo-100 rounded-2xl shadow-sm mt-4">
+                  <div className="flex items-center mb-3">
+                    <div className="w-8 h-8 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><ShieldCheck size={16} /></div>
+                    <div className="flex-1">
+                      <h4 className="text-[13px] font-bold text-indigo-900 uppercase tracking-tight">Módulo Protheus</h4>
+                      <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mt-0.5">Integração ERP SIGAATF</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-indigo-100">
+                      <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest">Habilitar Módulo</span>
+                      <button 
+                        onClick={() => onUpdateProtheusIntegration(!protheusIntegrationEnabled)}
+                        className={`w-10 h-5 rounded-full relative transition-colors ${protheusIntegrationEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
+                      >
+                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${protheusIntegrationEnabled ? 'left-6' : 'left-1'}`}  />
+                      </button>
+                    </div>
+
+                    {protheusIntegrationEnabled && (
+                      <div className="space-y-1 animate-fadeIn">
+                        <label className="block text-[8px] font-bold text-indigo-400 uppercase tracking-widest ml-1">VITE_PROTHEUS_API_URL</label>
+                        <input 
+                          type="text"
+                          value={protheusApiUrl}
+                          onChange={(e) => onUpdateProtheusApiUrl(e.target.value)}
+                          placeholder="https://api.empresa.com.br"
+                          className="w-full px-3 py-2 bg-white border border-indigo-100 rounded-xl text-[10px] font-bold text-indigo-900 outline-none focus:border-indigo-500 transition-all shadow-sm"
+                        />
+                      </div>
+                    )}
+
+                    <div className="p-2 bg-white/50 border border-indigo-100 rounded-lg">
+                      <p className="text-[7px] font-bold text-indigo-600 uppercase leading-relaxed tracking-wide">
+                        Atenção: A integração exige o campo <span className="text-indigo-900">Sn1_recno</span> na carga de dados.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -542,13 +655,64 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              <button disabled={!hasData} onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left">
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <button 
+                  onClick={onSyncCloud} 
+                  disabled={isSyncing}
+                  className="w-full flex items-center p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl active:scale-[0.98] disabled:opacity-50 transition-all text-left"
+                >
+                  <div className={`w-10 h-10 bg-emerald-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-emerald-500/20 ${isSyncing ? 'animate-spin' : ''}`}>
+                    <Cloud size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-emerald-400 uppercase tracking-tight">Sincronizar Nuvem</h4>
+                    <p className="text-[8px] font-bold text-emerald-400/60 uppercase tracking-widest mt-0.5">Baixar Dados do Supabase</p>
+                  </div>
+                </button>
+              )}
+
+              <button onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onExport(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left">
                 <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Download size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar base de dados</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Exportar XLS</p>
                 </div>
               </button>
+
+              <button onClick={() => { onBackup(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Database size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Gerar Backup JSON (Local)</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Segurança de Dados Locais</p>
+                </div>
+              </button>
+
+              <button onClick={() => { onDownloadCloudData(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><Cloud size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar Dados da Nuvem</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Download Direto do Supabase</p>
+                </div>
+              </button>
+
+              <div className="relative">
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) onRestore(file);
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                />
+                <button className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                  <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Download size={20} className="rotate-180" /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Restaurar Backup</h4>
+                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Recuperar dados de arquivo</p>
+                  </div>
+                </button>
+              </div>
 
               <button onClick={() => { 
                 setIsDataMenuOpen(false); 
@@ -567,8 +731,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
               }} className="w-full flex items-center p-4 bg-red-500/10 border border-red-500/20 rounded-2xl active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 bg-red-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-red-500/20"><Trash2 size={20} /></div>
                 <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">Limpar Banco de Dados</h4>
-                  <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5">Apagar Ativos do App</p>
+                  <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">Limpeza Total (Local + Nuvem)</h4>
+                  <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5">Apagar Tudo Permanentemente</p>
                 </div>
               </button>
             </div>
@@ -584,12 +748,141 @@ const MainMenu: React.FC<MainMenuProps> = ({
           setIsAdminMenuOpen(false);
           onClearDatabase();
         }}
-        title="Limpar Banco de Dados"
-        message="ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário. Deseja continuar?"
+        title="Limpeza Total do Sistema"
+        message="ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário TANTO LOCALMENTE QUANTO NA NUVEM (Supabase). Recomenda-se gerar um BACKUP antes. Deseja continuar?"
         type="confirm"
         confirmText="Sim, Apagar Tudo"
         cancelText="Cancelar"
       />
+      {isDocModalOpen && (
+        <div className="fixed inset-0 z-[20000] bg-white flex flex-col animate-slideUp">
+          <div className="px-6 pt-12 pb-6 bg-emerald-500 text-white flex items-center justify-between shadow-lg">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/30">
+                <BookOpen size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">GBR v24.50 KARDEK</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsDocModalOpen(false)}
+              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-xl flex items-center justify-center transition-all active:scale-90"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-bg-main no-scrollbar">
+            <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
+              <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
+                <ReactMarkdown>
+                  {`# Documentação Técnica e Operacional - GBR v24.50 KARDEK
+
+Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado (GBR v24.50).
+
+---
+
+## 1. Visão Geral do Sistema
+O **GBR v24.50 KARDEK** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
+
+### 1.1. Pilares do Sistema
+- **Protocolo GBR v24**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).
+- **Integração Protheus**: Sincronização direta via \`Sn1_recno\`.
+- **Mobilidade**: Interface otimizada para dispositivos móveis com suporte a QR Code e Scanner.
+- **Segurança**: Controle de acesso por perfis (ADMIN e AUDITOR).
+
+---
+
+## 2. Arquitetura e Tech Stack
+- **Frontend**: React 18+ com TypeScript.
+- **Estilização**: Tailwind CSS (Design System GBR).
+- **Ícones**: Lucide React.
+- **Processamento de Dados**: XLSX (SheetJS) para carga de planilhas.
+- **QR Code**: QRCode.react para geração dinâmica.
+- **Backend/Sincronização**: Firebase (Firestore e Auth) para persistência em nuvem.
+
+---
+
+## 3. Perfis de Usuário e Permissões
+
+| Perfil | Permissões |
+| :--- | :--- |
+| **ADMIN** | Gestão de usuários, configuração de campos editáveis, configuração de QR Code, carga de banco de dados, visualização de performance global. |
+| **AUDITOR** | Realização de inventário, consulta de ativos, edição de campos permitidos, sincronização com Protheus. |
+
+---
+
+## 4. Módulos Operacionais
+
+### 4.1. Carga de Dados (Database Loader)
+- **Protocolo de Importação**: Suporta arquivos \`.xlsx\` e \`.csv\`.
+- **Mapeamento v24**: Identifica automaticamente 18 colunas críticas (Empresa, Status, Etiqueta, etc.).
+- **Sn1_recno**: Captura obrigatória do identificador do Protheus para integração.
+- **Regras de Eliminação (GBR v24)**:
+  - Itens baixados com contas contábeis específicas (131105001/002) são eliminados.
+  - Itens baixados sem etiqueta são eliminados.
+  - Itens baixados cuja etiqueta já existe em um registro ativo são eliminados para evitar duplicidade.
+
+### 4.2. Inventário Físico
+- **Seleção de Local**: O auditor seleciona a unidade e o endereço antes de iniciar.
+- **Modos de Leitura**:
+  - **Scanner**: Uso da câmera para leitura de QR Code/Código de Barras.
+  - **Manual**: Digitação da etiqueta via teclado numérico otimizado.
+- **Feedback Visual**: Cores indicativas de status (Pendente, Conferido, Divergência, Baixado).
+
+### 4.3. Consulta e Busca Avançada
+- Filtros múltiplos: Etiqueta, Descrição, Serial, CNPJ, NF, Endereço, Conta, Centro de Custo e **ID Protheus (RECNO)**.
+- Busca por intervalo de data de aquisição.
+- Modo de retorno ao inventário para itens localizados fora da rota original.
+
+### 4.4. Detalhes do Ativo (Kardex)
+- Visualização completa de 5 grupos de dados: Identificação, Localização, Aquisição, Controle Contábil e Dados do Inventário.
+- **Edição Controlada**: Apenas campos configurados pelo ADMIN podem ser alterados pelo AUDITOR.
+- **Geração de QR Code**: Baseado em campos configuráveis para etiquetas de campo.
+
+---
+
+## 5. Integração Protheus (SIGAATF)
+O sistema possui um módulo dedicado para comunicação com o ERP TOTVS Protheus.
+
+- **Identificador**: \`Sn1_recno\`.
+- **Campos Sincronizados**: Filial (\`N1_FILIAL\`), Código Base (\`N1_CBASE\`), Local (\`N1_LOCAL\`), Centro de Custo (\`N3_CCUSTO\`), etc.
+- **Operação**: O botão "Sincronizar Protheus" no detalhe do ativo envia as alterações realizadas no inventário diretamente para a API do ERP.
+
+---
+
+## 6. Configurações Administrativas
+- **Campos Editáveis**: Define quais informações o auditor pode alterar no campo.
+- **QR Code Configurator**: Define quais dados serão codificados na etiqueta QR.
+- **User Management**: Criação e edição de credenciais de acesso.
+- **Performance Global**: Gráficos de progresso (D3.js/Recharts) por empresa e status.
+
+---
+
+## 7. Procedimentos de Manutenção
+- **Limpeza de Dados**: Realizada via menu "Dados" (Purge).
+- **Sincronização Cloud**: O sistema detecta alterações locais e solicita sincronização com o Firebase para manter a base centralizada.
+
+---
+*Documentação atualizada em: 18 de Março de 2026*
+*Versão do App: 24.50.03*`}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-6 bg-white border-t border-border flex items-center justify-center">
+            <button 
+              onClick={() => setIsDocModalOpen(false)}
+              className="w-full max-w-sm py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] shadow-lg active:scale-95 transition-all"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

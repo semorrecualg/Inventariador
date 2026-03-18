@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters } from './types';
+import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry } from './types';
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -22,8 +22,8 @@ import AccountReconciliation from './components/AccountReconciliation';
 
 import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { saveInventory, loadInventory, clearInventory } from './services/persistenceService';
-import { getAssetByTag } from './services/supabaseService';
+import { saveInventory, loadInventory, clearInventory, backupInventory, restoreInventory } from './services/persistenceService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud } from './services/supabaseService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -111,6 +111,19 @@ const App: React.FC = () => {
     return localStorage.getItem('app_selected_company') || null;
   });
 
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'info' | 'error' | 'success' | 'confirm';
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
   const [inventory, setInventory] = useState<InventoryState>({ 
     assets: [], 
     companies: [], 
@@ -124,11 +137,153 @@ const App: React.FC = () => {
     inventorySearchMode: InventorySearchMode.MANUAL,
     immersiveMode: false,
     darkMode: localStorage.getItem('app_dark_mode') === 'true',
-    batterySaver: localStorage.getItem('app_battery_saver') === 'true'
+    batterySaver: localStorage.getItem('app_battery_saver') === 'true',
+    protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
+    protheusApiUrl: localStorage.getItem('app_protheus_url') || ''
+  });
+
+  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
+    try {
+      const saved = localStorage.getItem('app_database_mode');
+      return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+    } catch { return DatabaseMode.INTERNAL; }
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyAssetsRef = useRef<Set<string>>(new Set());
+
+  const pushLocalChanges = useCallback(async () => {
+    if (databaseMode === DatabaseMode.INTERNAL) return;
+    
+    const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    if (!hasSupabase) return;
+
+    const dirtyIds = Array.from(dirtyAssetsRef.current);
+    if (dirtyIds.length === 0) return;
+
+    const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
+
+    if (dirtyAssets.length > 0) {
+      setIsSyncing(true);
+      try {
+        // Sincroniza os ativos e ESPERA a conclusão (Push)
+        await syncAssetsToCloud(dirtyAssets, user?.tenantId);
+        
+        // Sincroniza a config também para garantir que o timestamp suba
+        const configToSync = { ...inventory };
+        // @ts-expect-error - assets is removed for sync
+        delete configToSync.assets;
+        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantId);
+
+        dirtyAssetsRef.current.clear();
+        setLastSyncTime(new Date().toISOString());
+        setSyncError(null);
+      } catch (err) {
+        setSyncError('Erro ao enviar alterações locais');
+        console.error('Push error:', err);
+        throw err;
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  }, [databaseMode, inventory]);
+
+  const syncFromCloud = useCallback(async () => {
+    if (databaseMode === DatabaseMode.INTERNAL) return;
+    
+    setIsSyncing(true);
+    try {
+      const cloudData = await fetchFullInventory(user?.tenantId);
+      if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
+        setInventory(prev => {
+          const newState: InventoryState = {
+            ...prev,
+            ...cloudData.config,
+            assets: cloudData.assets,
+            status: DatabaseStatus.LOADED,
+            lastUpdated: new Date().toISOString()
+          };
+          saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
+          return newState;
+        });
+        setLastSyncTime(new Date().toISOString());
+        setSyncError(null);
+        setShowRecoveryToast(true);
+        setTimeout(() => setShowRecoveryToast(false), 5000);
+      } else {
+        setLastSyncTime(new Date().toISOString());
+        setSyncError(null);
+        setModalConfig({
+          isOpen: true,
+          title: 'Sincronização Concluída',
+          message: 'A sincronização foi finalizada, mas nenhum dado foi encontrado na nuvem para este modo.',
+          type: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao sincronizar da nuvem:', error);
+      setSyncError('Erro na conexão');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [databaseMode]);
+
+  // Real-time Cloud Sync Listener
+  useEffect(() => {
+    if (databaseMode === DatabaseMode.INTERNAL) return;
+
+    const subscription = subscribeToInventoryChanges((newConfig) => {
+      if (newConfig && newConfig.lastUpdated) {
+        const cloudTime = new Date(newConfig.lastUpdated).getTime();
+        const localTime = inventory.lastUpdated ? new Date(inventory.lastUpdated).getTime() : 0;
+
+        // Se o tempo na nuvem for maior que o local, significa que houve uma carga externa (Admin)
+        if (cloudTime > localTime + 5000) { // Margem de 5s para evitar auto-sync do próprio update
+          setIsCloudUpdatePending(true);
+        }
+      }
+    });
+
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
+  }, [databaseMode, inventory.lastUpdated]);
+
+  // Efeito para forçar sincronização se houver atualização pendente e o usuário for auditor
+  useEffect(() => {
+    if (isCloudUpdatePending && !user?.isAdmin && user?.email !== ADMIN_EMAIL) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Atualização do Banco de Dados',
+        message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
+        type: 'confirm',
+        onConfirm: async () => {
+          setIsCloudUpdatePending(false);
+          try {
+            // 1. Envia o que tiver de local primeiro
+            await pushLocalChanges();
+            // 2. Baixa a nova base
+            await syncFromCloud();
+          } catch (e) {
+            console.error("Falha na sincronização segura:", e);
+            setModalConfig({
+              isOpen: true,
+              title: 'Erro na Sincronização',
+              message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
+              type: 'error'
+            });
+          }
+        }
+      });
+    }
+  }, [isCloudUpdatePending, user, syncFromCloud, pushLocalChanges]);
+
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
@@ -146,7 +301,8 @@ const App: React.FC = () => {
         CONTACONTABIL: '',
         CENTRODECUSTO: '',
         DATAAQUSIC_START: '',
-        DATAAQUSIC_END: ''
+        DATAAQUSIC_END: '',
+        Sn1_recno: ''
       };
     } catch {
       return {
@@ -160,7 +316,8 @@ const App: React.FC = () => {
         CONTACONTABIL: '',
         CENTRODECUSTO: '',
         DATAAQUSIC_START: '',
-        DATAAQUSIC_END: ''
+        DATAAQUSIC_END: '',
+        Sn1_recno: ''
       };
     }
   });
@@ -171,12 +328,6 @@ const App: React.FC = () => {
     } catch {
       return null;
     }
-  });
-  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
-    try {
-      const saved = localStorage.getItem('app_database_mode');
-      return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
-    } catch { return DatabaseMode.INTERNAL; }
   });
 
   // Apply theme class to body based on databaseMode and darkMode
@@ -200,8 +351,17 @@ const App: React.FC = () => {
   // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
+      let savedInventory: InventoryState | null = null;
       try {
-        const saved = await loadInventory();
+        savedInventory = await loadInventory();
+        const saved = savedInventory;
+        
+        // Se não houver dados locais e estivermos em modo nuvem, tenta sincronizar
+        if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL) {
+          await syncFromCloud();
+          return;
+        }
+
         if (saved && saved.assets && saved.assets.length > 0) {
           // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
           const todayStr = '2026-03-16';
@@ -313,6 +473,24 @@ const App: React.FC = () => {
         console.error("Data load failed", e); 
       } finally {
         setIsDataLoaded(true);
+        
+        // Verifica se há atualizações na nuvem logo após o carregamento inicial
+        if (databaseMode !== DatabaseMode.INTERNAL) {
+          try {
+            const cloudData = await fetchFullInventory(user?.tenantId);
+            if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
+              const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
+              const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
+              
+              if (cloudTime > localTime + 5000) {
+                setIsCloudUpdatePending(true);
+              }
+            }
+          } catch (err) {
+            console.warn('Falha ao verificar atualizações na nuvem no início:', err);
+          }
+        }
+
         // @ts-expect-error - appStarted is a custom property for the loader fallback
         window.appStarted = true;
         // Remove o loader do index.html
@@ -353,7 +531,7 @@ const App: React.FC = () => {
         setPublicAsset(foundLocal);
       } else {
         // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam).then(foundCloud => {
+        getAssetByTag(etqParam, user?.tenantId).then(foundCloud => {
           if (foundCloud) {
             setPublicAsset(foundCloud);
           }
@@ -388,9 +566,31 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem('app_users');
       const userList: User[] = saved ? JSON.parse(saved) : [];
+      
+      // Admin Padrão
       if (!userList.find(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
-        userList.push({ username: "ADMIN GBR", email: ADMIN_EMAIL, password: "admin", isAdmin: true, mustChangePassword: false });
+        userList.push({ 
+          username: "ADMIN GBR", 
+          email: ADMIN_EMAIL, 
+          password: "admin", 
+          role: UserRole.ADMIN,
+          isAdmin: true, 
+          mustChangePassword: true 
+        });
       }
+      
+      // Auditor Padrão
+      if (!userList.find(u => u.username.toUpperCase() === "AUDITOR")) {
+        userList.push({ 
+          username: "AUDITOR", 
+          email: "auditor@gbr.com.br", 
+          password: "auditor", 
+          role: UserRole.AUDITOR,
+          isAdmin: false, 
+          mustChangePassword: true 
+        });
+      }
+      
       return userList;
     } catch { return []; }
   });
@@ -490,9 +690,6 @@ const App: React.FC = () => {
   const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
-
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyAssetsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -626,7 +823,25 @@ const App: React.FC = () => {
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
           
-          await saveInventory(inventory, dirtyAssets);
+          const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+          
+          // Sincroniza se houver ativos sujos OU se a config mudou (lastUpdated mudou)
+          if (hasSupabase && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime)) {
+            setIsSyncing(true);
+            try {
+              await saveInventory(inventory, dirtyAssets);
+              setLastSyncTime(new Date().toISOString());
+              setSyncError(null);
+            } catch (err) {
+              setSyncError('Erro na sincronização');
+              console.error('Sync error:', err);
+            } finally {
+              setIsSyncing(false);
+            }
+          } else {
+            await saveInventory(inventory, dirtyAssets);
+          }
+          
           dirtyAssetsRef.current.clear();
         }
         localStorage.setItem('app_screen_history', JSON.stringify(history));
@@ -652,6 +867,11 @@ const App: React.FC = () => {
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);
     localStorage.setItem('app_database_mode', mode);
+    
+    // Se mudou para modo nuvem e está vazio, tenta sincronizar
+    if (mode !== DatabaseMode.INTERNAL && inventory.assets.length === 0) {
+      syncFromCloud();
+    }
   };
 
   const popScreen = () => {
@@ -683,6 +903,16 @@ const App: React.FC = () => {
       updates._conferido = true;
       updates._dataLeitura = new Date().toISOString();
       updates._auditor = user?.username || user?.email || 'SISTEMA';
+      
+      // Log de Auditoria
+      const historyEntry: AuditLogEntry = {
+        timestamp: new Date().toISOString(),
+        user: user?.username || user?.email || 'SISTEMA',
+        action: index === -1 ? 'CREATE' : 'UPDATE',
+        details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc}`,
+        tenantId: user?.tenantId || 'default'
+      };
+      updates._history = [...(updates._history || []), historyEntry];
       
       const alteredFields = new Set<string>(updates._camposAlterados || []);
       
@@ -782,6 +1012,16 @@ const App: React.FC = () => {
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
           const updates = { ...a, ...(manualUpdates || {}) };
+          
+          // Log de Auditoria para atualização em lote
+          const historyEntry: AuditLogEntry = {
+            timestamp: new Date().toISOString(),
+            user: user?.username || user?.email || 'SISTEMA',
+            action: 'BULK_UPDATE',
+            details: `Atualização em lote: ${Object.keys(manualUpdates || {}).join(', ')}`,
+            tenantId: user?.tenantId || 'default'
+          };
+          updates._history = [...(updates._history || []), historyEntry];
           
           // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
           const targetLoc = isReconciliationWorkflow
@@ -920,6 +1160,175 @@ const App: React.FC = () => {
     XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
   };
 
+  const handleBackup = async () => {
+    const success = await backupInventory();
+    if (success) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Backup Concluído',
+        message: 'O arquivo de backup foi gerado com sucesso. Guarde-o em um local seguro.',
+        type: 'info'
+      });
+    } else {
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro no Backup',
+        message: 'Não foi possível gerar o arquivo de backup. Verifique se há dados no sistema.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleRestore = async (file: File) => {
+    const newState = await restoreInventory(file);
+    if (newState) {
+      setInventory(newState);
+      setModalConfig({
+        isOpen: true,
+        title: 'Backup Restaurado',
+        message: `O backup foi restaurado com sucesso. ${newState.assets.length} ativos carregados.`,
+        type: 'info'
+      });
+    } else {
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro na Restauração',
+        message: 'Não foi possível restaurar o backup. Verifique se o arquivo é um JSON válido do sistema.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleDownloadCloudData = async () => {
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Modo Interno',
+        message: 'Você está no modo de banco de dados interno. Mude para o modo Supabase para baixar dados da nuvem.',
+        type: 'info'
+      });
+      return;
+    }
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Baixando Dados',
+      message: 'Aguarde enquanto buscamos os dados na nuvem...',
+      type: 'info'
+    });
+
+    try {
+      const cloudData = await fetchFullInventory();
+      if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
+        const backupData = {
+          assets: cloudData.assets,
+          config: cloudData.config,
+          timestamp: new Date().toISOString(),
+          source: 'Supabase Cloud Export'
+        };
+
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_nuvem_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        setModalConfig({
+          isOpen: true,
+          title: 'Download Concluído',
+          message: `Foram baixados ${cloudData.assets.length} ativos da nuvem com sucesso.`,
+          type: 'success'
+        });
+      } else {
+        setModalConfig({
+          isOpen: true,
+          title: 'Nenhum Dado',
+          message: 'Não foram encontrados dados na nuvem para baixar.',
+          type: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao baixar dados da nuvem:', error);
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro no Download',
+        message: 'Ocorreu um erro ao tentar baixar os dados da nuvem. Verifique sua conexão.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
+    const companyName = selectedCompany ? selectedCompany.toUpperCase().trim() : 'GERAL';
+    
+    // Nome do arquivo conforme especificação: [GBR_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
+    const backupFileName = `GBR_MOBILE+KBP+DADOS+${companyName}+${dateStr}+${timeStr}`;
+    
+    // 1. Realiza backup automático antes de limpar
+    await backupInventory(backupFileName);
+    
+    // 2. Limpa localmente (apenas a empresa selecionada se houver)
+    await clearInventory(selectedCompany || undefined); 
+    
+    // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a empresa selecionada)
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      try {
+        await clearCloudInventory(selectedCompany || undefined);
+        
+        // Atualiza o timestamp na nuvem para notificar outros usuários
+        const configToSync = { ...inventory };
+        // @ts-expect-error - assets is removed for sync
+        delete configToSync.assets;
+        await syncConfigToCloud({ 
+          ...configToSync, 
+          lastUpdated: new Date().toISOString() 
+        } as Omit<InventoryState, 'assets'>, user?.tenantId);
+      } catch (error) {
+        console.error('Erro ao limpar nuvem:', error);
+      }
+    }
+
+    // Atualiza o estado local removendo apenas os ativos da empresa limpa
+    if (selectedCompany) {
+      const normalizedSel = selectedCompany.toUpperCase().trim();
+      const remainingAssets = inventory.assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedSel);
+      
+      setInventory(prev => ({
+        ...prev,
+        assets: remainingAssets,
+        lastUpdated: new Date().toISOString(),
+        status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
+      }));
+    } else {
+      // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
+      setInventory(prev => ({ 
+        ...prev,
+        assets: [], 
+        companies: [], 
+        lastUpdated: null, 
+        status: DatabaseStatus.EMPTY
+      }));
+    }
+    
+    setModalConfig({
+      isOpen: true,
+      title: 'Limpeza Concluída',
+      message: `A unidade operacional "${companyName}" foi limpa com sucesso (Local${databaseMode === DatabaseMode.SUPABASE ? ' e Nuvem' : ''}). Um backup de segurança foi gerado: ${backupFileName}`,
+      type: 'info'
+    });
+  };
+
+  const isAdmin = useMemo(() => {
+    return user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+  }, [user]);
+
   const filteredAssetsByCompany = useMemo(() => {
     if (!selectedCompany) return inventory.assets; 
     const selKey = normalizeKey(selectedCompany);
@@ -1003,8 +1412,12 @@ const App: React.FC = () => {
               onNavigateToRegister={() => pushScreen(AppScreen.REGISTER)}
               onLogin={(u) => { 
                 setUser(u); 
-                const isAdmin = u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                const isAdmin = u.role === UserRole.ADMIN || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
                 const isEmpty = inventory.assets.length === 0;
+
+                if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
+                  syncFromCloud();
+                }
 
                 if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
@@ -1061,27 +1474,17 @@ const App: React.FC = () => {
                   CONTACONTABIL: '',
                   CENTRODECUSTO: '',
                   DATAAQUSIC_START: '',
-                  DATAAQUSIC_END: ''
+                  DATAAQUSIC_END: '',
+                  Sn1_recno: ''
                 });
                 setCommittedConsultationFilters(null);
                 pushScreen(AppScreen.LOGIN); 
               }} 
               onExport={handleExport} 
-              onClearDatabase={async () => { 
-                await clearInventory(); 
-                setInventory({ 
-                  assets: [], 
-                  companies: [], 
-                  lastUpdated: null, 
-                  status: DatabaseStatus.EMPTY, 
-                  editableFields: inventory.editableFields, 
-                  qrCodeFields: inventory.qrCodeFields, 
-                  scannerMode: inventory.scannerMode, 
-                  autoConfirmOnScan: inventory.autoConfirmOnScan, 
-                  scanFeedbackMode: inventory.scanFeedbackMode, 
-                  inventorySearchMode: inventory.inventorySearchMode 
-                }); 
-              }} 
+              onBackup={handleBackup}
+              onDownloadCloudData={handleDownloadCloudData}
+              onRestore={handleRestore}
+              onClearDatabase={handleClearDatabase} 
               user={user} 
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
@@ -1102,17 +1505,70 @@ const App: React.FC = () => {
               onUpdateDarkMode={(val) => setInventory(prev => ({ ...prev, darkMode: val }))}
               batterySaver={inventory.batterySaver || false}
               onUpdateBatterySaver={(val) => setInventory(prev => ({ ...prev, batterySaver: val }))}
+              onSyncCloud={syncFromCloud}
+              isSyncing={isSyncing}
+              lastSyncTime={lastSyncTime}
+              syncError={syncError}
+              hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
+              protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
+              onUpdateProtheusIntegration={(val) => {
+                localStorage.setItem('app_protheus_enabled', String(val));
+                setInventory(prev => ({ ...prev, protheusIntegrationEnabled: val }));
+              }}
+              protheusApiUrl={inventory.protheusApiUrl || ''}
+              onUpdateProtheusApiUrl={(val) => {
+                localStorage.setItem('app_protheus_url', val);
+                setInventory(prev => ({ ...prev, protheusApiUrl: val }));
+              }}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
-            <DatabaseLoader 
-              onBack={popScreen} 
-              onDataLoaded={(a, c) => { 
-                setInventory({ ...inventory, assets: a, companies: c, lastUpdated: new Date().toISOString(), status: DatabaseStatus.LOADED }); 
-                setStartWithDataMenu(false);
-                pushScreen(AppScreen.COMPANY_SELECTION); 
-              }} 
-            />
+            isAdmin ? (
+              <DatabaseLoader 
+                onBack={popScreen} 
+                onDataLoaded={async (a, c) => { 
+                  const newInventory = { 
+                    ...inventory, 
+                    assets: a, 
+                    companies: c, 
+                    lastUpdated: new Date().toISOString(), 
+                    status: DatabaseStatus.LOADED 
+                  };
+                  setInventory(newInventory); 
+                  
+                  // Se for Admin e houver Supabase, faz o push total para a nuvem
+                  if (isAdmin && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)) {
+                    setIsSyncing(true);
+                    try {
+                      // Limpa a nuvem antes de subir a nova base para garantir espelhamento
+                      await clearCloudInventory();
+                      // Sincroniza todos os ativos (em lotes se necessário, mas syncAssetsToCloud já lida com isso)
+                      await syncAssetsToCloud(a, user?.tenantId);
+                      // Sincroniza a config (que contém o lastUpdated)
+                      const configToSync = { ...newInventory };
+                      // @ts-expect-error - assets is removed for sync
+                      delete configToSync.assets;
+                      await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantId);
+                      
+                      setLastSyncTime(new Date().toISOString());
+                      setSyncError(null);
+                    } catch (err) {
+                      console.error('Erro ao sincronizar nova carga com a nuvem:', err);
+                      setSyncError('Erro no upload total');
+                    } finally {
+                      setIsSyncing(false);
+                    }
+                  }
+                  
+                  setStartWithDataMenu(false);
+                  pushScreen(AppScreen.COMPANY_SELECTION); 
+                }} 
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p>
+              </div>
+            )
           )}
           {screen === AppScreen.INVENTORY && (
             <Inventory 
@@ -1172,19 +1628,33 @@ const App: React.FC = () => {
               uniqueEnderecos={allLocations} 
               uniqueCentrosDeCusto={uniqueCentrosDeCusto} 
               readOnly={isReadOnlyDetail}
+              protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
+              protheusApiUrl={inventory.protheusApiUrl || ''}
             />
           )}
           {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
           {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
-          {screen === AppScreen.USER_MANAGEMENT && <UserManagement users={users} setUsers={setUsers} onBack={popScreen} />}
-          {screen === AppScreen.FIELD_CONFIGURATOR && <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} />}
-          {screen === AppScreen.QR_CODE_CONFIGURATOR && <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} />}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
         </div>
   
         {/* Immersive Mode handled automatically on first interaction */}
       </div>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={() => {
+          if (modalConfig.onConfirm) modalConfig.onConfirm();
+          setModalConfig(prev => ({ ...prev, isOpen: false }));
+        }}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+      />
 
       <Modal
         isOpen={isDuplicateModalOpen}
