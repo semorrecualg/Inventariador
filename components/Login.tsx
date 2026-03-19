@@ -60,11 +60,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         
         if (!sbUser) throw new Error("Usuário não encontrado.");
 
-        const isAdmin = sbUser.email?.toLowerCase() === "semorr@gmail.com";
+        // Identifica se é admin pelo e-mail ou pelo papel (role) nos metadados
+        const isEmailAdmin = sbUser.email?.toLowerCase() === "semorr@gmail.com";
+        const isRoleAdmin = sbUser.user_metadata?.role === UserRole.ADMIN || sbUser.user_metadata?.role === 'ADMIN';
+        const isAdmin = isEmailAdmin || isRoleAdmin;
+
         loggedUser = {
           username: sbUser.user_metadata?.username || sbUser.email?.split('@')[0].toUpperCase() || 'USUÁRIO',
           email: sbUser.email || '',
-          role: sbUser.user_metadata?.role || (isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
+          role: isAdmin ? UserRole.ADMIN : UserRole.AUDITOR,
           isAdmin: isAdmin,
           mustChangePassword: false,
           tenantId: sbUser.user_metadata?.tenantId || 'default'
@@ -146,9 +150,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement?.classList.add('bg-accent-soft');
-                const icon = document.createElement('div');
-                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
-                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
+                const logoFallback = document.createElement('img');
+                logoFallback.src = 'https://picsum.photos/seed/gbr/200/200';
+                logoFallback.className = 'w-full h-full object-contain';
+                e.currentTarget.parentElement?.appendChild(logoFallback);
               }}
             />
           </div>

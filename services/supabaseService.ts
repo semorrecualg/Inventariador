@@ -10,7 +10,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-export const signUp = async (email: string, password: string, username: string, role: string = 'ADMIN') => {
+export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN') => {
   if (!supabase) throw new Error("Supabase não configurado.");
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -19,6 +19,7 @@ export const signUp = async (email: string, password: string, username: string, 
       data: {
         username,
         role,
+        tenantId, // Este campo é lido pela função public.get_tenant_id() no SQL
       },
     },
   });
@@ -58,10 +59,27 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
   if (!supabase || !assets || assets.length === 0) return;
 
   // Garante que todos os ativos tenham o tenantId antes de subir
-  const assetsWithTenant = assets.map(a => ({
-    ...a,
-    _tenantId: tenantId || a._tenantId || 'default'
-  }));
+  // E remove URLs de blob locais que não devem ir para a nuvem
+  const assetsWithTenant = assets.map(a => {
+    const cleanAsset = { ...a };
+    // Remove URLs de blob locais e garante tipos corretos para o banco
+    if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
+      delete cleanAsset._photoUrl;
+    }
+    
+    // Garante que coordenadas sejam números ou null (evita strings vazias)
+    const lat = typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null;
+    const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
+    const conferido = Boolean(cleanAsset._conferido);
+
+    return {
+      ...cleanAsset,
+      _lat: lat,
+      _lng: lng,
+      _conferido: conferido,
+      _tenantId: tenantId || a._tenantId || 'default'
+    };
+  });
 
   // Tenta fazer upsert dos ativos
   const { error } = await supabase
@@ -69,12 +87,6 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
     .upsert(assetsWithTenant, { onConflict: 'id' });
 
   if (error) {
-    // Se o erro for de coluna inexistente, apenas avisamos no console
-    if (error.code === 'PGRST204') {
-      console.warn('Coluna inexistente na tabela assets. Sincronização parcial.', error.message);
-      throw new Error('Esquema do banco desatualizado');
-    }
-    
     // Handle network errors gracefully
     if (error.message === 'Failed to fetch') {
       console.warn('Supabase sync failed: Network error or invalid URL.');
@@ -94,14 +106,18 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'id', 
     'companies', 
     'lastUpdated', 
-    'status', 
+    'status',
     'editableFields', 
     'qrCodeFields', 
     'scannerMode', 
     'autoConfirmOnScan', 
     'scanFeedbackMode', 
-    'inventorySearchMode', 
+    'inventorySearchMode',
     'immersiveMode',
+    'darkMode',
+    'batterySaver',
+    'protheusIntegrationEnabled',
+    'protheusApiUrl',
     '_tenantId'
   ];
 
@@ -120,12 +136,6 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     .upsert([filteredConfig], { onConflict: 'id' });
 
   if (error) {
-    // Se o erro for de coluna inexistente, logamos mas não travamos o app
-    if (error.code === 'PGRST204') {
-      console.warn('Coluna inexistente no Supabase (inventory_config). Por favor, atualize o esquema do banco.', error.message);
-      throw new Error('Esquema do banco desatualizado');
-    }
-
     // Handle network errors gracefully
     if (error.message === 'Failed to fetch') {
       console.warn('Supabase sync failed: Network error or invalid URL.');
@@ -277,19 +287,30 @@ export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<Inventor
 /**
  * Limpa todos os ativos e configurações do Supabase (ou apenas de uma empresa específica)
  */
-export const clearCloudInventory = async (companyToClear?: string): Promise<void> => {
+export const clearCloudInventory = async (companyToClear?: string | string[], tenantId?: string): Promise<void> => {
   if (!supabase) return;
 
   try {
     // 1. Limpa os ativos
     let query = supabase.from('assets').delete();
     
+    // Filtro por Tenant (Segurança RLS)
+    if (tenantId) {
+      query = query.eq('_tenantId', tenantId);
+    }
+    
     if (companyToClear) {
-      // Se for por empresa, filtramos pela coluna EMPRESA
-      query = query.eq('EMPRESA', companyToClear.toUpperCase().trim());
+      if (Array.isArray(companyToClear)) {
+        const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
+        query = query.in('EMPRESA', normalizedCompanies);
+      } else {
+        query = query.eq('EMPRESA', companyToClear.toUpperCase().trim());
+      }
     } else {
-      // Se for tudo, usamos o truque do neq id 0
-      query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+      // Limpeza total (se houver tenantId, o filtro acima já limita ao tenant)
+      if (!tenantId) {
+        query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+      }
     }
 
     const { error: assetsError } = await query;
@@ -299,12 +320,13 @@ export const clearCloudInventory = async (companyToClear?: string): Promise<void
       throw assetsError;
     }
 
-    // 2. Limpa a configuração global (apenas se estiver limpando TUDO)
+    // 2. Limpa a configuração (apenas se estiver limpando TUDO)
     if (!companyToClear) {
+      const configId = tenantId ? `config_${tenantId}` : 'global_config';
       const { error: configError } = await supabase
         .from('inventory_config')
         .delete()
-        .eq('id', 'global_config');
+        .eq('id', configId);
 
       if (configError) {
         console.warn('Erro ao limpar configuração na nuvem (pode não existir):', configError);
@@ -314,4 +336,81 @@ export const clearCloudInventory = async (companyToClear?: string): Promise<void
     console.error('Erro inesperado ao limpar nuvem:', err);
     throw err;
   }
+};
+
+/**
+ * Faz upload de uma foto do ativo para o Supabase Storage
+ */
+export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenantId: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const fileExt = 'jpg'; // Forçamos jpg para consistência
+    const fileName = `${tenantId}/${assetId}/${Date.now()}.${fileExt}`;
+    const filePath = `photos/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('asset-photos')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+    if (uploadError) {
+      console.error('Erro ao fazer upload da foto:', uploadError);
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage
+      .from('asset-photos')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  } catch (err) {
+    console.error('Erro inesperado no upload da foto:', err);
+    return null;
+  }
+};
+
+/**
+ * Remove uma foto do Supabase Storage
+ */
+export const deleteAssetPhoto = async (photoUrl: string): Promise<boolean> => {
+  if (!supabase || !photoUrl) return false;
+
+  try {
+    // Extrai o caminho do arquivo da URL pública
+    // Ex: https://.../storage/v1/object/public/asset-photos/photos/tenant/id/123.jpg
+    const urlParts = photoUrl.split('/asset-photos/');
+    if (urlParts.length < 2) return false;
+    
+    const filePath = urlParts[1];
+
+    const { error } = await supabase.storage
+      .from('asset-photos')
+      .remove([filePath]);
+
+    if (error) {
+      console.error('Erro ao deletar foto do storage:', error);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Erro inesperado ao deletar foto:', err);
+    return false;
+  }
+};
+
+/**
+ * Atualiza apenas a URL da foto de um ativo na nuvem
+ */
+export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, tenantId: string) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('assets')
+    .update({ _photoUrl: photoUrl })
+    .eq('id', assetId)
+    .eq('_tenantId', tenantId);
+  if (error) throw error;
 };

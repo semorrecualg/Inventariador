@@ -23,9 +23,10 @@ interface UserManagementProps {
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   onBack: () => void;
+  currentUser: User | null;
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -82,7 +83,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       role: newRole,
       isAdmin: newRole === UserRole.ADMIN,
       mustChangePassword: true,
-      tenantId: 'default' // Por enquanto, todos na mesma base interna
+      tenantId: currentUser?.tenantId || 'default'
     };
 
     setUsers(prev => {

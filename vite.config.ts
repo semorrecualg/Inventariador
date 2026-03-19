@@ -9,7 +9,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   define: {
-    'process.env': process.env
+    'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || '')
   },
   server: {
     port: 3000,

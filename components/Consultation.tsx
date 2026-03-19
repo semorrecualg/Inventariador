@@ -224,7 +224,7 @@ const Consultation: React.FC<ConsultationProps> = ({
   };
 
   const isNumericField = (field: keyof SearchFilters) => {
-    return ['ETIQUETA', 'CNPJ', 'NOTAFISCAL'].includes(field);
+    return ['ETIQUETA', 'CNPJ', 'NOTAFISCAL', 'Sn1_recno', 'Sn3_recno'].includes(field);
   };
 
   const clearFilters = () => {
@@ -239,7 +239,9 @@ const Consultation: React.FC<ConsultationProps> = ({
       CONTACONTABIL: '',
       CENTRODECUSTO: '',
       DATAAQUSIC_START: '',
-      DATAAQUSIC_END: ''
+      DATAAQUSIC_END: '',
+      Sn1_recno: '',
+      Sn3_recno: ''
     });
     onUpdateCommittedFilters(null);
   };
@@ -367,7 +369,8 @@ const Consultation: React.FC<ConsultationProps> = ({
               {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
               {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
               {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
-              {renderInput('Sn1_recno', 'ID Protheus (RECNO)', <Hash size={16} />)}
+              {renderInput('Sn1_recno', 'ID Protheus (SN1)', <Hash size={16} />)}
+              {renderInput('Sn3_recno', 'ID Protheus (SN3)', <Hash size={16} />)}
               
               <div className="space-y-1.5">
                 <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (De)</label>

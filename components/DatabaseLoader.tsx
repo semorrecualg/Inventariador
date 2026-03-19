@@ -92,7 +92,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         PK: rawHeaders.indexOf('PRIMARYKEY'),
         CUSTO: rawHeaders.indexOf('CENTRODECUSTO'),
         VALOR: rawHeaders.indexOf('VLRAQUISIC'),
-        RECNO: rawHeaders.indexOf('SN1_RECNO') !== -1 ? rawHeaders.indexOf('SN1_RECNO') : rawHeaders.indexOf('RECNO')
+        RECNO: rawHeaders.indexOf('SN1_RECNO') !== -1 ? rawHeaders.indexOf('SN1_RECNO') : rawHeaders.indexOf('RECNO'),
+        RECNO3: rawHeaders.indexOf('SN3_RECNO') !== -1 ? rawHeaders.indexOf('SN3_RECNO') : -1
       };
 
       // Fallback para mapeamento por índice se os cabeçalhos não forem localizados corretamente
@@ -181,6 +182,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         const recnoVal = row[m.RECNO];
         if (recnoVal !== undefined && recnoVal !== null && recnoVal !== "") {
           asset.Sn1_recno = Number(recnoVal);
+        }
+
+        const recno3Val = m.RECNO3 !== -1 ? row[m.RECNO3] : undefined;
+        if (recno3Val !== undefined && recno3Val !== null && recno3Val !== "") {
+          asset.Sn3_recno = Number(recno3Val);
         }
 
         asset._plaquetaMaster = asset.ETIQUETA || "S/ ETQ";

@@ -22,9 +22,16 @@ import {
   Briefcase,
   Wallet,
   QrCode,
-  Loader2
+  Loader2,
+  Camera,
+  Image as ImageIcon,
+  Trash2,
+  History
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { deleteAssetPhoto } from '../services/supabaseService';
+import { compressImage } from '../utils/imageUtils';
+import { addToSyncQueue } from '../services/syncService';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -51,6 +58,9 @@ interface AssetDetailProps {
   readOnly?: boolean;
   protheusIntegrationEnabled?: boolean;
   protheusApiUrl?: string;
+  tenantId?: string;
+  mandatoryPhotoOnDivergence?: boolean;
+  mandatoryPhotoOnNewItem?: boolean;
 }
 
 const AssetDetail: React.FC<AssetDetailProps> = ({ 
@@ -64,7 +74,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   qrCodeFields, 
   readOnly = false,
   protheusIntegrationEnabled = false,
-  protheusApiUrl = ''
+  protheusApiUrl = '',
+  tenantId = '',
+  mandatoryPhotoOnDivergence = false,
+  mandatoryPhotoOnNewItem = false
 }) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
@@ -73,6 +86,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
 
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
@@ -150,7 +164,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
         { key: 'CONTACONTABIL', label: 'CONTA CONTÁBIL', icon: Briefcase },
         { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
-        { key: 'Sn1_recno', label: 'ID PROTHEUS (RECNO)', icon: Hash }
+        { key: 'Sn1_recno', label: 'ID PROTHEUS (SN1)', icon: Hash },
+        { key: 'Sn3_recno', label: 'ID PROTHEUS (SN3)', icon: Hash }
       ]
     },
     {
@@ -190,6 +205,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     if (editingField) {
       const newValue = editValue.toUpperCase().trim();
       finalAsset[editingField] = newValue;
+    }
+
+    // Validação de foto obrigatória
+    const tag = finalAsset.TAG_INVENTARIO;
+    const isDivergence = tag === TagInventario.DIVERGENCIA;
+    const isNew = tag === TagInventario.NOVO_ITEM;
+
+    if (mandatoryPhotoOnDivergence && isDivergence && !finalAsset._photoUrl) {
+      alert('Foto obrigatória para itens com divergência!');
+      return;
+    }
+
+    if (mandatoryPhotoOnNewItem && isNew && !finalAsset._photoUrl) {
+      alert('Foto obrigatória para novos itens!');
+      return;
     }
 
     if (isBatch) {
@@ -233,6 +263,48 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     } finally {
       setIsSyncingProtheus(false);
     }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || isBatch) return;
+
+    setIsUploadingPhoto(true);
+    try {
+      // Se já existe uma foto, vamos deletar a antiga do storage para economizar espaço
+      // Mas apenas se não for uma URL local (blob:)
+      if (workingAsset._photoUrl && !workingAsset._photoUrl.startsWith('blob:')) {
+        await deleteAssetPhoto(workingAsset._photoUrl);
+      }
+
+      // Comprime a imagem antes de subir (Reduz para ~1280px e ~80-100KB, padrão WhatsApp)
+      const compressedBlob = await compressImage(file, 1280, 1280, 0.6);
+      
+      // Cria URL local para visualização imediata
+      const localUrl = URL.createObjectURL(compressedBlob);
+      
+      // Adiciona à fila de sincronização offline
+      await addToSyncQueue(String(workingAsset.id), compressedBlob, tenantId || 'default');
+
+      // Atualiza o estado local imediatamente com a URL do blob
+      const updated = { ...workingAsset, _photoUrl: localUrl };
+      setWorkingAsset(updated);
+      onUpdate(updated);
+      
+    } catch (err) {
+      console.error('Erro ao processar foto:', err);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const removePhoto = async () => {
+    if (workingAsset._photoUrl) {
+      await deleteAssetPhoto(workingAsset._photoUrl);
+    }
+    const updated = { ...workingAsset, _photoUrl: undefined };
+    setWorkingAsset(updated);
+    onUpdate(updated);
   };
 
   const getTagColors = (tag: TagInventario | string) => {
@@ -297,6 +369,51 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           <h2 className="text-xl font-bold uppercase tracking-tight leading-tight mb-6 text-white line-clamp-2">
             {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
           </h2>
+
+          {!isBatch && (
+            <div className="flex items-center space-x-4 mb-4">
+              <div className="relative group">
+                <div className="w-24 h-24 bg-white/20 rounded-2xl border border-white/30 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg">
+                  {workingAsset._photoUrl ? (
+                    <img 
+                      src={workingAsset._photoUrl} 
+                      alt="Ativo" 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <ImageIcon size={32} className="text-white/40" />
+                  )}
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <Loader2 size={24} className="text-white animate-spin" />
+                    </div>
+                  )}
+                </div>
+                {!readOnly && (
+                  <div className="absolute -bottom-2 -right-2 flex space-x-1">
+                    <label className="w-8 h-8 bg-white text-slate-900 rounded-lg flex items-center justify-center shadow-lg cursor-pointer active:scale-90 transition-all">
+                      <Camera size={16} />
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+                    </label>
+                    {workingAsset._photoUrl && (
+                      <button onClick={removePhoto} className="w-8 h-8 bg-red-500 text-white rounded-lg flex items-center justify-center shadow-lg active:scale-90 transition-all">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mb-1">Evidência Fotográfica</p>
+                <p className="text-[11px] text-white/90 leading-tight">
+                  {workingAsset._photoUrl 
+                    ? 'Foto registrada com sucesso. Clique para ampliar ou alterar.' 
+                    : 'Nenhuma foto registrada para este ativo. Capture uma agora para auditoria.'}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner">
@@ -449,6 +566,39 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           ))}
       </div>
       
+      {/* AUDIT HISTORY SECTION */}
+      {workingAsset._history && workingAsset._history.length > 0 && (
+        <div className="mt-6 mb-32 px-4">
+          <div className="flex items-center space-x-2 mb-4">
+            <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">
+              <History size={16} className="text-accent" />
+            </div>
+            <h3 className="text-[11px] font-black text-ink uppercase tracking-[0.2em]">Histórico de Auditoria</h3>
+          </div>
+          
+          <div className="space-y-3">
+            {workingAsset._history.slice().reverse().map((entry, index) => (
+              <div key={index} className="relative pl-6 border-l-2 border-border pb-4 last:pb-0">
+                <div className="absolute left-[-9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-accent flex items-center justify-center">
+                   <div className="w-1.5 h-1.5 rounded-full bg-accent" />
+                </div>
+                <div className="bg-white border border-border rounded-xl p-3 shadow-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[8px] font-bold text-accent uppercase tracking-wider">{entry.action}</span>
+                    <span className="text-[7px] font-medium text-ink-muted">{new Date(entry.timestamp).toLocaleString('pt-BR')}</span>
+                  </div>
+                  <p className="text-[10px] font-bold text-ink mb-1">{entry.details}</p>
+                  <div className="flex items-center space-x-1">
+                    <User size={8} className="text-ink-muted" />
+                    <span className="text-[7px] font-bold text-ink-muted uppercase tracking-tighter">AUDITOR: {entry.user}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KARDEX FOOTER */}
       {!readOnly && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex flex-col space-y-3 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">

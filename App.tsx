@@ -9,7 +9,8 @@ import DatabaseLoader from './components/DatabaseLoader';
 import AssetDetail from './components/AssetDetail';
 import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
-import Consultation from './components/Consultation';
+import Signature from './components/Signature';
+import { getCurrentLocation } from './utils/gpsUtils';
 import CompanySelector from './components/CompanySelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
@@ -19,11 +20,18 @@ import FieldConfigurator from './components/FieldConfigurator';
 import QrCodeConfigurator from './components/QrCodeConfigurator';
 import GlobalPerformance from './components/GlobalPerformance';
 import AccountReconciliation from './components/AccountReconciliation';
+import Consultation from './components/Consultation';
+import AssetMap from './components/AssetMap';
+import ActiveSearch from './components/ActiveSearch';
+import ModuleSelector from './components/ModuleSelector';
+import AssetControlModule from './components/AssetControlModule';
+import { AppModule } from './types';
 
 import { Building2, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { saveInventory, loadInventory, clearInventory, backupInventory, restoreInventory } from './services/persistenceService';
+import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud } from './services/supabaseService';
+import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -51,9 +59,10 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
               referrerPolicy="no-referrer"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
-                const icon = document.createElement('div');
-                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
-                e.currentTarget.parentElement?.appendChild(icon.firstChild as Node);
+                const logoFallback = document.createElement('img');
+                logoFallback.src = 'https://picsum.photos/seed/gbr/200/200';
+                logoFallback.className = 'w-full h-full object-contain';
+                e.currentTarget.parentElement?.appendChild(logoFallback);
               }}
             />
           </div>
@@ -95,6 +104,22 @@ const App: React.FC = () => {
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
+  const [, setCurrentModule] = useState<AppModule | null>(() => {
+    const saved = localStorage.getItem('app_current_module');
+    return (saved as AppModule) || null;
+  });
+
+  // Remove o loader do index.html quando o componente principal montar
+  useEffect(() => {
+    const loader = document.getElementById('app-loader');
+    if (loader) {
+      loader.classList.add('hidden');
+      // Remove do DOM após a transição de opacidade
+      setTimeout(() => {
+        loader.remove();
+      }, 500);
+    }
+  }, []);
 
   const [history, setHistory] = useState<AppScreen[]>(() => {
     try {
@@ -139,7 +164,9 @@ const App: React.FC = () => {
     darkMode: localStorage.getItem('app_dark_mode') === 'true',
     batterySaver: localStorage.getItem('app_battery_saver') === 'true',
     protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
-    protheusApiUrl: localStorage.getItem('app_protheus_url') || ''
+    protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
+    mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
+    mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true'
   });
 
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
@@ -155,6 +182,7 @@ const App: React.FC = () => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
+  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
 
@@ -236,7 +264,39 @@ const App: React.FC = () => {
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
-    if (databaseMode === DatabaseMode.INTERNAL) return;
+    // Update pending photos count
+    const updatePendingCount = async () => {
+      const items = await getPendingSyncItems();
+      setPendingPhotosCount(items.length);
+    };
+
+    updatePendingCount();
+
+    // Listen for sync events
+    const handlePhotoSynced = (e: Event) => {
+      const customEvent = e as CustomEvent<{ assetId: string; photoUrl: string }>;
+      const { assetId, photoUrl } = customEvent.detail;
+      // Update local state with the real cloud URL
+      setInventory(prev => ({
+        ...prev,
+        assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
+      }));
+      updatePendingCount();
+    };
+
+    window.addEventListener('gbr_photo_synced', handlePhotoSynced);
+    
+    // Expose map opener for Dashboard
+    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => pushScreen(AppScreen.ASSET_MAP);
+
+    // Check periodically
+    const interval = setInterval(updatePendingCount, 10000);
+
+    if (databaseMode === DatabaseMode.INTERNAL) return () => {
+      window.removeEventListener('gbr_photo_synced', handlePhotoSynced);
+      delete (window as unknown as { onOpenMap?: () => void }).onOpenMap;
+      clearInterval(interval);
+    };
 
     const subscription = subscribeToInventoryChanges((newConfig) => {
       if (newConfig && newConfig.lastUpdated) {
@@ -302,7 +362,8 @@ const App: React.FC = () => {
         CENTRODECUSTO: '',
         DATAAQUSIC_START: '',
         DATAAQUSIC_END: '',
-        Sn1_recno: ''
+        Sn1_recno: '',
+        Sn3_recno: ''
       };
     } catch {
       return {
@@ -317,7 +378,8 @@ const App: React.FC = () => {
         CENTRODECUSTO: '',
         DATAAQUSIC_START: '',
         DATAAQUSIC_END: '',
-        Sn1_recno: ''
+        Sn1_recno: '',
+        Sn3_recno: ''
       };
     }
   });
@@ -864,6 +926,77 @@ const App: React.FC = () => {
     else setHistory(prev => [...prev, s]);
   };
 
+  const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
+    if (companiesToClear.length === 0) return;
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
+    
+    // Backup de segurança antes da limpeza em massa
+    const backupFileName = `GBR_MOBILE+KBP+LIMPEZA_MASSA+${dateStr}+${timeStr}`;
+    await backupInventory(backupFileName);
+
+    setIsSyncing(true);
+    try {
+      // 1. Limpa localmente todas as empresas selecionadas em uma única operação
+      await clearMultipleInventories(companiesToClear);
+
+      // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
+      if (databaseMode === DatabaseMode.SUPABASE) {
+        await clearCloudInventory(companiesToClear, user?.tenantId);
+        
+        // Atualiza o timestamp na nuvem
+        const configToSync = { ...inventory };
+        // @ts-expect-error - assets is removed for sync
+        delete configToSync.assets;
+        await syncConfigToCloud({ 
+          ...configToSync, 
+          lastUpdated: new Date().toISOString() 
+        } as Omit<InventoryState, 'assets'>, user?.tenantId);
+      }
+
+      // 3. Atualiza o estado local
+      const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
+      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.EMPRESA || '').toUpperCase().trim()));
+      
+      setInventory(prev => ({
+        ...prev,
+        assets: remainingAssets,
+        lastUpdated: new Date().toISOString(),
+        status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
+      }));
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Limpeza em Massa Concluída',
+        message: `${companiesToClear.length} unidades foram limpas com sucesso. Um backup de segurança foi gerado: ${backupFileName}`,
+        type: 'info'
+      });
+    } catch (error: unknown) {
+      console.error('Erro na limpeza em massa:', error);
+      
+      let errorMessage = 'Erro desconhecido';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (error && typeof error === 'object') {
+        const errObj = error as Record<string, unknown>;
+        errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro na Limpeza',
+        message: `Ocorreu um erro ao tentar limpar as unidades selecionadas: ${errorMessage}`,
+        type: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);
     localStorage.setItem('app_database_mode', mode);
@@ -967,7 +1100,7 @@ const App: React.FC = () => {
     });
   }, [inventoryLocation, determineTag, normalizeKey, history]);
 
-  const updateAsset = useCallback((updatedAsset: Asset) => {
+  const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
     const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
     if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
@@ -988,7 +1121,18 @@ const App: React.FC = () => {
       }
     }
 
-    commitAssetUpdate(updatedAsset);
+    const assetWithGps = { ...updatedAsset };
+    if (updatedAsset._conferido) {
+      try {
+        const loc = await getCurrentLocation();
+        assetWithGps._lat = loc.lat;
+        assetWithGps._lng = loc.lng;
+      } catch (e) {
+        console.warn('GPS não capturado:', e);
+      }
+    }
+
+    commitAssetUpdate(assetWithGps);
   }, [inventory.assets, commitAssetUpdate]);
 
   const addNewLocation = (newLocation: string) => {
@@ -1002,16 +1146,24 @@ const App: React.FC = () => {
     }
   };
 
-  const bulkUpdateAssets = useCallback((ids: string[], manualUpdates?: Partial<Asset>) => {
+  const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
     ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
+    let gpsCoords: { lat?: number; lng?: number } = {};
+    try {
+      const loc = await getCurrentLocation();
+      gpsCoords = { lat: loc.lat, lng: loc.lng };
+    } catch (e) {
+      console.warn('GPS não capturado para lote:', e);
+    }
+
     setInventory(prev => ({
       ...prev,
       assets: prev.assets.map(a => {
         if (idSet.has(String(a.id))) {
-          const updates = { ...a, ...(manualUpdates || {}) };
+          const updates = { ...a, ...(manualUpdates || {}), _lat: gpsCoords.lat, _lng: gpsCoords.lng };
           
           // Log de Auditoria para atualização em lote
           const historyEntry: AuditLogEntry = {
@@ -1263,66 +1415,92 @@ const App: React.FC = () => {
   };
 
   const handleClearDatabase = async () => {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
-    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
-    const companyName = selectedCompany ? selectedCompany.toUpperCase().trim() : 'GERAL';
-    
-    // Nome do arquivo conforme especificação: [GBR_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
-    const backupFileName = `GBR_MOBILE+KBP+DADOS+${companyName}+${dateStr}+${timeStr}`;
-    
-    // 1. Realiza backup automático antes de limpar
-    await backupInventory(backupFileName);
-    
-    // 2. Limpa localmente (apenas a empresa selecionada se houver)
-    await clearInventory(selectedCompany || undefined); 
-    
-    // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a empresa selecionada)
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      try {
-        await clearCloudInventory(selectedCompany || undefined);
-        
-        // Atualiza o timestamp na nuvem para notificar outros usuários
-        const configToSync = { ...inventory };
-        // @ts-expect-error - assets is removed for sync
-        delete configToSync.assets;
-        await syncConfigToCloud({ 
-          ...configToSync, 
-          lastUpdated: new Date().toISOString() 
-        } as Omit<InventoryState, 'assets'>, user?.tenantId);
-      } catch (error) {
-        console.error('Erro ao limpar nuvem:', error);
-      }
-    }
-
-    // Atualiza o estado local removendo apenas os ativos da empresa limpa
-    if (selectedCompany) {
-      const normalizedSel = selectedCompany.toUpperCase().trim();
-      const remainingAssets = inventory.assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedSel);
+    try {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
+      const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
+      const companyName = selectedCompany ? selectedCompany.toUpperCase().trim() : 'GERAL';
       
-      setInventory(prev => ({
-        ...prev,
-        assets: remainingAssets,
-        lastUpdated: new Date().toISOString(),
-        status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
-      }));
-    } else {
-      // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
-      setInventory(prev => ({ 
-        ...prev,
-        assets: [], 
-        companies: [], 
-        lastUpdated: null, 
-        status: DatabaseStatus.EMPTY
-      }));
+      // Nome do arquivo conforme especificação: [GBR_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
+      const backupFileName = `GBR_MOBILE+KBP+DADOS+${companyName}+${dateStr}+${timeStr}`;
+      
+      // 1. Realiza backup automático antes de limpar
+      await backupInventory(backupFileName);
+      
+      // 2. Limpa localmente (apenas a empresa selecionada se houver)
+      await clearInventory(selectedCompany || undefined); 
+      
+      // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a empresa selecionada)
+      if (databaseMode === DatabaseMode.SUPABASE) {
+        try {
+          await clearCloudInventory(selectedCompany || undefined, user?.tenantId);
+          
+          // Atualiza o timestamp na nuvem para notificar outros usuários
+          const configToSync = { ...inventory };
+          // @ts-expect-error - assets is removed for sync
+          delete configToSync.assets;
+          await syncConfigToCloud({ 
+            ...configToSync, 
+            lastUpdated: new Date().toISOString() 
+          } as Omit<InventoryState, 'assets'>, user?.tenantId);
+        } catch (error: unknown) {
+          console.error('Erro ao limpar nuvem:', error);
+          let errorMessage = 'Erro desconhecido';
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          } else if (error && typeof error === 'object') {
+            const errObj = error as Record<string, unknown>;
+            errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+          }
+          throw new Error(`Erro na nuvem: ${errorMessage}`);
+        }
+      }
+
+      // Atualiza o estado local removendo apenas os ativos da empresa limpa
+      if (selectedCompany) {
+        const normalizedSel = selectedCompany.toUpperCase().trim();
+        const remainingAssets = inventory.assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedSel);
+        
+        setInventory(prev => ({
+          ...prev,
+          assets: remainingAssets,
+          lastUpdated: new Date().toISOString(),
+          status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
+        }));
+      } else {
+        // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
+        setInventory(prev => ({ 
+          ...prev,
+          assets: [], 
+          companies: [], 
+          lastUpdated: null, 
+          status: DatabaseStatus.EMPTY
+        }));
+      }
+      
+      setModalConfig({
+        isOpen: true,
+        title: 'Limpeza Concluída',
+        message: `A unidade operacional "${companyName}" foi limpa com sucesso (Local${databaseMode === DatabaseMode.SUPABASE ? ' e Nuvem' : ''}). Um backup de segurança foi gerado: ${backupFileName}`,
+        type: 'info'
+      });
+    } catch (error: unknown) {
+      console.error('Erro na limpeza do banco:', error);
+      let errorMessage = 'Erro desconhecido';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (error && typeof error === 'object') {
+        const errObj = error as Record<string, unknown>;
+        errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+      }
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro na Limpeza',
+        message: `Ocorreu um erro ao tentar limpar a unidade selecionada: ${errorMessage}`,
+        type: 'error'
+      });
     }
-    
-    setModalConfig({
-      isOpen: true,
-      title: 'Limpeza Concluída',
-      message: `A unidade operacional "${companyName}" foi limpa com sucesso (Local${databaseMode === DatabaseMode.SUPABASE ? ' e Nuvem' : ''}). Um backup de segurança foi gerado: ${backupFileName}`,
-      type: 'info'
-    });
   };
 
   const isAdmin = useMemo(() => {
@@ -1346,6 +1524,65 @@ const App: React.FC = () => {
     }
     return filtered;
   }, [inventory.assets, selectedCompany, normalizeKey]);
+
+  const handleSignatureConfirm = useCallback(async (signature: string) => {
+    if (!selectedCompany) return;
+
+    const confirmedAssets = filteredAssetsByCompany.filter(a => a._conferido);
+    if (confirmedAssets.length === 0) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Nenhum Item Conferido',
+        message: 'Não há itens conferidos para assinar nesta unidade.',
+        type: 'error'
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const aprovador = user?.email || 'Auditor';
+
+    const ids = confirmedAssets.map(a => String(a.id));
+    const updates: Partial<Asset> = {
+      _aprovado: true,
+      _dataAprovacao: now,
+      _aprovador: aprovador,
+      _assinatura: signature
+    };
+
+    try {
+      await bulkUpdateAssets(ids, updates);
+      setModalConfig({
+        isOpen: true,
+        title: 'Inventário Finalizado',
+        message: `O inventário da unidade ${selectedCompany} foi assinado e aprovado com sucesso.`,
+        type: 'success'
+      });
+      popScreen();
+    } catch (error) {
+      console.error('Erro ao salvar assinatura:', error);
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro ao Finalizar',
+        message: 'Ocorreu um erro ao tentar salvar a assinatura. Verifique sua conexão.',
+        type: 'error'
+      });
+    }
+  }, [selectedCompany, filteredAssetsByCompany, user, bulkUpdateAssets, popScreen]);
+
+  const fullCompaniesWithStatus = useMemo(() => {
+    return inventory.companies.map(company => {
+      const hasAssets = inventory.assets.some(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
+      return {
+        name: company,
+        hasData: hasAssets
+      };
+    });
+  }, [inventory.companies, inventory.assets, normalizeKey]);
+
+  const companiesWithStatus = useMemo(() => {
+    return fullCompaniesWithStatus.filter(c => c.hasData);
+  }, [fullCompaniesWithStatus]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
@@ -1412,7 +1649,6 @@ const App: React.FC = () => {
               onNavigateToRegister={() => pushScreen(AppScreen.REGISTER)}
               onLogin={(u) => { 
                 setUser(u); 
-                const isAdmin = u.role === UserRole.ADMIN || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
                 const isEmpty = inventory.assets.length === 0;
 
                 if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
@@ -1421,11 +1657,8 @@ const App: React.FC = () => {
 
                 if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
-                } else if (isEmpty && isAdmin) {
-                  setStartWithDataMenu(true);
-                  pushScreen(AppScreen.MAIN_MENU);
                 } else { 
-                  pushScreen(AppScreen.COMPANY_SELECTION); 
+                  pushScreen(AppScreen.MODULE_SELECTION); 
                 } 
               }} 
             />
@@ -1485,7 +1718,9 @@ const App: React.FC = () => {
               onDownloadCloudData={handleDownloadCloudData}
               onRestore={handleRestore}
               onClearDatabase={handleClearDatabase} 
+              onClearMultipleCompanies={handleClearMultipleCompanies}
               user={user} 
+              companies={fullCompaniesWithStatus}
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
@@ -1505,11 +1740,21 @@ const App: React.FC = () => {
               onUpdateDarkMode={(val) => setInventory(prev => ({ ...prev, darkMode: val }))}
               batterySaver={inventory.batterySaver || false}
               onUpdateBatterySaver={(val) => setInventory(prev => ({ ...prev, batterySaver: val }))}
+              mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence || false}
+              onUpdateMandatoryPhotoOnDivergence={(val) => setInventory(prev => ({ ...prev, mandatoryPhotoOnDivergence: val }))}
+              mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
+              onUpdateMandatoryPhotoOnNewItem={(val) => setInventory(prev => ({ ...prev, mandatoryPhotoOnNewItem: val }))}
               onSyncCloud={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
               syncError={syncError}
               hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
+              pendingPhotosCount={pendingPhotosCount}
+              onProcessSyncQueue={async () => {
+                await processSyncQueue();
+                const items = await getPendingSyncItems();
+                setPendingPhotosCount(items.length);
+              }}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               onUpdateProtheusIntegration={(val) => {
                 localStorage.setItem('app_protheus_enabled', String(val));
@@ -1592,6 +1837,7 @@ const App: React.FC = () => {
               autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
               scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
               onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
+              onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
               inventorySearchValue={inventorySearchValue} 
               clearInventorySearchValue={() => setInventorySearchValue(null)} 
               immersiveMode={inventory.immersiveMode || false} 
@@ -1630,11 +1876,76 @@ const App: React.FC = () => {
               readOnly={isReadOnlyDetail}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               protheusApiUrl={inventory.protheusApiUrl || ''}
+              tenantId={user?.tenantId || 'default'}
+              mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
+              mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
             />
           )}
-          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={inventory.companies} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
-          {screen === AppScreen.DASHBOARD && <Dashboard assets={filteredAssetsByCompany} onBack={popScreen} />}
-          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.SIGNATURE && (
+            <Signature 
+              assets={filteredAssetsByCompany.filter(a => a._conferido)}
+              onBack={popScreen}
+              onConfirm={handleSignatureConfirm}
+              companyName={selectedCompany || ''}
+            />
+          )}
+          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={companiesWithStatus} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
+          {screen === AppScreen.DASHBOARD && (
+            <Dashboard 
+              assets={filteredAssetsByCompany} 
+              onBack={popScreen} 
+              onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
+            />
+          )}
+          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} />}
+          {screen === AppScreen.ACTIVE_SEARCH && (
+            <ActiveSearch 
+              assets={filteredAssetsByCompany} 
+              onBack={popScreen} 
+              onSelectAsset={(asset) => {
+                handleSelectAsset(asset);
+              }}
+            />
+          )}
+          {screen === AppScreen.MODULE_SELECTION && (
+            <ModuleSelector 
+              username={user?.username || ''}
+              onLogout={() => {
+                setUser(null);
+                setCurrentModule(null);
+                localStorage.removeItem('app_current_module');
+                pushScreen(AppScreen.LOGIN);
+              }}
+              onSelect={(module) => {
+                setCurrentModule(module);
+                localStorage.setItem('app_current_module', module);
+                if (module === AppModule.INVENTORY) {
+                  const isSystemAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                  const isEmpty = inventory.assets.length === 0;
+                  if (isEmpty && isSystemAdmin) {
+                    setStartWithDataMenu(true);
+                    pushScreen(AppScreen.MAIN_MENU);
+                  } else {
+                    pushScreen(AppScreen.COMPANY_SELECTION);
+                  }
+                } else {
+                  pushScreen(AppScreen.ASSET_CONTROL_HOME);
+                }
+              }}
+            />
+          )}
+          {screen === AppScreen.ASSET_CONTROL_HOME && (
+            <AssetControlModule 
+              username={user?.username || ''}
+              tenantId={user?.tenantId || 'default'}
+              onBack={() => {
+                setCurrentModule(null);
+                localStorage.removeItem('app_current_module');
+                pushScreen(AppScreen.MODULE_SELECTION);
+              }}
+            />
+          )}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}

@@ -71,7 +71,8 @@ export const normalizeToProtheus = (asset: Asset) => {
     N1_LOCAL: asset.ENDERECO || '',
     N3_CUSTBEM: asset.CONTACONTABIL || '',
     N3_CCUSTO: asset.CENTRODECUSTO || '',
-    SN1_RECNO: asset.Sn1_recno
+    SN1_RECNO: asset.Sn1_recno,
+    SN3_RECNO: asset.Sn3_recno
   };
 };
 
@@ -83,6 +84,10 @@ export const validateForProtheus = (asset: Asset): { valid: boolean; errors: str
   
   if (!asset.Sn1_recno) {
     errors.push('Identificador Protheus (Sn1_recno) não encontrado.');
+  }
+  
+  if (!asset.Sn3_recno) {
+    errors.push('Identificador Protheus (Sn3_recno) não encontrado.');
   }
   
   if (!asset.EMPRESA) errors.push('Filial (EMPRESA) é obrigatória.');

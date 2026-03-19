@@ -4,7 +4,7 @@ import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehou
 import BackButton from './BackButton';
 
 interface CompanySelectorProps {
-  companies: string[];
+  companies: Array<{ name: string; hasData: boolean }>;
   onSelect: (company: string) => void;
   onBack: () => void;
 }
@@ -13,11 +13,17 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredCompanies = companies.filter(c => 
-    c.toLowerCase().includes(searchTerm.toLowerCase())
+    c.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Helper para gerar ícone e cor consistente baseada no nome
-  const getCompanyIdentity = (name: string) => {
+  const getCompanyIdentity = (name: string, hasData: boolean) => {
+    if (!hasData) {
+      return {
+        style: 'bg-slate-50 text-slate-300 border-slate-100 grayscale',
+        Icon: Building2
+      };
+    }
     const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const colors = [
       'bg-blue-50 text-blue-600 border-blue-100',
@@ -69,26 +75,37 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
         <div className="grid grid-cols-1 gap-3 pb-24">
           {filteredCompanies.length > 0 ? (
             filteredCompanies.map((company) => {
-              const { style, Icon } = getCompanyIdentity(company);
+              const { style, Icon } = getCompanyIdentity(company.name, company.hasData);
               return (
                 <button
-                  key={company}
-                  onClick={() => onSelect(company)}
-                  className="bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border border-border hover:border-accent active:scale-[0.99] transition-all group overflow-hidden relative modern-card"
+                  key={company.name}
+                  onClick={() => company.hasData && onSelect(company.name)}
+                  disabled={!company.hasData}
+                  className={`bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border transition-all group overflow-hidden relative modern-card ${
+                    company.hasData 
+                      ? 'hover:border-accent active:scale-[0.99] border-border' 
+                      : 'opacity-60 cursor-not-allowed border-slate-100'
+                  }`}
                 >
                   <div className="flex items-center space-x-4 relative z-10">
                     <div className={`w-12 h-12 ${style} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border`}>
                       <Icon size={24} strokeWidth={2.5} />
                     </div>
                     <div className="text-left">
-                      <h4 className="font-bold text-ink text-sm uppercase leading-tight tracking-tight">{company}</h4>
+                      <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${company.hasData ? 'text-ink' : 'text-slate-400'}`}>
+                        {company.name}
+                      </h4>
                       <div className="flex items-center space-x-1.5 mt-1">
-                         <div className="w-1.5 h-1.5 bg-success rounded-full shadow-sm shadow-success/50"></div>
-                         <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Base Master Disponível</span>
+                         <div className={`w-1.5 h-1.5 rounded-full shadow-sm ${company.hasData ? 'bg-success shadow-success/50' : 'bg-slate-300'}`}></div>
+                         <span className={`text-[9px] font-bold uppercase tracking-widest ${company.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
+                           {company.hasData ? 'Base Master Disponível' : 'Base de Dados Vazia'}
+                         </span>
                       </div>
                     </div>
                   </div>
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-slate-100 group-hover:text-accent transition-colors relative z-10">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors relative z-10 ${
+                    company.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
+                  }`}>
                     <CheckCircle2 size={24} />
                   </div>
                 </button>

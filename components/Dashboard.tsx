@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Asset, TagInventario } from '../types';
+import { Asset, TagInventario, AuditLogEntry } from '../types';
 import * as XLSX from 'xlsx';
 import BackButton from './BackButton';
 import { 
@@ -14,7 +14,11 @@ import {
   Info,
   X,
   Palette,
-  MapPin
+  Map as MapIcon,
+  MapPin,
+  History,
+  User,
+  PackageSearch
 } from 'lucide-react';
 
 const DASHBOARD_HINTS: Record<string, string> = {
@@ -31,9 +35,10 @@ const DASHBOARD_HINTS: Record<string, string> = {
 interface DashboardProps {
   assets: Asset[];
   onBack: () => void;
+  onOpenActiveSearch?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearch }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
 
   const stats = useMemo(() => {
@@ -58,6 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       semId: 0,
       countAtivos: 0,
       countBaixados: 0,
+      criticalDivergence: 0,
     };
 
     for (let i = 0; i < assets.length; i++) {
@@ -68,6 +74,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
       const tag = a.TAG_INVENTARIO;
       const etq = String(a.ETIQUETA || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
+
+      // Valor de aquisição para divergência crítica
+      const valorStr = String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.');
+      const valor = parseFloat(valorStr) || 0;
 
       if (!isBaixado) {
         s.totalAtivos++;
@@ -88,7 +98,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
         s.jaEtiquetado++;
       }
 
-      if (tag === TagInventario.DIVERGENCIA) s.divergencia++;
+      if (tag === TagInventario.DIVERGENCIA) {
+        s.divergencia++;
+        if (valor >= 5000) s.criticalDivergence++;
+      }
       if (tag === TagInventario.NOVO_ITEM || a._isNew) s.novoItem++;
       if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO) s.adotado++;
       if (tag === TagInventario.RE_ADOTADO) s.readotado++;
@@ -108,6 +121,26 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
     s.percConferido = s.totalAtivos > 0 ? Math.round((s.conferidoAtivos / s.totalAtivos) * 100) : 0;
 
     return s;
+  }, [assets]);
+
+  const recentActivity = useMemo(() => {
+    const allHistory: (AuditLogEntry & { assetId: string | number; assetTag?: string; assetDesc?: string })[] = [];
+    assets.forEach(a => {
+      if (a._history && Array.isArray(a._history)) {
+        a._history.forEach(h => {
+          allHistory.push({
+            ...h,
+            assetId: a.id,
+            assetTag: a.ETIQUETA,
+            assetDesc: a.DESCRICAODOATIVO
+          });
+        });
+      }
+    });
+    
+    return allHistory
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 5);
   }, [assets]);
 
   const exportFilteredData = (filterFn: (a: Asset) => boolean, fileName: string) => {
@@ -258,6 +291,27 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
           </div>
 
           <div 
+            onClick={() => {
+              exportFilteredData(a => {
+                const valorStr = String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.');
+                const valor = parseFloat(valorStr) || 0;
+                return a.TAG_INVENTARIO === TagInventario.DIVERGENCIA && valor >= 5000;
+              }, 'DIVERGENCIAS_CRITICAS');
+            }}
+            className="bg-rose-50 border border-rose-200 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
+          >
+            <div className="w-8 h-8 bg-rose-600 rounded-lg flex items-center justify-center text-white mb-3 shadow-lg shadow-rose-900/20">
+              <ShieldAlert size={16} />
+            </div>
+            <span className="text-[8px] font-bold text-rose-900 uppercase tracking-widest block mb-0.5">Divergências Críticas</span>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-xl font-bold text-rose-950">{stats.criticalDivergence}</span>
+              <span className="text-[8px] font-bold text-rose-600 uppercase tracking-widest">Valor &gt; R$ 5k</span>
+              <Download size={10} className="text-rose-900/30 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
+            </div>
+          </div>
+
+          <div 
             onClick={() => exportFilteredData(a => String(a.STATUS || '').toUpperCase().includes('BAIXADO') && !!a._conferido, 'BAIXADOS_LOCALIZADOS')}
             className="bg-white border border-border rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
           >
@@ -282,6 +336,50 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
             <div className="flex items-baseline space-x-2">
               <span className="text-xl font-bold text-ink">{stats.novoItem}</span>
               <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </div>
+
+          <div 
+            onClick={() => (window as unknown as { onOpenMap?: () => void }).onOpenMap && (window as unknown as { onOpenMap: () => void }).onOpenMap!()}
+            className="col-span-2 bg-slate-900 border border-slate-800 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-32 h-32 bg-accent/10 rounded-full -mr-16 -mt-16 blur-2xl" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
+                  <MapIcon size={20} />
+                </div>
+                <div>
+                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest block mb-0.5">Geotagging v24</span>
+                  <h4 className="text-sm font-bold text-white uppercase tracking-tight">Mapa de Calor de Ativos</h4>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-bold text-white">{assets.filter(a => a._lat && a._lng).length}</span>
+                <p className="text-[7px] font-bold text-white/40 uppercase tracking-widest">Ativos Mapeados</p>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onOpenActiveSearch && onOpenActiveSearch()}
+            className="col-span-2 bg-amber-500 border border-amber-400 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full -mr-16 -mt-16 blur-2xl" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-lg shadow-amber-900/10">
+                  <PackageSearch size={20} />
+                </div>
+                <div>
+                  <span className="text-[8px] font-bold text-amber-900 uppercase tracking-widest block mb-0.5">Busca Ativa</span>
+                  <h4 className="text-sm font-bold text-amber-950 uppercase tracking-tight">Itens Não Localizados</h4>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-bold text-amber-950">{assets.filter(a => !a._conferido).length}</span>
+                <p className="text-[7px] font-bold text-amber-900 uppercase tracking-widest">Faltantes</p>
+              </div>
             </div>
           </div>
         </div>
@@ -417,6 +515,47 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack }) => {
               <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Registros Baixados</span>
               <span className="text-xl font-bold text-ink">{stats.countBaixados}</span>
             </div>
+          </div>
+        </section>
+
+        {/* RECENT ACTIVITY FEED */}
+        <section className="bg-white border border-border rounded-[2.5rem] p-8 shadow-sm modern-card space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-accent/10 rounded-2xl flex items-center justify-center text-accent border border-accent/20 shadow-sm">
+                <History size={20} />
+              </div>
+              <div>
+                <h3 className="text-[11px] font-black text-ink uppercase tracking-[0.2em]">Atividade Recente</h3>
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Últimas 5 alterações de ativos</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {recentActivity.length > 0 ? (
+              recentActivity.map((activity, idx) => (
+                <div key={idx} className="flex items-start space-x-4 group">
+                  <div className="w-1 h-12 bg-border group-hover:bg-accent transition-colors rounded-full mt-1" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[8px] font-black text-accent uppercase tracking-widest">{activity.action}</span>
+                      <span className="text-[7px] font-bold text-ink-muted uppercase">{new Date(activity.timestamp).toLocaleString('pt-BR')}</span>
+                    </div>
+                    <p className="text-[10px] font-bold text-ink truncate uppercase tracking-tight">{activity.details}</p>
+                    <div className="flex items-center space-x-1.5 mt-1">
+                      <User size={8} className="text-ink-muted" />
+                      <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">{activity.user}</span>
+                      <span className="text-[7px] font-bold text-accent/50 uppercase tracking-widest ml-auto">TAG: {activity.assetTag || '---'}</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="py-10 text-center">
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em]">Nenhuma atividade registrada</p>
+              </div>
+            )}
           </div>
         </section>
       </div>

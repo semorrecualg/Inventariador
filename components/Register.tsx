@@ -73,6 +73,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [tenantId, setTenantId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,8 +84,20 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
     setError(null);
     setIsLoading(true);
 
+    if (!tenantId || tenantId.length < 3) {
+      setError("O ID da Empresa deve ter pelo menos 3 caracteres.");
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      await signUp(email.trim(), password, username.toUpperCase(), UserRole.ADMIN);
+      await signUp(
+        email.trim(), 
+        password, 
+        username.toUpperCase(), 
+        tenantId.toLowerCase().trim(), 
+        UserRole.ADMIN
+      );
       setIsSuccess(true);
       setTimeout(() => {
         onRegister();
@@ -180,6 +193,20 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
           </div>
         )}
 
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">ID da Empresa (Tenant)</label>
+          <input 
+            type="text" 
+            required
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value.toLowerCase().replace(/\s/g, ''))}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: empresa_abc"
+          />
+          <p className="text-[7px] text-ink-muted uppercase tracking-widest ml-1">
+            Este ID isola seus dados de outras empresas.
+          </p>
+        </div>
         <div className="space-y-1">
           <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Username</label>
           <input 

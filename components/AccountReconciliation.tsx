@@ -295,7 +295,9 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       const matchesSearch = assetSearchTerm === '' || 
         (asset.DESCRICAODOATIVO || '').toUpperCase().includes(assetSearchTerm.toUpperCase()) ||
         (asset.REGISTRO || '').toString().includes(assetSearchTerm) ||
-        (asset.ETIQUETA || '').toString().includes(assetSearchTerm);
+        (asset.ETIQUETA || '').toString().includes(assetSearchTerm) ||
+        (asset.Sn1_recno || '').toString().includes(assetSearchTerm) ||
+        (asset.Sn3_recno || '').toString().includes(assetSearchTerm);
 
       if (!matchesAccount || !matchesSearch) return false;
 

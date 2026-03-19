@@ -12,6 +12,11 @@ if (!rootElement) {
 console.log("App mounting...");
 const root = createRoot(rootElement);
 
+// Sinaliza que o app iniciou para remover o loader do index.html
+if (typeof window !== 'undefined') {
+  (window as Window & { appStarted?: boolean }).appStarted = true;
+}
+
 root.render(
   <App />
 );

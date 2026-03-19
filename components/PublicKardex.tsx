@@ -42,8 +42,8 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
           <div className="absolute bottom-0 left-0 w-24 h-24 bg-black/10 rounded-full -ml-12 -mb-12 blur-xl" />
           
           <div className="relative z-10 flex flex-col items-center">
-            <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-4 border border-white/30 shadow-lg">
-              <ShieldCheck size={32} />
+            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 border border-white/30 shadow-lg overflow-hidden p-1">
+              <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
             </div>
             <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/80 mb-1">AUDIT AUTHORITY</h1>
             <p className="text-xs font-bold uppercase tracking-widest text-white/60">KARDEX DIGITAL v24.50</p>

@@ -72,7 +72,8 @@ export interface Asset {
   PRIMARYKEY?: string;
   CENTRODECUSTO?: string;
   VLRAQUISIC?: string | number;
-  Sn1_recno?: number; // Identificador único do registro no Protheus
+  Sn1_recno?: number; // Identificador único do registro no Protheus (Tabela SN1)
+  Sn3_recno?: number; // Identificador único do registro no Protheus (Tabela SN3 - Centro de Custo)
 
   // Campos de Controle Interno
   _conferido?: boolean;
@@ -95,6 +96,59 @@ export interface Asset {
   _history?: AuditLogEntry[];
   _photoUrl?: string;
   _tenantId?: string;
+  _lat?: number;
+  _lng?: number;
+  _aprovado?: boolean;
+  _dataAprovacao?: string;
+  _aprovador?: string;
+  _assinatura?: string; // Base64 da assinatura
+  DE_PARA?: string;
+  AUDITOR_STATUS_CONFERENCIA?: string;
+
+  // Novos Campos Módulo Controle de Ativo (Contábil)
+  _valor_aquisicao?: number;
+  _valor_residual?: number;
+  _depreciacao_acumulada?: number;
+  _data_aquisicao?: string;
+  _data_inicio_depreciacao?: string;
+  _vida_util_meses?: number;
+  _taxa_depreciacao_anual?: number;
+  _status_contabil?: 'ATIVO' | 'BAIXADO' | 'VENDIDO';
+  _conta_contabil?: string;
+  _centro_custo?: string;
+}
+
+export interface AssetCategory {
+  id: string;
+  name: string;
+  account_code: string;
+  annual_depreciation_rate: number;
+  useful_life_months: number;
+  _tenantId: string;
+}
+
+export interface AssetMovement {
+  id: string;
+  asset_id: string;
+  type: 'TRANSFER' | 'SALE' | 'WRITE_OFF' | 'ACQUISITION' | 'REVALUATION';
+  date: string;
+  from_cc?: string;
+  to_cc?: string;
+  value?: number;
+  description?: string;
+  user_email: string;
+  _tenantId: string;
+}
+
+export interface DepreciationHistory {
+  id: string;
+  asset_id: string;
+  period_month: number;
+  period_year: number;
+  depreciation_value: number;
+  accumulated_depreciation: number;
+  residual_value: number;
+  _tenantId: string;
 }
 
 export enum AppScreen {
@@ -115,7 +169,17 @@ export enum AppScreen {
   QR_CODE_CONFIGURATOR = 'QR_CODE_CONFIGURATOR',
   QR_CONFIGURATOR = 'QR_CONFIGURATOR',
   GLOBAL_PERFORMANCE = 'GLOBAL_PERFORMANCE',
-  ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION'
+  ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION',
+  SIGNATURE = 'SIGNATURE',
+  ASSET_MAP = 'ASSET_MAP',
+  ACTIVE_SEARCH = 'ACTIVE_SEARCH',
+  MODULE_SELECTION = 'MODULE_SELECTION',
+  ASSET_CONTROL_HOME = 'ASSET_CONTROL_HOME'
+}
+
+export enum AppModule {
+  INVENTORY = 'INVENTORY',
+  ASSET_CONTROL = 'ASSET_CONTROL'
 }
 export enum ScannerMode {
   BARCODE = 'BARCODE',
@@ -153,6 +217,7 @@ export interface SearchFilters {
   DATAAQUSIC_START: string;
   DATAAQUSIC_END: string;
   Sn1_recno?: string;
+  Sn3_recno?: string;
 }
 
 export interface InventoryState {
@@ -171,4 +236,17 @@ export interface InventoryState {
   batterySaver?: boolean;
   protheusIntegrationEnabled?: boolean;
   protheusApiUrl?: string;
+  mandatoryPhotoOnDivergence?: boolean;
+  mandatoryPhotoOnNewItem?: boolean;
+}
+
+export interface SyncQueueItem {
+  id: string; // UUID interno da fila
+  assetId: string;
+  tenantId: string;
+  photoBlob: Blob;
+  timestamp: number;
+  attempts: number;
+  lastAttempt?: number;
+  error?: string;
 }

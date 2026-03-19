@@ -24,8 +24,8 @@ import {
   X,
   AlertTriangle,
   FilePlus2,
+  FileText,
   RefreshCw,
-  ShieldCheck,
   Camera,
   Database,
   Keyboard,
@@ -216,6 +216,11 @@ const AssetCard = React.memo(({
             <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
+            {asset._photoUrl && (
+              <div className="bg-accent/10 p-1 rounded-lg animate-pulse">
+                <Camera size={12} className="text-accent" />
+              </div>
+            )}
           </div>
           {isBatch && (
             <div className="px-2 py-1 bg-warning rounded-lg flex items-center space-x-1 shadow-md">
@@ -333,6 +338,7 @@ interface InventoryProps {
   autoConfirmOnScan: boolean;
   scanFeedbackMode: ScanFeedbackMode;
   onOpenConsultation: () => void;
+  onOpenSignature: () => void;
   inventorySearchValue: string | null;
   clearInventorySearchValue: () => void;
   immersiveMode: boolean;
@@ -340,7 +346,34 @@ interface InventoryProps {
   batterySaver: boolean;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, selectedLocation, setSelectedLocation, isInventorying, setIsInventorying, selectedCompany, onAddNewLocation, locationsWithStats, scannerMode, searchMode, onUpdateSearchMode, onUpdateScannerMode, autoConfirmOnScan, scanFeedbackMode, onOpenConsultation, inventorySearchValue, clearInventorySearchValue, immersiveMode, onToggleFullscreen, batterySaver }) => {
+const Inventory: React.FC<InventoryProps> = ({ 
+  assets, 
+  allAssets, 
+  onBack, 
+  onUpdateAsset, 
+  onBulkUpdateAssets, 
+  onSelectAsset, 
+  selectedLocation, 
+  setSelectedLocation, 
+  isInventorying, 
+  setIsInventorying, 
+  selectedCompany, 
+  onAddNewLocation, 
+  locationsWithStats, 
+  scannerMode, 
+  searchMode, 
+  onUpdateSearchMode, 
+  onUpdateScannerMode, 
+  autoConfirmOnScan, 
+  scanFeedbackMode, 
+  onOpenConsultation, 
+  onOpenSignature,
+  inventorySearchValue, 
+  clearInventorySearchValue, 
+  immersiveMode, 
+  onToggleFullscreen, 
+  batterySaver 
+}) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
@@ -886,8 +919,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
             <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
               <div className="bg-accent p-8 text-white text-center">
-                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
-                  <ShieldCheck size={40} className="text-white" />
+                <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30 overflow-hidden p-2">
+                  <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
                 <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>
@@ -1098,6 +1131,17 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
                     >
                       {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
                       <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
+                    </button>
+                  )}
+                  
+                  {activeFilter === 'checked' && (
+                    <button 
+                      onClick={onOpenSignature}
+                      className="p-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl active:scale-95 transition-all flex items-center space-x-2 shadow-sm"
+                      title="Finalizar e Assinar Inventário"
+                    >
+                      <FileText size={16} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">Finalizar</span>
                     </button>
                   )}
                   
@@ -1417,8 +1461,8 @@ const Inventory: React.FC<InventoryProps> = ({ assets, allAssets, onBack, onUpda
               <X size={20} />
             </button>
             <div className="bg-accent p-8 text-white text-center">
-              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
-                <ShieldCheck size={40} className="text-white" />
+              <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30 overflow-hidden p-2">
+                <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
               </div>
               <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
               <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>

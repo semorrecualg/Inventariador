@@ -40,7 +40,9 @@ interface MainMenuProps {
   onDownloadCloudData: () => void;
   onRestore: (file: File) => void;
   onClearDatabase: () => void;
+  onClearMultipleCompanies?: (companies: string[]) => void;
   user: User | null;
+  companies: { name: string; hasData: boolean }[];
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
   autoConfirmOnScan: boolean;
   onUpdateAutoConfirm: (val: boolean) => void;
@@ -65,6 +67,12 @@ interface MainMenuProps {
   onUpdateProtheusIntegration: (val: boolean) => void;
   protheusApiUrl: string;
   onUpdateProtheusApiUrl: (val: string) => void;
+  mandatoryPhotoOnDivergence: boolean;
+  onUpdateMandatoryPhotoOnDivergence: (val: boolean) => void;
+  mandatoryPhotoOnNewItem: boolean;
+  onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
+  pendingPhotosCount?: number;
+  onProcessSyncQueue?: () => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -75,6 +83,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onDownloadCloudData,
   onRestore,
   onClearDatabase, 
+  onClearMultipleCompanies,
   user, 
   inventoryInfo, 
   autoConfirmOnScan, 
@@ -99,12 +108,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
   protheusIntegrationEnabled,
   onUpdateProtheusIntegration,
   protheusApiUrl,
-  onUpdateProtheusApiUrl
+  onUpdateProtheusApiUrl,
+  companies,
+  mandatoryPhotoOnDivergence,
+  onUpdateMandatoryPhotoOnDivergence,
+  mandatoryPhotoOnNewItem,
+  onUpdateMandatoryPhotoOnNewItem,
+  pendingPhotosCount = 0,
+  onProcessSyncQueue
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isSelectiveClearOpen, setIsSelectiveClearOpen] = useState(false);
+  const [selectedToClear, setSelectedToClear] = useState<string[]>([]);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
@@ -171,8 +189,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {/* USER PROFILE & IMMERSIVE TOGGLE (GREEN AREA MOVED UP) */}
       <div className="px-5 py-4 bg-white border-b border-border flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center p-1 border-2 border-emerald-500 rounded-2xl bg-white shadow-sm">
-          <div className="w-12 h-12 bg-white border border-accent/10 rounded-xl flex items-center justify-center shadow-sm">
-            <ShieldCheck size={24} className="text-accent" />
+          <div className="w-12 h-12 bg-white border border-accent/10 rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1">
+            <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
           </div>
           <div className="ml-3 pr-4">
             <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
@@ -234,6 +252,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
               title="Configurações do Sistema"
             >
               <Settings size={20} />
+            </button>
+          )}
+          {pendingPhotosCount > 0 && (
+            <button 
+              onClick={onProcessSyncQueue}
+              className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600 active:scale-90 transition-all shadow-sm hover:bg-amber-100 flex items-center space-x-2 animate-pulse"
+              title="Sincronizar Fotos Pendentes"
+            >
+              <Cloud size={20} />
+              <span className="text-[10px] font-black">{pendingPhotosCount}</span>
             </button>
           )}
         </div>
@@ -323,8 +351,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <div className="w-full max-w-sm space-y-3">
               <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-accent-soft text-accent rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent/10 shadow-lg">
-                  <ShieldCheck size={32} />
+                <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent/10 shadow-lg overflow-hidden p-1">
+                  <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Administrativo</h2>
                 <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Protocolo de Segurança GBR</p>
@@ -367,6 +395,36 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${!autoConfirmOnScan ? 'bg-slate-400 text-white shadow-md' : 'text-slate-400'}`}
                   >
                     NÃO
+                  </button>
+                </div>
+              </div>
+
+              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Tag size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Evidência Fotográfica</h4>
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Obrigatoriedade de Foto</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => onUpdateMandatoryPhotoOnDivergence(!mandatoryPhotoOnDivergence)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${mandatoryPhotoOnDivergence ? 'bg-accent-soft border-accent/20 text-accent shadow-sm' : 'bg-white border-slate-200 text-slate-500'}`}
+                  >
+                    <span>Obrigatório em Divergência</span>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${mandatoryPhotoOnDivergence ? 'bg-accent' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${mandatoryPhotoOnDivergence ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
+                  <button 
+                    onClick={() => onUpdateMandatoryPhotoOnNewItem(!mandatoryPhotoOnNewItem)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${mandatoryPhotoOnNewItem ? 'bg-accent-soft border-accent/20 text-accent shadow-sm' : 'bg-white border-slate-200 text-slate-500'}`}
+                  >
+                    <span>Obrigatório em Novo Item</span>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${mandatoryPhotoOnNewItem ? 'bg-accent' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${mandatoryPhotoOnNewItem ? 'left-6' : 'left-1'}`} />
+                    </div>
                   </button>
                 </div>
               </div>
@@ -727,6 +785,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button onClick={() => { 
+                setIsSelectiveClearOpen(true);
+              }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><ListChecks size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Limpeza Seletiva</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Escolher Unidades para Apagar</p>
+                </div>
+              </button>
+
+              <button onClick={() => { 
                 setIsClearConfirmOpen(true);
               }} className="w-full flex items-center p-4 bg-red-500/10 border border-red-500/20 rounded-2xl active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 bg-red-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-red-500/20"><Trash2 size={20} /></div>
@@ -754,6 +822,112 @@ const MainMenu: React.FC<MainMenuProps> = ({
         confirmText="Sim, Apagar Tudo"
         cancelText="Cancelar"
       />
+
+      {/* MODAL DE LIMPEZA SELETIVA */}
+      {isSelectiveClearOpen && (
+        <div className="fixed inset-0 z-[20000] bg-slate-950/95 backdrop-blur-xl flex flex-col animate-fadeIn">
+          <div className="px-6 pt-12 pb-6 bg-red-600 text-white flex items-center justify-between shadow-lg">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/30">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight">Limpeza Seletiva</h2>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Selecione as Unidades</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsSelectiveClearOpen(false)}
+              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-xl flex items-center justify-center transition-all active:scale-90"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 bg-bg-main no-scrollbar">
+            <div className="max-w-md mx-auto space-y-3">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-black text-ink-muted uppercase tracking-widest">
+                  {selectedToClear.length} Unidades Selecionadas
+                </p>
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => setSelectedToClear(companies.map(c => c.name))}
+                    className="text-[9px] font-black text-accent uppercase tracking-widest hover:underline"
+                  >
+                    Marcar Todas
+                  </button>
+                  <button 
+                    onClick={() => setSelectedToClear([])}
+                    className="text-[9px] font-black text-red-500 uppercase tracking-widest hover:underline"
+                  >
+                    Desmarcar Todas
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {companies.map(company => (
+                  <button
+                    key={company.name}
+                    onClick={() => {
+                      if (selectedToClear.includes(company.name)) {
+                        setSelectedToClear(prev => prev.filter(c => c !== company.name));
+                      } else {
+                        setSelectedToClear(prev => [...prev, company.name]);
+                      }
+                    }}
+                    className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                      selectedToClear.includes(company.name)
+                        ? 'bg-red-50 border-red-200 shadow-sm'
+                        : 'bg-white border-border'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                        selectedToClear.includes(company.name)
+                          ? 'bg-red-500 border-red-500 text-white'
+                          : 'bg-white border-slate-300'
+                      }`}>
+                        {selectedToClear.includes(company.name) && <ListChecks size={12} />}
+                      </div>
+                      <div className="flex flex-col items-start">
+                        <span className={`text-[11px] font-bold uppercase tracking-tight ${
+                          selectedToClear.includes(company.name) ? 'text-red-700' : 'text-ink'
+                        }`}>
+                          {company.name}
+                        </span>
+                        {!company.hasData && (
+                          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
+                            Base Vazia
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 bg-white border-t border-border">
+            <button
+              disabled={selectedToClear.length === 0}
+              onClick={() => {
+                if (onClearMultipleCompanies) {
+                  onClearMultipleCompanies(selectedToClear);
+                  setIsSelectiveClearOpen(false);
+                  setIsDataMenuOpen(false);
+                  setIsAdminMenuOpen(false);
+                }
+              }}
+              className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-red-600/20 active:scale-[0.98] disabled:opacity-40 transition-all"
+            >
+              Apagar {selectedToClear.length} Unidades
+            </button>
+          </div>
+        </div>
+      )}
       {isDocModalOpen && (
         <div className="fixed inset-0 z-[20000] bg-white flex flex-col animate-slideUp">
           <div className="px-6 pt-12 pb-6 bg-emerald-500 text-white flex items-center justify-between shadow-lg">

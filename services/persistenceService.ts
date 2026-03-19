@@ -133,6 +133,24 @@ export const loadInventory = async (): Promise<InventoryState | null> => {
   }
 };
 
+export const clearMultipleInventories = async (companiesToClear: string[]): Promise<void> => {
+  try {
+    if (companiesToClear.length === 0) return;
+    
+    const assets = await localforage.getItem<Asset[]>(INVENTORY_ASSETS_KEY) || [];
+    const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
+    
+    const remainingAssets = assets.filter(a => 
+      !normalizedCompanies.includes((a.EMPRESA || '').toUpperCase().trim())
+    );
+    
+    await localforage.setItem(INVENTORY_ASSETS_KEY, remainingAssets);
+  } catch (error) {
+    console.error('Error clearing multiple inventories from IndexedDB:', error);
+    throw error;
+  }
+};
+
 export const clearInventory = async (companyToClear?: string): Promise<void> => {
   try {
     if (companyToClear) {
