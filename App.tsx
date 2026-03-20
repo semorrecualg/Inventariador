@@ -172,7 +172,12 @@ const App: React.FC = () => {
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     try {
       const saved = localStorage.getItem('app_database_mode');
-      return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+      if (saved) return saved as DatabaseMode;
+      // Se houver configuração de Supabase, o padrão deve ser SUPABASE para facilitar para o auditor
+      if (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY) {
+        return DatabaseMode.SUPABASE;
+      }
+      return DatabaseMode.INTERNAL;
     } catch { return DatabaseMode.INTERNAL; }
   });
 
@@ -186,7 +191,7 @@ const App: React.FC = () => {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
 
-  const pushLocalChanges = useCallback(async () => {
+  const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (databaseMode === DatabaseMode.INTERNAL) return;
     
     const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
@@ -198,7 +203,7 @@ const App: React.FC = () => {
     const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
 
     if (dirtyAssets.length > 0) {
-      setIsSyncing(true);
+      if (!skipLoadingState) setIsSyncing(true);
       try {
         // Sincroniza os ativos e ESPERA a conclusão (Push)
         await syncAssetsToCloud(dirtyAssets, user?.tenantId);
@@ -217,17 +222,34 @@ const App: React.FC = () => {
         console.error('Push error:', err);
         throw err;
       } finally {
-        setIsSyncing(false);
+        if (!skipLoadingState) setIsSyncing(false);
       }
     }
   }, [databaseMode, inventory]);
 
-  const syncFromCloud = useCallback(async () => {
-    if (databaseMode === DatabaseMode.INTERNAL) return;
+  const syncFromCloud = useCallback(async (explicitTenantId?: string, explicitMode?: DatabaseMode) => {
+    const mode = explicitMode || databaseMode;
+    if (mode === DatabaseMode.INTERNAL) return;
     
+    const tenantId = explicitTenantId || user?.tenantId;
     setIsSyncing(true);
     try {
-      const cloudData = await fetchFullInventory(user?.tenantId);
+      // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
+      // Primeiro enviamos o que o auditor já fez para não perder trabalho
+      
+      // a) Envia alterações de ativos (dirtyAssetsRef)
+      await pushLocalChanges(true); // skipLoadingState=true pois já estamos em isSyncing=true
+      
+      // b) Envia fotos pendentes (processSyncQueue)
+      await processSyncQueue();
+      
+      // Atualiza contador de fotos após processar
+      const pendingItems = await getPendingSyncItems();
+      setPendingPhotosCount(pendingItems.length);
+
+      // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
+      // Agora que garantimos que o trabalho local subiu, baixamos a base master atualizada
+      const cloudData = await fetchFullInventory(tenantId);
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         setInventory(prev => {
           const newState: InventoryState = {
@@ -247,12 +269,14 @@ const App: React.FC = () => {
       } else {
         setLastSyncTime(new Date().toISOString());
         setSyncError(null);
-        setModalConfig({
-          isOpen: true,
-          title: 'Sincronização Concluída',
-          message: 'A sincronização foi finalizada, mas nenhum dado foi encontrado na nuvem para este modo.',
-          type: 'info'
-        });
+        if (!explicitTenantId) { // Só mostra modal se não for o sync automático do login
+          setModalConfig({
+            isOpen: true,
+            title: 'Sincronização Concluída',
+            message: 'A sincronização foi finalizada, mas nenhum dado foi encontrado na nuvem para este modo.',
+            type: 'info'
+          });
+        }
       }
     } catch (error) {
       console.error('Erro ao sincronizar da nuvem:', error);
@@ -260,7 +284,7 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [databaseMode]);
+  }, [databaseMode, user?.tenantId, inventory]);
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
@@ -544,7 +568,26 @@ const App: React.FC = () => {
               const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
               const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
               
-              if (cloudTime > localTime + 5000) {
+              const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
+
+              // Se a base local estiver vazia e houver dados na nuvem, sincroniza AUTOMATICAMENTE
+              if (isLocalEmpty && cloudData.assets && cloudData.assets.length > 0) {
+                console.log('Base local vazia detectada. Sincronizando automaticamente com a nuvem...');
+                const newState: InventoryState = {
+                  ...inventory,
+                  ...cloudData.config,
+                  assets: cloudData.assets,
+                  status: DatabaseStatus.LOADED,
+                  lastUpdated: new Date().toISOString()
+                };
+                setInventory(newState);
+                await saveInventory(newState);
+                setLastSyncTime(new Date().toISOString());
+                setShowRecoveryToast(true);
+                setTimeout(() => setShowRecoveryToast(false), 5000);
+              } 
+              // Se não estiver vazia, mas a nuvem for mais nova, apenas avisa (comportamento atual)
+              else if (cloudTime > localTime + 5000) {
                 setIsCloudUpdatePending(true);
               }
             }
@@ -916,10 +959,20 @@ const App: React.FC = () => {
         localStorage.setItem('app_committed_consultation_filters', JSON.stringify(committedConsultationFilters));
         localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
         localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
+        localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
+        localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { console.warn("Storage cap reached"); }
     }, 2000);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedCompany, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
+
+  const updateConfig = useCallback((updates: Partial<InventoryState>) => {
+    setInventory(prev => ({
+      ...prev,
+      ...updates,
+      lastUpdated: new Date().toISOString()
+    }));
+  }, []);
 
   const pushScreen = (s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
@@ -946,14 +999,18 @@ const App: React.FC = () => {
       if (databaseMode === DatabaseMode.SUPABASE) {
         await clearCloudInventory(companiesToClear, user?.tenantId);
         
-        // Atualiza o timestamp na nuvem
-        const configToSync = { ...inventory };
-        // @ts-expect-error - assets is removed for sync
-        delete configToSync.assets;
-        await syncConfigToCloud({ 
-          ...configToSync, 
-          lastUpdated: new Date().toISOString() 
-        } as Omit<InventoryState, 'assets'>, user?.tenantId);
+        // Atualiza o timestamp na nuvem - envolvemos em try/catch para não falhar a limpeza se apenas o log falhar
+        try {
+          const configToSync = { ...inventory };
+          // @ts-expect-error - assets is removed for sync
+          delete configToSync.assets;
+          await syncConfigToCloud({ 
+            ...configToSync, 
+            lastUpdated: new Date().toISOString() 
+          } as Omit<InventoryState, 'assets'>, user?.tenantId);
+        } catch (syncErr) {
+          console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
+        }
       }
 
       // 3. Atualiza o estado local
@@ -1436,13 +1493,17 @@ const App: React.FC = () => {
           await clearCloudInventory(selectedCompany || undefined, user?.tenantId);
           
           // Atualiza o timestamp na nuvem para notificar outros usuários
-          const configToSync = { ...inventory };
-          // @ts-expect-error - assets is removed for sync
-          delete configToSync.assets;
-          await syncConfigToCloud({ 
-            ...configToSync, 
-            lastUpdated: new Date().toISOString() 
-          } as Omit<InventoryState, 'assets'>, user?.tenantId);
+          try {
+            const configToSync = { ...inventory };
+            // @ts-expect-error - assets is removed for sync
+            delete configToSync.assets;
+            await syncConfigToCloud({ 
+              ...configToSync, 
+              lastUpdated: new Date().toISOString() 
+            } as Omit<InventoryState, 'assets'>, user?.tenantId);
+          } catch (syncErr) {
+            console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
+          }
         } catch (error: unknown) {
           console.error('Erro ao limpar nuvem:', error);
           let errorMessage = 'Erro desconhecido';
@@ -1572,17 +1633,18 @@ const App: React.FC = () => {
 
   const fullCompaniesWithStatus = useMemo(() => {
     return inventory.companies.map(company => {
-      const hasAssets = inventory.assets.some(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
+      const companyAssets = inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
+      const hasData = companyAssets.length > 0;
+      const hasActiveAssets = companyAssets.some(a => 
+        String(a.STATUS || '').toUpperCase().includes('ATIVO')
+      );
       return {
         name: company,
-        hasData: hasAssets
+        hasData,
+        hasActiveAssets
       };
     });
   }, [inventory.companies, inventory.assets, normalizeKey]);
-
-  const companiesWithStatus = useMemo(() => {
-    return fullCompaniesWithStatus.filter(c => c.hasData);
-  }, [fullCompaniesWithStatus]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
@@ -1652,7 +1714,8 @@ const App: React.FC = () => {
                 const isEmpty = inventory.assets.length === 0;
 
                 if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
-                  syncFromCloud();
+                  // Passa o tenantId e o modo explicitamente para garantir sync imediato no login
+                  syncFromCloud(u.tenantId, databaseMode);
                 }
 
                 if (u.mustChangePassword) { 
@@ -1720,7 +1783,7 @@ const App: React.FC = () => {
               onClearDatabase={handleClearDatabase} 
               onClearMultipleCompanies={handleClearMultipleCompanies}
               user={user} 
-              companies={fullCompaniesWithStatus}
+              companies={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
@@ -1729,21 +1792,21 @@ const App: React.FC = () => {
                 date: inventory.lastUpdated 
               }} 
               autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
-              onUpdateAutoConfirm={(val) => setInventory(prev => ({ ...prev, autoConfirmOnScan: val }))} 
+              onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })} 
               isFullscreen={isFullscreen} 
               onToggleFullscreen={toggleFullscreen} 
               scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
-              onUpdateScanFeedbackMode={(mode) => setInventory(prev => ({ ...prev, scanFeedbackMode: mode }))}
+              onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
               initialDataMenuOpen={startWithDataMenu}
               selectedCompany={selectedCompany}
               darkMode={inventory.darkMode || false}
-              onUpdateDarkMode={(val) => setInventory(prev => ({ ...prev, darkMode: val }))}
+              onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
               batterySaver={inventory.batterySaver || false}
-              onUpdateBatterySaver={(val) => setInventory(prev => ({ ...prev, batterySaver: val }))}
+              onUpdateBatterySaver={(val) => updateConfig({ batterySaver: val })}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence || false}
-              onUpdateMandatoryPhotoOnDivergence={(val) => setInventory(prev => ({ ...prev, mandatoryPhotoOnDivergence: val }))}
+              onUpdateMandatoryPhotoOnDivergence={(val) => updateConfig({ mandatoryPhotoOnDivergence: val })}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
-              onUpdateMandatoryPhotoOnNewItem={(val) => setInventory(prev => ({ ...prev, mandatoryPhotoOnNewItem: val }))}
+              onUpdateMandatoryPhotoOnNewItem={(val) => updateConfig({ mandatoryPhotoOnNewItem: val })}
               onSyncCloud={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
@@ -1758,12 +1821,12 @@ const App: React.FC = () => {
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               onUpdateProtheusIntegration={(val) => {
                 localStorage.setItem('app_protheus_enabled', String(val));
-                setInventory(prev => ({ ...prev, protheusIntegrationEnabled: val }));
+                updateConfig({ protheusIntegrationEnabled: val });
               }}
               protheusApiUrl={inventory.protheusApiUrl || ''}
               onUpdateProtheusApiUrl={(val) => {
                 localStorage.setItem('app_protheus_url', val);
-                setInventory(prev => ({ ...prev, protheusApiUrl: val }));
+                updateConfig({ protheusApiUrl: val });
               }}
             />
           )}
@@ -1889,7 +1952,7 @@ const App: React.FC = () => {
               companyName={selectedCompany || ''}
             />
           )}
-          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={companiesWithStatus} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
+          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasActiveAssets }))} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
           {screen === AppScreen.DASHBOARD && (
             <Dashboard 
               assets={filteredAssetsByCompany} 

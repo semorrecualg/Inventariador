@@ -98,7 +98,7 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
                       <div className="flex items-center space-x-1.5 mt-1">
                          <div className={`w-1.5 h-1.5 rounded-full shadow-sm ${company.hasData ? 'bg-success shadow-success/50' : 'bg-slate-300'}`}></div>
                          <span className={`text-[9px] font-bold uppercase tracking-widest ${company.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
-                           {company.hasData ? 'Base Master Disponível' : 'Base de Dados Vazia'}
+                           {company.hasData ? 'Base Master Disponível' : 'Sem Itens Ativos'}
                          </span>
                       </div>
                     </div>

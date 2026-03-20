@@ -133,9 +133,39 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     }
   });
 
-  const { error } = await supabase
-    .from('inventory_config')
-    .upsert([filteredConfig], { onConflict: 'id' });
+  // Lógica de tentativa resiliente para lidar com cache de schema desatualizado
+  const currentPayload = { ...filteredConfig };
+  let error = null;
+  let retryCount = 0;
+  const maxRetries = 5;
+
+  while (retryCount < maxRetries) {
+    const { error: syncError } = await supabase
+      .from('inventory_config')
+      .upsert([currentPayload], { onConflict: 'id' });
+    
+    if (!syncError) {
+      error = null;
+      break;
+    }
+
+    error = syncError;
+    
+    // Se o erro for de coluna não encontrada no cache do schema, 
+    // removemos a coluna específica e tentamos novamente o restante
+    const errorMessage = syncError.message || "";
+    const match = errorMessage.match(/Could not find the '(.+)' column/);
+    
+    if (match && match[1]) {
+      const missingColumn = match[1];
+      console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada no cache. Removendo e tentando novamente...`);
+      delete currentPayload[missingColumn];
+      retryCount++;
+    } else {
+      // Outro tipo de erro, não adianta tentar remover colunas
+      break;
+    }
+  }
 
   if (error) {
     // Handle network errors gracefully
@@ -233,22 +263,57 @@ export const fetchFullInventory = async (tenantId?: string): Promise<{ assets: A
     }
 
     // 2. Busca a configuração (pode ser global ou por tenant)
-    let configQuery = supabase.from('inventory_config').select('*');
-    if (tenantId) {
-      configQuery = configQuery.eq('id', `config_${tenantId}`);
-    } else {
-      configQuery = configQuery.eq('id', 'global_config');
-    }
+    const configId = tenantId ? `config_${tenantId}` : 'global_config';
     
-    const { data: configData, error: configError } = await configQuery.single();
+    // Lista de colunas conhecidas para tentar uma busca resiliente se o select('*') falhar
+    const knownConfigColumns = [
+      'id', 'companies', 'lastUpdated', 'status', 'editableFields', 
+      'qrCodeFields', 'scannerMode', 'autoConfirmOnScan', 'scanFeedbackMode', 
+      'inventorySearchMode', 'immersiveMode', 'darkMode', 'batterySaver',
+      'protheusIntegrationEnabled', 'protheusApiUrl', 'mandatoryPhotoOnDivergence',
+      'mandatoryPhotoOnNewItem', '_tenantId'
+    ];
 
     let config = {};
-    if (configError) {
-      if (configError.code !== 'PGRST116') { // Se não for apenas "não encontrado"
-        console.warn('Erro ao buscar configuração do Supabase:', configError);
+    let currentColumns = [...knownConfigColumns];
+    let configError = null;
+    let retryCount = 0;
+    const maxRetries = 5;
+
+    while (retryCount < maxRetries) {
+      const { data: configData, error: err } = await supabase
+        .from('inventory_config')
+        .select(currentColumns.join(','))
+        .eq('id', configId)
+        .single();
+
+      if (!err) {
+        config = configData;
+        configError = null;
+        break;
       }
-    } else {
-      config = configData;
+
+      configError = err;
+      const errorMessage = err.message || "";
+      const match = errorMessage.match(/Could not find the '(.+)' column/);
+
+      if (match && match[1]) {
+        const missingColumn = match[1];
+        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada no cache durante a busca. Removendo e tentando novamente...`);
+        currentColumns = currentColumns.filter(col => col !== missingColumn);
+        retryCount++;
+      } else if (err.code === 'PGRST116') {
+        // Registro não encontrado, não é um erro de cache
+        configError = null;
+        break;
+      } else {
+        // Outro erro
+        break;
+      }
+    }
+
+    if (configError) {
+      console.warn('Erro ao buscar configuração do Supabase:', configError);
     }
 
     return {
@@ -325,13 +390,22 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     // 2. Limpa a configuração (apenas se estiver limpando TUDO)
     if (!companyToClear) {
       const configId = tenantId ? `config_${tenantId}` : 'global_config';
+      
+      // Para o delete, tentamos ser o mais simples possível.
+      // Se falhar por causa do cache do schema, ignoramos o erro de configuração
+      // pois o objetivo principal (limpar ativos) já foi tentado.
       const { error: configError } = await supabase
         .from('inventory_config')
         .delete()
         .eq('id', configId);
 
       if (configError) {
-        console.warn('Erro ao limpar configuração na nuvem (pode não existir):', configError);
+        const isCacheError = configError.message?.includes('schema cache');
+        if (isCacheError) {
+          console.warn('[Supabase] Erro de cache de schema ao deletar config. Ignorando para permitir conclusão da limpeza.');
+        } else {
+          console.warn('Erro ao limpar configuração na nuvem (pode não existir):', configError);
+        }
       }
     }
   } catch (err) {
