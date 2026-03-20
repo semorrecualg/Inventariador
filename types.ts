@@ -116,14 +116,69 @@ export interface Asset {
   _status_contabil?: 'ATIVO' | 'BAIXADO' | 'VENDIDO';
   _conta_contabil?: string;
   _centro_custo?: string;
+  _ncm_code?: string;
 }
 
-export interface AssetCategory {
+export interface NCMClassifier {
   id: string;
-  name: string;
-  account_code: string;
+  ncm_code: string; // Código NCM
+  description: string; // Descrição do Bem
+  group_code: string; // Código do Grupo (4 dígitos)
   annual_depreciation_rate: number;
   useful_life_months: number;
+  _tenantId: string;
+}
+
+export enum DepreciationMethod {
+  LINEAR = 'LINEAR',
+  ACCELERATED_SUM_DIGITS = 'ACELERADA_SOMA_DIGITOS',
+  ACCELERATED_DECLINING_BALANCE = 'ACELERADA_SALDO_DECRESCENTE',
+  UNITS_OF_PRODUCTION = 'UNIDADES_PRODUCAO'
+}
+
+export interface AssetGroup {
+  id: string;
+  group_code: string; // GRUPO (4 dígitos)
+  name: string; // DESCRIC
+  asset_account: string; // CTACTB
+  accumulated_depreciation_account: string; // CTADEP
+  depreciation_expense_account: string; // CTADES
+  annual_depreciation_rate: number; // TAXA
+  depreciation_method: DepreciationMethod; // TIPODEPREC
+  useful_life_months: number;
+  _tenantId: string;
+}
+
+export enum AccountType {
+  SYNTHETIC = 'S',
+  ANALYTICAL = 'A'
+}
+
+export enum AccountNature {
+  DEBIT = 'D',
+  CREDIT = 'C'
+}
+
+export enum AccountClassification {
+  ASSET = 'ATIVO',
+  LIABILITY = 'PASSIVO',
+  EQUITY = 'PL',
+  REVENUE = 'RECEITA',
+  EXPENSE = 'DESPESA',
+  COST = 'CUSTO'
+}
+
+export interface ChartOfAccount {
+  id: string;
+  code: string; // COD_CTA
+  name: string; // NOME_CTA
+  type: AccountType; // IND_CTA
+  level: number; // NIVEL
+  parent_code?: string; // COD_CTA_SUP
+  nature: AccountNature; // NATUREZA
+  classification: AccountClassification; // CLASSIFICACAO
+  referential_code?: string; // COD_REF (SPED)
+  is_active: boolean; // STATUS
   _tenantId: string;
 }
 

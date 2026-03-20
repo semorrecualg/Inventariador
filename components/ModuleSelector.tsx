@@ -18,9 +18,9 @@ interface ModuleSelectorProps {
 
 const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, username }) => {
   return (
-    <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn">
+    <div className="min-h-screen bg-bg-main flex flex-col p-4 sm:p-6 animate-fadeIn overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-12">
+      <div className="flex items-center justify-between mb-6 sm:mb-12">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
             <ShieldCheck size={24} />
@@ -38,27 +38,27 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
         </button>
       </div>
 
-      <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full">
-        <div className="mb-10 text-center">
-          <h2 className="text-3xl font-bold text-ink mb-2 tracking-tight">Bem-vindo, {username}</h2>
-          <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Selecione o módulo de trabalho</p>
+      <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full py-4">
+        <div className="mb-6 sm:mb-10 text-center">
+          <h2 className="text-2xl sm:text-3xl font-bold text-ink mb-1 sm:mb-2 tracking-tight">Bem-vindo, {username}</h2>
+          <p className="text-ink-muted uppercase font-bold text-[10px] sm:text-xs tracking-[0.2em]">Selecione o módulo de trabalho</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Módulo Inventariador */}
           <button 
             onClick={() => onSelect(AppModule.INVENTORY)}
-            className="group relative bg-white border border-border rounded-[2.5rem] p-8 text-left transition-all hover:border-accent hover:shadow-2xl hover:shadow-accent/10 active:scale-[0.98] overflow-hidden"
+            className="group relative bg-white border border-border rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-accent hover:shadow-2xl hover:shadow-accent/10 active:scale-[0.98] overflow-hidden"
           >
-            <div className="absolute top-0 right-0 w-48 h-48 bg-accent/5 rounded-full -mr-24 -mt-24 blur-3xl group-hover:bg-accent/10 transition-colors" />
+            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-accent/5 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-accent/10 transition-colors" />
             
             <div className="relative z-10">
-              <div className="w-16 h-16 bg-accent/10 rounded-2xl flex items-center justify-center text-accent mb-6 group-hover:scale-110 transition-transform">
-                <ClipboardCheck size={32} />
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-accent/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-accent mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+                <ClipboardCheck size={28} className="sm:w-8 sm:h-8" />
               </div>
               
-              <h3 className="text-2xl font-bold text-ink mb-3 tracking-tight uppercase">Inventariador</h3>
-              <p className="text-ink-muted text-sm mb-8 leading-relaxed">
+              <h3 className="text-xl sm:text-2xl font-bold text-ink mb-2 sm:mb-3 tracking-tight uppercase">Inventariador</h3>
+              <p className="text-ink-muted text-xs sm:text-sm mb-4 sm:mb-8 leading-relaxed">
                 Controle físico, etiquetagem, geolocalização e auditoria de campo em tempo real.
               </p>
 
@@ -81,17 +81,17 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
           {/* Módulo Controle de Ativo Imobilizado */}
           <button 
             onClick={() => onSelect(AppModule.ASSET_CONTROL)}
-            className="group relative bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 text-left transition-all hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-500/10 active:scale-[0.98] overflow-hidden"
+            className="group relative bg-slate-900 border border-slate-800 rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-500/10 active:scale-[0.98] overflow-hidden"
           >
-            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full -mr-24 -mt-24 blur-3xl group-hover:bg-emerald-500/20 transition-colors" />
+            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-emerald-500/10 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-emerald-500/20 transition-colors" />
             
             <div className="relative z-10">
-              <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 mb-6 group-hover:scale-110 transition-transform">
-                <Calculator size={32} />
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-emerald-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+                <Calculator size={28} className="sm:w-8 sm:h-8" />
               </div>
               
-              <h3 className="text-2xl font-bold text-white mb-3 tracking-tight uppercase">Controle de Ativo</h3>
-              <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+              <h3 className="text-xl sm:text-2xl font-bold text-white mb-2 sm:mb-3 tracking-tight uppercase">Controle de Ativo</h3>
+              <p className="text-slate-400 text-xs sm:text-sm mb-4 sm:mb-8 leading-relaxed">
                 Gestão contábil, cálculos de depreciação, correção monetária e relatórios fiscais.
               </p>
 

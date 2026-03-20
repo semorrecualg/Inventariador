@@ -118,6 +118,8 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'batterySaver',
     'protheusIntegrationEnabled',
     'protheusApiUrl',
+    'mandatoryPhotoOnDivergence',
+    'mandatoryPhotoOnNewItem',
     '_tenantId'
   ];
 
