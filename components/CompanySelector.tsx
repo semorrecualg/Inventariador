@@ -7,9 +7,12 @@ interface CompanySelectorProps {
   companies: Array<{ name: string; hasData: boolean }>;
   onSelect: (company: string) => void;
   onBack: () => void;
+  onSync?: () => void;
+  isSyncing?: boolean;
+  lastSyncTime?: string | null;
 }
 
-const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, onBack }) => {
+const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, onBack, onSync, isSyncing }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredCompanies = companies.filter(c => 
@@ -54,8 +57,24 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
             <h2 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Unidade Operacional</h2>
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
-          <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
-            <LayoutGrid size={24} />
+          <div className="flex items-center space-x-2">
+            {onSync && (
+              <button 
+                onClick={onSync}
+                disabled={isSyncing}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-white text-accent border border-accent/10 active:scale-95'}`}
+              >
+                <div className={isSyncing ? 'animate-spin' : ''}>
+                  <LayoutGrid size={20} className={isSyncing ? 'hidden' : ''} />
+                  <svg className={isSyncing ? 'w-5 h-5' : 'hidden'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                </div>
+              </button>
+            )}
+            <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
+              <LayoutGrid size={24} />
+            </div>
           </div>
         </div>
 

@@ -27,7 +27,7 @@ import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import { AppModule } from './types';
 
-import { Building2, ShieldCheck } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud } from './services/supabaseService';
@@ -1648,6 +1648,13 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
+  // Auto-sync on Company Selection if base is empty
+  useEffect(() => {
+    if (screen === AppScreen.COMPANY_SELECTION && inventory.assets.length === 0 && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && user?.tenantId) {
+      syncFromCloud(user.tenantId, databaseMode);
+    }
+  }, [screen, inventory.assets.length, databaseMode, isSyncing, user?.tenantId, syncFromCloud]);
+
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION && screen !== AppScreen.MAIN_MENU;
 
   if (publicAsset) {
@@ -1952,7 +1959,25 @@ const App: React.FC = () => {
               companyName={selectedCompany || ''}
             />
           )}
-          {screen === AppScreen.COMPANY_SELECTION && <CompanySelector companies={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasActiveAssets }))} onSelect={(c) => { setSelectedCompany(c); setIsInventorying(false); setInventoryLocation(null); pushScreen(AppScreen.MAIN_MENU); }} onBack={() => { setUser(null); setSelectedCompany(null); pushScreen(AppScreen.LOGIN); }} />}
+          {screen === AppScreen.COMPANY_SELECTION && (
+            <CompanySelector 
+              companies={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasActiveAssets }))} 
+              onSelect={(c) => { 
+                setSelectedCompany(c); 
+                setIsInventorying(false); 
+                setInventoryLocation(null); 
+                pushScreen(AppScreen.MAIN_MENU); 
+              }} 
+              onBack={() => { 
+                setUser(null); 
+                setSelectedCompany(null); 
+                pushScreen(AppScreen.LOGIN); 
+              }} 
+              onSync={syncFromCloud}
+              isSyncing={isSyncing}
+              lastSyncTime={lastSyncTime}
+            />
+          )}
           {screen === AppScreen.DASHBOARD && (
             <Dashboard 
               assets={filteredAssetsByCompany} 
@@ -2049,6 +2074,20 @@ const App: React.FC = () => {
         confirmText="Continuar"
         cancelText="Cancelar"
       />
+
+      {isSyncing && (screen === AppScreen.COMPANY_SELECTION || screen === AppScreen.MODULE_SELECTION) && (
+        <div className="fixed inset-0 z-[10000] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn">
+          <div className="relative w-24 h-24 mb-6">
+            <div className="absolute inset-0 border-4 border-accent/10 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center text-accent">
+              <Cloud size={32} className="animate-pulse" />
+            </div>
+          </div>
+          <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">Sincronizando Base</h3>
+          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">Aguarde, baixando dados da nuvem...</p>
+        </div>
+      )}
     </ErrorBoundary>
   );
 };
