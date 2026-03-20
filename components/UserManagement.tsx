@@ -16,7 +16,8 @@ import {
   Save,
   ChevronRight,
   Eye,
-  EyeOff
+  EyeOff,
+  Check
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -24,9 +25,10 @@ interface UserManagementProps {
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   onBack: () => void;
   currentUser: User | null;
+  availableTenants: string[];
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, availableTenants }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -53,6 +55,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
+  const [newTenants, setNewTenants] = useState<string[]>(currentUser?.tenantId ? [currentUser.tenantId] : []);
+  const [newCustomTenant, setNewCustomTenant] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   // States para Edição
@@ -60,6 +64,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState<UserRole>(UserRole.AUDITOR);
+  const [editTenants, setEditTenants] = useState<string[]>([]);
+  const [editCustomTenant, setEditCustomTenant] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
 
   const handleAddUser = (e: React.FormEvent) => {
@@ -83,7 +89,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       role: newRole,
       isAdmin: newRole === UserRole.ADMIN,
       mustChangePassword: true,
-      tenantId: currentUser?.tenantId || 'default'
+      tenants: newTenants.length > 0 ? newTenants : (currentUser?.tenantId ? [currentUser.tenantId] : ['default']),
+      tenantId: newTenants[0] || currentUser?.tenantId || 'default'
     };
 
     setUsers(prev => {
@@ -105,6 +112,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditEmail(user.email);
     setEditPassword(user.password || '');
     setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
+    setEditTenants(user.tenants || (user.tenantId ? [user.tenantId] : []));
+    setEditCustomTenant('');
     setIsEditModalOpen(true);
   };
 
@@ -125,7 +134,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setUsers(prev => {
       const updated = prev.map(u => 
         u.email === selectedUser.email 
-          ? { ...u, username, email, password, role: editRole, isAdmin: editRole === UserRole.ADMIN } 
+          ? { 
+              ...u, 
+              username, 
+              email, 
+              password, 
+              role: editRole, 
+              isAdmin: editRole === UserRole.ADMIN, 
+              tenants: editTenants,
+              tenantId: editTenants[0] || u.tenantId
+            } 
           : u
       );
       localStorage.setItem('app_users', JSON.stringify(updated));
@@ -188,6 +206,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">LOGIN ID</span>
                 </div>
                 <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest truncate">{u.email}</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Empresas:</span>
+                  {(u.tenants && u.tenants.length > 0 ? u.tenants : [u.tenantId || 'GLOBAL']).map(t => (
+                    <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
+                  ))}
+                </div>
               </div>
             </div>
             
@@ -258,6 +282,50 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   </button>
                 </div>
               </div>
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
+                <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
+                  {Array.from(new Set([...availableTenants, ...editTenants])).map(tenant => (
+                    <label key={tenant} className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group">
+                      <div 
+                        onClick={() => {
+                          setEditTenants(prev => 
+                            prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                          );
+                        }}
+                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}
+                      >
+                        {editTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
+                      </div>
+                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
+                    </label>
+                  ))}
+                  
+                  <div className="pt-2 border-t border-border/50">
+                    <div className="flex items-center space-x-2">
+                      <input 
+                        type="text" 
+                        placeholder="Novo ID..." 
+                        value={editCustomTenant}
+                        onChange={(e) => setEditCustomTenant(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          if (editCustomTenant && !editTenants.includes(editCustomTenant)) {
+                            setEditTenants(prev => [...prev, editCustomTenant]);
+                            setEditCustomTenant('');
+                          }
+                        }}
+                        className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail</label>
                 <div className="relative">
@@ -284,6 +352,50 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Criação de Username de Acesso</p>
             </div>
             <form onSubmit={handleAddUser} className="space-y-5">
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
+                <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
+                  {Array.from(new Set([...availableTenants, ...newTenants])).map(tenant => (
+                    <label key={tenant} className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group">
+                      <div 
+                        onClick={() => {
+                          setNewTenants(prev => 
+                            prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                          );
+                        }}
+                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${newTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}
+                      >
+                        {newTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
+                      </div>
+                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
+                    </label>
+                  ))}
+                  
+                  <div className="pt-2 border-t border-border/50">
+                    <div className="flex items-center space-x-2">
+                      <input 
+                        type="text" 
+                        placeholder="Novo ID..." 
+                        value={newCustomTenant}
+                        onChange={(e) => setNewCustomTenant(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          if (newCustomTenant && !newTenants.includes(newCustomTenant)) {
+                            setNewTenants(prev => [...prev, newCustomTenant]);
+                            setNewCustomTenant('');
+                          }
+                        }}
+                        className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username</label>
                 <input type="text" required autoComplete="off" placeholder="EX: PEDRO.GBR" value={newUsername} onChange={(e) => setNewUsername(e.target.value.toUpperCase())} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />

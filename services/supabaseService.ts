@@ -247,14 +247,18 @@ export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Ass
 /**
  * Busca todo o inventário (ativos e configuração) do Supabase
  */
-export const fetchFullInventory = async (tenantId?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+export const fetchFullInventory = async (tenantId?: string | string[]): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase) return null;
 
   try {
     // 1. Busca todos os ativos filtrados por tenantId
     let assetsQuery = supabase.from('assets').select('*');
     if (tenantId) {
-      assetsQuery = assetsQuery.eq('_tenantId', tenantId);
+      if (Array.isArray(tenantId)) {
+        assetsQuery = assetsQuery.in('_tenantId', tenantId);
+      } else {
+        assetsQuery = assetsQuery.eq('_tenantId', tenantId);
+      }
     }
     const { data: assets, error: assetsError } = await assetsQuery;
 

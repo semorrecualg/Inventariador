@@ -100,11 +100,26 @@ O sistema possui um módulo dedicado para comunicação com o ERP TOTVS Protheus
 
 ---
 
-## 8. Procedimentos de Manutenção
-- **Limpeza de Dados**: Realizada via menu "Dados" (Purge).
-- **Sincronização Cloud**: O sistema detecta alterações locais e solicita sincronização com o Firebase para manter a base centralizada.
+## 9. Manual de Procedimentos Operacionais
+
+Este capítulo detalha os procedimentos padrão para a gestão e operação do sistema GBR v24.50.
+
+### 9.1. Criação de Perfil Auditor (Fluxo de Segurança)
+
+Para que um auditor atenda aos requisitos de segurança, isolamento de dados (Multi-Tenancy) e funcionalidade plena no campo, o Administrador deve seguir rigorosamente este procedimento:
+
+1.  **Acesso à Gestão**: No menu principal (logado como ADMIN), acesse o módulo **"Gestão de Usuários"**.
+2.  **Novo Cadastro**: Clique no botão **"+"** para iniciar a criação de uma nova credencial.
+3.  **Empresas Autorizadas (ListBox)**: Em vez de digitar um ID, agora você utiliza uma lista de seleção (ListBox) onde pode **marcar ou desmarcar** quais empresas o auditor terá acesso.
+    - *Seleção Múltipla*: Um auditor pode ser vinculado a várias unidades simultaneamente.
+    - *Novos IDs*: Se a empresa desejada não estiver na lista, utilize o campo "Novo ID..." para adicioná-la à seleção.
+    - *Nota Crítica*: O auditor só visualizará e sincronizará ativos que pertençam a uma das empresas marcadas.
+4.  **Definição de Perfil**: Selecione obrigatoriamente o perfil **AUDITOR**. 
+    - Este perfil restringe o acesso apenas às funções de campo (Inventário, Consulta), bloqueando funções administrativas como limpeza de base, alteração de configurações globais ou visualização de outras unidades.
+5.  **Credenciais**: Defina um *Username* (ex: `PEDRO.GBR`) e uma *Senha* segura.
+6.  **Login e Sincronização**: O auditor utilizará estas credenciais para entrar. O sistema identificará automaticamente o `tenantId` vinculado e realizará a sincronização apenas dos dados pertinentes àquela unidade.
 
 ---
 
-*Documentação atualizada em: 19 de Março de 2026*
-*Versão do App: 24.50.05 KARDEK ENTERPRISE*
+*Documentação atualizada em: 20 de Março de 2026*
+*Versão do App: 24.50.06 KARDEK ENTERPRISE*

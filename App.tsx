@@ -227,11 +227,19 @@ const App: React.FC = () => {
     }
   }, [databaseMode, inventory]);
 
-  const syncFromCloud = useCallback(async (explicitTenantId?: string, explicitMode?: DatabaseMode) => {
+  const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode) => {
     const mode = explicitMode || databaseMode;
     if (mode === DatabaseMode.INTERNAL) return;
     
-    const tenantId = explicitTenantId || user?.tenantId;
+    const tenantId = explicitTenantId || user?.tenants || user?.tenantId;
+    
+    // Se não temos tenantId e estamos em modo nuvem, não faz sentido tentar sincronizar
+    // pois a base é multi-tenant e o RLS vai bloquear ou retornará vazio/global.
+    if (!tenantId || (Array.isArray(tenantId) && tenantId.length === 0)) {
+      console.log('Sincronização ignorada: Nenhum tenantId disponível.');
+      return;
+    }
+
     setIsSyncing(true);
     try {
       // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
@@ -442,8 +450,8 @@ const App: React.FC = () => {
         savedInventory = await loadInventory();
         const saved = savedInventory;
         
-        // Se não houver dados locais e estivermos em modo nuvem, tenta sincronizar
-        if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL) {
+        // Se não houver dados locais e estivermos em modo nuvem, tenta sincronizar (apenas se houver usuário logado)
+        if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
           await syncFromCloud();
           return;
         }
@@ -1060,12 +1068,23 @@ const App: React.FC = () => {
     }
   };
 
+  const availableTenants = useMemo(() => {
+    const fromAssets = inventory.assets.map(a => a._tenantId).filter(Boolean);
+    const fromUsers = users.flatMap(u => {
+      const t = [];
+      if (u.tenantId) t.push(u.tenantId);
+      if (u.tenants) t.push(...u.tenants);
+      return t;
+    }).filter(Boolean);
+    return Array.from(new Set([...fromAssets, ...fromUsers])) as string[];
+  }, [inventory.assets, users]);
+
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);
     localStorage.setItem('app_database_mode', mode);
     
-    // Se mudou para modo nuvem e está vazio, tenta sincronizar
-    if (mode !== DatabaseMode.INTERNAL && inventory.assets.length === 0) {
+    // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
+    if (mode !== DatabaseMode.INTERNAL && inventory.assets.length === 0 && user) {
       syncFromCloud();
     }
   };
@@ -1638,28 +1657,57 @@ const App: React.FC = () => {
   }, [selectedCompany, filteredAssetsByCompany, user, bulkUpdateAssets, popScreen]);
 
   const fullCompaniesWithStatus = useMemo(() => {
-    return inventory.companies.map(company => {
-      const companyAssets = inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
-      const hasData = companyAssets.length > 0;
-      const hasActiveAssets = companyAssets.some(a => 
-        String(a.STATUS || '').toUpperCase().includes('ATIVO')
-      );
-      return {
-        name: company,
-        hasData,
-        hasActiveAssets
-      };
-    });
-  }, [inventory.companies, inventory.assets, normalizeKey]);
+    const userTenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
+    const isAuditor = user?.role === UserRole.AUDITOR;
+
+    return inventory.companies
+      .filter(company => {
+        if (!isAuditor || userTenants.length === 0) return true;
+        // Se for auditor, só mostra as empresas que estão na sua lista de tenants
+        // ou se o nome da empresa bater com o tenantId (caso o tenantId seja o nome da empresa)
+        return userTenants.some(t => 
+          normalizeKey(t) === normalizeKey(company) || 
+          inventory.assets.some(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company) && normalizeKey(a._tenantId || '') === normalizeKey(t))
+        );
+      })
+      .map(company => {
+        const companyAssets = inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
+        const hasData = companyAssets.length > 0;
+        const hasActiveAssets = companyAssets.some(a => 
+          String(a.STATUS || '').toUpperCase().includes('ATIVO')
+        );
+        return {
+          name: company,
+          hasData,
+          hasActiveAssets
+        };
+      });
+  }, [inventory.companies, inventory.assets, normalizeKey, user, UserRole.AUDITOR]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   // Auto-sync on Company Selection if base is empty
   useEffect(() => {
-    if (screen === AppScreen.COMPANY_SELECTION && inventory.assets.length === 0 && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && user?.tenantId) {
-      syncFromCloud(user.tenantId, databaseMode);
+    const tenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
+    if (screen === AppScreen.COMPANY_SELECTION && inventory.assets.length === 0 && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
+      syncFromCloud(tenants, databaseMode);
     }
-  }, [screen, inventory.assets.length, databaseMode, isSyncing, user?.tenantId, syncFromCloud]);
+  }, [screen, inventory.assets.length, databaseMode, isSyncing, user, syncFromCloud]);
+
+  // Auto-select company if only one is available for the auditor
+  useEffect(() => {
+    if (screen === AppScreen.COMPANY_SELECTION && !selectedCompany && !isSyncing && inventory.assets.length > 0) {
+      const available = fullCompaniesWithStatus.filter(c => c.hasData);
+      if (available.length === 1 && user?.role === UserRole.AUDITOR) {
+        const company = available[0].name;
+        setSelectedCompany(company);
+        localStorage.setItem('app_selected_company', company);
+        setIsInventorying(false);
+        setInventoryLocation(null);
+        pushScreen(AppScreen.MAIN_MENU);
+      }
+    }
+  }, [screen, selectedCompany, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR]);
 
   const showCompanyHeader = !!selectedCompany && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.COMPANY_SELECTION && screen !== AppScreen.MAIN_MENU;
 
@@ -1728,7 +1776,7 @@ const App: React.FC = () => {
 
                 if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
                   // Passa o tenantId e o modo explicitamente para garantir sync imediato no login
-                  syncFromCloud(u.tenantId, databaseMode);
+                  syncFromCloud(u.tenants || u.tenantId, databaseMode);
                 }
 
                 if (u.mustChangePassword) { 
@@ -2039,7 +2087,7 @@ const App: React.FC = () => {
               }}
             />
           )}
-          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} availableTenants={availableTenants} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByCompany} onBack={popScreen} />}

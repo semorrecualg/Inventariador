@@ -11,7 +11,8 @@ export interface User {
   role: UserRole;
   isAdmin?: boolean; // Mantido para compatibilidade
   mustChangePassword?: boolean;
-  tenantId?: string;
+  tenantId?: string; // ID primário (legado)
+  tenants?: string[]; // Lista de IDs de empresas autorizadas
 }
 
 export interface AuditLogEntry {
