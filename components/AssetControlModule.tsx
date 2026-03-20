@@ -692,7 +692,89 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                     ) : null}
                   </div>
                 )}
-                {activeSubModule !== 'DASHBOARD' && activeSubModule !== 'ASSETS' && activeSubModule !== 'CATEGORIES' && (
+                {activeSubModule === 'REPORTS' && (
+                  <div className="space-y-6 animate-fadeIn">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight">Relatórios e Impressão</h2>
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Geração de documentos e listagens</p>
+                      </div>
+                      <button 
+                        onClick={() => window.print()}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Imprimir Relatório</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-200 transition-all cursor-pointer group">
+                        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                          <Package className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-bold text-slate-900 uppercase text-sm">Inventário Geral</h4>
+                        <p className="text-xs text-slate-500 mt-2">Listagem completa de todos os ativos cadastrados no sistema.</p>
+                      </div>
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-emerald-200 transition-all cursor-pointer group">
+                        <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                          <TrendingDown className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-bold text-slate-900 uppercase text-sm">Depreciação Mensal</h4>
+                        <p className="text-xs text-slate-500 mt-2">Relatório de valores depreciados no período selecionado.</p>
+                      </div>
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-amber-200 transition-all cursor-pointer group">
+                        <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                          <ArrowLeftRight className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-bold text-slate-900 uppercase text-sm">Movimentações</h4>
+                        <p className="text-xs text-slate-500 mt-2">Histórico de transferências e baixas de ativos.</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                      <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Prévia do Relatório</span>
+                        <div className="flex items-center gap-2">
+                           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                           <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">Dados Atualizados</span>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/50">
+                              <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100">Etiqueta</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100">Descrição</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100">Valor Aquisição</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {assets.slice(0, 10).map((asset) => (
+                              <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-6 py-4 text-xs font-bold text-slate-900">{asset.ETIQUETA}</td>
+                                <td className="px-6 py-4 text-xs text-slate-600 uppercase">{asset.DESCRICAODOATIVO}</td>
+                                <td className="px-6 py-4 text-xs font-bold text-slate-900">
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao) || Number(asset.VLRAQUISIC) || 0)}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest ${
+                                    asset._status_contabil === 'ATIVO' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
+                                  }`}>
+                                    {asset._status_contabil}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeSubModule !== 'DASHBOARD' && activeSubModule !== 'ASSETS' && activeSubModule !== 'CATEGORIES' && activeSubModule !== 'REPORTS' && (
                   <div className="flex flex-col items-center justify-center h-[60vh] text-slate-400">
                     <div className="p-6 bg-slate-100 rounded-full mb-4">
                       <History className="w-12 h-12" />

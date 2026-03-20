@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building } from 'lucide-react';
+import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building, RefreshCw, Cloud } from 'lucide-react';
 import BackButton from './BackButton';
 
 interface CompanySelectorProps {
@@ -62,13 +62,11 @@ const CompanySelector: React.FC<CompanySelectorProps> = ({ companies, onSelect, 
               <button 
                 onClick={onSync}
                 disabled={isSyncing}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-white text-accent border border-accent/10 active:scale-95'}`}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md ${isSyncing ? 'bg-blue-50 text-blue-500' : 'bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft'}`}
+                title="Sincronizar com a Nuvem"
               >
                 <div className={isSyncing ? 'animate-spin' : ''}>
-                  <LayoutGrid size={20} className={isSyncing ? 'hidden' : ''} />
-                  <svg className={isSyncing ? 'w-5 h-5' : 'hidden'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
+                  {isSyncing ? <RefreshCw size={20} /> : <Cloud size={20} />}
                 </div>
               </button>
             )}

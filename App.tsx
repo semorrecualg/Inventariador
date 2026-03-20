@@ -1017,12 +1017,18 @@ const App: React.FC = () => {
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
       const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.EMPRESA || '').toUpperCase().trim()));
       
-      setInventory(prev => ({
-        ...prev,
-        assets: remainingAssets,
-        lastUpdated: new Date().toISOString(),
-        status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
-      }));
+      setInventory(prev => {
+        const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
+        const remainingCompanies = prev.companies.filter(c => !normalizedToClear.includes(c.toUpperCase().trim()));
+        
+        return {
+          ...prev,
+          assets: remainingAssets,
+          companies: remainingCompanies,
+          lastUpdated: new Date().toISOString(),
+          status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
+        };
+      });
 
       setModalConfig({
         isOpen: true,
@@ -2075,7 +2081,7 @@ const App: React.FC = () => {
         cancelText="Cancelar"
       />
 
-      {isSyncing && (screen === AppScreen.COMPANY_SELECTION || screen === AppScreen.MODULE_SELECTION) && (
+      {isSyncing && (
         <div className="fixed inset-0 z-[10000] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn">
           <div className="relative w-24 h-24 mb-6">
             <div className="absolute inset-0 border-4 border-accent/10 rounded-full"></div>

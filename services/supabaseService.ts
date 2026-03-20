@@ -77,7 +77,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
       _lat: lat,
       _lng: lng,
       _conferido: conferido,
-      _tenantId: tenantId || a._tenantId || 'default'
+      _tenantId: tenantId || a._tenantId || 'default',
+      EMPRESA: (cleanAsset.EMPRESA || '').toUpperCase().trim()
     };
   });
 
@@ -358,6 +359,8 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
   if (!supabase) return;
 
   try {
+    console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantId || 'GLOBAL'}`);
+    
     // 1. Limpa os ativos
     let query = supabase.from('assets').delete();
     
@@ -380,12 +383,14 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
       }
     }
 
-    const { error: assetsError } = await query;
+    const { error: assetsError, count } = await query.select('id', { count: 'exact', head: false });
 
     if (assetsError) {
       console.error('Erro ao limpar ativos na nuvem:', assetsError);
       throw assetsError;
     }
+    
+    console.log(`[Supabase] Limpeza de ativos concluída. Registros afetados: ${count || 'desconhecido'}`);
 
     // 2. Limpa a configuração (apenas se estiver limpando TUDO)
     if (!companyToClear) {

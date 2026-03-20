@@ -6,7 +6,8 @@ import {
   FileSpreadsheet, 
   Activity,
   CheckSquare,
-  Square
+  Square,
+  CheckCircle2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
@@ -374,22 +375,61 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         {step === 'SUMMARY' && summary && (
           <div className="space-y-6 animate-slideUp">
             <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
-               <span className="text-[9px] font-bold uppercase text-emerald-600 tracking-[0.2em]">Carga Finalizada</span>
-               <div className="flex items-baseline space-x-2 mt-3">
-                  <h3 className="text-4xl font-bold tracking-tight text-slate-900">{summary.rows}</h3>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens</span>
+               <div className="flex justify-between items-start mb-4">
+                 <div>
+                   <span className="text-[9px] font-bold uppercase text-emerald-600 tracking-[0.2em]">Carga Finalizada</span>
+                   <h3 className="text-4xl font-bold tracking-tight text-slate-900 mt-1">{summary.rows}</h3>
+                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens Processados</p>
+                 </div>
+                 <div className="text-right">
+                   <div className="bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                     <span className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">{Object.keys(summary.companies).length} Unidades</span>
+                   </div>
+                 </div>
                </div>
-               <div className="mt-6 space-y-3">
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-inner">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Colunas</span>
-                    <span className="text-sm font-bold text-blue-600">{summary.cols}</span>
+
+               <div className="grid grid-cols-2 gap-3 mt-6">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Colunas</span>
+                    <span className="text-lg font-bold text-slate-900">{summary.cols}</span>
                   </div>
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-inner">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Endereços</span>
-                    <span className="text-sm font-bold text-blue-600">{summary.locationsMasterCount}</span>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Endereços</span>
+                    <span className="text-lg font-bold text-slate-900">{summary.locationsMasterCount}</span>
                   </div>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Com Plaqueta</span>
+                    <span className="text-lg font-bold text-emerald-600">{summary.withPlaqueta}</span>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Descartados</span>
+                    <span className="text-lg font-bold text-rose-500">{summary.purgedRows}</span>
+                  </div>
+               </div>
+
+               <div className="mt-6 pt-6 border-t border-slate-100">
+                 <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-4">Distribuição por Unidade</h4>
+                 <div className="space-y-2 max-h-[20vh] overflow-y-auto no-scrollbar pr-1">
+                   {Object.entries(summary.companies).map(([name, count]) => (
+                     <div key={name} className="flex justify-between items-center text-[11px]">
+                       <span className="font-medium text-slate-600 truncate mr-4">{name}</span>
+                       <span className="font-bold text-slate-900">{count}</span>
+                     </div>
+                   ))}
+                 </div>
                </div>
             </div>
+            
+            <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex items-start space-x-3">
+              <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center text-amber-600 shrink-0">
+                <CheckCircle2 size={18} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold text-amber-900 uppercase tracking-tight">Pronto para Ativação</p>
+                <p className="text-[10px] text-amber-700 mt-0.5">A base foi validada e está pronta para ser sincronizada com a nuvem.</p>
+              </div>
+            </div>
+
             <button onClick={() => onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort())} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3">
               <span>ATIVAR SISTEMA</span> <ArrowRight size={18} />
             </button>
