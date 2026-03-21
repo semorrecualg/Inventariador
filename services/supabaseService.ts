@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState } from '../types';
+import { Asset, InventoryState, User } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -210,6 +210,81 @@ export const getUserPermissions = async (email: string) => {
 };
 
 /**
+ * Provisiona um usuário no Supabase Auth (Cria o login oficial)
+ * Nota: Como é um SPA, usamos signUp. Para evitar deslogar o admin,
+ * criamos uma instância temporária do cliente.
+ */
+export const provisionUserInAuth = async (email: string, password?: string) => {
+  if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
+    throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
+  }
+
+  try {
+    // Criamos um cliente temporário para não afetar a sessão do Admin logado
+    const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false, // Importante: não salvar esta sessão no localStorage
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      }
+    });
+
+    const { data, error } = await tempClient.auth.signUp({
+      email: email.toLowerCase().trim(),
+      password: password,
+      options: {
+        data: {
+          provisioned_by: 'admin_dashboard'
+        }
+      }
+    });
+
+    if (error) {
+      console.error('Erro no signUp do Supabase:', error);
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Erro inesperado no provisionamento:', err);
+    throw err;
+  }
+};
+
+/**
+ * Sincroniza a lista de usuários locais com a tabela de permissões no Supabase
+ */
+export const syncUsersToCloud = async (users: User[], tenantId?: string) => {
+  if (!supabase || !users || users.length === 0) return;
+
+  try {
+    const usersToSync = users.map(u => ({
+      email: u.email.toLowerCase().trim(),
+      username: u.username,
+      role: u.role,
+      isAdmin: u.isAdmin || u.role === 'ADMIN',
+      tenantId: u.tenantId || 'default',
+      tenants: u.tenants || [u.tenantId || 'default'],
+      _tenantId: tenantId || u.tenantId || 'default'
+    }));
+
+    const { error } = await supabase
+      .from('user_permissions')
+      .upsert(usersToSync, { onConflict: 'email' });
+
+    if (error) {
+      console.error('Erro ao sincronizar usuários com Supabase:', error);
+      throw error;
+    }
+    
+    console.log(`[Supabase] Sincronização de ${usersToSync.length} usuários concluída.`);
+  } catch (err) {
+    console.error('Erro inesperado na sincronização de usuários:', err);
+    throw err;
+  }
+};
+
+/**
  * Busca um ativo específico pela etiqueta no Supabase (para consulta pública via QR Code)
  */
 export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Asset | null> => {
@@ -366,7 +441,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantId || 'GLOBAL'}`);
     
     // 1. Limpa os ativos
-    let query = supabase.from('assets').delete();
+    let query = supabase.from('assets').delete({ count: 'exact' });
     
     // Filtro por Tenant (Segurança RLS)
     if (tenantId) {
@@ -387,7 +462,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
       }
     }
 
-    const { error: assetsError, count } = await query.select('id', { count: 'exact', head: false });
+    const { error: assetsError, count } = await query;
 
     if (assetsError) {
       console.error('Erro ao limpar ativos na nuvem:', assetsError);

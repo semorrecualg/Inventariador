@@ -30,7 +30,7 @@ import { AppModule } from './types';
 import { Building2, ShieldCheck, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
@@ -696,7 +696,7 @@ const App: React.FC = () => {
       if (!userList.find(u => u.username.toUpperCase() === "AUDITOR")) {
         userList.push({ 
           username: "AUDITOR", 
-          email: "auditor@gbr.com.br", 
+          email: "auditor@gbr.com", 
           password: "auditor", 
           role: UserRole.AUDITOR,
           isAdmin: false, 
@@ -707,6 +707,15 @@ const App: React.FC = () => {
       return userList;
     } catch { return []; }
   });
+
+  // Sincronização automática de usuários com o Supabase
+  useEffect(() => {
+    if (users.length > 0) {
+      syncUsersToCloud(users, user?.tenantId).catch(err => {
+        console.warn('[Supabase] Falha na sincronização silenciosa de usuários:', err);
+      });
+    }
+  }, [users, user?.tenantId]);
 
   const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
     return localStorage.getItem('app_inventory_location') || null;
@@ -1070,14 +1079,15 @@ const App: React.FC = () => {
 
   const availableTenants = useMemo(() => {
     const fromAssets = inventory.assets.map(a => a._tenantId).filter(Boolean);
+    const fromCompanies = inventory.companies.map(c => c.toLowerCase().replace(/\s/g, '_')).filter(Boolean);
     const fromUsers = users.flatMap(u => {
       const t = [];
       if (u.tenantId) t.push(u.tenantId);
       if (u.tenants) t.push(...u.tenants);
       return t;
     }).filter(Boolean);
-    return Array.from(new Set([...fromAssets, ...fromUsers])) as string[];
-  }, [inventory.assets, users]);
+    return Array.from(new Set([...fromAssets, ...fromCompanies, ...fromUsers])) as string[];
+  }, [inventory.assets, inventory.companies, users]);
 
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);

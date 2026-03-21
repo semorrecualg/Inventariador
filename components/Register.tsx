@@ -90,11 +90,17 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
       return;
     }
 
+    let finalEmail = email.toLowerCase().trim();
+    if (!finalEmail.endsWith('@gbr.com')) {
+      const prefix = finalEmail.split('@')[0];
+      finalEmail = `${prefix}@gbr.com`;
+    }
+
     try {
       await signUp(
-        email.trim(), 
+        finalEmail, 
         password, 
-        username.toUpperCase(), 
+        username, 
         tenantId.toLowerCase().trim(), 
         UserRole.ADMIN
       );
@@ -213,20 +219,24 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
             type="text" 
             required
             value={username}
-            onChange={(e) => setUsername(e.target.value.toUpperCase())}
-            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold uppercase shadow-sm text-sm"
-            placeholder="EX: JOAO.SILVA"
+            onChange={(e) => {
+              const val = e.target.value;
+              setUsername(val);
+              setEmail(val.toLowerCase() + "@gbr.com");
+            }}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: joao.silva"
           />
         </div>
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">E-mail Corporativo</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">E-mail Corporativo (Padrão @gbr.com)</label>
           <input 
             type="email" 
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
-            placeholder="contato@gbr.com.br"
+            placeholder="usuario@gbr.com"
           />
         </div>
         <div className="space-y-1">

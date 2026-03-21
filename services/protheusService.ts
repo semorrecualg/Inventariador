@@ -44,7 +44,7 @@ export const authenticateWithProtheus = async (
           message: 'Autenticação Protheus realizada com sucesso.',
           user: {
             username: username.toUpperCase(),
-            email: username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@gbr.com.br`
+            email: username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@gbr.com`
           }
         });
       } else {

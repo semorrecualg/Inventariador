@@ -17,8 +17,11 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Check
+  Check,
+  Cloud,
+  Loader2
 } from 'lucide-react';
+import { provisionUserInAuth } from '../services/supabaseService';
 
 interface UserManagementProps {
   users: User[];
@@ -58,6 +61,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newTenants, setNewTenants] = useState<string[]>(currentUser?.tenantId ? [currentUser.tenantId] : []);
   const [newCustomTenant, setNewCustomTenant] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [provisionOnCreate, setProvisionOnCreate] = useState(true);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
@@ -67,19 +71,43 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [editTenants, setEditTenants] = useState<string[]>([]);
   const [editCustomTenant, setEditCustomTenant] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
+  const [isProvisioning, setIsProvisioning] = useState(false);
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const username = newUsername.toUpperCase().trim();
-    const email = newEmail.toLowerCase().trim();
+    const username = newUsername.trim();
+    let email = newEmail.toLowerCase().trim();
     const password = newPassword.trim();
 
     if (!username || !email || !password) return;
+
+    // Regra de Ouro: Forçar domínio @gbr.com
+    if (!email.endsWith('@gbr.com')) {
+      const prefix = email.split('@')[0];
+      email = `${prefix}@gbr.com`;
+    }
 
     // Verificar duplicidade
     if (users.find(u => u.email.toLowerCase() === email || u.username.toUpperCase() === username)) {
       showModal("Erro de Cadastro", "Usuário ou E-mail já cadastrado!", "error");
       return;
+    }
+
+    // Provisionamento no Supabase Auth se solicitado
+    if (provisionOnCreate) {
+      setIsProvisioning(true);
+      try {
+        await provisionUserInAuth(email, password);
+      } catch (err) {
+        const error = err as { message?: string };
+        const msg = error.message || "Erro desconhecido";
+        if (!msg.includes("already registered")) {
+          showModal("Erro de Ativação Cloud", `O usuário foi criado localmente, mas não foi possível ativar na nuvem: ${msg}`, "warning");
+          // Não interrompemos a criação local, apenas avisamos
+        }
+      } finally {
+        setIsProvisioning(false);
+      }
     }
 
     const newUser: User = {
@@ -117,13 +145,39 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setIsEditModalOpen(true);
   };
 
+  const handleProvision = async () => {
+    if (!selectedUser || !editEmail || !editPassword) return;
+    
+    setIsProvisioning(true);
+    try {
+      await provisionUserInAuth(editEmail, editPassword);
+      showModal("Sucesso", `O usuário ${editEmail} foi ativado no Supabase Auth com sucesso!`, "success");
+    } catch (err) {
+      const error = err as { message?: string };
+      const msg = error.message || "Erro desconhecido";
+      if (msg.includes("already registered")) {
+        showModal("Aviso", "Este e-mail já possui acesso ativo no Supabase Cloud.", "warning");
+      } else {
+        showModal("Erro de Ativação", `Não foi possível ativar o acesso: ${msg}`, "error");
+      }
+    } finally {
+      setIsProvisioning(false);
+    }
+  };
+
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || !editUsername || !editEmail || !editPassword) return;
 
-    const username = editUsername.toUpperCase().trim();
-    const email = editEmail.toLowerCase().trim();
+    const username = editUsername.trim();
+    let email = editEmail.toLowerCase().trim();
     const password = editPassword.trim();
+
+    // Regra de Ouro: Forçar domínio @gbr.com
+    if (!email.endsWith('@gbr.com')) {
+      const prefix = email.split('@')[0];
+      email = `${prefix}@gbr.com`;
+    }
 
     // Verificar duplicidade (excluindo o próprio usuário)
     if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username))) {
@@ -202,10 +256,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center space-x-3 mb-1">
-                  <span className="font-bold text-base uppercase text-ink tracking-tight truncate">{u.username}</span>
+                  <span className="font-bold text-base text-ink tracking-tight truncate">{u.username}</span>
                   <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">LOGIN ID</span>
                 </div>
-                <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest truncate">{u.email}</p>
+                <p className="text-[11px] font-bold text-ink-muted tracking-widest truncate">{u.email}</p>
                 <div className="flex flex-wrap gap-2 mt-1">
                   <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Empresas:</span>
                   {(u.tenants && u.tenants.length > 0 ? u.tenants : [u.tenantId || 'GLOBAL']).map(t => (
@@ -245,7 +299,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Login</label>
                 <div className="relative">
-                  <input type="text" required autoComplete="off" value={editUsername} onChange={(e) => setEditUsername(e.target.value.toUpperCase())} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm uppercase transition-all shadow-sm" />
+                  <input type="text" required autoComplete="off" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                 </div>
               </div>
@@ -286,19 +340,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
                 <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
                   {Array.from(new Set([...availableTenants, ...editTenants])).map(tenant => (
-                    <label key={tenant} className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group">
-                      <div 
-                        onClick={() => {
-                          setEditTenants(prev => 
-                            prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
-                          );
-                        }}
-                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}
-                      >
+                    <div 
+                      key={tenant} 
+                      onClick={() => {
+                        setEditTenants(prev => 
+                          prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                        );
+                      }}
+                      className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
+                    >
+                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
                         {editTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
                       </div>
                       <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
-                    </label>
+                    </div>
                   ))}
                   
                   <div className="pt-2 border-t border-border/50">
@@ -327,7 +382,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail (Padrão @gbr.com)</label>
                 <div className="relative">
                   <input type="email" required autoComplete="off" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
@@ -337,6 +392,26 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <Save size={18} />
                 <span className="text-sm">Atualizar Acesso</span>
               </button>
+
+              <div className="pt-4 border-t border-border/50">
+                <button 
+                  type="button"
+                  onClick={handleProvision}
+                  disabled={isProvisioning}
+                  className="w-full py-4 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-[2rem] font-bold uppercase tracking-[0.2em] active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
+                >
+                  {isProvisioning ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Cloud size={18} />
+                  )}
+                  <span>{isProvisioning ? 'Ativando...' : 'Ativar Acesso Cloud'}</span>
+                </button>
+                <p className="text-[9px] font-bold text-slate-400 text-center mt-3 uppercase tracking-widest leading-relaxed">
+                  Cria o login oficial no Supabase Auth <br/>
+                  usando o e-mail e senha acima.
+                </p>
+              </div>
             </form>
           </div>
         </div>
@@ -356,19 +431,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
                 <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
                   {Array.from(new Set([...availableTenants, ...newTenants])).map(tenant => (
-                    <label key={tenant} className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group">
-                      <div 
-                        onClick={() => {
-                          setNewTenants(prev => 
-                            prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
-                          );
-                        }}
-                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${newTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}
-                      >
+                    <div 
+                      key={tenant} 
+                      onClick={() => {
+                        setNewTenants(prev => 
+                          prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                        );
+                      }}
+                      className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
+                    >
+                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${newTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
                         {newTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
                       </div>
                       <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
-                    </label>
+                    </div>
                   ))}
                   
                   <div className="pt-2 border-t border-border/50">
@@ -398,11 +474,23 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username</label>
-                <input type="text" required autoComplete="off" placeholder="EX: PEDRO.GBR" value={newUsername} onChange={(e) => setNewUsername(e.target.value.toUpperCase())} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <input 
+                  type="text" 
+                  required 
+                  autoComplete="off" 
+                  placeholder="EX: pedro.gbr" 
+                  value={newUsername} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewUsername(val);
+                    setNewEmail(val.toLowerCase() + "@gbr.com");
+                  }} 
+                  className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail</label>
-                <input type="email" required autoComplete="off" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail (Padrão @gbr.com)</label>
+                <input type="email" required autoComplete="off" placeholder="usuario@gbr.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Perfil de Acesso</label>
@@ -436,8 +524,27 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   </button>
                 </div>
               </div>
-              <button type="submit" className="w-full py-4 bg-accent text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl shadow-accent/20 active:scale-95 transition-all mt-4 text-sm">
-                Confirmar Cadastro
+
+              <div 
+                className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
+                onClick={() => setProvisionOnCreate(!provisionOnCreate)}
+              >
+                <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${provisionOnCreate ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-emerald-200 bg-white'}`}>
+                  {provisionOnCreate && <Check size={12} strokeWidth={4} />}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-tight">Ativar Acesso Cloud Imediato</span>
+                  <span className="text-[8px] font-medium text-emerald-600/70 uppercase tracking-widest">Cria login no Supabase Auth agora</span>
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={isProvisioning}
+                className="w-full py-4 bg-accent text-white rounded-[2rem] font-bold uppercase tracking-[0.2em] shadow-xl shadow-accent/20 active:scale-95 transition-all mt-4 text-sm flex items-center justify-center space-x-3 disabled:opacity-50"
+              >
+                {isProvisioning && <Loader2 size={18} className="animate-spin" />}
+                <span>{isProvisioning ? 'Ativando Cloud...' : 'Confirmar Cadastro'}</span>
               </button>
             </form>
           </div>

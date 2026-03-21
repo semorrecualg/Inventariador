@@ -180,10 +180,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
       {/* COMPANY NAME BAR */}
-      <div className="px-5 py-2 bg-white border-b border-border z-30">
+      <div className="px-5 py-2 bg-white border-b border-border z-30 flex items-center justify-between">
         <h2 className="text-[11px] font-black text-ink uppercase tracking-tight truncate">
           {selectedCompany || 'NENHUMA EMPRESA SELECIONADA'}
         </h2>
+        <div className="flex items-center">
+          <img 
+            src="https://flagcdn.com/w40/br.png" 
+            alt="Brasil" 
+            className="h-6 w-auto rounded-sm shadow-sm"
+            referrerPolicy="no-referrer"
+          />
+        </div>
       </div>
 
       {/* USER PROFILE & IMMERSIVE TOGGLE (GREEN AREA MOVED UP) */}

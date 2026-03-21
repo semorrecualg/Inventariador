@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck } from 'lucide-react';
-import { getUserPermissions, signIn as supabaseSignIn } from '../services/supabaseService';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { getUserPermissions, signIn as supabaseSignIn, supabase } from '../services/supabaseService';
 import { authenticateWithProtheus } from '../services/protheusService';
 import { User, DatabaseMode, UserRole } from '../types';
 
@@ -17,6 +17,7 @@ interface LoginProps {
 const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,35 +44,39 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         }
 
         // 2. Busca permissões no Supabase
-        const permissions = await getUserPermissions(authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com.br`);
+        const permissions = await getUserPermissions(authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`);
         
         loggedUser = {
-          username: authResult.user?.username || username.trim().toUpperCase(),
-          email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com.br`,
+          username: authResult.user?.username || username.trim(),
+          email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`,
           role: permissions.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR,
           isAdmin: permissions.isAdmin || false,
           mustChangePassword: false,
           tenantId: permissions.tenantId || 'default'
         };
       } else if (databaseMode === DatabaseMode.SUPABASE) {
-        // Autenticação via Supabase Auth
-        const signInResult = await supabaseSignIn(username.trim(), password);
-        const { user: sbUser } = signInResult;
+        // Autenticação Direta via Tabela de Permissões (Bypassa necessidade de e-mail real)
+        const { data: cloudUsers, error: cloudError } = await supabase!
+          .from('user_permissions')
+          .select('*')
+          .eq('email', username.trim().toLowerCase());
+
+        if (cloudError) throw new Error("Erro ao conectar com a nuvem.");
         
-        if (!sbUser) throw new Error("Usuário não encontrado.");
-
-        // Identifica se é admin pelo e-mail ou pelo papel (role) nos metadados
-        const isEmailAdmin = sbUser.email?.toLowerCase() === "semorr@gmail.com";
-        const isRoleAdmin = sbUser.user_metadata?.role === UserRole.ADMIN || sbUser.user_metadata?.role === 'ADMIN';
-        const isAdmin = isEmailAdmin || isRoleAdmin;
-
+        const cloudUser = cloudUsers?.[0];
+        
+        if (!cloudUser || cloudUser.password !== password) {
+          throw new Error("Credenciais Cloud inválidas ou usuário não sincronizado.");
+        }
+        
         loggedUser = {
-          username: sbUser.user_metadata?.username || sbUser.email?.split('@')[0].toUpperCase() || 'USUÁRIO',
-          email: sbUser.email || '',
-          role: isAdmin ? UserRole.ADMIN : UserRole.AUDITOR,
-          isAdmin: isAdmin,
+          username: cloudUser.username,
+          email: cloudUser.email,
+          role: cloudUser.role as UserRole,
+          isAdmin: cloudUser.isAdmin,
           mustChangePassword: false,
-          tenantId: sbUser.user_metadata?.tenantId || 'default'
+          tenantId: cloudUser.tenantId || 'default',
+          tenants: cloudUser.tenants || [cloudUser.tenantId || 'default']
         };
       } else {
         // Banco de Dados Interno (Independente)
@@ -219,14 +224,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         
         <div className="space-y-1 animate-fadeIn">
           <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] ml-1">{config.passLabel}</label>
-          <input 
-            type="password" 
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={`w-full px-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm`}
-            placeholder={config.passPlaceholder}
-          />
+          <div className="relative">
+            <input 
+              type={showPassword ? "text" : "password"} 
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={`w-full px-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm pr-12`}
+              placeholder={config.passPlaceholder}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-accent/40 hover:text-accent transition-colors"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
         </div>
 
         <button 
