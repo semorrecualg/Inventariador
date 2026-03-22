@@ -31,7 +31,9 @@ import {
   Keyboard,
   Calendar,
   User,
-  Mic
+  Mic,
+  ShieldAlert,
+  Activity
 } from 'lucide-react';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -259,6 +261,12 @@ const AssetCard = React.memo(({
               {String(tag)}
             </span>
           ))}
+          {(asset._lat || asset._lng) && (
+            <div className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-slate-100 text-slate-600 border border-slate-200 flex items-center space-x-1">
+              <MapPin size={8} />
+              <span>{asset._lat?.toFixed(4)}, {asset._lng?.toFixed(4)}</span>
+            </div>
+          )}
         </div>
 
         {asset.DE_PARA === 'COM ALTERAÇÃO' && (
@@ -344,6 +352,9 @@ interface InventoryProps {
   immersiveMode: boolean;
   onToggleFullscreen: () => void;
   batterySaver: boolean;
+  isGpsAvailable?: boolean | null;
+  databaseMode: 'INTERNAL' | 'SUPABASE';
+  onSyncFromCloud: () => Promise<void>;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -372,7 +383,10 @@ const Inventory: React.FC<InventoryProps> = ({
   clearInventorySearchValue, 
   immersiveMode, 
   onToggleFullscreen, 
-  batterySaver 
+  batterySaver,
+  isGpsAvailable,
+  databaseMode,
+  onSyncFromCloud
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -1048,7 +1062,29 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
             <h1 className="text-2xl font-bold text-ink uppercase tracking-tight">Mapeamento Geográfico</h1>
-            <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mt-2">Selecione uma localidade para auditoria</p>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Selecione uma localidade para auditoria</p>
+              {databaseMode === 'INTERNAL' ? (
+                <div className="flex items-center space-x-1 bg-warning/10 px-2 py-1 rounded-lg border border-warning/20">
+                  <ShieldAlert size={10} className="text-warning" />
+                  <span className="text-[8px] font-black text-warning uppercase tracking-widest">Modo Offline</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <button 
+                    onClick={onSyncFromCloud}
+                    className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20 hover:bg-accent/20 transition-colors"
+                  >
+                    <Activity size={10} className="text-accent" />
+                    <span className="text-[8px] font-black text-accent uppercase tracking-widest">Sincronizar Nuvem</span>
+                  </button>
+                  <div className="flex items-center space-x-1 bg-success/10 px-2 py-1 rounded-lg border border-success/20">
+                    <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                    <span className="text-[8px] font-black text-success uppercase tracking-widest">Real-time On</span>
+                  </div>
+                </div>
+              )}
+            </div>
             
             {isLocationSearchVisible && (
               <div className="mt-4 relative animate-fadeIn">
@@ -1123,6 +1159,14 @@ const Inventory: React.FC<InventoryProps> = ({
                 </button>
                 
                 <div className="flex items-center space-x-2">
+                  {isGpsAvailable !== undefined && (
+                    <div className={`flex items-center space-x-1 px-2 py-1 rounded-lg border shadow-sm transition-all ${isGpsAvailable ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : isGpsAvailable === false ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                      <MapPin size={12} className={isGpsAvailable ? 'animate-pulse' : ''} />
+                      <span className="text-[8px] font-black uppercase tracking-widest">
+                        {isGpsAvailable ? 'GPS OK' : isGpsAvailable === false ? 'GPS OFF' : 'GPS ?'}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center space-x-2">
                   {isBatchMode && (
                     <button 

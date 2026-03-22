@@ -5,7 +5,7 @@ import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset } from '../types';
 import BackButton from './BackButton';
-import { Layers, Info, X } from 'lucide-react';
+import { Layers, Info, X, ShieldAlert } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -15,6 +15,7 @@ declare module 'leaflet' {
 interface AssetMapProps {
   assets: Asset[];
   onBack: () => void;
+  databaseMode: 'INTERNAL' | 'SUPABASE';
 }
 
 // Componente para gerenciar a camada de calor (Heatmap)
@@ -42,7 +43,7 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
   return null;
 };
 
-const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
+const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => {
   const [showInfo, setShowInfo] = useState(true);
 
   // Prepara os pontos para o mapa de calor [lat, lng, intensidade]
@@ -112,6 +113,12 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
                   <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Ativos Mapeados</span>
                   <span className="text-lg font-bold text-ink tracking-tighter">{heatPoints.length}</span>
                 </div>
+                {databaseMode === 'INTERNAL' && (
+                  <div className="flex items-center space-x-1 bg-warning/10 px-2 py-1 rounded-lg border border-warning/20">
+                    <ShieldAlert size={10} className="text-warning" />
+                    <span className="text-[8px] font-black text-warning uppercase tracking-widest">Modo Offline</span>
+                  </div>
+                )}
                 <div className="flex flex-col text-right">
                   <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Total Conferidos</span>
                   <span className="text-lg font-bold text-accent tracking-tighter">

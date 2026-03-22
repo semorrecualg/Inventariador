@@ -294,6 +294,7 @@ export interface InventoryState {
   protheusApiUrl?: string;
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
+  databaseMode: 'INTERNAL' | 'SUPABASE';
 }
 
 export interface SyncQueueItem {

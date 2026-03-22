@@ -91,9 +91,9 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
     }
 
     let finalEmail = email.toLowerCase().trim();
-    if (!finalEmail.endsWith('@gbr.com')) {
-      const prefix = finalEmail.split('@')[0];
-      finalEmail = `${prefix}@gbr.com`;
+    // Removida restrição forçada de @gbr.com para permitir gbrauditor1@gmail.com e outros
+    if (!finalEmail.includes('@')) {
+      finalEmail = `${finalEmail}@gbr.com`;
     }
 
     try {

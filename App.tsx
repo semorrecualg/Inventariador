@@ -30,7 +30,8 @@ import { AppModule } from './types';
 import { Building2, ShieldCheck, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud } from './services/supabaseService';
+import { Session } from '@supabase/supabase-js';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, supabase, ensureUserProfile } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
@@ -121,6 +122,8 @@ const App: React.FC = () => {
     }
   }, []);
 
+
+
   const [history, setHistory] = useState<AppScreen[]>(() => {
     try {
       const saved = localStorage.getItem('app_screen_history');
@@ -131,6 +134,8 @@ const App: React.FC = () => {
       return [AppScreen.LOGIN];
     } catch { return [AppScreen.LOGIN]; }
   });
+
+  const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   const [selectedCompany, setSelectedCompany] = useState<string | null>(() => {
     return localStorage.getItem('app_selected_company') || null;
@@ -166,7 +171,8 @@ const App: React.FC = () => {
     protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
     protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
     mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
-    mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true'
+    mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
+    databaseMode: (localStorage.getItem('app_database_mode') as 'INTERNAL' | 'SUPABASE') || 'INTERNAL'
   });
 
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
@@ -190,6 +196,16 @@ const App: React.FC = () => {
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
+
+  // Efeito para garantir que a lista de empresas esteja sempre populada a partir dos ativos se estiver vazia
+  useEffect(() => {
+    if (inventory.assets.length > 0 && (!inventory.companies || inventory.companies.length === 0)) {
+      const extractedCompanies = Array.from(new Set(inventory.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
+      if (extractedCompanies.length > 0) {
+        setInventory(prev => ({ ...prev, companies: extractedCompanies }));
+      }
+    }
+  }, [inventory.assets, inventory.companies]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (databaseMode === DatabaseMode.INTERNAL) return;
@@ -260,10 +276,16 @@ const App: React.FC = () => {
       const cloudData = await fetchFullInventory(tenantId);
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         setInventory(prev => {
+          // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
+          const cloudCompanies = cloudData.config.companies || [];
+          const extractedCompanies = Array.from(new Set(cloudData.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
+          const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
+
           const newState: InventoryState = {
             ...prev,
             ...cloudData.config,
             assets: cloudData.assets,
+            companies: finalCompanies,
             status: DatabaseStatus.LOADED,
             lastUpdated: new Date().toISOString()
           };
@@ -342,10 +364,54 @@ const App: React.FC = () => {
       }
     });
 
+    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantId || 'default', (payload) => {
+      const { eventType, new: newAssetData, old: oldAssetData } = payload;
+      const newAsset = newAssetData as unknown as Asset;
+      const oldAsset = oldAssetData as unknown as Asset;
+      
+      setInventory(prev => {
+        let updatedAssets = [...prev.assets];
+        let hasChanges = false;
+        
+        if (eventType === 'INSERT') {
+          if (!updatedAssets.find(a => String(a.id) === String(newAsset.id))) {
+            updatedAssets.push(newAsset);
+            hasChanges = true;
+          }
+        } else if (eventType === 'UPDATE') {
+          const index = updatedAssets.findIndex(a => String(a.id) === String(newAsset.id));
+          if (index !== -1) {
+            // Só atualiza se não for um item que o usuário local acabou de mexer (dirty)
+            if (!dirtyAssetsRef.current.has(String(newAsset.id))) {
+              updatedAssets[index] = { ...updatedAssets[index], ...newAsset };
+              hasChanges = true;
+            }
+          } else {
+            // Se o item não existe localmente mas foi atualizado na nuvem, adicionamos
+            updatedAssets.push(newAsset);
+            hasChanges = true;
+          }
+        } else if (eventType === 'DELETE') {
+          const initialLength = updatedAssets.length;
+          updatedAssets = updatedAssets.filter(a => String(a.id) !== String(oldAsset.id));
+          if (updatedAssets.length !== initialLength) {
+            hasChanges = true;
+          }
+        }
+        
+        if (!hasChanges) return prev;
+
+        const newState = { ...prev, assets: updatedAssets };
+        saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado em tempo real:', e));
+        return newState;
+      });
+    });
+
     return () => {
       if (subscription) subscription.unsubscribe();
+      if (assetSubscription) assetSubscription.unsubscribe();
     };
-  }, [databaseMode, inventory.lastUpdated]);
+  }, [databaseMode, inventory.lastUpdated, user]);
 
   // Efeito para forçar sincronização se houver atualização pendente e o usuário for auditor
   useEffect(() => {
@@ -568,7 +634,16 @@ const App: React.FC = () => {
       } finally {
         setIsDataLoaded(true);
         
-        // Verifica se há atualizações na nuvem logo após o carregamento inicial
+        // @ts-expect-error - appStarted is a custom property for the loader fallback
+        window.appStarted = true;
+        // Remove o loader do index.html o mais rápido possível
+        const loader = document.getElementById('app-loader');
+        if (loader) {
+          loader.classList.add('hidden');
+          setTimeout(() => loader.remove(), 500);
+        }
+
+        // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background)
         if (databaseMode !== DatabaseMode.INTERNAL) {
           try {
             const cloudData = await fetchFullInventory(user?.tenantId);
@@ -602,15 +677,6 @@ const App: React.FC = () => {
           } catch (err) {
             console.warn('Falha ao verificar atualizações na nuvem no início:', err);
           }
-        }
-
-        // @ts-expect-error - appStarted is a custom property for the loader fallback
-        window.appStarted = true;
-        // Remove o loader do index.html
-        const loader = document.getElementById('app-loader');
-        if (loader) {
-          loader.classList.add('hidden');
-          setTimeout(() => loader.remove(), 500);
         }
       }
     };
@@ -991,10 +1057,144 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  const pushScreen = (s: AppScreen) => {
+  const pushScreen = useCallback((s: AppScreen) => {
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
     else setHistory(prev => [...prev, s]);
-  };
+  }, []);
+
+  // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
+  useEffect(() => {
+    if (!supabase) return;
+
+    // Função para processar o login a partir de uma sessão
+    const processSession = async (session: Session) => {
+      if (!session?.user) return;
+      
+      // Se já temos um usuário no estado e é o mesmo, não fazemos nada para evitar loop
+      if (user && user.email === session.user.email) return;
+
+      try {
+        // Garante que o usuário tenha um perfil na tabela user_permissions
+        const permissions = await ensureUserProfile(session.user.email!, session.user.user_metadata);
+        
+        const loggedUser: User = {
+          username: session.user.user_metadata?.username || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
+          email: session.user.email!,
+          role: (permissions.role as UserRole) || UserRole.AUDITOR,
+          isAdmin: !!permissions.isAdmin,
+          mustChangePassword: false,
+          tenantId: permissions.tenantId || 'default',
+          tenants: permissions.tenants || [permissions.tenantId || 'default']
+        };
+
+        // Atualiza estado global
+        setUser(loggedUser);
+        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        
+        // Se logou via Supabase, garante que o modo está correto
+        let targetMode = databaseMode;
+        if (databaseMode !== DatabaseMode.SUPABASE && databaseMode !== DatabaseMode.PROTHEUS_SUPABASE) {
+          targetMode = DatabaseMode.SUPABASE;
+          setDatabaseMode(DatabaseMode.SUPABASE);
+          localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+        }
+        
+        // Se estiver na tela de login ou registro, navega para o dashboard
+        const currentScreen = history[history.length - 1];
+        if (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER) {
+          // Se a base estiver vazia ou se acabamos de mudar para modo nuvem, tenta sincronizar
+          // Isso garante que o usuário veja os dados do seu tenant imediatamente
+          const isEmpty = inventory.assets.length === 0;
+          const modeChanged = targetMode !== databaseMode;
+
+          if ((isEmpty || modeChanged) && targetMode !== DatabaseMode.INTERNAL) {
+            syncFromCloud(loggedUser.tenants || loggedUser.tenantId, targetMode);
+          }
+          pushScreen(AppScreen.MODULE_SELECTION);
+        }
+      } catch (err) {
+        console.error('Erro ao processar login automático:', err);
+      }
+    };
+
+    // Verifica erros no hash ou query da URL (Magic Link expirado, etc)
+    const handleUrlErrors = () => {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      
+      let errorCode: string | null = null;
+      let errorDescription: string | null = null;
+
+      if (hash && hash.includes('error=')) {
+        const params = new URLSearchParams(hash.substring(1));
+        errorCode = params.get('error_code');
+        errorDescription = params.get('error_description');
+      } else if (search && search.includes('error=')) {
+        const params = new URLSearchParams(search);
+        errorCode = params.get('error_code');
+        errorDescription = params.get('error_description');
+      }
+      
+      if (errorCode) {
+        // Se o usuário já estiver logado, ignoramos erros de OTP expirado (clique redundante)
+        if (user && (errorCode === 'otp_expired' || errorDescription?.includes('expired'))) {
+          window.history.replaceState(null, '', window.location.pathname);
+          return;
+        }
+
+        if (errorCode === 'otp_expired' || errorDescription?.includes('expired')) {
+          setModalConfig({
+            isOpen: true,
+            title: 'Link de Acesso Expirado',
+            message: 'Este link de acesso (Magic Link) já expirou ou foi utilizado. Por favor, retorne à tela de login e solicite um novo link. Lembre-se que o link é de uso único e expira em 5 minutos.',
+            type: 'error'
+          });
+        } else if (errorCode === 'access_denied') {
+          setModalConfig({
+            isOpen: true,
+            title: 'Acesso Negado',
+            message: 'O link de acesso é inválido ou foi recusado pelo servidor. Verifique se você está utilizando o link mais recente enviado para seu e-mail.',
+            type: 'error'
+          });
+        } else {
+          setModalConfig({
+            isOpen: true,
+            title: 'Erro de Autenticação',
+            message: `Ocorreu um erro ao processar seu login: ${errorDescription || errorCode}. Tente novamente ou entre em contato com o suporte.`,
+            type: 'error'
+          });
+        }
+        // Limpa a URL para não mostrar o erro novamente
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    };
+
+    handleUrlErrors();
+
+    // Verifica sessão atual ao montar
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) processSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth event:', event);
+      
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+        processSession(session);
+      } else if (event === 'SIGNED_OUT') {
+        // Limpa estado se deslogar no Supabase
+        if (databaseMode !== DatabaseMode.INTERNAL) {
+          setUser(null);
+          localStorage.removeItem('app_current_user');
+          setHistory([AppScreen.LOGIN]);
+        }
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase, databaseMode, user]); // Reduzido para evitar re-execuções desnecessárias
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
@@ -1098,6 +1298,24 @@ const App: React.FC = () => {
       syncFromCloud();
     }
   };
+
+  const [isGpsAvailable, setIsGpsAvailable] = useState<boolean | null>(null);
+
+  // Verifica disponibilidade de GPS no início
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' }).then(result => {
+        setIsGpsAvailable(result.state === 'granted');
+        result.onchange = () => {
+          setIsGpsAvailable(result.state === 'granted');
+        };
+      }).catch(() => {
+        setIsGpsAvailable(null);
+      });
+    } else {
+      setIsGpsAvailable(false);
+    }
+  }, []);
 
   const popScreen = () => {
     setHistory(prev => {
@@ -1216,11 +1434,14 @@ const App: React.FC = () => {
     const assetWithGps = { ...updatedAsset };
     if (updatedAsset._conferido) {
       try {
+        // Tenta obter localização, mas não bloqueia se demorar muito
+        // Usamos um timeout menor aqui para não travar a experiência de scan rápido
         const loc = await getCurrentLocation();
         assetWithGps._lat = loc.lat;
         assetWithGps._lng = loc.lng;
       } catch (e) {
         console.warn('GPS não capturado:', e);
+        // Se falhar, mantemos os valores anteriores se existirem
       }
     }
 
@@ -1600,7 +1821,7 @@ const App: React.FC = () => {
   };
 
   const isAdmin = useMemo(() => {
-    return user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+    return user?.role === UserRole.ADMIN || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
   }, [user]);
 
   const filteredAssetsByCompany = useMemo(() => {
@@ -1670,7 +1891,12 @@ const App: React.FC = () => {
     const userTenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
     const isAuditor = user?.role === UserRole.AUDITOR;
 
-    return inventory.companies
+    // Se a lista de empresas estiver vazia mas tivermos ativos, extraímos na hora para não travar a tela
+    const baseCompanies = inventory.companies.length > 0 
+      ? inventory.companies 
+      : Array.from(new Set(inventory.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
+
+    return baseCompanies
       .filter(company => {
         if (!isAuditor || userTenants.length === 0) return true;
         // Se for auditor, só mostra as empresas que estão na sua lista de tenants
@@ -1694,15 +1920,23 @@ const App: React.FC = () => {
       });
   }, [inventory.companies, inventory.assets, normalizeKey, user, UserRole.AUDITOR]);
 
-  const screen = history[history.length - 1] || AppScreen.LOGIN;
-
   // Auto-sync on Company Selection if base is empty
   useEffect(() => {
     const tenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
-    if (screen === AppScreen.COMPANY_SELECTION && inventory.assets.length === 0 && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
-      syncFromCloud(tenants, databaseMode);
+    const isEmpty = inventory.assets.length === 0;
+    
+    if (screen === AppScreen.COMPANY_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
+      syncFromCloud(tenants, databaseMode).then(() => {
+        // Se após o sync continuar vazio e for admin, manda para a carga
+        // Usamos o estado atualizado do inventory.assets via ref ou checagem direta se possível, 
+        // mas aqui o inventory.assets no closure ainda é o antigo.
+        // No entanto, o próximo ciclo do useEffect pegará o valor atualizado.
+      });
+    } else if (screen === AppScreen.COMPANY_SELECTION && isEmpty && isAdmin && !isSyncing) {
+      // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
+      pushScreen(AppScreen.LOAD_DATABASE);
     }
-  }, [screen, inventory.assets.length, databaseMode, isSyncing, user, syncFromCloud]);
+  }, [screen, inventory.assets.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen]);
 
   // Auto-select company if only one is available for the auditor
   useEffect(() => {
@@ -1811,7 +2045,7 @@ const App: React.FC = () => {
               onPasswordChanged={(p) => { 
                 const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); 
                 setUsers(upd); 
-                const isAdmin = user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                const isAdmin = user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
                 const isEmpty = inventory.assets.length === 0;
 
                 if (isEmpty && isAdmin) {
@@ -1826,7 +2060,8 @@ const App: React.FC = () => {
           {screen === AppScreen.MAIN_MENU && (
             <MainMenu 
               onNavigate={pushScreen} 
-              onLogout={() => { 
+              onLogout={async () => { 
+                if (supabase) await supabase.auth.signOut();
                 setUser(null); 
                 setSelectedCompany(null); 
                 setStartWithDataMenu(false);
@@ -1955,6 +2190,7 @@ const App: React.FC = () => {
               allAssets={inventory.assets} 
               onBack={popScreen} 
               onUpdateAsset={updateAsset} 
+              isGpsAvailable={isGpsAvailable}
               onBulkUpdateAssets={bulkUpdateAssets} 
               onSelectAsset={handleSelectAsset} 
               selectedLocation={inventoryLocation} 
@@ -1977,6 +2213,8 @@ const App: React.FC = () => {
               immersiveMode={inventory.immersiveMode || false} 
               onToggleFullscreen={toggleFullscreen}
               batterySaver={inventory.batterySaver || false}
+              databaseMode={inventory.databaseMode}
+              onSyncFromCloud={syncFromCloud}
             />
           )}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByCompany} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} selectedCompany={selectedCompany} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
@@ -2032,7 +2270,8 @@ const App: React.FC = () => {
                 setInventoryLocation(null); 
                 pushScreen(AppScreen.MAIN_MENU); 
               }} 
-              onBack={() => { 
+              onBack={async () => { 
+                if (supabase) await supabase.auth.signOut();
                 setUser(null); 
                 setSelectedCompany(null); 
                 pushScreen(AppScreen.LOGIN); 
@@ -2049,7 +2288,7 @@ const App: React.FC = () => {
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
             />
           )}
-          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} />}
+          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} databaseMode={inventory.databaseMode} />}
           {screen === AppScreen.ACTIVE_SEARCH && (
             <ActiveSearch 
               assets={filteredAssetsByCompany} 
@@ -2062,7 +2301,8 @@ const App: React.FC = () => {
           {screen === AppScreen.MODULE_SELECTION && (
             <ModuleSelector 
               username={user?.username || ''}
-              onLogout={() => {
+              onLogout={async () => {
+                if (supabase) await supabase.auth.signOut();
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
@@ -2072,11 +2312,10 @@ const App: React.FC = () => {
                 setCurrentModule(module);
                 localStorage.setItem('app_current_module', module);
                 if (module === AppModule.INVENTORY) {
-                  const isSystemAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                  const isSystemAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
                   const isEmpty = inventory.assets.length === 0;
                   if (isEmpty && isSystemAdmin) {
-                    setStartWithDataMenu(true);
-                    pushScreen(AppScreen.MAIN_MENU);
+                    pushScreen(AppScreen.LOAD_DATABASE);
                   } else {
                     pushScreen(AppScreen.COMPANY_SELECTION);
                   }

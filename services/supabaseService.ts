@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User } from '../types';
+import { Asset, InventoryState, User, UserRole } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -12,6 +12,8 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 
 export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN') => {
   if (!supabase) throw new Error("Supabase não configurado.");
+  
+  // 1. Cria o usuário no Supabase Auth
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -19,12 +21,82 @@ export const signUp = async (email: string, password: string, username: string, 
       data: {
         username,
         role,
-        tenantId, // Este campo é lido pela função public.get_tenant_id() no SQL
+        tenantId,
       },
     },
   });
+  
   if (error) throw error;
+
+  // 2. Cria o perfil na tabela user_permissions para garantir sincronia
+  // Usamos upsert para evitar erros se o trigger já tiver criado (embora não tenhamos trigger no schema)
+  if (data.user) {
+    const { error: permError } = await supabase
+      .from('user_permissions')
+      .upsert([{
+        email: email.toLowerCase(),
+        username,
+        role,
+        isAdmin: role === 'ADMIN',
+        tenantId
+      }], { onConflict: 'email' });
+      
+    if (permError) {
+      console.warn("Erro ao criar permissões, mas usuário foi criado no Auth:", permError);
+    }
+  }
+
   return data;
+};
+
+/**
+ * Garante que o usuário tenha um perfil na tabela user_permissions.
+ * Se não existir, cria um perfil padrão.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const ensureUserProfile = async (email: string, metadata?: Record<string, any>): Promise<any> => {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  
+  const lowerEmail = email.toLowerCase();
+  
+  // 1. Busca perfil existente
+  const { data: profiles, error: fetchError } = await supabase
+    .from('user_permissions')
+    .select('*')
+    .eq('email', lowerEmail);
+    
+  if (fetchError) throw fetchError;
+  
+  if (profiles && profiles.length > 0) {
+    return profiles[0];
+  }
+  
+  // 2. Se não existir, cria um perfil padrão
+  const { data: newProfile, error: createError } = await supabase
+    .from('user_permissions')
+    .insert([{
+      email: lowerEmail,
+      username: metadata?.username || lowerEmail.split('@')[0],
+      role: metadata?.role || UserRole.AUDITOR,
+      isAdmin: metadata?.isAdmin || false,
+      tenantId: metadata?.tenantId || 'default'
+    }])
+    .select()
+    .single();
+    
+  if (createError) {
+    console.warn("Não foi possível criar perfil automático:", createError);
+    // Fallback para um objeto básico
+    return {
+      username: metadata?.username || lowerEmail.split('@')[0],
+      email: lowerEmail,
+      role: UserRole.AUDITOR,
+      isAdmin: false,
+      tenantId: 'default'
+    };
+  }
+  
+  return newProfile;
 };
 
 export const signIn = async (email: string, password: string) => {
@@ -124,9 +196,11 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     '_tenantId'
   ];
 
-  const configId = tenantId ? `config_${tenantId}` : 'global_config';
+  const configId = tenantId 
+    ? (Array.isArray(tenantId) ? `config_${tenantId[0]}` : `config_${tenantId}`)
+    : 'global_config';
   const filteredConfig: Record<string, unknown> = { id: configId };
-  if (tenantId) filteredConfig._tenantId = tenantId;
+  if (tenantId) filteredConfig._tenantId = Array.isArray(tenantId) ? tenantId[0] : tenantId;
   
   Object.keys(config).forEach(key => {
     if (allowedKeys.includes(key)) {
@@ -343,7 +417,9 @@ export const fetchFullInventory = async (tenantId?: string | string[]): Promise<
     }
 
     // 2. Busca a configuração (pode ser global ou por tenant)
-    const configId = tenantId ? `config_${tenantId}` : 'global_config';
+    const configId = tenantId 
+      ? (Array.isArray(tenantId) ? `config_${tenantId[0]}` : `config_${tenantId}`)
+      : 'global_config';
     
     // Lista de colunas conhecidas para tentar uma busca resiliente se o select('*') falhar
     const knownConfigColumns = [
@@ -424,6 +500,46 @@ export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<Inventor
       },
       (payload) => {
         onUpdate(payload.new);
+      }
+    )
+    .subscribe();
+
+  return channel;
+};
+
+/**
+ * Assina mudanças em tempo real na tabela de ativos
+ */
+export const subscribeToAssetChanges = (tenantId: string | string[], onUpdate: (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => void) => {
+  if (!supabase) return null;
+
+  const channel = supabase
+    .channel('asset_changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen for INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: 'assets'
+      },
+      (payload) => {
+        // Filtra por tenantId no lado do cliente se necessário, 
+        // embora o ideal seja o RLS do Supabase já filtrar se o usuário estiver logado.
+        // No entanto, para canais de broadcast/realtime, às vezes precisamos de filtros extras.
+        const newAsset = payload.new as Asset;
+        const oldAsset = payload.old as Asset;
+        const targetAsset = newAsset || oldAsset;
+
+        if (targetAsset && tenantId) {
+          const assetTenant = targetAsset._tenantId;
+          const isAllowed = Array.isArray(tenantId) 
+            ? tenantId.includes(assetTenant || 'default')
+            : (assetTenant || 'default') === tenantId;
+          
+          if (isAllowed) {
+            onUpdate(payload);
+          }
+        }
       }
     )
     .subscribe();

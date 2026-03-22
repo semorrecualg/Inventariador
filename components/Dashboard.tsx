@@ -14,7 +14,6 @@ import {
   Info,
   X,
   Palette,
-  Map as MapIcon,
   MapPin,
   History,
   User,
@@ -336,28 +335,6 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
             <div className="flex items-baseline space-x-2">
               <span className="text-xl font-bold text-ink">{stats.novoItem}</span>
               <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-          </div>
-
-          <div 
-            onClick={() => (window as unknown as { onOpenMap?: () => void }).onOpenMap && (window as unknown as { onOpenMap: () => void }).onOpenMap!()}
-            className="col-span-2 bg-slate-900 border border-slate-800 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-accent/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
-                  <MapIcon size={20} />
-                </div>
-                <div>
-                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest block mb-0.5">Geotagging v24</span>
-                  <h4 className="text-sm font-bold text-white uppercase tracking-tight">Mapa de Calor de Ativos</h4>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="text-lg font-bold text-white">{assets.filter(a => a._lat && a._lng).length}</span>
-                <p className="text-[7px] font-bold text-white/40 uppercase tracking-widest">Ativos Mapeados</p>
-              </div>
             </div>
           </div>
 

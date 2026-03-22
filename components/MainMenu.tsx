@@ -28,7 +28,8 @@ import {
   Database,
   Cloud,
   Server,
-  BookOpen
+  BookOpen,
+  Map as MapIcon
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -635,6 +636,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Rendimento Global</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Análise Diária de Auditoria</p>
+                </div>
+                <ChevronRight size={14} className="text-white/20" />
+              </button>
+
+              <button 
+                disabled={!hasData} 
+                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.ASSET_MAP); }} 
+                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
+                  <MapIcon size={20} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Mapa de Calor</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Geotagging de Ativos</p>
                 </div>
                 <ChevronRight size={14} className="text-white/20" />
               </button>

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { getUserPermissions, signIn as supabaseSignIn, supabase } from '../services/supabaseService';
+import { getUserPermissions, supabase, ensureUserProfile } from '../services/supabaseService';
 import { authenticateWithProtheus } from '../services/protheusService';
 import { User, DatabaseMode, UserRole } from '../types';
 
@@ -26,6 +26,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
     setIsLoading(false);
     setError(null);
   }, [databaseMode]);
+
+  const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+
+  const handleMagicLink = async () => {
+    if (!username.includes('@')) {
+      setError("Por favor, insira um e-mail válido para o Magic Link.");
+      return;
+    }
+
+    setError(null);
+    setIsMagicLinkLoading(true);
+    try {
+      const { error } = await supabase!.auth.signInWithOtp({
+        email: username.trim().toLowerCase(),
+        options: {
+          emailRedirectTo: window.location.origin,
+        }
+      });
+
+      if (error) throw error;
+      setMagicLinkSent(true);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao enviar link: ${error.message}`);
+    } finally {
+      setIsMagicLinkLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,19 +84,27 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           tenantId: permissions.tenantId || 'default'
         };
       } else if (databaseMode === DatabaseMode.SUPABASE) {
-        // Autenticação Direta via Tabela de Permissões (Bypassa necessidade de e-mail real)
-        const { data: cloudUsers, error: cloudError } = await supabase!
-          .from('user_permissions')
-          .select('*')
-          .eq('email', username.trim().toLowerCase());
+        // 1. Autenticação via Supabase Auth (Oficial)
+        const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
+          email: username.trim().toLowerCase(),
+          password: password
+        });
 
-        if (cloudError) throw new Error("Erro ao conectar com a nuvem.");
-        
-        const cloudUser = cloudUsers?.[0];
-        
-        if (!cloudUser || cloudUser.password !== password) {
-          throw new Error("Credenciais Cloud inválidas ou usuário não sincronizado.");
+        if (authError) {
+          // Se falhar no Auth, mostramos a mensagem real do Supabase para diagnóstico
+          if (authError.message.includes("Email not confirmed")) {
+            throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou confirme manualmente no painel do Supabase.");
+          }
+          if (authError.message.includes("Invalid login credentials")) {
+            throw new Error("E-mail ou senha incorretos no Supabase.");
+          }
+          throw new Error(`Erro Supabase: ${authError.message}`);
         }
+        
+        if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
+
+        // 2. Garante que o usuário tenha um perfil na tabela user_permissions
+        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata);
         
         loggedUser = {
           username: cloudUser.username,
@@ -245,7 +282,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
 
         <button 
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || isMagicLinkLoading}
           className="w-full bg-accent text-white font-bold py-3.5 rounded-xl shadow-md active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
@@ -257,6 +294,36 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
             <span>Acessar Sistema</span>
           )}
         </button>
+
+        {databaseMode === DatabaseMode.SUPABASE && (
+          <div className="pt-2">
+            {magicLinkSent ? (
+              <div className="bg-green-50 border border-green-100 text-green-700 p-3 rounded-xl text-[10px] font-bold uppercase text-center animate-fadeIn">
+                Link enviado! Verifique seu e-mail. <br/>
+                <span className="text-[8px] opacity-80 mt-1 block">O link expira em 5 minutos e só pode ser usado uma vez.</span>
+              </div>
+            ) : (
+              <button 
+                type="button"
+                onClick={handleMagicLink}
+                disabled={isMagicLinkLoading || isLoading}
+                className="w-full bg-white border border-accent/20 text-accent font-bold py-3 rounded-xl active:scale-[0.98] transition-all uppercase tracking-[0.1em] text-[10px] flex items-center justify-center space-x-2 disabled:opacity-70"
+              >
+                {isMagicLinkLoading ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>Enviando Link...</span>
+                  </>
+                ) : (
+                  <>
+                    <Cloud size={12} />
+                    <span>Entrar sem senha (Magic Link)</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
       </form>
 
       <div className="mt-6 text-center space-y-3">
