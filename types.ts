@@ -115,6 +115,7 @@ export interface Asset {
   _dataAprovacao?: string;
   _aprovador?: string;
   _assinatura?: string; // Base64 da assinatura
+  _campaignId?: string; // ID da Campanha de Inventário
   DE_PARA?: string;
   AUDITOR_STATUS_CONFERENCIA?: string;
   _origemTransacao?: TransactionOrigin;
@@ -243,7 +244,9 @@ export enum AppScreen {
   ASSET_MAP = 'ASSET_MAP',
   ACTIVE_SEARCH = 'ACTIVE_SEARCH',
   MODULE_SELECTION = 'MODULE_SELECTION',
-  ASSET_CONTROL_HOME = 'ASSET_CONTROL_HOME'
+  ASSET_CONTROL_HOME = 'ASSET_CONTROL_HOME',
+  AUDIT_LOGS = 'AUDIT_LOGS',
+  CAMPAIGN_MANAGEMENT = 'CAMPAIGN_MANAGEMENT'
 }
 
 export enum AppModule {
@@ -307,6 +310,7 @@ export interface InventoryState {
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
   databaseMode: 'INTERNAL' | 'SUPABASE';
+  currentCampaignId?: string;
 }
 
 export interface SyncQueueItem {
@@ -318,4 +322,25 @@ export interface SyncQueueItem {
   attempts: number;
   lastAttempt?: number;
   error?: string;
+}
+
+export enum CampaignStatus {
+  ACTIVE = 'ACTIVE',
+  CLOSED = 'CLOSED',
+  ARCHIVED = 'ARCHIVED'
+}
+
+export interface InventoryCampaign {
+  id: string;
+  name: string;
+  description?: string;
+  start_date: string;
+  end_date?: string;
+  status: CampaignStatus;
+  tenant_id: string;
+  created_by: string;
+  // Estatísticas calculadas
+  total_assets?: number;
+  inventoried_assets?: number;
+  divergence_count?: number;
 }

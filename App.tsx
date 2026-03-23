@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin } from './types';
+import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin } from './types';
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -26,10 +27,13 @@ import ActiveSearch from './components/ActiveSearch';
 import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TrustOnboarding from './components/TrustOnboarding';
+import AuditLogs from './components/AuditLogs';
+import CampaignManager from './components/CampaignManager';
 import FloatingHelp from './components/FloatingHelp';
-import { AppModule } from './types';
+import PrivacyCenter from './components/PrivacyCenter';
 
-import { Building2, ShieldCheck, Cloud, Loader2 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -116,21 +120,66 @@ const App: React.FC = () => {
     return localStorage.getItem('app_show_onboarding') !== 'false';
   });
 
+  const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
+  const [isSafeMode, setIsSafeMode] = useState(true);
+  const [securityThreats, setSecurityThreats] = useState<string[]>([]);
+  const [syncQueueLength, setSyncQueueLength] = useState(0);
+
+  // Monitor de Sincronização Offline
+  useEffect(() => {
+    const checkSyncQueue = async () => {
+      const { getSyncQueueLength } = await import('./services/syncService');
+      const len = await getSyncQueueLength();
+      setSyncQueueLength(len);
+    };
+
+    checkSyncQueue();
+    const interval = setInterval(checkSyncQueue, 10000); // Check every 10s
+
+    const handleSynced = () => checkSyncQueue();
+    window.addEventListener('gbr_photo_synced', handleSynced);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('gbr_photo_synced', handleSynced);
+    };
+  }, []);
+
   const [, setCurrentModule] = useState<AppModule | null>(() => {
     const saved = localStorage.getItem('app_current_module');
     return (saved as AppModule) || null;
   });
 
-  // Remove o loader do index.html quando o componente principal montar
+  // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
-    const loader = document.getElementById('app-loader');
-    if (loader) {
-      loader.classList.add('hidden');
-      // Remove do DOM após a transição de opacidade
-      setTimeout(() => {
-        loader.remove();
-      }, 500);
+    // Check inicial
+    const initialCheck = checkRuntimeIntegrity();
+    if (!initialCheck.isSafe) {
+      setIsSafeMode(false);
+      setSecurityThreats(initialCheck.threats);
     }
+
+    // Monitor contínuo
+    const monitorId = startSecurityMonitor((threats) => {
+      setIsSafeMode(false);
+      setSecurityThreats(threats);
+      
+      // Se detectar debugger ou scripts maliciosos, forçamos logout por segurança
+      if (threats.includes('DEBUGGER_DETECTED') || threats.includes('SUSPICIOUS_SCRIPTS')) {
+        setModalConfig({
+          isOpen: true,
+          title: 'Violação de Segurança Detectada',
+          message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
+          type: 'error',
+          onConfirm: () => {
+             localStorage.removeItem('app_current_user');
+             window.location.reload();
+          }
+        });
+      }
+    });
+
+    return () => clearInterval(monitorId);
   }, []);
 
 
@@ -1533,8 +1582,25 @@ const App: React.FC = () => {
       }
     }
 
-    commitAssetUpdate(assetWithGps);
-  }, [inventory.assets, commitAssetUpdate]);
+    // Adiciona entrada na trilha de auditoria
+    const auditEntry: AuditLogEntry = {
+      timestamp: new Date().toISOString(),
+      user: user?.email || 'unknown',
+      action: 'UPDATE',
+      details: `Alteração de campos: ${Object.keys(updatedAsset).filter(k => !k.startsWith('_')).join(', ')}`,
+      tenantId: user?.tenantId,
+      origin: updatedAsset._origemTransacao
+    };
+    
+    const assetWithHistory = {
+      ...assetWithGps,
+      _history: [...(assetWithGps._history || []), auditEntry],
+      _auditor: user?.email || assetWithGps._auditor,
+      _dataLeitura: new Date().toISOString()
+    };
+
+    commitAssetUpdate(assetWithHistory);
+  }, [inventory.assets, commitAssetUpdate, user]);
 
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
@@ -2092,6 +2158,7 @@ const App: React.FC = () => {
             setHasAcceptedTerms(true);
             localStorage.setItem('app_accepted_terms', 'true');
           }} 
+          onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
         />
       </ErrorBoundary>
     );
@@ -2109,15 +2176,20 @@ const App: React.FC = () => {
                  </div>
                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria</p>
                </div>
-               <div className="flex items-center space-x-1.5">
-                 <div className="px-1.5 py-0.5 rounded-lg bg-emerald-50 border border-emerald-100 shadow-sm flex items-center space-x-1" title="Banco de Dados Protegido (IndexedDB)">
-                   <ShieldCheck size={10} className="text-emerald-600" />
-                   <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest">SAFE</span>
-                 </div>
-                 <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
-                   <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
-                 </div>
-               </div>
+                <div className="flex items-center space-x-1.5">
+                  <div 
+                    className={`px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 transition-colors ${isSafeMode ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`} 
+                    title={isSafeMode ? "Banco de Dados Protegido (Criptografia AES-256)" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
+                  >
+                    <ShieldCheck size={10} className={isSafeMode ? "text-emerald-600" : "text-red-600"} />
+                    <span className={`text-[7px] font-black uppercase tracking-widest ${isSafeMode ? "text-emerald-600" : "text-red-600"}`}>
+                      {isSafeMode ? 'SAFE' : 'RISK'}
+                    </span>
+                  </div>
+                  <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
+                    <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
+                  </div>
+                </div>
             </div>
             <div className="px-3 pb-1.5 pt-0.5 border-t border-slate-50">
                <h2 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-tight">
@@ -2140,6 +2212,7 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               onNavigateToRegister={() => pushScreen(AppScreen.REGISTER)}
+              onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onLogin={(u) => { 
                 setUser(u); 
                 const isEmpty = inventory.assets.length === 0;
@@ -2344,6 +2417,7 @@ const App: React.FC = () => {
               databaseMode={inventory.databaseMode}
               onSyncFromCloud={syncFromCloud}
               user={user}
+              currentCampaignId={inventory.currentCampaignId}
             />
           )}
           {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
@@ -2469,6 +2543,15 @@ const App: React.FC = () => {
           {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={popScreen} databaseMode={databaseMode} />}
+          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (
+            <CampaignManager 
+              user={user} 
+              onBack={popScreen} 
+              onActivate={(id) => setInventory(prev => ({ ...prev, currentCampaignId: id }))}
+              currentCampaignId={inventory.currentCampaignId}
+            />
+          )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
         </div>
@@ -2481,6 +2564,31 @@ const App: React.FC = () => {
               localStorage.setItem('app_show_onboarding', 'false');
             }} 
           />
+        )}
+
+        <PrivacyCenter 
+          isOpen={isPrivacyCenterOpen} 
+          onClose={() => setIsPrivacyCenterOpen(false)} 
+        />
+
+        {/* Indicador de Sincronização Offline (Fotos) */}
+        {syncQueueLength > 0 && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] bg-ink text-bg px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
+          >
+            <div className="relative">
+              <RefreshCw size={16} className="animate-spin text-accent" />
+              <div className="absolute -top-1 -right-1 w-2 h-2 bg-accent rounded-full animate-ping"></div>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase tracking-widest leading-none">Sincronizando Fotos</span>
+              <span className="text-[8px] font-bold text-bg/60 uppercase tracking-tighter mt-0.5">
+                {syncQueueLength} {syncQueueLength === 1 ? 'item pendente' : 'itens pendentes'} na fila
+              </span>
+            </div>
+          </motion.div>
         )}
 
         {/* Immersive Mode handled automatically on first interaction */}

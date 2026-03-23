@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
 export interface ProvisionResult {
@@ -864,6 +864,66 @@ export const resetPassword = async (email: string) => {
 };
 
 /**
+ * Busca os logs de auditoria do Supabase
+ */
+export const fetchAuditLogs = async (tenantId: string, recordId?: string): Promise<Record<string, unknown>[]> => {
+  if (!supabase) return [];
+
+  try {
+    let query = supabase
+      .from('audit_logs')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('timestamp', { ascending: false });
+
+    if (recordId) {
+      query = query.eq('record_id', recordId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Erro ao buscar logs de auditoria:', error);
+      return [];
+    }
+
+    return (data || []) as Record<string, unknown>[];
+  } catch (err) {
+    console.error('Erro inesperado ao buscar logs:', err);
+    return [];
+  }
+};
+
+/**
+ * Registra um evento de auditoria manualmente
+ */
+export const logAuditEvent = async (entry: {
+  user_email: string;
+  action: string;
+  table_name?: string;
+  record_id?: string;
+  old_data?: unknown;
+  new_data?: unknown;
+  details?: string;
+  tenant_id?: string;
+  origin?: string;
+}) => {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert([entry]);
+
+    if (error) {
+      console.error('Erro ao registrar log de auditoria:', error);
+    }
+  } catch (err) {
+    console.error('Erro inesperado ao registrar log:', err);
+  }
+};
+
+/**
  * Atualiza apenas a URL da foto de um ativo na nuvem
  */
 export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, tenantId: string) => {
@@ -874,4 +934,98 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
     .eq('id', assetId)
     .eq('_tenantId', tenantId);
   if (error) throw error;
+};
+
+/**
+ * Busca todas as campanhas de um tenant
+ */
+export const fetchCampaigns = async (tenantId: string): Promise<InventoryCampaign[]> => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('inventory_campaigns')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('start_date', { ascending: false });
+  
+  if (error) {
+    console.error('Erro ao buscar campanhas:', error);
+    return [];
+  }
+  return (data || []) as InventoryCampaign[];
+};
+
+/**
+ * Cria uma nova campanha
+ */
+export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('inventory_campaigns')
+    .insert([campaign])
+    .select();
+  
+  if (error) {
+    console.error('Erro ao criar campanha:', error);
+    return null;
+  }
+  return data ? data[0] as InventoryCampaign : null;
+};
+
+/**
+ * Atualiza o status de uma campanha
+ */
+export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus): Promise<boolean> => {
+  if (!supabase) return false;
+  const { error } = await supabase
+    .from('inventory_campaigns')
+    .update({ 
+      status, 
+      end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : null 
+    })
+    .eq('id', campaignId);
+  
+  if (error) {
+    console.error('Erro ao atualizar status da campanha:', error);
+    return false;
+  }
+  return true;
+};
+
+/**
+ * Busca estatísticas de uma campanha
+ */
+export const fetchCampaignStats = async (campaignId: string, tenantId: string) => {
+  if (!supabase) return null;
+  
+  try {
+    // Total de ativos no tenant
+    const { count: totalCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('_tenantId', tenantId);
+      
+    // Ativos inventariados nesta campanha
+    const { count: inventoriedCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('_tenantId', tenantId)
+      .eq('_campaignId', campaignId);
+
+    // Divergências nesta campanha
+    const { count: divergenceCount } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .eq('_tenantId', tenantId)
+      .eq('_campaignId', campaignId)
+      .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
+
+    return {
+      total: totalCount || 0,
+      inventoried: inventoriedCount || 0,
+      divergences: divergenceCount || 0
+    };
+  } catch (err) {
+    console.error('Erro ao buscar estatísticas da campanha:', err);
+    return null;
+  }
 };

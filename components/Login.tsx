@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { supabase, ensureUserProfile, resetPassword } from '../services/supabaseService';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { supabase, ensureUserProfile, resetPassword, logAuditEvent } from '../services/supabaseService';
 import { User, DatabaseMode, UserRole } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
@@ -11,10 +11,11 @@ interface LoginProps {
   users: User[];
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
+  onOpenPrivacyCenter: () => void;
 }
 
 // Login Component
-const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -203,6 +204,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         console.log('[Login] Sucesso! Logando usuário:', loggedUser.email);
         // Salva no localStorage para persistência
         localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        
+        // Log de Auditoria
+        logAuditEvent({
+          user_email: loggedUser.email,
+          action: 'LOGIN',
+          details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno'}`,
+          tenant_id: loggedUser.tenantId
+        });
+
         onLogin(loggedUser);
       }
     } catch (err: unknown) {
@@ -472,6 +482,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           <p className="text-[8px] font-bold text-accent uppercase tracking-[0.3em]">
             GBR Intelligent Systems
           </p>
+          <button 
+            onClick={onOpenPrivacyCenter}
+            className="mt-2 text-[8px] font-bold text-ink-muted uppercase tracking-widest hover:text-accent transition-colors flex items-center justify-center mx-auto space-x-1"
+          >
+            <ShieldCheck size={10} />
+            <span>Privacidade e Segurança</span>
+          </button>
           <p className="text-[7px] text-slate-400 mt-1 font-mono opacity-40">
             URL: {getAppBaseUrl()}
           </p>

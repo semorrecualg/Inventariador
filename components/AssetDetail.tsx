@@ -32,6 +32,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { deleteAssetPhoto } from '../services/supabaseService';
 import { compressImage } from '../utils/imageUtils';
 import { addToSyncQueue } from '../services/syncService';
+import { createWorker } from 'tesseract.js';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -87,6 +88,45 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
+  const ocrInputRef = React.useRef<HTMLInputElement>(null);
+  const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
+
+  const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !ocrTargetField) return;
+
+    setIsOCRProcessing(true);
+    try {
+      const worker = await createWorker('eng');
+      const { data: { text } } = await worker.recognize(file);
+      await worker.terminate();
+
+      // Limpeza básica do texto (remover espaços extras, quebras de linha)
+      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
+      
+      // Atualizar o ativo com o texto reconhecido
+      const updates = { ...workingAsset };
+      updates[ocrTargetField] = cleanedText;
+      setWorkingAsset(updates);
+      
+      // Se estiver editando esse campo, atualizar o valor da edição
+      if (editingField === ocrTargetField) {
+        setEditValue(cleanedText);
+      }
+    } catch (err) {
+      console.error('Erro no OCR:', err);
+    } finally {
+      setIsOCRProcessing(false);
+      setOcrTargetField(null);
+      if (ocrInputRef.current) ocrInputRef.current.value = '';
+    }
+  };
+
+  const triggerOCR = (field: string) => {
+    setOcrTargetField(field);
+    ocrInputRef.current?.click();
+  };
 
 
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
@@ -436,6 +476,27 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment" 
+            className="hidden" 
+            ref={ocrInputRef} 
+            onChange={handleOCR} 
+          />
+          
+          {isOCRProcessing && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
+              <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
+                <Loader2 size={40} className="text-accent animate-spin" />
+              </div>
+              <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Processando OCR</h3>
+              <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
+                Aguarde enquanto nossa IA extrai o texto da imagem...
+              </p>
+            </div>
+          )}
+
           {isBatch && (
             <div className="bg-white border border-border rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">
@@ -508,6 +569,15 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                               className="flex-1 bg-white px-3 py-2 border border-accent/30 rounded-lg text-xs font-bold uppercase text-ink outline-none shadow-sm focus:ring-2 focus:ring-accent/20" 
                               placeholder={`NOVO VALOR (PARA) ${label}`}
                             />
+                            {(key === 'SERIAL' || key === 'ETIQUETA') && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); triggerOCR(key); }}
+                                className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30"
+                                title="Ler texto da câmera (OCR)"
+                              >
+                                <Camera size={18} />
+                              </button>
+                            )}
                             <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-accent text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
                               <Check size={20}/>
                             </button>

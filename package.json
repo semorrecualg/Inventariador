@@ -35,6 +35,7 @@
     "react-signature-canvas": "^1.1.0-alpha.2",
     "react-virtuoso": "^4.18.1",
     "react-window": "^2.2.7",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

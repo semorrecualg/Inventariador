@@ -1,9 +1,10 @@
 import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
+import { encryption } from './securityService';
 
-const INVENTORY_ASSETS_KEY = 'inventory_assets_v24';
-const INVENTORY_CONFIG_KEY = 'inventory_config_v24';
+const INVENTORY_ASSETS_KEY = 'inventory_assets_v24_secure';
+const INVENTORY_CONFIG_KEY = 'inventory_config_v24_secure';
 
 // Configure localforage
 localforage.config({
@@ -87,19 +88,21 @@ export const restoreInventory = async (file: File): Promise<InventoryState | nul
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[]): Promise<void> => {
   try {
-    // 1. Salva localmente primeiro (Offline-First)
-    // Separamos assets de config para evitar re-escrever milhares de itens se apenas uma config mudou
+    // 1. Salva localmente primeiro (Offline-First) com Blindagem Técnica (Criptografia)
     const config = { ...data } as Record<string, unknown>;
     const assets = data.assets;
     delete config.assets;
 
-    // Salvamos a config imediatamente (é pequena)
-    await localforage.setItem(INVENTORY_CONFIG_KEY, config);
+    // Criptografamos os dados antes de salvar no IndexedDB
+    const [encryptedConfig, encryptedAssets] = await Promise.all([
+      encryption.encrypt(config),
+      encryption.encrypt(assets)
+    ]);
 
-    // Salvamos os assets (pode ser grande, mas o App.tsx já faz debounce)
-    await localforage.setItem(INVENTORY_ASSETS_KEY, assets);
+    await localforage.setItem(INVENTORY_CONFIG_KEY, encryptedConfig);
+    await localforage.setItem(INVENTORY_ASSETS_KEY, encryptedAssets);
 
-    // 2. Tenta sincronizar com a nuvem (Supabase)
+    // 2. Tenta sincronizar com a nuvem (Supabase) - Os dados na nuvem já são protegidos por TLS e RLS
     const assetsToSync = dirtyAssets || [];
     
     if (assetsToSync.length > 0) {
@@ -116,12 +119,18 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[])
 
 export const loadInventory = async (): Promise<InventoryState | null> => {
   try {
-    const [assets, config] = await Promise.all([
-      localforage.getItem<Asset[]>(INVENTORY_ASSETS_KEY),
-      localforage.getItem<Omit<InventoryState, 'assets'>>(INVENTORY_CONFIG_KEY)
+    const [encryptedAssets, encryptedConfig] = await Promise.all([
+      localforage.getItem<string>(INVENTORY_ASSETS_KEY),
+      localforage.getItem<string>(INVENTORY_CONFIG_KEY)
     ]);
 
-    if (!config && !assets) return null;
+    if (!encryptedConfig && !encryptedAssets) return null;
+
+    // Decriptografamos os dados carregados
+    const [assets, config] = await Promise.all([
+      encryptedAssets ? encryption.decrypt(encryptedAssets) : Promise.resolve([]),
+      encryptedConfig ? encryption.decrypt(encryptedConfig) : Promise.resolve({})
+    ]);
 
     return {
       ...(config || {}),

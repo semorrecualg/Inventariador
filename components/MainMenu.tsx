@@ -32,9 +32,12 @@ import {
   Map as MapIcon,
   RefreshCw,
   ShieldAlert,
-  ExternalLink
+  ExternalLink,
+  Activity,
+  Calendar
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import SecurityPinModal from './SecurityPinModal';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen) => void;
@@ -128,11 +131,26 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isSelectiveClearOpen, setIsSelectiveClearOpen] = useState(false);
   const [selectedToClear, setSelectedToClear] = useState<string[]>([]);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<() => void>(() => {});
+  
   const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
+  const handleSecureAction = (action: () => void) => {
+    setPendingAction(() => action);
+    setIsSecurityPinOpen(true);
+  };
+
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
+      <SecurityPinModal 
+        isOpen={isSecurityPinOpen}
+        onClose={() => setIsSecurityPinOpen(false)}
+        onSuccess={pendingAction}
+        title="Confirmação de Segurança"
+        description="Esta operação exige autenticação adicional com seu PIN de segurança."
+      />
       {/* TOP STATUS BAR */}
       <div className="px-5 pt-8 pb-2 bg-white flex items-center justify-between z-30">
         <div className="flex items-center space-x-2">
@@ -451,6 +469,22 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.AUDIT_LOGS); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Activity size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Auditoria</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Trilha de Auditoria</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.CAMPAIGN_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Calendar size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Eventos</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Campanhas de Inventário</p>
+                </div>
+              </button>
+
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
                   <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><ShieldCheck size={16} /></div>
@@ -758,6 +792,42 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
+              {/* Security Status Card */}
+              <div className="w-full p-4 bg-emerald-50 border border-emerald-100 rounded-2xl shadow-sm mb-3">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-emerald-500 text-white rounded-lg flex items-center justify-center shadow-md">
+                      <ShieldCheck size={16} />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-[13px] font-bold text-emerald-900 uppercase tracking-tight">Status de Blindagem</h4>
+                      <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-0.5">Integridade do Sistema</p>
+                    </div>
+                  </div>
+                  <div className="px-2 py-1 bg-emerald-100 border border-emerald-200 rounded-lg">
+                    <span className="text-[8px] font-black text-emerald-700 uppercase tracking-widest">PROTEGIDO</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-700/60 px-1">
+                    <span>Criptografia AES-256</span>
+                    <span className="text-emerald-600">ATIVO</span>
+                  </div>
+                  <div className="w-full h-1 bg-emerald-100 rounded-full overflow-hidden">
+                    <div className="w-full h-full bg-emerald-500" />
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-700/60 px-1 pt-1">
+                    <span>Monitor de Runtime</span>
+                    <span className="text-emerald-600">MONITORANDO</span>
+                  </div>
+                  <div className="w-full h-1 bg-emerald-100 rounded-full overflow-hidden">
+                    <div className="w-[85%] h-full bg-emerald-500 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+
               {/* Modalidade de Acesso movida para cá */}
               <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl shadow-sm mb-3">
                 <div className="flex items-center mb-3">
@@ -879,12 +949,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button onClick={() => { 
-                setIsClearConfirmOpen(true);
+                handleSecureAction(() => setIsClearConfirmOpen(true));
               }} className="w-full flex items-center p-4 bg-red-500/10 border border-red-500/20 rounded-2xl active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 bg-red-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-red-500/20"><Trash2 size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">Limpeza Total (Local + Nuvem)</h4>
-                  <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5">Apagar Tudo Permanentemente</p>
+                  <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5 italic">Requer PIN de Segurança</p>
                 </div>
               </button>
             </div>

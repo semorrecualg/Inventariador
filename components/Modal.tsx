@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { X, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import { X, AlertTriangle, Info, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 interface ModalProps {
   isOpen: boolean;
@@ -8,7 +8,7 @@ interface ModalProps {
   onConfirm?: () => void;
   title: string;
   message: string;
-  type?: 'info' | 'warning' | 'error' | 'success' | 'confirm';
+  type?: 'info' | 'warning' | 'error' | 'success' | 'confirm' | 'security';
   confirmText?: string;
   cancelText?: string;
 }
@@ -34,6 +34,8 @@ const Modal: React.FC<ModalProps> = ({
         return <X className="text-red-500" size={32} />;
       case 'success':
         return <CheckCircle2 className="text-emerald-500" size={32} />;
+      case 'security':
+        return <ShieldCheck className="text-blue-600" size={32} />;
       default:
         return <Info className="text-blue-500" size={32} />;
     }
@@ -48,8 +50,10 @@ const Modal: React.FC<ModalProps> = ({
         return 'bg-red-50 border-red-100';
       case 'success':
         return 'bg-emerald-50 border-emerald-100';
-      default:
+      case 'security':
         return 'bg-blue-50 border-blue-100';
+      default:
+        return 'bg-slate-50 border-slate-100';
     }
   };
 

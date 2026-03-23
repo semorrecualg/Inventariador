@@ -5,9 +5,10 @@ import { ShieldCheck, Lock, Database, CheckCircle2, ChevronRight, Info, Eye, Shi
 
 interface TrustOnboardingProps {
   onAccept: () => void;
+  onOpenPrivacyCenter: () => void;
 }
 
-const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
+const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPrivacyCenter }) => {
   const [step, setStep] = useState(1);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
@@ -73,6 +74,12 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
           <p className="text-[10px] text-ink-muted italic text-center">
             &quot;Não compartilhamos dados com terceiros. Seus dados pertencem à sua organização.&quot;
           </p>
+          <button 
+            onClick={onOpenPrivacyCenter}
+            className="w-full py-2 text-[9px] font-bold text-accent uppercase tracking-widest hover:underline"
+          >
+            Ver Detalhes da Política (LGPD)
+          </button>
         </div>
       )
     },
@@ -128,10 +135,10 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
       <motion.div 
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-[3rem] shadow-2xl overflow-hidden relative flex flex-col h-[600px] border border-white/10"
+        className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden relative flex flex-col max-h-[90vh] border border-white/10"
       >
         {/* Progress Bar */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 flex">
+        <div className="absolute top-0 left-0 right-0 h-1.5 flex z-20">
           {steps.map((s) => (
             <div 
               key={s.id} 
@@ -140,7 +147,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
           ))}
         </div>
 
-        <div className="flex-1 flex flex-col p-8 pt-12">
+        <div className="flex-1 flex flex-col overflow-y-auto no-scrollbar p-6 pt-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
@@ -149,14 +156,14 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
               exit={{ opacity: 0, x: -20 }}
               className="flex-1 flex flex-col items-center text-center"
             >
-              <div className="mb-6 bg-accent-soft p-6 rounded-[2.5rem] shadow-inner border border-accent/5">
+              <div className="mb-4 bg-accent-soft p-4 rounded-[2rem] shadow-inner border border-accent/5">
                 {currentStep.icon}
               </div>
               
-              <h2 className="text-2xl font-black text-ink tracking-tighter uppercase italic leading-none mb-2">
+              <h2 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none mb-1">
                 {currentStep.title}
               </h2>
-              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] mb-8 max-w-[80%]">
+              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] mb-6 max-w-[80%]">
                 {currentStep.subtitle}
               </p>
 
@@ -167,7 +174,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept }) => {
           </AnimatePresence>
         </div>
 
-        <div className="p-8 bg-bg-main border-t border-border flex items-center justify-between">
+        <div className="p-6 bg-bg-main border-t border-border flex items-center justify-between shrink-0">
           <div className="flex space-x-1">
             {steps.map((s) => (
               <div 

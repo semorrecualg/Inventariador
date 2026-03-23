@@ -103,6 +103,13 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
 };
 
 /**
+ * Retorna o número de itens pendentes na fila
+ */
+export const getSyncQueueLength = async (): Promise<number> => {
+  return await queueStore.length();
+};
+
+/**
  * Limpa a fila (útil para debug ou reset)
  */
 export const clearSyncQueue = async (): Promise<void> => {
