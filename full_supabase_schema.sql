@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _history JSONB,
     _photoUrl TEXT,
     _tenantId TEXT NOT NULL,
+    _unitId TEXT, -- Unidade Operacional
     _lat DECIMAL(10,8),
     _lng DECIMAL(11,8),
     _aprovado BOOLEAN DEFAULT FALSE,
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS inventory_config (
     "mandatoryPhotoOnDivergence" BOOLEAN,
     "mandatoryPhotoOnNewItem" BOOLEAN,
     _tenantId TEXT,
+    _unitId TEXT, -- Unidade Operacional (opcional para config específica)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -103,8 +105,12 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT NOT NULL UNIQUE,
     "isAdmin" BOOLEAN DEFAULT FALSE,
-    tenantId TEXT,
+    tenantId TEXT, -- ID da Organização (ex: CICOPAL)
+    unitId TEXT,   -- Unidade Operacional Padrão
+    units TEXT[],  -- Lista de Unidades Operacionais autorizadas
+    tenants TEXT[], -- Mantido para compatibilidade
     username TEXT,
+    name TEXT,     -- Nome Completo
     role TEXT DEFAULT 'AUDITOR',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

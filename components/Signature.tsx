@@ -11,10 +11,10 @@ interface SignatureProps {
   assets: Asset[];
   onBack: () => void;
   onConfirm: (signature: string) => void;
-  companyName: string;
+  unitName: string;
 }
 
-const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, companyName }) => {
+const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitName }) => {
   const sigCanvas = useRef<SignatureCanvas>(null);
   const [isSigned, setIsSigned] = useState(false);
 
@@ -46,7 +46,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, compan
     doc.text('Protocolo de Inventário GBR v24', 105, 20, { align: 'center' });
     
     doc.setFontSize(12);
-    doc.text(`Empresa: ${companyName}`, 20, 35);
+    doc.text(`Empresa: ${unitName}`, 20, 35);
     doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 20, 42);
     doc.text(`Total de Itens: ${assets.length}`, 20, 49);
 
@@ -79,7 +79,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, compan
     doc.text('__________________________', 20, finalY + 40);
     doc.text('Responsável pela Unidade', 20, finalY + 45);
 
-    doc.save(`INVENTARIO_${companyName}_${new Date().getTime()}.pdf`);
+    doc.save(`INVENTARIO_${unitName}_${new Date().getTime()}.pdf`);
   };
 
   return (
@@ -104,7 +104,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, compan
           </div>
 
           <p className="text-xs text-ink-muted leading-relaxed mb-6">
-            Eu, responsável pela unidade <strong>{companyName}</strong>, declaro que o inventário físico dos ativos imobilizados foi realizado sob minha supervisão, estando os itens listados em conformidade com a realidade física encontrada.
+            Eu, responsável pela unidade <strong>{unitName}</strong>, declaro que o inventário físico dos ativos imobilizados foi realizado sob minha supervisão, estando os itens listados em conformidade com a realidade física encontrada.
           </p>
 
           <div className="bg-bg-main border-2 border-dashed border-border rounded-2xl p-2 relative">

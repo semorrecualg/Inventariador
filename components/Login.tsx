@@ -1,8 +1,7 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { getUserPermissions, supabase, ensureUserProfile, resetPassword } from '../services/supabaseService';
-import { authenticateWithProtheus } from '../services/protheusService';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { supabase, ensureUserProfile, resetPassword } from '../services/supabaseService';
 import { User, DatabaseMode, UserRole } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
@@ -149,28 +148,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
     try {
       let loggedUser: User | null = null;
 
-      if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
-        console.log('[Login] Autenticando via Protheus...');
-        // 1. Autentica no Protheus
-        const authResult = await authenticateWithProtheus(username.trim(), password);
-        
-        if (!authResult.success) {
-          throw new Error(authResult.message || "Falha na autenticação Protheus.");
-        }
-
-        console.log('[Login] Protheus OK. Buscando permissões no Supabase...');
-        // 2. Busca permissões no Supabase
-        const permissions = await getUserPermissions(authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`);
-        
-        loggedUser = {
-          username: authResult.user?.username || username.trim(),
-          email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`,
-          role: permissions.role || (permissions.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
-          isAdmin: permissions.isAdmin || false,
-          mustChangePassword: false,
-          tenantId: permissions.tenantId || 'default'
-        };
-      } else if (databaseMode === DatabaseMode.SUPABASE) {
+      if (databaseMode === DatabaseMode.SUPABASE) {
         console.log('[Login] Autenticando via Supabase Auth...');
         // 1. Autenticação via Supabase Auth (Oficial)
         const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
@@ -239,15 +217,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
 
   const getFieldConfig = () => {
     switch (databaseMode) {
-      case DatabaseMode.PROTHEUS_SUPABASE:
-        return {
-          userLabel: "Usuário Protheus",
-          userPlaceholder: "MATRÍCULA OU USUÁRIO ERP",
-          passLabel: "Senha ERP",
-          passPlaceholder: "••••••••",
-          accentColor: "text-accent",
-          focusColor: "focus:border-accent"
-        };
       case DatabaseMode.SUPABASE:
         return {
           userLabel: "E-mail Cloud",
@@ -320,13 +289,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           >
             <Cloud size={12} />
             <span>Supabase</span>
-          </button>
-          <button 
-            onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
-          >
-            <ShieldCheck size={12} />
-            <span>Protheus</span>
           </button>
         </div>
       </div>
@@ -447,7 +409,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
                 Administradores: <span className="underline">Registrar Unidade</span>
               </button>
             </div>
-          ) : databaseMode === DatabaseMode.SUPABASE ? (
+          ) : (
             <div className="space-y-1">
               <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Novo no sistema Cloud?</p>
               <button 
@@ -457,13 +419,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
                 Cadastre-se Agora
               </button>
             </div>
-          ) : (
-            <div className="pt-1">
-              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Acesso Restrito ERP Protheus</p>
-            </div>
           )}
 
-          {/* Link de Resgate (Bypass para erro de localhost) - Disponível para Supabase e Protheus */}
+          {/* Link de Resgate (Bypass para erro de localhost) - Disponível para Supabase */}
           {databaseMode !== DatabaseMode.INTERNAL && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               {!showManualInput ? (

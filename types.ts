@@ -7,13 +7,16 @@ export enum UserRole {
 
 export interface User {
   username: string;
+  name?: string; // Nome completo para exibição
   email: string;
   password?: string;
   role: UserRole;
   isAdmin?: boolean; // Mantido para compatibilidade
   mustChangePassword?: boolean;
-  tenantId?: string; // ID primário (legado)
-  tenants?: string[]; // Lista de IDs de empresas autorizadas
+  tenantId?: string; // ID da ORGANIZAÇÃO (ex: CICOPAL)
+  unitId?: string;   // Unidade Operacional Padrão
+  units?: string[];  // Lista de Unidades Operacionais autorizadas
+  tenants?: string[]; // Mantido para compatibilidade (será migrado para units)
 }
 
 export enum TransactionOrigin {
@@ -104,7 +107,8 @@ export interface Asset {
   _auditor?: string;
   _history?: AuditLogEntry[];
   _photoUrl?: string;
-  _tenantId?: string;
+  _tenantId?: string; // Organização
+  _unitId?: string;   // Unidade Operacional
   _lat?: number;
   _lng?: number;
   _aprovado?: boolean;
@@ -227,7 +231,7 @@ export enum AppScreen {
   INVENTORY = 'INVENTORY',
   LABELING = 'LABELING', // Nova tela independente
   CONSULTATION = 'CONSULTATION',
-  COMPANY_SELECTION = 'COMPANY_SELECTION',
+  UNIT_SELECTION = 'UNIT_SELECTION',
   USER_MANAGEMENT = 'USER_MANAGEMENT',
   CHANGE_PASSWORD = 'CHANGE_PASSWORD',
   FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR',
@@ -265,8 +269,7 @@ export enum InventorySearchMode {
 
 export enum DatabaseMode {
   INTERNAL = 'INTERNAL',
-  SUPABASE = 'SUPABASE',
-  PROTHEUS_SUPABASE = 'PROTHEUS_SUPABASE'
+  SUPABASE = 'SUPABASE'
 }
 
 export interface SearchFilters {

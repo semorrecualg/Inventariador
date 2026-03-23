@@ -136,6 +136,13 @@
   animation: progress linear forwards;
 }
 
+@keyframes pulse-soft {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+.animate-pulse-soft { animation: pulse-soft 2s infinite ease-in-out; }
+
 .font-data {
   font-family: 'JetBrains Mono', monospace;
 }

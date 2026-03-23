@@ -35,9 +35,13 @@ interface DashboardProps {
   assets: Asset[];
   onBack: () => void;
   onOpenActiveSearch?: () => void;
+  user: {
+    tenantId?: string;
+    unitId?: string;
+  } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearch }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearch, user }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
 
   const stats = useMemo(() => {
@@ -147,7 +151,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
     if (filtered.length === 0) return;
 
     const wsData = filtered.map(a => {
-      const res: { [key: string]: string | number | boolean | null | undefined } = {};
+      const res: { [key: string]: string | number | boolean | null | undefined } = {
+        'TENANT': a._tenantId || user?.tenantId || '',
+        'UNIDADE': a._unitId || user?.unitId || '',
+      };
       
       // Mapeia campos normais (PARA)
       Object.keys(a).forEach(k => { 
@@ -246,7 +253,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Relatórios" subLabel="Analytics Precision V24" />
+          <BackButton onClick={onBack} label="Relatórios" subLabel={`${user?.tenantId || 'S/ TENANT'} | ${user?.unitId || 'S/ UNIDADE'}`} />
         </div>
         <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
           <BarChart3 size={20} />

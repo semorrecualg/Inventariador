@@ -190,7 +190,7 @@ export const normalizeString = (s: string): string => {
     .trim();
 };
 
-export const determineAssetTag = (asset: Asset, targetLocation: string, selectedCompany: string | null): TagInventario => {
+export const determineAssetTag = (asset: Asset, targetLocation: string, selectedUnit: string | null): TagInventario => {
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
   
@@ -198,9 +198,9 @@ export const determineAssetTag = (asset: Asset, targetLocation: string, selected
   if (isBaixado) return TagInventario.BAIXADO;
   
   // 2. ADOTADO EXTERNO
-  if (selectedCompany) {
+  if (selectedUnit) {
     const assetCompKey = normalizeString(asset.EMPRESA || '');
-    const currentCompKey = normalizeString(selectedCompany);
+    const currentCompKey = normalizeString(selectedUnit);
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
     }

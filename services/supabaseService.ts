@@ -3,6 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { Asset, InventoryState, User, UserRole } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
+export interface ProvisionResult {
+  user: unknown;
+  existing?: boolean;
+}
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.ITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
@@ -19,7 +24,7 @@ export const generateUUID = () => {
   });
 };
 
-export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN') => {
+export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN', name?: string, unitId?: string, units?: string[]) => {
   if (!supabase) throw new Error("Supabase não configurado.");
   
   // 1. Cria o usuário no Supabase Auth
@@ -29,14 +34,22 @@ export const signUp = async (email: string, password: string, username: string, 
     options: {
       data: {
         username,
+        name: name || username,
         role,
         tenantId,
-        tenants: [tenantId]
+        unitId: unitId || tenantId,
+        units: units || [unitId || tenantId],
+        tenants: [tenantId] // Mantido para compatibilidade
       },
     },
   });
   
-  if (error) throw error;
+  if (error) {
+    if (error.message.includes('already registered')) {
+      throw new Error('Este e-mail já está cadastrado. Tente fazer login ou recupere sua senha.');
+    }
+    throw error;
+  }
 
   // 2. Cria o perfil na tabela user_permissions para garantir sincronia
   if (data.user) {
@@ -46,9 +59,12 @@ export const signUp = async (email: string, password: string, username: string, 
         id: data.user.id, // Sincroniza com o ID do Auth
         email: email.toLowerCase(),
         username,
+        name: name || username,
         role,
         isAdmin: role === 'ADMIN' || role === 'MASTER',
         tenantId,
+        unitId: unitId || tenantId,
+        units: units || [unitId || tenantId],
         tenants: [tenantId]
       }], { onConflict: 'email' });
       
@@ -92,7 +108,11 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     return {
       ...profile,
       username: metadata?.username || profile.username || lowerEmail.split('@')[0],
+      name: metadata?.name || profile.name || metadata?.username || profile.username || lowerEmail.split('@')[0],
       role: metadata?.role || profile.role || (profile.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
+      tenantId: metadata?.tenantId || profile.tenantId || 'default',
+      unitId: metadata?.unitId || profile.unitId || metadata?.tenantId || profile.tenantId || 'default',
+      units: metadata?.units || profile.units || metadata?.tenants || profile.tenants || [profile.tenantId || 'default'],
       tenants: metadata?.tenants || profile.tenants || [profile.tenantId || 'default']
     };
   }
@@ -101,9 +121,12 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   const insertData = {
     email: lowerEmail,
     username: metadata?.username || lowerEmail.split('@')[0],
+    name: metadata?.name || metadata?.username || lowerEmail.split('@')[0],
     role: metadata?.role || UserRole.AUDITOR,
     isAdmin: metadata?.isAdmin || false,
     tenantId: metadata?.tenantId || 'default',
+    unitId: metadata?.unitId || metadata?.tenantId || 'default',
+    units: metadata?.units || [metadata?.tenantId || 'default'],
     tenants: metadata?.tenants || [metadata?.tenantId || 'default'],
     ...(userId ? { id: userId } : {})
   };
@@ -196,6 +219,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
       _lng: lng,
       _conferido: conferido,
       _tenantId: finalTenantId,
+      _unitId: a._unitId || null,
       EMPRESA: assetEmpresa
     };
   });
@@ -338,7 +362,7 @@ export const getUserPermissions = async (email: string) => {
  * Nota: Como é um SPA, usamos signUp. Para evitar deslogar o admin,
  * criamos uma instância temporária do cliente.
  */
-export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantId?: string, tenants?: string[]) => {
+export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantId?: string, tenants?: string[], name?: string, unitId?: string, units?: string[]): Promise<ProvisionResult> => {
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
     throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
   }
@@ -359,8 +383,11 @@ export const provisionUserInAuth = async (email: string, password?: string, user
       options: {
         data: {
           username: username || email.split('@')[0],
+          name: name || username || email.split('@')[0],
           role: role || 'AUDITOR',
           tenantId: tenantId || 'default',
+          unitId: unitId || tenantId || 'default',
+          units: units || [unitId || tenantId || 'default'],
           tenants: tenants || [tenantId || 'default'],
           provisioned_by: 'admin_dashboard'
         }
@@ -368,6 +395,31 @@ export const provisionUserInAuth = async (email: string, password?: string, user
     });
 
     if (error) {
+      // Se o usuário já existe, não falhamos o processo inteiro, 
+      // tentamos apenas atualizar as permissões na tabela
+      if (error.message.includes('already registered') || error.status === 422) {
+        console.log('Usuário já registrado no Auth. Tentando atualizar permissões...');
+        
+        if (supabase) {
+          const { error: permError } = await supabase
+            .from('user_permissions')
+            .upsert([{
+              email: email.toLowerCase().trim(),
+              username: username || email.split('@')[0],
+              name: name || username || email.split('@')[0],
+              role: role || 'AUDITOR',
+              isAdmin: role === 'ADMIN' || role === 'MASTER',
+              tenantId: tenantId || 'default',
+              unitId: unitId || tenantId || 'default',
+              units: units || [unitId || tenantId || 'default'],
+              tenants: tenants || [tenantId || 'default']
+            }], { onConflict: 'email' });
+            
+          if (permError) throw permError;
+          return { user: { email }, existing: true };
+        }
+      }
+      
       console.error('Erro no signUp do Supabase:', error);
       throw error;
     }
@@ -381,9 +433,12 @@ export const provisionUserInAuth = async (email: string, password?: string, user
           id: data.user.id, // Sincroniza ID
           email: email.toLowerCase().trim(),
           username: username || email.split('@')[0],
+          name: name || username || email.split('@')[0],
           role: role || 'AUDITOR',
-          isAdmin: role === 'ADMIN',
+          isAdmin: role === 'ADMIN' || role === 'MASTER',
           tenantId: tenantId || 'default',
+          unitId: unitId || tenantId || 'default',
+          units: units || [unitId || tenantId || 'default'],
           tenants: tenants || [tenantId || 'default']
         }], { onConflict: 'email' });
         
@@ -411,9 +466,12 @@ export const syncUsersToCloud = async (users: User[]) => {
     const usersToSync = users.map(u => ({
       email: u.email.toLowerCase().trim(),
       username: u.username,
+      name: u.name || u.username,
       role: u.role,
-      isAdmin: u.isAdmin || u.role === 'ADMIN',
+      isAdmin: u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER',
       tenantId: u.tenantId || 'default',
+      unitId: u.unitId || u.tenantId || 'default',
+      units: u.units || [u.unitId || u.tenantId || 'default'],
       tenants: u.tenants || [u.tenantId || 'default']
     }));
 
@@ -480,12 +538,15 @@ export const fetchUsersFromCloud = async (tenantId?: string): Promise<User[]> =>
 
     return (data || []).map(u => ({
       username: u.username || u.email.split('@')[0],
+      name: u.name || u.username || u.email.split('@')[0],
       email: u.email,
       password: '', // Senhas não são expostas
       role: u.role as UserRole,
       isAdmin: u.isAdmin || u.role === 'ADMIN',
       mustChangePassword: false,
       tenantId: u.tenantId || 'default',
+      unitId: u.unitId || u.tenantId || 'default',
+      units: u.units || [u.unitId || u.tenantId || 'default'],
       tenants: u.tenants || [u.tenantId || 'default']
     }));
   } catch (err) {
@@ -532,11 +593,11 @@ export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Ass
 /**
  * Busca todo o inventário (ativos e configuração) do Supabase
  */
-export const fetchFullInventory = async (tenantId?: string | string[]): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+export const fetchFullInventory = async (tenantId?: string | string[], unitId?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase) return null;
 
   try {
-    // 1. Busca todos os ativos filtrados por tenantId
+    // 1. Busca todos os ativos filtrados por tenantId e opcionalmente unitId
     let assetsQuery = supabase.from('assets').select('*');
     if (tenantId) {
       if (Array.isArray(tenantId)) {
@@ -545,6 +606,11 @@ export const fetchFullInventory = async (tenantId?: string | string[]): Promise<
         assetsQuery = assetsQuery.eq('_tenantId', tenantId);
       }
     }
+    
+    if (unitId && unitId !== 'default') {
+      assetsQuery = assetsQuery.eq('_unitId', unitId);
+    }
+
     const { data: assets, error: assetsError } = await assetsQuery;
 
     if (assetsError) {

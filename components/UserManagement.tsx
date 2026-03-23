@@ -22,17 +22,18 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react';
-import { provisionUserInAuth, resetPassword, deleteUserFromCloud } from '../services/supabaseService';
+import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
 
 interface UserManagementProps {
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   onBack: () => void;
   currentUser: User | null;
-  availableTenants: string[];
+  setUser?: React.Dispatch<React.SetStateAction<User | null>>;
+  availableUnits: string[];
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, availableTenants }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -56,21 +57,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   
   // States para Novo Usuário
   const [newUsername, setNewUsername] = useState('');
+  const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenants, setNewTenants] = useState<string[]>(currentUser?.tenantId ? [currentUser.tenantId] : []);
-  const [newCustomTenant, setNewCustomTenant] = useState('');
+  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantId || 'default');
+  const [newUnits, setNewUnits] = useState<string[]>(currentUser?.unitId ? [currentUser.unitId] : []);
+  const [newCustomUnit, setNewCustomUnit] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [provisionOnCreate, setProvisionOnCreate] = useState(true);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
+  const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [editTenants, setEditTenants] = useState<string[]>([]);
-  const [editCustomTenant, setEditCustomTenant] = useState('');
+  const [editTenantId, setEditTenantId] = useState('');
+  const [editUnits, setEditUnits] = useState<string[]>([]);
+  const [editCustomUnit, setEditCustomUnit] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -93,7 +98,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     if (provisionOnCreate) {
       setIsProvisioning(true);
       try {
-        await provisionUserInAuth(email, password, username, newRole, newTenants[0] || currentUser?.tenantId || 'default');
+        const result: ProvisionResult = await provisionUserInAuth(
+          email, 
+          password, 
+          username, 
+          newRole, 
+          newTenantId, 
+          newUnits, 
+          newName.trim(),
+          newUnits[0] || currentUser?.unitId || 'default',
+          newUnits
+        );
+        if (result && result.existing) {
+          showModal("Aviso de Acesso", "Este e-mail já possui acesso no Supabase Cloud. As permissões foram sincronizadas com sucesso! IMPORTANTE: A senha definida aqui NÃO altera a senha já existente na nuvem. Use o botão de 'Redefinição' se necessário.", "warning");
+        }
       } catch (err) {
         const error = err as { message?: string };
         const msg = error.message || "Erro desconhecido";
@@ -110,13 +128,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     const newUser: User = {
       username,
+      name: newName.trim(),
       email,
       password,
       role: newRole,
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER,
       mustChangePassword: true,
-      tenants: newTenants.length > 0 ? newTenants : (currentUser?.tenantId ? [currentUser.tenantId] : ['default']),
-      tenantId: newTenants[0] || currentUser?.tenantId || 'default'
+      tenantId: newTenantId,
+      unitId: newUnits[0] || currentUser?.unitId || 'default',
+      units: newUnits.length > 0 ? newUnits : (currentUser?.unitId ? [currentUser.unitId] : ['default']),
+      tenants: [newTenantId] // Compatibilidade
     };
 
     setUsers(prev => {
@@ -135,11 +156,13 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const handleOpenEdit = (user: User) => {
     setSelectedUser(user);
     setEditUsername(user.username);
+    setEditName(user.name || '');
     setEditEmail(user.email);
     setEditPassword(user.password || '');
     setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
-    setEditTenants(user.tenants || (user.tenantId ? [user.tenantId] : []));
-    setEditCustomTenant('');
+    setEditTenantId(user.tenantId || 'default');
+    setEditUnits(user.units || user.tenants || (user.unitId ? [user.unitId] : []));
+    setEditCustomUnit('');
     setIsEditModalOpen(true);
   };
 
@@ -163,8 +186,22 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     
     setIsProvisioning(true);
     try {
-      await provisionUserInAuth(editEmail, editPassword, editUsername, editRole, editTenants[0] || selectedUser.tenantId || 'default', editTenants);
-      showModal("Sucesso", `O usuário ${editEmail} foi ativado no Supabase Auth com sucesso!`, "success");
+      const result: ProvisionResult = await provisionUserInAuth(
+        editEmail, 
+        editPassword, 
+        editUsername, 
+        editRole, 
+        editTenantId, 
+        editUnits, 
+        editName.trim(),
+        editUnits[0] || selectedUser.unitId || 'default',
+        editUnits
+      );
+      if (result && result.existing) {
+        showModal("Aviso", "Este e-mail já possui acesso ativo no Supabase Cloud. As permissões foram sincronizadas com sucesso! IMPORTANTE: A senha NÃO foi alterada. Para mudar a senha de um usuário que já existe, use o botão 'Enviar Link de Redefinição' abaixo.", "warning");
+      } else {
+        showModal("Sucesso", `O usuário ${editEmail} foi ativado no Supabase Auth com sucesso!`, "success");
+      }
     } catch (err) {
       const error = err as { message?: string };
       const msg = error.message || "Erro desconhecido";
@@ -180,36 +217,52 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser || !editUsername || !editEmail || !editPassword) return;
+    if (!selectedUser || !editUsername || !editEmail || !editPassword) {
+      console.warn('[UserManagement] Tentativa de salvar edição com campos obrigatórios vazios.');
+      return;
+    }
 
     const username = editUsername.trim();
     const email = editEmail.toLowerCase().trim();
     const password = editPassword.trim();
+    const name = editName.trim();
+
+    console.log(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
 
     // Verificar duplicidade (excluindo o próprio usuário)
-    if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username))) {
+    if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username.toUpperCase()))) {
       showModal("Erro de Edição", "Este Username ou E-mail já está em uso por outro usuário!", "error");
       return;
     }
 
+    const updatedUser: User = { 
+      ...selectedUser, 
+      username, 
+      name,
+      email, 
+      password, 
+      role: editRole, 
+      isAdmin: editRole === UserRole.ADMIN || editRole === UserRole.MASTER, 
+      tenantId: editTenantId,
+      unitId: editUnits[0] || selectedUser.unitId || 'default',
+      units: editUnits,
+      tenants: [editTenantId]
+    };
+
     setUsers(prev => {
-      const updated = prev.map(u => 
-        u.email === selectedUser.email 
-          ? { 
-              ...u, 
-              username, 
-              email, 
-              password, 
-              role: editRole, 
-              isAdmin: editRole === UserRole.ADMIN || editRole === UserRole.MASTER, 
-              tenants: editTenants,
-              tenantId: editTenants[0] || u.tenantId
-            } 
-          : u
-      );
-      localStorage.setItem('app_users', JSON.stringify(updated));
+      const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
+      console.log('[UserManagement] Lista de usuários atualizada localmente.');
       return updated;
     });
+
+    // Se o usuário editado for o usuário logado, atualiza o estado global e o localStorage
+    if (currentUser && selectedUser.email.toLowerCase() === currentUser.email.toLowerCase()) {
+      console.log('[UserManagement] Atualizando dados do usuário logado...');
+      if (setUser) {
+        setUser(updatedUser);
+      }
+      localStorage.setItem('app_current_user', JSON.stringify(updatedUser));
+    }
 
     setIsEditModalOpen(false);
     setSelectedUser(null);
@@ -283,13 +336,23 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center space-x-3 mb-1">
-                  <span className="font-bold text-base text-ink tracking-tight truncate">{u.username}</span>
-                  <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">LOGIN ID</span>
+                  <span className="font-bold text-base text-ink tracking-tight truncate">{u.name || 'Sem Nome'}</span>
+                  <div className="flex items-center space-x-1">
+                    <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">
+                      {u.tenantId || 'S/ TENANT'}
+                    </span>
+                    <span className="bg-accent/5 text-accent text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-accent/10">
+                      {u.role}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-[11px] font-bold text-ink-muted tracking-widest truncate">{u.email}</p>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Empresas:</span>
-                  {(u.tenants && u.tenants.length > 0 ? u.tenants : [u.tenantId || 'GLOBAL']).map(t => (
+                <div className="flex flex-col space-y-0.5">
+                  <p className="text-[10px] font-bold text-accent tracking-widest truncate uppercase">User: {u.username}</p>
+                  <p className="text-[10px] font-medium text-ink-muted tracking-tight truncate">{u.email}</p>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
+                  {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitId || 'GLOBAL']).map(t => (
                     <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
                   ))}
                 </div>
@@ -323,6 +386,13 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Username e Senha de Acesso</p>
             </div>
             <form onSubmit={handleSaveEdit} className="space-y-5">
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
+                <div className="relative">
+                  <input type="text" required autoComplete="off" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" placeholder="Ex: Glaucio Silva" />
+                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Login</label>
                 <div className="relative">
@@ -374,23 +444,34 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   )}
                 </div>
               </div>
+              {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
+                  <input 
+                    type="text" 
+                    value={editTenantId} 
+                    onChange={(e) => setEditTenantId(e.target.value.toUpperCase().trim())} 
+                    className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                  />
+                </div>
+              )}
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais</label>
                 <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
-                  {Array.from(new Set([...availableTenants, ...editTenants])).map(tenant => (
+                  {Array.from(new Set([...availableUnits, ...editUnits])).map(unit => (
                     <div 
-                      key={tenant} 
+                      key={unit} 
                       onClick={() => {
-                        setEditTenants(prev => 
-                          prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                        setEditUnits(prev => 
+                          prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
                         );
                       }}
                       className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
                     >
-                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
-                        {editTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
+                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editUnits.includes(unit) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
+                        {editUnits.includes(unit) && <Check size={14} strokeWidth={4} />}
                       </div>
-                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
+                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{unit}</span>
                     </div>
                   ))}
                   
@@ -399,16 +480,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       <input 
                         type="text" 
                         placeholder="Novo ID..." 
-                        value={editCustomTenant}
-                        onChange={(e) => setEditCustomTenant(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        value={editCustomUnit}
+                        onChange={(e) => setEditCustomUnit(e.target.value.toLowerCase().replace(/\s/g, ''))}
                         className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
                       />
                       <button 
                         type="button"
                         onClick={() => {
-                          if (editCustomTenant && !editTenants.includes(editCustomTenant)) {
-                            setEditTenants(prev => [...prev, editCustomTenant]);
-                            setEditCustomTenant('');
+                          if (editCustomUnit && !editUnits.includes(editCustomUnit)) {
+                            setEditUnits(prev => [...prev, editCustomUnit]);
+                            setEditCustomUnit('');
                           }
                         }}
                         className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
@@ -480,22 +561,22 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             </div>
             <form onSubmit={handleAddUser} className="space-y-5">
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Empresas Autorizadas</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais</label>
                 <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
-                  {Array.from(new Set([...availableTenants, ...newTenants])).map(tenant => (
+                  {Array.from(new Set([...availableUnits, ...newUnits])).map(unit => (
                     <div 
-                      key={tenant} 
+                      key={unit} 
                       onClick={() => {
-                        setNewTenants(prev => 
-                          prev.includes(tenant) ? prev.filter(t => t !== tenant) : [...prev, tenant]
+                        setNewUnits(prev => 
+                          prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
                         );
                       }}
                       className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
                     >
-                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${newTenants.includes(tenant) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
-                        {newTenants.includes(tenant) && <Check size={14} strokeWidth={4} />}
+                      <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${newUnits.includes(unit) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
+                        {newUnits.includes(unit) && <Check size={12} strokeWidth={4} />}
                       </div>
-                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{tenant}</span>
+                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{unit}</span>
                     </div>
                   ))}
                   
@@ -504,16 +585,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       <input 
                         type="text" 
                         placeholder="Novo ID..." 
-                        value={newCustomTenant}
-                        onChange={(e) => setNewCustomTenant(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        value={newCustomUnit}
+                        onChange={(e) => setNewCustomUnit(e.target.value.toLowerCase().replace(/\s/g, ''))}
                         className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
                       />
                       <button 
                         type="button"
                         onClick={() => {
-                          if (newCustomTenant && !newTenants.includes(newCustomTenant)) {
-                            setNewTenants(prev => [...prev, newCustomTenant]);
-                            setNewCustomTenant('');
+                          if (newCustomUnit && !newUnits.includes(newCustomUnit)) {
+                            setNewUnits(prev => [...prev, newCustomUnit]);
+                            setNewCustomUnit('');
                           }
                         }}
                         className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
@@ -525,7 +606,19 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
+                <input 
+                  type="text" 
+                  required 
+                  autoComplete="off" 
+                  placeholder="EX: Glaucio Silva" 
+                  value={newName} 
+                  onChange={(e) => setNewName(e.target.value)} 
+                  className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Login</label>
                 <input 
                   type="text" 
                   required 
@@ -570,6 +663,17 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   )}
                 </div>
               </div>
+              {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
+                  <input 
+                    type="text" 
+                    value={newTenantId} 
+                    onChange={(e) => setNewTenantId(e.target.value.toUpperCase().trim())} 
+                    className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                  />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Senha</label>
                 <div className="relative">

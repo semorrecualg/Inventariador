@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POP - Sistema de Auditoria GBR v24.50</title>
+    <style>
+        :root {
+            --navy: #0a192f;
+            --navy-light: #112240;
+            --accent: #007bff;
+            --gray-light: #f8f9fa;
+            --gray-medium: #e9ecef;
+            --text-main: #333;
+            --text-muted: #666;
+            --white: #ffffff;
+            --success: #28a745;
+            --warning: #ffc107;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-main);
+            background-color: var(--gray-light);
+            padding-bottom: 50px;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--navy);
+            color: var(--white);
+            padding: 40px 20px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            font-weight: 300;
+        }
+
+        /* Search Bar Area */
+        .search-container {
+            max-width: 800px;
+            margin: -25px auto 30px;
+            padding: 0 20px;
+        }
+
+        .search-box {
+            background: var(--white);
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            border: 1px solid var(--gray-medium);
+        }
+
+        .search-box input {
+            border: none;
+            outline: none;
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+        }
+
+        /* Main Content */
+        main {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Highlight Cards */
+        .alert-card {
+            background-color: var(--white);
+            border-left: 5px solid var(--accent);
+            padding: 20px;
+            margin-bottom: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .alert-card h3 {
+            color: var(--navy);
+            font-size: 1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+
+        .alert-card.warning { border-left-color: var(--warning); }
+        .alert-card.success { border-left-color: var(--success); }
+
+        /* Accordion */
+        .accordion-item {
+            background: var(--white);
+            margin-bottom: 15px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--gray-medium);
+            transition: all 0.3s ease;
+        }
+
+        .accordion-header {
+            padding: 20px;
+            background: var(--white);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: var(--navy);
+            user-select: none;
+        }
+
+        .accordion-header:hover {
+            background-color: var(--gray-light);
+        }
+
+        .accordion-header::after {
+            content: '+';
+            font-size: 1.5rem;
+            color: var(--accent);
+            transition: transform 0.3s ease;
+        }
+
+        .accordion-item.active .accordion-header::after {
+            content: '-';
+            transform: rotate(180deg);
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            padding: 0 20px;
+            background-color: var(--white);
+        }
+
+        .accordion-item.active .accordion-content {
+            max-height: 1000px; /* Grande o suficiente para o conteúdo */
+            padding-bottom: 20px;
+        }
+
+        /* Content Styles */
+        .content-block {
+            padding-top: 10px;
+        }
+
+        .content-block p {
+            margin-bottom: 15px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .content-block ul {
+            margin-left: 20px;
+            margin-bottom: 15px;
+            color: var(--text-muted);
+        }
+
+        .content-block li {
+            margin-bottom: 8px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-right: 5px;
+        }
+
+        .badge-blue { background: #e7f1ff; color: #007bff; }
+        .badge-gray { background: #f0f0f0; color: #666; }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 40px 20px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            header h1 { font-size: 1.4rem; }
+            .accordion-header { padding: 15px; font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Procedimento Operacional Padrão</h1>
+        <p>Sistema GBR Auditoria de Ativos • v24.50</p>
+    </header>
+
+    <div class="search-container">
+        <div class="search-box">
+            <span>🔍</span>
+            <input type="text" id="searchInput" placeholder="O que você deseja saber hoje?" onkeyup="filterContent()">
+        </div>
+    </div>
+
+    <main>
+        <!-- Aviso de Atualização -->
+        <div class="alert-card">
+            <h3>ℹ️ Atualização de Arquitetura</h3>
+            <p>O sistema foi otimizado para garantir performance máxima em locais com baixa conectividade. A dependência direta do ERP Protheus durante o login foi removida.</p>
+        </div>
+
+        <!-- Tópico 1 -->
+        <div class="accordion-item active">
+            <div class="accordion-header">1. Novo Fluxo de Acesso e Modalidades</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Ao abrir o aplicativo, você deve selecionar entre duas modalidades principais de operação:</p>
+                    <ul>
+                        <li><strong><span class="badge badge-gray">Interno</span> Modo Offline:</strong> Ideal para inventários em locais sem qualquer sinal de internet. Os dados são salvos localmente no navegador (IndexedDB).</li>
+                        <li><strong><span class="badge badge-blue">Supabase</span> Modo Cloud:</strong> Recomendado para a maioria das auditorias. Permite sincronização em tempo real de fotos e dados com a nuvem GBR.</li>
+                    </ul>
+                    <p><em>Nota: O login agora é centralizado. Você não precisa mais de uma conexão ativa com o servidor do Protheus para iniciar seu trabalho.</em></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tópico 2 -->
+        <div class="accordion-item">
+            <div class="accordion-header">2. Por que mudamos? (Vantagens)</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>A remoção da "Modalidade Protheus" direta no login traz benefícios críticos para o campo:</p>
+                    <ul>
+                        <li><strong>Estabilidade 3G/4G:</strong> Sem quedas de sessão por instabilidade no link do ERP.</li>
+                        <li><strong>Performance:</strong> O carregamento de ativos é instantâneo, pois os dados residem em uma camada de alta performance (Supabase/Local).</li>
+                        <li><strong>Sincronização de Fotos:</strong> As fotos são enviadas em background, permitindo que você continue auditando sem esperar o upload terminar.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tópico 3 -->
+        <div class="accordion-item">
+            <div class="accordion-header">3. Configuração de Integração (Administradores)</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Para que os dados auditados cheguem ao Protheus, o administrador deve configurar o ponto de integração:</p>
+                    <ol style="margin-left: 20px; color: var(--text-muted); margin-bottom: 15px;">
+                        <li>Acesse o <strong>Menu Administrativo</strong>.</li>
+                        <li>Vá em <strong>Módulo Protheus</strong>.</li>
+                        <li>Habilite a integração e insira a <strong>URL da API Protheus</strong> da sua unidade.</li>
+                    </ol>
+                    <div class="alert-card warning" style="padding: 10px; margin-top: 10px;">
+                        <p style="font-size: 0.85rem; margin-bottom: 0;"><strong>Aviso:</strong> Esta configuração é feita uma única vez por unidade/tenant.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tópico 4 -->
+        <div class="accordion-item">
+            <div class="accordion-header">4. Garantia e Integridade de Dados Técnicos</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Mesmo com a mudança de fluxo, a integridade técnica com o ERP é 100% preservada:</p>
+                    <ul>
+                        <li><strong>Recnos Preservados:</strong> Os campos <code>Sn1_recno</code> e <code>Sn3_recno</code> são carregados e mantidos em cada registro.</li>
+                        <li><strong>Rastreabilidade:</strong> Cada alteração feita no aplicativo mantém o vínculo original com a tabela do SIGAATF, garantindo que o retorno dos dados ao Protheus seja preciso e sem duplicidades.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tópico 5: Painel Administrativo e Gestão -->
+        <div class="accordion-item">
+            <div class="accordion-header">5. Painel Administrativo e Gestão de Dados</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>O ecossistema administrativo do GBR v24.50 é dividido em três pilares principais para garantir o controle total da operação:</p>
+                    
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">A. Configurações Operacionais</h4>
+                    <ul>
+                        <li><strong>Configurar Campos:</strong> Define quais informações (Descrição, Serial, etc.) o auditor pode editar.</li>
+                        <li><strong>Configurar QR Code:</strong> Personaliza os dados contidos nas etiquetas geradas pelo app.</li>
+                        <li><strong>Gestão de Acessos:</strong> Controle centralizado de usuários e perfis (ADMIN/AUDITOR).</li>
+                        <li><strong>Auto-Conferência:</strong> Agiliza o campo registrando o item imediatamente após a leitura.</li>
+                        <li><strong>Evidência Fotográfica:</strong> Torna a foto obrigatória em divergências ou novos itens.</li>
+                        <li><strong>Feedback do Scanner:</strong> Ajusta alertas sonoros e vibratórios do dispositivo.</li>
+                        <li><strong>Otimização de Energia:</strong> Modo Escuro e Economia de Bateria para longas jornadas.</li>
+                        <li><strong>Módulo Protheus:</strong> Configuração técnica para integração com o ERP Protheus via API.</li>
+                        <li><strong>Manual do Sistema:</strong> Acesso à documentação técnica interna em formato Markdown.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">B. Gestão e Manutenção de Dados</h4>
+                    <ul>
+                        <li><strong>Carga Expert:</strong> Importação massiva de ativos via planilhas Excel (.xlsx) ou CSV.</li>
+                        <li><strong>Sincronização Cloud:</strong> No modo Supabase, permite baixar e enviar dados para a nuvem.</li>
+                        <li><strong>Backups e Restauração:</strong> Geração de arquivos JSON locais para segurança e restauração rápida de estados anteriores.</li>
+                        <li><strong>Exportação XLS:</strong> Gera relatórios em Excel com o status atualizado de todo o inventário.</li>
+                        <li><strong>Limpeza Seletiva/Total:</strong> Ferramentas para apagar dados de unidades específicas ou resetar completamente o banco (Local + Nuvem).</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">C. Análise e Performance (Analytics)</h4>
+                    <ul>
+                        <li><strong>Painel de Progresso:</strong> Visão detalhada do avanço por unidade e endereço.</li>
+                        <li><strong>Rendimento Global:</strong> Gráficos de produtividade diária da equipe de auditoria.</li>
+                        <li><strong>Mapa de Calor:</strong> Visualização geográfica da dispersão dos ativos (Geotagging).</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tópico 6: Módulo de Gestão e Manutenção -->
+        <div class="accordion-item">
+            <div class="accordion-header">6. Módulo de Gestão e Manutenção (Painel Administrativo)</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Este módulo é o "coração" técnico do sistema, onde o administrador gerencia o ciclo de vida dos dados e a integridade da base. Abaixo, detalhamos as operações críticas:</p>
+                    
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">A. Sincronização e Modalidades</h4>
+                    <ul>
+                        <li><strong>Modalidade de Acesso:</strong> Permite alternar entre o <em>Banco Interno (IndexedDB)</em> para uso offline e o <em>Banco Externo (Supabase)</em> para colaboração em nuvem. <strong>Aviso:</strong> Mudar de modo altera a origem dos dados e o fluxo de login.</li>
+                        <li><strong>Sincronizar Nuvem:</strong> No modo Supabase, este comando baixa os dados mais recentes da nuvem para o dispositivo, garantindo que o auditor trabalhe com a base atualizada.</li>
+                        <li><strong>Baixar Dados da Nuvem:</strong> Realiza um download direto e forçado dos dados do Supabase, útil para auditorias de integridade ou recuperação de desastres.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">B. Importação e Exportação</h4>
+                    <ul>
+                        <li><strong>Carga Expert:</strong> Ferramenta de importação massiva. Aceita arquivos Excel (.xlsx) e CSV. O sistema processa automaticamente as colunas conforme o protocolo GBR v24, eliminando duplicidades e itens baixados irrelevantes.</li>
+                        <li><strong>Baixar Base de Dados (XLS):</strong> Exporta o estado atual do inventário (incluindo fotos e coordenadas GPS, se disponíveis) para um arquivo Excel formatado para auditoria.</li>
+                        <li><strong>Backup JSON (Local):</strong> Gera um arquivo de segurança contendo todos os dados armazenados localmente no navegador. Essencial antes de limpezas ou trocas de dispositivo.</li>
+                        <li><strong>Restaurar Backup:</strong> Permite carregar um arquivo JSON previamente gerado, restaurando o inventário para aquele ponto exato no tempo.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">C. Rotinas de Limpeza (Purge)</h4>
+                    <ul>
+                        <li><strong>Limpeza Seletiva:</strong> Permite escolher unidades de negócio ou filiais específicas para remover do dispositivo, liberando memória sem apagar todo o trabalho.</li>
+                        <li><strong>Limpeza Total (Local + Nuvem):</strong> O comando mais crítico do sistema. Apaga permanentemente todos os registros do dispositivo e do servidor Supabase. Requer confirmação dupla.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">D. Gestão de Acessos e Usuários</h4>
+                    <ul>
+                        <li><strong>Nome Completo:</strong> Nome de exibição do auditor nos relatórios e logs. <em>(Ex: Glaucio Silva)</em></li>
+                        <li><strong>Username de Login:</strong> Identificador único para acesso ao sistema. <em>(Ex: glaucio.silva)</em></li>
+                        <li><strong>Perfis de Acesso:</strong> 
+                            <br>- <strong>ADMIN:</strong> Acesso total a configurações e gestão.
+                            <br>- <strong>MASTER:</strong> Gestão de usuários e dados de sua organização (Tenant).
+                            <br>- <strong>AUDITOR:</strong> Acesso apenas à coleta de dados em campo.
+                        </li>
+                        <li><strong>Ativação Cloud:</strong> Opção para criar automaticamente o login no Supabase Auth durante o cadastro do usuário.</li>
+                    </ul>
+
+                    <div class="alert-card info" style="padding: 10px; margin-top: 10px; border-left: 4px solid var(--accent);">
+                        <p style="font-size: 0.85rem; margin-bottom: 0;"><strong>Dica de Persistência:</strong> Se os nomes dos usuários parecerem desatualizados, utilize a função <strong>"Sincronizar Nuvem"</strong> no modo Supabase para baixar as informações mais recentes do servidor.</p>
+                    </div>
+
+                    <div class="alert-card warning" style="padding: 10px; margin-top: 10px;">
+                        <p style="font-size: 0.85rem; margin-bottom: 0;"><strong>Segurança:</strong> Sempre gere um <strong>Backup JSON</strong> antes de realizar operações de Limpeza ou Carga Expert.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FAQ -->
+        <h2 style="margin: 30px 0 15px; font-size: 1.2rem; color: var(--navy); text-transform: uppercase; letter-spacing: 1px;">Perguntas Frequentes</h2>
+
+        <div class="accordion-item">
+            <div class="accordion-header">Posso trocar de modo (Interno para Supabase) no meio do trabalho?</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Sim, mas recomendamos exportar um backup em JSON antes da troca para garantir que nenhum dado local seja sobrescrito pela base da nuvem.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="accordion-item">
+            <div class="accordion-header">O que acontece se eu ficar sem internet no modo Supabase?</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>O sistema continuará funcionando normalmente. As alterações ficarão em uma fila de sincronização e serão enviadas automaticamente assim que o sinal for restabelecido.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert-card success">
+            <h3>💡 Dica de Ouro</h3>
+            <p>Sempre utilize o <strong>Modo Imersivo (Full Screen)</strong> durante a leitura de etiquetas para evitar toques acidentais nas barras de navegação do celular.</p>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 GBR Intelligent Systems • Documentação Técnica de Auditoria</p>
+    </footer>
+
+    <script>
+        // Lógica do Accordion
+        const headers = document.querySelectorAll('.accordion-header');
+        
+        headers.forEach(header => {
+            header.addEventListener('click', () => {
+                const item = header.parentElement;
+                const isActive = item.classList.contains('active');
+                
+                // Opcional: Fechar outros ao abrir um (comentado para permitir múltiplos abertos)
+                // document.querySelectorAll('.accordion-item').forEach(i => i.classList.remove('active'));
+                
+                if (isActive) {
+                    item.classList.remove('active');
+                } else {
+                    item.classList.add('active');
+                }
+            });
+        });
+
+        // Função de Busca (Estética/Simples)
+        function filterContent() {
+            const input = document.getElementById('searchInput');
+            const filter = input.value.toLowerCase();
+            const items = document.querySelectorAll('.accordion-item');
+
+            items.forEach(item => {
+                const text = item.innerText.toLowerCase();
+                if (text.includes(filter)) {
+                    item.style.display = "";
+                } else {
+                    item.style.display = "none";
+                }
+            });
+        }
+    </script>
+</body>
+</html>

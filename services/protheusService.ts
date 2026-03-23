@@ -12,55 +12,8 @@ export interface ProtheusUpdateResponse {
   recno?: number;
 }
 
-export interface ProtheusAuthResponse {
-  success: boolean;
-  message: string;
-  user?: {
-    username: string;
-    email: string;
-  };
-}
-
-/**
- * Simula a autenticação de um usuário no ERP Protheus
- */
-export const authenticateWithProtheus = async (
-  username: string,
-  password: string
-): Promise<ProtheusAuthResponse> => {
-  console.log(`Autenticando usuário ${username} no Protheus...`);
-
-  // Simulação de chamada de API de autenticação
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // Para fins de teste/protótipo:
-      // Se a senha for 'admin' ou 'gbr123', autentica com sucesso
-      // Ou se for o email do usuário principal
-      const isSuccess = password === 'admin' || password === 'gbr123' || username.toLowerCase() === 'semorr@gmail.com';
-      
-      if (isSuccess) {
-        resolve({
-          success: true,
-          message: 'Autenticação Protheus realizada com sucesso.',
-          user: {
-            username: username.toUpperCase(),
-            email: username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@gbr.com`
-          }
-        });
-      } else {
-        resolve({
-          success: false,
-          message: 'Usuário ou senha inválidos no ERP Protheus.'
-        });
-      }
-    }, 1200);
-  });
-};
-
 /**
  * Mapeia os campos do nosso App para os campos do Protheus (SN1/SN3)
- * @param asset Ativo do App
- * @returns Objeto formatado para a API do Protheus
  */
 export const normalizeToProtheus = (asset: Asset) => {
   return {

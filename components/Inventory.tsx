@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
@@ -31,7 +31,7 @@ import {
   Database,
   Keyboard,
   Calendar,
-  User,
+  User as UserIcon,
   Mic,
   ShieldAlert,
   Activity
@@ -55,7 +55,7 @@ interface AssetCardProps {
   selectedLocation: string | null;
   onSelect: (a: Asset) => void;
   onMakeDecision: (id: string, decision: 'YES' | 'NO') => void;
-  selectedCompany: string | null;
+  selectedUnit: string | null;
   isBatchMode: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
@@ -99,13 +99,13 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedCompany, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
+  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
-  const companyKey = useMemo(() => normalizeKeyFast(selectedCompany), [selectedCompany]);
+  const companyKey = useMemo(() => normalizeKeyFast(selectedUnit), [selectedUnit]);
   const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.EMPRESA), [asset.EMPRESA]);
-  const isDifferentCompany = selectedCompany && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
+  const isDifferentCompany = selectedUnit && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   
@@ -246,7 +246,7 @@ const AssetCard = React.memo(({
               </div>
               {asset._auditor && (
                 <div className="flex items-center space-x-1 pl-2">
-                  <User size={10} className="text-success" />
+                  <UserIcon size={10} className="text-success" />
                   <span className="text-ink-muted">{asset._auditor}</span>
                 </div>
               )}
@@ -337,7 +337,7 @@ interface InventoryProps {
   setSelectedLocation: (loc: string | null) => void;
   isInventorying: boolean;
   setIsInventorying: (val: boolean) => void;
-  selectedCompany: string | null;
+  selectedUnit: string | null;
   onAddNewLocation: (newLocation: string) => void;
   locationsWithStats: Record<string, { total: number; checked: number }>;
   scannerMode: ScannerMode;
@@ -356,6 +356,7 @@ interface InventoryProps {
   isGpsAvailable?: boolean | null;
   databaseMode: 'INTERNAL' | 'SUPABASE';
   onSyncFromCloud: () => Promise<void>;
+  user: User | null;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -369,7 +370,7 @@ const Inventory: React.FC<InventoryProps> = ({
   setSelectedLocation, 
   isInventorying, 
   setIsInventorying, 
-  selectedCompany, 
+  selectedUnit, 
   onAddNewLocation, 
   locationsWithStats, 
   scannerMode, 
@@ -387,7 +388,8 @@ const Inventory: React.FC<InventoryProps> = ({
   batterySaver,
   isGpsAvailable,
   databaseMode,
-  onSyncFromCloud
+  onSyncFromCloud,
+  user
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -419,7 +421,7 @@ const Inventory: React.FC<InventoryProps> = ({
   // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
   const allAssetsRef = useRef(allAssets);
   const selectedLocationRef = useRef(selectedLocation);
-  const selectedCompanyRef = useRef(selectedCompany);
+  const selectedUnitRef = useRef(selectedUnit);
   const onUpdateAssetRef = useRef(onUpdateAsset);
   const autoConfirmOnScanRef = useRef(autoConfirmOnScan);
   const scanFeedbackModeRef = useRef(scanFeedbackMode);
@@ -429,7 +431,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   useEffect(() => { allAssetsRef.current = allAssets; }, [allAssets]);
   useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
-  useEffect(() => { selectedCompanyRef.current = selectedCompany; }, [selectedCompany]);
+  useEffect(() => { selectedUnitRef.current = selectedUnit; }, [selectedUnit]);
   useEffect(() => { onUpdateAssetRef.current = onUpdateAsset; }, [onUpdateAsset]);
   useEffect(() => { autoConfirmOnScanRef.current = autoConfirmOnScan; }, [autoConfirmOnScan]);
   useEffect(() => { scanFeedbackModeRef.current = scanFeedbackMode; }, [scanFeedbackMode]);
@@ -488,14 +490,14 @@ const Inventory: React.FC<InventoryProps> = ({
     if (autoConfirmOnScanRef.current) {
       if (foundAsset) {
         // Se encontrou, confirma automaticamente na localização atual
-        const currentCompKey = normalizeKey(selectedCompanyRef.current || '');
+        const currentCompKey = normalizeKey(selectedUnitRef.current || '');
         const assetCompKey = normalizeKey(foundAsset.EMPRESA || '');
         
         if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
           // Caso seja de outra empresa, adota
           onUpdateAssetRef.current({ 
             ...foundAsset, 
-            EMPRESA: selectedCompanyRef.current || foundAsset.EMPRESA,
+            EMPRESA: selectedUnitRef.current || foundAsset.EMPRESA,
             _conferido: true,
             TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
             _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
@@ -538,7 +540,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (!selectedLocation) return [];
     const term = normalizeKeyFast(committedSearch);
     const currentLocKey = normalizeKeyFast(selectedLocation);
-    const currentCompKey = normalizeKeyFast(selectedCompany || '');
+    const currentCompKey = normalizeKeyFast(selectedUnit || '');
 
     if (!term) {
       const result = [];
@@ -622,7 +624,7 @@ const Inventory: React.FC<InventoryProps> = ({
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedCompany]);
+  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedUnit]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
@@ -654,7 +656,7 @@ const Inventory: React.FC<InventoryProps> = ({
     
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
-    const currentCompKey = normalizeKey(selectedCompany || '');
+    const currentCompKey = normalizeKey(selectedUnit || '');
     
     if (isBatch && etq && etq !== "ETIQUETAR") {
       // Restrito à EMPRESA ATUAL e STATUS ATIVO
@@ -680,13 +682,13 @@ const Inventory: React.FC<InventoryProps> = ({
       _localMaster: selectedLocation || asset.ENDERECO
     });
     setDisplayValue('');
-  }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedCompany, selectedLocation]);
+  }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback((asset: Asset) => {
     setShowNumericKeypad(false);
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
-    const currentCompKey = normalizeKey(selectedCompany || '');
+    const currentCompKey = normalizeKey(selectedUnit || '');
     const assetCompKey = normalizeKey(asset.EMPRESA || '');
     
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
@@ -699,7 +701,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       onUpdateAsset({ 
         ...asset, 
-        EMPRESA: selectedCompany || asset.EMPRESA,
+        EMPRESA: selectedUnit || asset.EMPRESA,
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
         _localMaster: selectedLocation || asset.ENDERECO
@@ -723,7 +725,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedCompany, selectedLocation]);
+  }, [allAssets, onSelectAsset, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -763,7 +765,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleCreateNew = () => {
     setManualAsset({
         ETIQUETA: committedSearch || "",
-        EMPRESA: selectedCompany || "",
+        EMPRESA: selectedUnit || "",
         STATUS: "ATIVO",
         DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -822,7 +824,9 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
-        _localMaster: selectedLocation || ""
+        _localMaster: selectedLocation || "",
+        _tenantId: user?.tenantId || 'default',
+        _unitId: selectedUnit || user?.unitId || 'default'
     } as Asset;
     
     onUpdateAsset(newAsset);
@@ -835,10 +839,23 @@ const Inventory: React.FC<InventoryProps> = ({
  
 
   useEffect(() => {
-    if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
-      setIsScannerOpen(true);
-    }
-  }, [isInventorying]); // Só dispara quando entra no inventário de um local
+    const checkCameraPermission = async () => {
+      if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
+        try {
+          // Just-in-Time: Solicita permissão apenas no momento do uso
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          // Se chegou aqui, a permissão foi concedida. Paramos o stream imediatamente.
+          stream.getTracks().forEach(track => track.stop());
+          setIsScannerOpen(true);
+        } catch (err) {
+          console.error('Erro ao acessar a câmera:', err);
+          // Opcional: Mostrar um alerta amigável se a permissão for negada
+        }
+      }
+    };
+
+    checkCameraPermission();
+  }, [isInventorying, searchMode]); // Só dispara quando entra no inventário de um local ou muda para scanner
 
   useEffect(() => {
     const searchTimeout = setTimeout(() => {
@@ -961,13 +978,13 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                   <button 
                     onClick={() => {
-                      const currentCompKey = normalizeKey(selectedCompany || '');
+                      const currentCompKey = normalizeKey(selectedUnit || '');
                       const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
                       
                       if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                         onUpdateAsset({ 
                           ...scannedAsset, 
-                          EMPRESA: selectedCompany || scannedAsset.EMPRESA,
+                          EMPRESA: selectedUnit || scannedAsset.EMPRESA,
                           _conferido: true,
                           TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
@@ -1015,7 +1032,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     onClick={() => {
                       setManualAsset({
                         ETIQUETA: scannedResult,
-                        EMPRESA: selectedCompany || "",
+                        EMPRESA: selectedUnit || "",
                         STATUS: "ATIVO",
                         DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
                         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1371,7 +1388,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       selectedLocation={selectedLocation} 
                       onSelect={() => handleAssetClick(asset)} 
                       onMakeDecision={handleMakeDecision} 
-                      selectedCompany={selectedCompany} 
+                      selectedUnit={selectedUnit} 
                       isBatchMode={isBatchMode} 
                       isSelected={selectedIds.has(String(asset.id))} 
                       onToggleSelect={toggleSelect} 
@@ -1429,7 +1446,7 @@ const Inventory: React.FC<InventoryProps> = ({
             setIsScannerOpen(false);
             setManualAsset({
               ETIQUETA: "",
-              EMPRESA: selectedCompany || "",
+              EMPRESA: selectedUnit || "",
               STATUS: "ATIVO",
               DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
               AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1533,13 +1550,13 @@ const Inventory: React.FC<InventoryProps> = ({
                 </button>
                 <button 
                   onClick={() => {
-                    const currentCompKey = normalizeKey(selectedCompany || '');
+                    const currentCompKey = normalizeKey(selectedUnit || '');
                     const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
                     
                     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                       onUpdateAsset({ 
                         ...scannedAsset, 
-                        EMPRESA: selectedCompany || scannedAsset.EMPRESA,
+                        EMPRESA: selectedUnit || scannedAsset.EMPRESA,
                         _conferido: true,
                         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                         _localMaster: selectedLocation || scannedAsset.ENDERECO
@@ -1592,7 +1609,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   onClick={() => {
                     setManualAsset({
                       ETIQUETA: scannedResult,
-                      EMPRESA: selectedCompany || "",
+                      EMPRESA: selectedUnit || "",
                       STATUS: "ATIVO",
                       DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
                       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",

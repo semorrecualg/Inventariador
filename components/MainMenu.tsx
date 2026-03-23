@@ -31,7 +31,8 @@ import {
   BookOpen,
   Map as MapIcon,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -43,9 +44,9 @@ interface MainMenuProps {
   onDownloadCloudData: () => void;
   onRestore: (file: File) => void;
   onClearDatabase: () => void;
-  onClearMultipleCompanies?: (companies: string[]) => void;
+  onClearMultipleUnits?: (units: string[]) => void;
   user: User | null;
-  companies: { name: string; hasData: boolean }[];
+  units: { name: string; hasData: boolean }[];
   inventoryInfo: { count: number; totalDatabase: number; date: string | null };
   autoConfirmOnScan: boolean;
   onUpdateAutoConfirm: (val: boolean) => void;
@@ -56,7 +57,7 @@ interface MainMenuProps {
   initialDataMenuOpen?: boolean;
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
-  selectedCompany: string | null;
+  selectedUnit: string | null;
   darkMode: boolean;
   onUpdateDarkMode: (val: boolean) => void;
   batterySaver: boolean;
@@ -86,7 +87,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onDownloadCloudData,
   onRestore,
   onClearDatabase, 
-  onClearMultipleCompanies,
+  onClearMultipleUnits,
   user, 
   inventoryInfo, 
   autoConfirmOnScan, 
@@ -98,7 +99,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   initialDataMenuOpen = false,
   databaseMode,
   onUpdateDatabaseMode,
-  selectedCompany,
+  selectedUnit,
   darkMode,
   onUpdateDarkMode,
   batterySaver,
@@ -112,7 +113,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateProtheusIntegration,
   protheusApiUrl,
   onUpdateProtheusApiUrl,
-  companies,
+  units,
   mandatoryPhotoOnDivergence,
   onUpdateMandatoryPhotoOnDivergence,
   mandatoryPhotoOnNewItem,
@@ -185,7 +186,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {/* COMPANY NAME BAR */}
       <div className="px-5 py-2 bg-white border-b border-border z-30 flex items-center justify-between">
         <h2 className="text-[11px] font-black text-ink uppercase tracking-tight truncate">
-          {selectedCompany || 'NENHUMA EMPRESA SELECIONADA'}
+          {selectedUnit || 'NENHUMA UNIDADE SELECIONADA'}
         </h2>
         <div className="flex items-center">
           <img 
@@ -600,6 +601,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </div>
                   <ChevronRight size={14} className="text-emerald-300" />
                 </button>
+
+                <button 
+                  onClick={() => window.open('/ajuda_sistema.html', '_blank')}
+                  className="w-full flex items-center p-4 bg-indigo-50 border border-indigo-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm mt-3"
+                >
+                  <div className="w-8 h-8 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><ExternalLink size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-indigo-900 uppercase tracking-tight">POP Interativo</h4>
+                    <p className="text-[8px] font-bold text-indigo-600 uppercase tracking-widest mt-0.5">Guia de Nova Arquitetura</p>
+                  </div>
+                  <ChevronRight size={14} className="text-indigo-300" />
+                </button>
                 
                 <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 flex items-start space-x-2">
                   <Battery size={14} className="text-amber-500 shrink-0 mt-0.5" />
@@ -776,17 +789,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     </div>
                     {databaseMode === DatabaseMode.SUPABASE && <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />}
                   </button>
-
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.PROTHEUS_SUPABASE)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.PROTHEUS_SUPABASE ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
-                  >
-                    <div className="flex items-center">
-                      <ShieldCheck size={14} className="mr-3" />
-                      <span>3) Protheus + Supabase</span>
-                    </div>
-                    {databaseMode === DatabaseMode.PROTHEUS_SUPABASE && <div className="w-2 h-2 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(129,140,248,0.8)]" />}
-                  </button>
                 </div>
                 <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">
                   <p className="text-[7px] font-bold text-accent uppercase leading-relaxed tracking-wide opacity-80">
@@ -934,7 +936,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </p>
                 <div className="flex space-x-2">
                   <button 
-                    onClick={() => setSelectedToClear(companies.map(c => c.name))}
+                    onClick={() => setSelectedToClear(units.map(c => c.name))}
                     className="text-[9px] font-black text-accent uppercase tracking-widest hover:underline"
                   >
                     Marcar Todas
@@ -949,37 +951,37 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
 
               <div className="space-y-2">
-                {companies.map(company => (
+                {units.map(unit => (
                   <button
-                    key={company.name}
+                    key={unit.name}
                     onClick={() => {
-                      if (selectedToClear.includes(company.name)) {
-                        setSelectedToClear(prev => prev.filter(c => c !== company.name));
+                      if (selectedToClear.includes(unit.name)) {
+                        setSelectedToClear(prev => prev.filter(c => c !== unit.name));
                       } else {
-                        setSelectedToClear(prev => [...prev, company.name]);
+                        setSelectedToClear(prev => [...prev, unit.name]);
                       }
                     }}
                     className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${
-                      selectedToClear.includes(company.name)
+                      selectedToClear.includes(unit.name)
                         ? 'bg-red-50 border-red-200 shadow-sm'
                         : 'bg-white border-border'
                     }`}
                   >
                     <div className="flex items-center space-x-3">
                       <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
-                        selectedToClear.includes(company.name)
+                        selectedToClear.includes(unit.name)
                           ? 'bg-red-500 border-red-500 text-white'
                           : 'bg-white border-slate-300'
                       }`}>
-                        {selectedToClear.includes(company.name) && <ListChecks size={12} />}
+                        {selectedToClear.includes(unit.name) && <ListChecks size={12} />}
                       </div>
                       <div className="flex flex-col items-start">
                         <span className={`text-[11px] font-bold uppercase tracking-tight ${
-                          selectedToClear.includes(company.name) ? 'text-red-700' : 'text-ink'
+                          selectedToClear.includes(unit.name) ? 'text-red-700' : 'text-ink'
                         }`}>
-                          {company.name}
+                          {unit.name}
                         </span>
-                        {!company.hasData && (
+                        {!unit.hasData && (
                           <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
                             Base Vazia
                           </span>
@@ -996,8 +998,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <button
               disabled={selectedToClear.length === 0}
               onClick={() => {
-                if (onClearMultipleCompanies) {
-                  onClearMultipleCompanies(selectedToClear);
+                if (onClearMultipleUnits) {
+                  onClearMultipleUnits(selectedToClear);
                   setIsSelectiveClearOpen(false);
                   setIsDataMenuOpen(false);
                   setIsAdminMenuOpen(false);

@@ -71,6 +71,7 @@ const AssetIcon = ({ className }: { className?: string }) => (
 // Register Component
 const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMode }) => {
   const [username, setUsername] = useState('');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('');
@@ -102,7 +103,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
         password, 
         username, 
         tenantId.toLowerCase().trim(), 
-        UserRole.ADMIN
+        UserRole.ADMIN,
+        name.trim()
       );
       setIsSuccess(true);
       setTimeout(() => {
@@ -115,28 +117,6 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
       setIsLoading(false);
     }
   };
-
-  if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
-    return (
-      <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
-        <div className="w-20 h-20 bg-accent-soft text-accent rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-accent/10">
-          <AlertCircle size={32} />
-        </div>
-        <h2 className="text-2xl font-bold text-ink uppercase tracking-tight">Registro via Protheus</h2>
-        <p className="text-ink-muted mt-4 text-xs font-medium leading-relaxed max-w-xs">
-          Nesta modalidade, o registro de novos usuários deve ser realizado diretamente no sistema <span className="text-accent font-bold">Protheus</span>.
-          <br/><br/>
-          Utilize suas credenciais corporativas para entrar.
-        </p>
-        <button 
-          onClick={onGoToLogin}
-          className="mt-8 w-full max-w-xs bg-accent text-white font-bold py-5 rounded-3xl shadow-lg hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
-        >
-          Voltar ao Login
-        </button>
-      </div>
-    );
-  }
 
   if (isSuccess) {
     return (
@@ -214,7 +194,18 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
           </p>
         </div>
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Username</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Nome Completo</label>
+          <input 
+            type="text" 
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: Glaucio Silva"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Username de Login</label>
           <input 
             type="text" 
             required

@@ -25,7 +25,6 @@ interface LabelingProps {
   onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void;
   onSelectAsset: (asset: Asset) => void;
   uniqueCentrosDeCusto: string[];
-  selectedCompany: string | null;
   scannerMode: ScannerMode;
   onUpdateScannerMode: (mode: ScannerMode) => void;
   scanFeedbackMode: ScanFeedbackMode;
