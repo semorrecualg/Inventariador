@@ -46,6 +46,7 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS _valor_residual DECIMAL(15,2);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS _depreciacao_acumulada DECIMAL(15,2);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS _data_inicio_depreciacao DATE;
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS _status_contabil TEXT DEFAULT 'ATIVO'; -- 'ATIVO', 'BAIXADO', 'VENDIDO'
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS _origemTransacao TEXT;
 
 -- 5. Índices para performance
 CREATE INDEX IF NOT EXISTS idx_movements_asset ON asset_movements(asset_id);

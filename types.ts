@@ -1,6 +1,7 @@
 
 export enum UserRole {
   ADMIN = 'ADMIN',
+  MASTER = 'MASTER',
   AUDITOR = 'AUDITOR'
 }
 
@@ -15,12 +16,19 @@ export interface User {
   tenants?: string[]; // Lista de IDs de empresas autorizadas
 }
 
+export enum TransactionOrigin {
+  INVENTORY = '1000',
+  LABELING = '2000',
+  ACCOUNT_RECONCILIATION = '3000'
+}
+
 export interface AuditLogEntry {
   timestamp: string;
   user: string;
   action: string;
   details?: string;
   tenantId?: string;
+  origin?: TransactionOrigin;
 }
 
 export enum DatabaseStatus {
@@ -105,6 +113,7 @@ export interface Asset {
   _assinatura?: string; // Base64 da assinatura
   DE_PARA?: string;
   AUDITOR_STATUS_CONFERENCIA?: string;
+  _origemTransacao?: TransactionOrigin;
 
   // Novos Campos Módulo Controle de Ativo (Contábil)
   _valor_aquisicao?: number;

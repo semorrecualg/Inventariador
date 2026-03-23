@@ -3,9 +3,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet.heat';
-import { Asset } from '../types';
+import { Asset, TransactionOrigin } from '../types';
 import BackButton from './BackButton';
-import { Layers, Info, X, ShieldAlert } from 'lucide-react';
+import { Layers, Info, X, ShieldAlert, Filter } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -23,7 +23,11 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
   const map = useMap();
 
   useEffect(() => {
-    if (!map || points.length === 0) return;
+    if (!map) return;
+    if (points.length === 0) {
+      // Se não houver pontos, não faz nada ou remove camadas anteriores se necessário
+      return;
+    }
 
     // Cria a camada de calor
     const heatLayer = L.heatLayer(points as L.LatLngExpression[], {
@@ -35,6 +39,12 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
 
     heatLayer.addTo(map);
 
+    // Ajusta o zoom para os pontos se houver
+    if (points.length > 0) {
+      const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+
     return () => {
       map.removeLayer(heatLayer);
     };
@@ -45,16 +55,31 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
 
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => {
   const [showInfo, setShowInfo] = useState(true);
+  const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
+
+  // Opções de filtro de origem
+  const originOptions = [
+    { label: 'TODAS AS ORIGENS', value: 'ALL' },
+    { label: 'INVENTÁRIO (1000)', value: TransactionOrigin.INVENTORY },
+    { label: 'ETIQUETAR (2000)', value: TransactionOrigin.LABELING },
+    { label: 'CONCILIAÇÃO (3000)', value: TransactionOrigin.ACCOUNT_RECONCILIATION },
+  ];
+
+  // Filtra os ativos pela origem selecionada
+  const filteredAssets = useMemo(() => {
+    if (selectedOrigin === 'ALL') return assets;
+    return assets.filter(a => a._origemTransacao === selectedOrigin);
+  }, [assets, selectedOrigin]);
 
   // Prepara os pontos para o mapa de calor [lat, lng, intensidade]
   const heatPoints = useMemo(() => {
-    return assets
+    return filteredAssets
       .filter(a => a._lat && a._lng)
       .map(a => [a._lat!, a._lng!, 1] as [number, number, number]);
-  }, [assets]);
+  }, [filteredAssets]);
 
-  // Calcula o centro do mapa
-  const center = useMemo(() => {
+  // Calcula o centro do mapa (apenas para inicialização se necessário)
+  const initialCenter = useMemo(() => {
     if (heatPoints.length === 0) return [-23.5505, -46.6333] as [number, number]; // São Paulo default
     const sumLat = heatPoints.reduce((acc, p) => acc + p[0], 0);
     const sumLng = heatPoints.reduce((acc, p) => acc + p[1], 0);
@@ -63,13 +88,38 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main overflow-hidden relative">
-      <div className="absolute top-12 left-4 z-[1000]">
-        <BackButton onClick={onBack} label="Voltar" subLabel="Mapa Gratuito" />
+      {/* Header com Filtro */}
+      <div className="absolute top-12 left-4 right-4 z-[1000] flex items-center justify-between pointer-events-none">
+        <div className="pointer-events-auto">
+          <BackButton onClick={onBack} label="Voltar" subLabel="Mapa de Calor" />
+        </div>
+
+        <div className="pointer-events-auto bg-white/90 backdrop-blur-md border border-border p-1 rounded-2xl shadow-xl flex items-center space-x-1">
+          <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
+            <Filter size={14} className="text-accent" />
+            <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Origem</span>
+          </div>
+          <div className="flex items-center space-x-1 pr-1">
+            {originOptions.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSelectedOrigin(opt.value as TransactionOrigin | 'ALL')}
+                className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
+                  selectedOrigin === opt.value 
+                    ? 'bg-accent text-white shadow-md' 
+                    : 'text-ink-muted hover:bg-bg-main'
+                }`}
+              >
+                {opt.label.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 relative z-0">
         <MapContainer 
-          center={center} 
+          center={initialCenter} 
           zoom={13} 
           style={{ width: '100%', height: '100%' }}
           zoomControl={false}
@@ -99,18 +149,20 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
                   <Layers size={16} />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">Mapa de Calor Gratuito</h3>
+                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">
+                    {selectedOrigin === 'ALL' ? 'Mapa de Calor Global' : `Origem: ${selectedOrigin}`}
+                  </h3>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">OpenStreetMap Data</p>
                 </div>
               </div>
               
               <p className="text-[10px] text-ink-muted leading-relaxed mb-4">
-                Visualização de densidade de ativos baseada em OpenStreetMap. Sem custos de API ou faturamento.
+                Visualização de densidade de ativos baseada em geolocalização capturada durante as transações.
               </p>
               
               <div className="flex items-center justify-between pt-4 border-t border-border/50">
                 <div className="flex flex-col">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Ativos Mapeados</span>
+                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Pontos Filtrados</span>
                   <span className="text-lg font-bold text-ink tracking-tighter">{heatPoints.length}</span>
                 </div>
                 {databaseMode === 'INTERNAL' && (
@@ -122,7 +174,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
                 <div className="flex flex-col text-right">
                   <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Total Conferidos</span>
                   <span className="text-lg font-bold text-accent tracking-tighter">
-                    {assets.filter(a => a._conferido).length}
+                    {filteredAssets.filter(a => a._conferido).length}
                   </span>
                 </div>
               </div>

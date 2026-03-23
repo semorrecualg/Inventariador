@@ -1,14 +1,23 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { Asset, InventoryState, User, UserRole } from '../types';
+import { getAppBaseUrl } from '../utils/urlUtils';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.ITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 // Initialize client only if credentials exist to prevent crash
 export const supabase = (supabaseUrl && supabaseAnonKey) 
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
+
+// Função para gerar UUID v4 simples para uso local/offline
+export const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN') => {
   if (!supabase) throw new Error("Supabase não configurado.");
@@ -22,6 +31,7 @@ export const signUp = async (email: string, password: string, username: string, 
         username,
         role,
         tenantId,
+        tenants: [tenantId]
       },
     },
   });
@@ -29,16 +39,17 @@ export const signUp = async (email: string, password: string, username: string, 
   if (error) throw error;
 
   // 2. Cria o perfil na tabela user_permissions para garantir sincronia
-  // Usamos upsert para evitar erros se o trigger já tiver criado (embora não tenhamos trigger no schema)
   if (data.user) {
     const { error: permError } = await supabase
       .from('user_permissions')
       .upsert([{
+        id: data.user.id, // Sincroniza com o ID do Auth
         email: email.toLowerCase(),
         username,
         role,
-        isAdmin: role === 'ADMIN',
-        tenantId
+        isAdmin: role === 'ADMIN' || role === 'MASTER',
+        tenantId,
+        tenants: [tenantId]
       }], { onConflict: 'email' });
       
     if (permError) {
@@ -54,7 +65,7 @@ export const signUp = async (email: string, password: string, username: string, 
  * Se não existir, cria um perfil padrão.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const ensureUserProfile = async (email: string, metadata?: Record<string, any>): Promise<any> => {
+export const ensureUserProfile = async (email: string, metadata?: Record<string, any>, userId?: string): Promise<any> => {
   if (!supabase) throw new Error("Supabase não configurado.");
   
   const lowerEmail = email.toLowerCase();
@@ -68,19 +79,38 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   if (fetchError) throw fetchError;
   
   if (profiles && profiles.length > 0) {
-    return profiles[0];
+    const profile = profiles[0];
+    
+    // Se o perfil existe mas não tem o ID (ou o ID é diferente), atualiza para sincronizar
+    if (userId && profile.id !== userId) {
+      await supabase
+        .from('user_permissions')
+        .update({ id: userId })
+        .eq('email', lowerEmail);
+    }
+
+    return {
+      ...profile,
+      username: metadata?.username || profile.username || lowerEmail.split('@')[0],
+      role: metadata?.role || profile.role || (profile.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
+      tenants: metadata?.tenants || profile.tenants || [profile.tenantId || 'default']
+    };
   }
   
   // 2. Se não existir, cria um perfil padrão
+  const insertData = {
+    email: lowerEmail,
+    username: metadata?.username || lowerEmail.split('@')[0],
+    role: metadata?.role || UserRole.AUDITOR,
+    isAdmin: metadata?.isAdmin || false,
+    tenantId: metadata?.tenantId || 'default',
+    tenants: metadata?.tenants || [metadata?.tenantId || 'default'],
+    ...(userId ? { id: userId } : {})
+  };
+
   const { data: newProfile, error: createError } = await supabase
     .from('user_permissions')
-    .insert([{
-      email: lowerEmail,
-      username: metadata?.username || lowerEmail.split('@')[0],
-      role: metadata?.role || UserRole.AUDITOR,
-      isAdmin: metadata?.isAdmin || false,
-      tenantId: metadata?.tenantId || 'default'
-    }])
+    .insert([insertData])
     .select()
     .single();
     
@@ -90,12 +120,13 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     return {
       username: metadata?.username || lowerEmail.split('@')[0],
       email: lowerEmail,
-      role: UserRole.AUDITOR,
-      isAdmin: false,
-      tenantId: 'default'
+      role: metadata?.role || UserRole.AUDITOR,
+      isAdmin: metadata?.isAdmin || false,
+      tenantId: metadata?.tenantId || 'default',
+      tenants: metadata?.tenants || ['default']
     };
   }
-  
+
   return newProfile;
 };
 
@@ -114,7 +145,7 @@ export const signInWithMagicLink = async (email: string) => {
   const { data, error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: window.location.origin,
+      emailRedirectTo: getAppBaseUrl(),
     },
   });
   if (error) throw error;
@@ -127,7 +158,7 @@ export const signOut = async () => {
   if (error) throw error;
 };
 
-export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
+export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | string[]) => {
   if (!supabase || !assets || assets.length === 0) return;
 
   // Garante que todos os ativos tenham o tenantId antes de subir
@@ -144,13 +175,28 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
     const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
     const conferido = Boolean(cleanAsset._conferido);
 
+    const assetEmpresa = (cleanAsset.EMPRESA || '').toUpperCase().trim();
+    let finalTenantId = 'default';
+    
+    if (tenantId) {
+      if (Array.isArray(tenantId)) {
+        // Se for um array (múltiplos tenants), tenta bater com a empresa do ativo
+        const match = tenantId.find(t => t.toUpperCase().trim() === assetEmpresa);
+        finalTenantId = match || tenantId[0] || 'default';
+      } else {
+        finalTenantId = tenantId;
+      }
+    } else {
+      finalTenantId = a._tenantId || assetEmpresa || 'default';
+    }
+
     return {
       ...cleanAsset,
       _lat: lat,
       _lng: lng,
       _conferido: conferido,
-      _tenantId: tenantId || a._tenantId || 'default',
-      EMPRESA: (cleanAsset.EMPRESA || '').toUpperCase().trim()
+      _tenantId: finalTenantId,
+      EMPRESA: assetEmpresa
     };
   });
 
@@ -171,7 +217,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string) => {
   }
 };
 
-export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantId?: string) => {
+export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantId?: string | string[]) => {
   if (!supabase) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
@@ -193,6 +239,7 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'protheusApiUrl',
     'mandatoryPhotoOnDivergence',
     'mandatoryPhotoOnNewItem',
+    'databaseMode',
     '_tenantId'
   ];
 
@@ -228,15 +275,18 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     
     // Se o erro for de coluna não encontrada no cache do schema, 
     // removemos a coluna específica e tentamos novamente o restante
-    const errorMessage = syncError.message || "";
-    const match = errorMessage.match(/Could not find the '(.+)' column/);
-    
-    if (match && match[1]) {
-      const missingColumn = match[1];
-      console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada no cache. Removendo e tentando novamente...`);
-      delete currentPayload[missingColumn];
-      retryCount++;
-    } else {
+      const errorMessage = syncError.message || "";
+      // Captura tanto erro de cache (PGRST204) quanto erro de coluna indefinida (42703)
+      const match = errorMessage.match(/Could not find the '(.+)' column/) || 
+                    errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
+                    errorMessage.match(/column (.+) does not exist/);
+      
+      if (match && (match[1] || match[2])) {
+        const missingColumn = match[1] || match[2];
+        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada. Removendo do payload e tentando novamente...`);
+        delete currentPayload[missingColumn];
+        retryCount++;
+      } else {
       // Outro tipo de erro, não adianta tentar remover colunas
       break;
     }
@@ -288,7 +338,7 @@ export const getUserPermissions = async (email: string) => {
  * Nota: Como é um SPA, usamos signUp. Para evitar deslogar o admin,
  * criamos uma instância temporária do cliente.
  */
-export const provisionUserInAuth = async (email: string, password?: string) => {
+export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantId?: string, tenants?: string[]) => {
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
     throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
   }
@@ -308,6 +358,10 @@ export const provisionUserInAuth = async (email: string, password?: string) => {
       password: password,
       options: {
         data: {
+          username: username || email.split('@')[0],
+          role: role || 'AUDITOR',
+          tenantId: tenantId || 'default',
+          tenants: tenants || [tenantId || 'default'],
           provisioned_by: 'admin_dashboard'
         }
       }
@@ -316,6 +370,28 @@ export const provisionUserInAuth = async (email: string, password?: string) => {
     if (error) {
       console.error('Erro no signUp do Supabase:', error);
       throw error;
+    }
+
+    // 2. Garante que o perfil exista na tabela user_permissions
+    // Importante: Usamos o cliente principal (supabase) aqui, pois ele tem as permissões de escrita (se o RLS permitir)
+    if (supabase && data.user) {
+      const { error: permError } = await supabase
+        .from('user_permissions')
+        .upsert([{
+          id: data.user.id, // Sincroniza ID
+          email: email.toLowerCase().trim(),
+          username: username || email.split('@')[0],
+          role: role || 'AUDITOR',
+          isAdmin: role === 'ADMIN',
+          tenantId: tenantId || 'default',
+          tenants: tenants || [tenantId || 'default']
+        }], { onConflict: 'email' });
+        
+      if (permError) {
+        console.warn("⚠️ Usuário criado no Auth, mas erro ao criar permissões:", permError);
+      } else {
+        console.log("✅ Perfil de permissões criado/atualizado na nuvem.");
+      }
     }
 
     return data;
@@ -328,7 +404,7 @@ export const provisionUserInAuth = async (email: string, password?: string) => {
 /**
  * Sincroniza a lista de usuários locais com a tabela de permissões no Supabase
  */
-export const syncUsersToCloud = async (users: User[], tenantId?: string) => {
+export const syncUsersToCloud = async (users: User[]) => {
   if (!supabase || !users || users.length === 0) return;
 
   try {
@@ -338,8 +414,7 @@ export const syncUsersToCloud = async (users: User[], tenantId?: string) => {
       role: u.role,
       isAdmin: u.isAdmin || u.role === 'ADMIN',
       tenantId: u.tenantId || 'default',
-      tenants: u.tenants || [u.tenantId || 'default'],
-      _tenantId: tenantId || u.tenantId || 'default'
+      tenants: u.tenants || [u.tenantId || 'default']
     }));
 
     const { error } = await supabase
@@ -355,6 +430,67 @@ export const syncUsersToCloud = async (users: User[], tenantId?: string) => {
   } catch (err) {
     console.error('Erro inesperado na sincronização de usuários:', err);
     throw err;
+  }
+};
+
+/**
+ * Remove um usuário da tabela de permissões na nuvem
+ */
+export const deleteUserFromCloud = async (email: string) => {
+  if (!supabase) return;
+  
+  try {
+    const { error } = await supabase
+      .from('user_permissions')
+      .delete()
+      .eq('email', email.toLowerCase().trim());
+      
+    if (error) {
+      console.error('Erro ao deletar usuário do Supabase:', error);
+      throw error;
+    }
+  } catch (err) {
+    console.error('Erro inesperado ao deletar usuário:', err);
+    throw err;
+  }
+};
+
+/**
+ * Busca todos os usuários da tabela de permissões (apenas para admins)
+ */
+export const fetchUsersFromCloud = async (tenantId?: string): Promise<User[]> => {
+  if (!supabase) return [];
+
+  try {
+    console.log(`[Supabase] Buscando usuários da nuvem (Tenant: ${tenantId || 'todos'})...`);
+    let query = supabase.from('user_permissions').select('*');
+    
+    if (tenantId && tenantId !== 'default') {
+      query = query.eq('tenantId', tenantId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Erro ao buscar usuários do Supabase:', error);
+      return [];
+    }
+
+    console.log(`[Supabase] ${data?.length || 0} usuários encontrados na nuvem.`);
+
+    return (data || []).map(u => ({
+      username: u.username || u.email.split('@')[0],
+      email: u.email,
+      password: '', // Senhas não são expostas
+      role: u.role as UserRole,
+      isAdmin: u.isAdmin || u.role === 'ADMIN',
+      mustChangePassword: false,
+      tenantId: u.tenantId || 'default',
+      tenants: u.tenants || [u.tenantId || 'default']
+    }));
+  } catch (err) {
+    console.error('Erro inesperado ao buscar usuários:', err);
+    return [];
   }
 };
 
@@ -421,55 +557,27 @@ export const fetchFullInventory = async (tenantId?: string | string[]): Promise<
       ? (Array.isArray(tenantId) ? `config_${tenantId[0]}` : `config_${tenantId}`)
       : 'global_config';
     
-    // Lista de colunas conhecidas para tentar uma busca resiliente se o select('*') falhar
-    const knownConfigColumns = [
-      'id', 'companies', 'lastUpdated', 'status', 'editableFields', 
-      'qrCodeFields', 'scannerMode', 'autoConfirmOnScan', 'scanFeedbackMode', 
-      'inventorySearchMode', 'immersiveMode', 'darkMode', 'batterySaver',
-      'protheusIntegrationEnabled', 'protheusApiUrl', 'mandatoryPhotoOnDivergence',
-      'mandatoryPhotoOnNewItem', '_tenantId'
-    ];
-
     let config = {};
-    let currentColumns = [...knownConfigColumns];
-    let configError = null;
-    let retryCount = 0;
-    const maxRetries = 5;
-
-    while (retryCount < maxRetries) {
-      const { data: configData, error: err } = await supabase
-        .from('inventory_config')
-        .select(currentColumns.join(','))
-        .eq('id', configId)
-        .single();
-
-      if (!err) {
-        config = configData;
-        configError = null;
-        break;
-      }
-
-      configError = err;
-      const errorMessage = err.message || "";
-      const match = errorMessage.match(/Could not find the '(.+)' column/);
-
-      if (match && match[1]) {
-        const missingColumn = match[1];
-        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada no cache durante a busca. Removendo e tentando novamente...`);
-        currentColumns = currentColumns.filter(col => col !== missingColumn);
-        retryCount++;
-      } else if (err.code === 'PGRST116') {
-        // Registro não encontrado, não é um erro de cache
-        configError = null;
-        break;
-      } else {
-        // Outro erro
-        break;
-      }
-    }
+    
+    // Busca resiliente: tenta select('*')
+    const { data: configData, error: configError } = await supabase
+      .from('inventory_config')
+      .select('*')
+      .eq('id', configId)
+      .maybeSingle();
 
     if (configError) {
       console.warn('Erro ao buscar configuração do Supabase:', configError);
+    } else if (configData) {
+      config = configData;
+    } else {
+      // Se não achar por ID específico, tenta a global
+      const { data: globalData } = await supabase
+        .from('inventory_config')
+        .select('*')
+        .eq('id', 'global_config')
+        .maybeSingle();
+      if (globalData) config = globalData;
     }
 
     return {
@@ -676,6 +784,17 @@ export const deleteAssetPhoto = async (photoUrl: string): Promise<boolean> => {
     console.error('Erro inesperado ao deletar foto:', err);
     return false;
   }
+};
+
+/**
+ * Solicita redefinição de senha por e-mail
+ */
+export const resetPassword = async (email: string) => {
+  if (!supabase) return;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: getAppBaseUrl(),
+  });
+  if (error) throw error;
 };
 
 /**

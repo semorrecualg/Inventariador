@@ -116,7 +116,8 @@ export const updateAssetInProtheus = async (
   }
 
   const protheusData = normalizeToProtheus(asset);
-  console.log(`Enviando dados para Protheus (${apiUrl}):`, protheusData);
+  const finalApiUrl = apiUrl || import.meta.env.VITE_PROTHEUS_API_URL || 'https://api-protheus-simulada.gbr.com.br/rest';
+  console.log(`Enviando dados para Protheus (${finalApiUrl}):`, protheusData);
 
   // Simulação de chamada de API
   return new Promise((resolve) => {

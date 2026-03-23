@@ -29,7 +29,9 @@ import {
   Cloud,
   Server,
   BookOpen,
-  Map as MapIcon
+  Map as MapIcon,
+  RefreshCw,
+  ShieldAlert
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -203,9 +205,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <div className="ml-3 pr-4">
             <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
-            <h1 className="text-base font-black text-ink truncate max-w-[140px] tracking-tight uppercase">
+            <h1 className="text-base font-black text-ink truncate max-w-[140px] tracking-tight uppercase leading-tight">
               {user?.username || 'Operador'}
             </h1>
+            <div className="flex items-center space-x-1 mt-0.5">
+              <span className="text-[7px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-1 rounded border border-blue-100">
+                UNIDADE: {user?.tenantId || 'default'}
+              </span>
+              {user?.role === UserRole.ADMIN && (
+                <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-1 rounded border border-emerald-100">
+                  ADMIN
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -287,7 +299,53 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2 no-scrollbar">
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 no-scrollbar">
+        {/* CLOUD SYNC STATUS CARD */}
+        {databaseMode !== DatabaseMode.INTERNAL && (
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center space-x-2">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isSyncing ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
+                  <Cloud size={12} />
+                </div>
+                <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">Status da Nuvem</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                {isSyncing && (
+                  <span className="text-[7px] font-bold text-blue-500 uppercase animate-pulse">Sincronizando...</span>
+                )}
+                <button 
+                  onClick={onSyncCloud}
+                  disabled={isSyncing}
+                  className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-blue-500 hover:border-blue-200 active:scale-90 transition-all shadow-sm"
+                >
+                  <RefreshCw size={10} className={isSyncing ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
+                <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Unidade Ativa</p>
+                <p className="text-[9px] font-black text-slate-900 truncate">{user?.tenantId || 'default'}</p>
+              </div>
+              <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
+                <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Ativos na Nuvem</p>
+                <p className="text-[9px] font-black text-slate-900">{inventoryInfo.totalDatabase}</p>
+              </div>
+            </div>
+
+            {syncError && (
+              <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-100 flex items-center space-x-2">
+                <ShieldAlert size={10} className="text-red-500" />
+                <p className="text-[7px] font-bold text-red-600 uppercase tracking-tight leading-tight">
+                  {syncError}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.INVENTORY)}
@@ -381,6 +439,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Configurar QR Code</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Definir campos do QR</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Users size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Acessos</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gerir Usuários</p>
                 </div>
               </button>
 
@@ -728,14 +794,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </p>
                 </div>
               </div>
-
-              <button onClick={() => { setIsDataMenuOpen(false); setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
-                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30"><Users size={20} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Acessos</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Gerir Usuários</p>
-                </div>
-              </button>
 
               {databaseMode !== DatabaseMode.INTERNAL && (
                 <button 

@@ -7,6 +7,7 @@ import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
+import { generateUUID } from '../services/supabaseService';
 
 import { 
   ArrowLeft,
@@ -817,7 +818,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const saveManualEntry = () => {
     const newAsset: Asset = {
         ...manualAsset,
-        id: `manual_${Date.now()}`,
+        id: generateUUID(),
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,

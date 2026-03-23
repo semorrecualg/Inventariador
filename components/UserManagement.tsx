@@ -19,9 +19,10 @@ import {
   EyeOff,
   Check,
   Cloud,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
-import { provisionUserInAuth } from '../services/supabaseService';
+import { provisionUserInAuth, resetPassword, deleteUserFromCloud } from '../services/supabaseService';
 
 interface UserManagementProps {
   users: User[];
@@ -72,20 +73,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [editCustomTenant, setEditCustomTenant] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     const username = newUsername.trim();
-    let email = newEmail.toLowerCase().trim();
+    const email = newEmail.toLowerCase().trim();
     const password = newPassword.trim();
 
     if (!username || !email || !password) return;
-
-    // Regra de Ouro: Forçar domínio @gbr.com
-    if (!email.endsWith('@gbr.com')) {
-      const prefix = email.split('@')[0];
-      email = `${prefix}@gbr.com`;
-    }
 
     // Verificar duplicidade
     if (users.find(u => u.email.toLowerCase() === email || u.username.toUpperCase() === username)) {
@@ -97,13 +93,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     if (provisionOnCreate) {
       setIsProvisioning(true);
       try {
-        await provisionUserInAuth(email, password);
+        await provisionUserInAuth(email, password, username, newRole, newTenants[0] || currentUser?.tenantId || 'default');
       } catch (err) {
         const error = err as { message?: string };
         const msg = error.message || "Erro desconhecido";
         if (!msg.includes("already registered")) {
           showModal("Erro de Ativação Cloud", `O usuário foi criado localmente, mas não foi possível ativar na nuvem: ${msg}`, "warning");
           // Não interrompemos a criação local, apenas avisamos
+        } else {
+          showModal("Aviso de Acesso", "Este e-mail já possui acesso no Supabase Cloud. A senha definida aqui NÃO altera a senha já existente na nuvem. Use o botão de 'Redefinição' se necessário.", "warning");
         }
       } finally {
         setIsProvisioning(false);
@@ -115,7 +113,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       email,
       password,
       role: newRole,
-      isAdmin: newRole === UserRole.ADMIN,
+      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER,
       mustChangePassword: true,
       tenants: newTenants.length > 0 ? newTenants : (currentUser?.tenantId ? [currentUser.tenantId] : ['default']),
       tenantId: newTenants[0] || currentUser?.tenantId || 'default'
@@ -145,18 +143,33 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setIsEditModalOpen(true);
   };
 
+  const handleResetPassword = async () => {
+    if (!selectedUser) return;
+    
+    setIsResetting(true);
+    try {
+      await resetPassword(selectedUser.email);
+      showModal("Sucesso", `Um link de redefinição de senha foi enviado para ${selectedUser.email}.`, "success");
+    } catch (err: unknown) {
+      const error = err as Error;
+      showModal("Erro", `Não foi possível enviar o link: ${error.message}`, "error");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const handleProvision = async () => {
     if (!selectedUser || !editEmail || !editPassword) return;
     
     setIsProvisioning(true);
     try {
-      await provisionUserInAuth(editEmail, editPassword);
+      await provisionUserInAuth(editEmail, editPassword, editUsername, editRole, editTenants[0] || selectedUser.tenantId || 'default', editTenants);
       showModal("Sucesso", `O usuário ${editEmail} foi ativado no Supabase Auth com sucesso!`, "success");
     } catch (err) {
       const error = err as { message?: string };
       const msg = error.message || "Erro desconhecido";
       if (msg.includes("already registered")) {
-        showModal("Aviso", "Este e-mail já possui acesso ativo no Supabase Cloud.", "warning");
+        showModal("Aviso", "Este e-mail já possui acesso ativo no Supabase Cloud. IMPORTANTE: A senha NÃO foi alterada. Para mudar a senha de um usuário que já existe, use o botão 'Enviar Link de Redefinição' abaixo.", "warning");
       } else {
         showModal("Erro de Ativação", `Não foi possível ativar o acesso: ${msg}`, "error");
       }
@@ -170,14 +183,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     if (!selectedUser || !editUsername || !editEmail || !editPassword) return;
 
     const username = editUsername.trim();
-    let email = editEmail.toLowerCase().trim();
+    const email = editEmail.toLowerCase().trim();
     const password = editPassword.trim();
-
-    // Regra de Ouro: Forçar domínio @gbr.com
-    if (!email.endsWith('@gbr.com')) {
-      const prefix = email.split('@')[0];
-      email = `${prefix}@gbr.com`;
-    }
 
     // Verificar duplicidade (excluindo o próprio usuário)
     if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username))) {
@@ -194,7 +201,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               email, 
               password, 
               role: editRole, 
-              isAdmin: editRole === UserRole.ADMIN, 
+              isAdmin: editRole === UserRole.ADMIN || editRole === UserRole.MASTER, 
               tenants: editTenants,
               tenantId: editTenants[0] || u.tenantId
             } 
@@ -216,14 +223,23 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     
     showModal(
       "Remover Acesso", 
-      "Deseja realmente remover este acesso?", 
+      "Deseja realmente remover este acesso? Esta ação também removerá as permissões na nuvem.", 
       "confirm",
-      () => {
-        setUsers(prev => {
-          const updated = prev.filter(u => u.email !== email);
-          localStorage.setItem('app_users', JSON.stringify(updated));
-          return updated;
-        });
+      async () => {
+        try {
+          // 1. Remove da Nuvem (Tabela user_permissions)
+          await deleteUserFromCloud(email);
+          
+          // 2. Remove Localmente
+          setUsers(prev => {
+            const updated = prev.filter(u => u.email !== email);
+            localStorage.setItem('app_users', JSON.stringify(updated));
+            return updated;
+          });
+        } catch (err) {
+          console.error('Erro ao remover usuário da nuvem:', err);
+          showModal("Erro", "Não foi possível remover o usuário da nuvem. Tente novamente.", "error");
+        }
       }
     );
   };
@@ -244,7 +260,18 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
-        {users.map((u) => (
+        {users
+          .filter(u => {
+            // Admin global vê tudo
+            if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
+            // Master vê apenas usuários do seu tenant
+            if (currentUser?.role === UserRole.MASTER) {
+              return u.tenantId === currentUser.tenantId || (u.tenants && u.tenants.includes(currentUser.tenantId || ''));
+            }
+            // Outros papéis não devem ver nada (ou apenas a si mesmos)
+            return u.email === currentUser?.email;
+          })
+          .map((u) => (
           <div 
             key={u.email} 
             onDoubleClick={() => handleOpenEdit(u)}
@@ -327,13 +354,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => setEditRole(UserRole.ADMIN)}
-                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
-                  >
-                    Admin
-                  </button>
+                  {(currentUser?.role === UserRole.ADMIN || currentUser?.email === "semorr@gmail.com") && (
+                    <>
+                      <button 
+                        type="button"
+                        onClick={() => setEditRole(UserRole.MASTER)}
+                        className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.MASTER ? 'bg-indigo-600 text-white shadow-sm' : 'text-ink-muted'}`}
+                      >
+                        Master
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setEditRole(UserRole.ADMIN)}
+                        className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
+                      >
+                        Admin
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="space-y-2">
@@ -382,7 +420,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail (Padrão @gbr.com)</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail de Acesso</label>
                 <div className="relative">
                   <input type="email" required autoComplete="off" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
@@ -408,9 +446,23 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   <span>{isProvisioning ? 'Ativando...' : 'Ativar Acesso Cloud'}</span>
                 </button>
                 <p className="text-[9px] font-bold text-slate-400 text-center mt-3 uppercase tracking-widest leading-relaxed">
-                  Cria o login oficial no Supabase Auth <br/>
-                  usando o e-mail e senha acima.
+                  Cria o login oficial no Supabase Auth usando o e-mail e senha acima. <br/>
+                  <span className="text-amber-600">Nota: Se o e-mail já possuir acesso, a senha não será alterada.</span>
                 </p>
+
+                <button 
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={isResetting}
+                  className="w-full py-3 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50 mt-4"
+                >
+                  {isResetting ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={16} />
+                  )}
+                  <span className="text-[10px]">Enviar Link de Redefinição</span>
+                </button>
               </div>
             </form>
           </div>
@@ -478,19 +530,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   type="text" 
                   required 
                   autoComplete="off" 
-                  placeholder="EX: pedro.gbr" 
+                  placeholder="EX: pedro.almeida" 
                   value={newUsername} 
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setNewUsername(val);
-                    setNewEmail(val.toLowerCase() + "@gbr.com");
-                  }} 
+                  onChange={(e) => setNewUsername(e.target.value)} 
                   className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail (Padrão @gbr.com)</label>
-                <input type="email" required autoComplete="off" placeholder="usuario@gbr.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">E-mail de Acesso</label>
+                <input type="email" required autoComplete="off" placeholder="usuario@email.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Perfil de Acesso</label>
@@ -502,13 +550,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => setNewRole(UserRole.ADMIN)}
-                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
-                  >
-                    Admin
-                  </button>
+                  {(currentUser?.role === UserRole.ADMIN || currentUser?.email === "semorr@gmail.com") && (
+                    <>
+                      <button 
+                        type="button"
+                        onClick={() => setNewRole(UserRole.MASTER)}
+                        className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.MASTER ? 'bg-indigo-600 text-white shadow-sm' : 'text-ink-muted'}`}
+                      >
+                        Master
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setNewRole(UserRole.ADMIN)}
+                        className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.ADMIN ? 'bg-warning text-white shadow-sm' : 'text-ink-muted'}`}
+                      >
+                        Admin
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="space-y-1.5">

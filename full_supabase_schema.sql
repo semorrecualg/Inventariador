@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _assinatura TEXT,
     "DE_PARA" TEXT,
     "AUDITOR_STATUS_CONFERENCIA" TEXT,
+    _origemTransacao TEXT,
     
     -- Novos Campos Módulo Controle de Ativo (Contábil)
     _valor_aquisicao DECIMAL(15,2),

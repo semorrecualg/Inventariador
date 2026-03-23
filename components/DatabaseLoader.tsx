@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
+import { generateUUID } from '../services/supabaseService';
 import BackButton from './BackButton';
 
 interface LoadSummary {
@@ -132,7 +133,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       const finalAssets: Asset[] = [];
       const companyCounts: Record<string, number> = {};
 
-      rawRows.slice(headerIdx + 1).forEach((row, idx) => {
+      rawRows.slice(headerIdx + 1).forEach((row) => {
         if (!row.some(c => String(c).trim() !== "")) return;
 
         const status = cleanDisplayValue(row[m.STATUS]);
@@ -160,7 +161,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
         }
         // Se for ATIVO, nunca elimina (Regra a.1)
 
-        const asset: Asset = { id: `gbr_v24_${idx}_${Date.now()}` };
+        const asset: Asset = { id: generateUUID() };
         asset.EMPRESA = cleanDisplayValue(row[m.EMPRESA]) || "GERAL";
         asset.STATUS = status || "ATIVO";
         asset.ETIQUETA = etiqueta;

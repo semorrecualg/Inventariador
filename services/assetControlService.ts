@@ -4,13 +4,17 @@ import { AssetGroup, AssetMovement, DepreciationHistory, Asset, ChartOfAccount, 
 
 export const assetControlService = {
   // Plano de Contas
-  async getChartOfAccounts(tenantId: string): Promise<ChartOfAccount[]> {
+  async getChartOfAccounts(tenantId: string | string[]): Promise<ChartOfAccount[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
-    const { data, error } = await supabase
-      .from('chart_of_accounts')
-      .select('*')
-      .eq('_tenantId', tenantId)
-      .order('code', { ascending: true });
+    let query = supabase.from('chart_of_accounts').select('*');
+    
+    if (Array.isArray(tenantId)) {
+      query = query.in('_tenantId', tenantId);
+    } else {
+      query = query.eq('_tenantId', tenantId);
+    }
+    
+    const { data, error } = await query.order('code', { ascending: true });
     
     if (error) throw error;
     return data || [];
@@ -36,12 +40,17 @@ export const assetControlService = {
   },
 
   // Grupos Contábeis (Bens)
-  async getAssetGroups(tenantId: string): Promise<AssetGroup[]> {
+  async getAssetGroups(tenantId: string | string[]): Promise<AssetGroup[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
-    const { data, error } = await supabase
-      .from('asset_groups')
-      .select('*')
-      .eq('_tenantId', tenantId);
+    let query = supabase.from('asset_groups').select('*');
+    
+    if (Array.isArray(tenantId)) {
+      query = query.in('_tenantId', tenantId);
+    } else {
+      query = query.eq('_tenantId', tenantId);
+    }
+    
+    const { data, error } = await query;
     
     if (error) throw error;
     return data || [];
@@ -67,12 +76,17 @@ export const assetControlService = {
   },
 
   // Classificador NCM
-  async getNCMClassifiers(tenantId: string): Promise<NCMClassifier[]> {
+  async getNCMClassifiers(tenantId: string | string[]): Promise<NCMClassifier[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
-    const { data, error } = await supabase
-      .from('ncm_classifiers')
-      .select('*')
-      .eq('_tenantId', tenantId);
+    let query = supabase.from('ncm_classifiers').select('*');
+    
+    if (Array.isArray(tenantId)) {
+      query = query.in('_tenantId', tenantId);
+    } else {
+      query = query.eq('_tenantId', tenantId);
+    }
+    
+    const { data, error } = await query;
     
     if (error) throw error;
     return data || [];
@@ -97,14 +111,17 @@ export const assetControlService = {
     if (error) throw error;
   },
 
-  async getNCMClassifierByCode(ncmCode: string, tenantId: string): Promise<NCMClassifier | null> {
+  async getNCMClassifierByCode(ncmCode: string, tenantId: string | string[]): Promise<NCMClassifier | null> {
     if (!supabase) throw new Error("Supabase não configurado.");
-    const { data, error } = await supabase
-      .from('ncm_classifiers')
-      .select('*')
-      .eq('ncm_code', ncmCode)
-      .eq('_tenantId', tenantId)
-      .single();
+    let query = supabase.from('ncm_classifiers').select('*').eq('ncm_code', ncmCode);
+    
+    if (Array.isArray(tenantId)) {
+      query = query.in('_tenantId', tenantId);
+    } else {
+      query = query.eq('_tenantId', tenantId);
+    }
+    
+    const { data, error } = await query.single();
     
     if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "no rows returned"
     return data;

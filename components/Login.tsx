@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { getUserPermissions, supabase, ensureUserProfile } from '../services/supabaseService';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, ShieldCheck, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { getUserPermissions, supabase, ensureUserProfile, resetPassword } from '../services/supabaseService';
 import { authenticateWithProtheus } from '../services/protheusService';
 import { User, DatabaseMode, UserRole } from '../types';
+import { getAppBaseUrl } from '../utils/urlUtils';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -27,8 +28,79 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
     setError(null);
   }, [databaseMode]);
 
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [manualLink, setManualLink] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
+
+  // Detectar erro de OTP expirado na URL
+  React.useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.includes('error_code=otp_expired')) {
+      setError("O link do e-mail expirou ou já foi usado. Por favor, solicite um NOVO link abaixo.");
+      // Limpa o hash para não ficar mostrando o erro se o usuário tentar outras coisas
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
+  const handleManualLogin = async () => {
+    if (!manualLink.includes('#access_token=')) {
+      setError("Link inválido. Copie o link completo que deu erro (localhost).");
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      // Extrai o hash do link (tudo após o #)
+      const hash = manualLink.split('#')[1];
+      const { data, error } = await supabase!.auth.setSession({
+        access_token: new URLSearchParams(hash).get('access_token') || '',
+        refresh_token: new URLSearchParams(hash).get('refresh_token') || '',
+      });
+
+      if (error) throw error;
+      if (data.user) {
+        const cloudUser = await ensureUserProfile(data.user.email!, data.user.user_metadata, data.user.id);
+        const loggedUser = {
+          username: cloudUser.username,
+          email: cloudUser.email,
+          role: cloudUser.role as UserRole,
+          isAdmin: cloudUser.isAdmin,
+          mustChangePassword: false,
+          tenantId: cloudUser.tenantId || 'default',
+          tenants: cloudUser.tenants || [cloudUser.tenantId || 'default']
+        };
+        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        onLogin(loggedUser);
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError("Erro ao processar link manual: " + error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!username || !username.includes('@')) {
+      setError("Digite seu e-mail para redefinir a senha.");
+      return;
+    }
+    setIsResetting(true);
+    setError("");
+    try {
+      await resetPassword(username.trim().toLowerCase());
+      setResetSent(true);
+      setTimeout(() => setResetSent(false), 5000);
+    } catch (err) {
+      const error = err as { message?: string };
+      setError(error.message || "Erro ao enviar e-mail de redefinição.");
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const handleMagicLink = async () => {
     if (!username.includes('@')) {
@@ -38,11 +110,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
 
     setError(null);
     setIsMagicLinkLoading(true);
+    const redirectTo = getAppBaseUrl();
+    console.log('[Login] Solicitando Magic Link. URL de Redirecionamento:', redirectTo);
+    
     try {
       const { error } = await supabase!.auth.signInWithOtp({
         email: username.trim().toLowerCase(),
         options: {
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: redirectTo,
         }
       });
 
@@ -60,11 +135,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
     e.preventDefault();
     setError(null);
     setIsLoading(true);
+    console.log('[Login] Iniciando autenticação...', { databaseMode, username });
     
+    // Timeout de segurança para não travar a UI
+    const loginTimeout = setTimeout(() => {
+      if (isLoading) {
+        setIsLoading(false);
+        setError("A autenticação está demorando muito. Verifique sua conexão ou tente novamente.");
+        console.warn('[Login] Timeout de autenticação atingido.');
+      }
+    }, 15000);
+
     try {
       let loggedUser: User | null = null;
 
       if (databaseMode === DatabaseMode.PROTHEUS_SUPABASE) {
+        console.log('[Login] Autenticando via Protheus...');
         // 1. Autentica no Protheus
         const authResult = await authenticateWithProtheus(username.trim(), password);
         
@@ -72,39 +158,44 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           throw new Error(authResult.message || "Falha na autenticação Protheus.");
         }
 
+        console.log('[Login] Protheus OK. Buscando permissões no Supabase...');
         // 2. Busca permissões no Supabase
         const permissions = await getUserPermissions(authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`);
         
         loggedUser = {
           username: authResult.user?.username || username.trim(),
           email: authResult.user?.email || `${username.trim().toLowerCase()}@gbr.com`,
-          role: permissions.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR,
+          role: permissions.role || (permissions.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
           isAdmin: permissions.isAdmin || false,
           mustChangePassword: false,
           tenantId: permissions.tenantId || 'default'
         };
       } else if (databaseMode === DatabaseMode.SUPABASE) {
+        console.log('[Login] Autenticando via Supabase Auth...');
         // 1. Autenticação via Supabase Auth (Oficial)
         const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
           email: username.trim().toLowerCase(),
-          password: password
+          password: password.trim()
         });
 
         if (authError) {
+          console.error('[Login] Erro Supabase Auth:', authError);
           // Se falhar no Auth, mostramos a mensagem real do Supabase para diagnóstico
           if (authError.message.includes("Email not confirmed")) {
-            throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou confirme manualmente no painel do Supabase.");
+            throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou use o 'Magic Link' abaixo.");
           }
           if (authError.message.includes("Invalid login credentials")) {
-            throw new Error("E-mail ou senha incorretos no Supabase.");
+            throw new Error("E-mail ou senha incorretos. Verifique se não há erros de digitação.");
           }
           throw new Error(`Erro Supabase: ${authError.message}`);
         }
         
         if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
 
+        console.log('[Login] Supabase Auth OK. Garantindo perfil do usuário...');
         // 2. Garante que o usuário tenha um perfil na tabela user_permissions
-        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata);
+        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id);
+        console.log('[Login] Perfil garantido:', cloudUser);
         
         loggedUser = {
           username: cloudUser.username,
@@ -116,6 +207,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           tenants: cloudUser.tenants || [cloudUser.tenantId || 'default']
         };
       } else {
+        console.log('[Login] Autenticando via Banco Interno...');
         // Banco de Dados Interno (Independente)
         const localUser = users.find(u => 
           (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
@@ -130,14 +222,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
       }
 
       if (loggedUser) {
+        console.log('[Login] Sucesso! Logando usuário:', loggedUser.email);
         // Salva no localStorage para persistência
         localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
         onLogin(loggedUser);
       }
     } catch (err: unknown) {
       const error = err as Error;
+      console.error('[Login] Erro durante o processo:', error);
       setError(error.message || "Erro ao autenticar. Verifique seus dados.");
     } finally {
+      clearTimeout(loginTimeout);
       setIsLoading(false);
     }
   };
@@ -296,7 +391,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
         </button>
 
         {databaseMode === DatabaseMode.SUPABASE && (
-          <div className="pt-2">
+          <div className="pt-2 space-y-2">
+            <button 
+              type="button"
+              onClick={handleResetPassword}
+              disabled={isResetting || isLoading}
+              className="w-full text-[9px] font-bold text-accent hover:text-accent-dark uppercase tracking-widest transition-colors flex items-center justify-center py-1"
+            >
+              {isResetting ? <RefreshCw size={10} className="mr-1 animate-spin" /> : <RefreshCw size={10} className="mr-1" />}
+              {resetSent ? "E-mail de redefinição enviado!" : "Esqueci minha senha"}
+            </button>
+
             {magicLinkSent ? (
               <div className="bg-green-50 border border-green-100 text-green-700 p-3 rounded-xl text-[10px] font-bold uppercase text-center animate-fadeIn">
                 Link enviado! Verifique seu e-mail. <br/>
@@ -357,11 +462,60 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
               <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Acesso Restrito ERP Protheus</p>
             </div>
           )}
+
+          {/* Link de Resgate (Bypass para erro de localhost) - Disponível para Supabase e Protheus */}
+          {databaseMode !== DatabaseMode.INTERNAL && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              {!showManualInput ? (
+                <button
+                  type="button"
+                  onClick={() => setShowManualInput(true)}
+                  className="text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-1 mx-auto"
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  Problemas com o link do e-mail?
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-gray-400 text-center">
+                    Se o link do e-mail abriu uma página de erro (localhost), copie o link completo da barra de endereços e cole abaixo:
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={manualLink}
+                      onChange={(e) => setManualLink(e.target.value)}
+                      placeholder="Cole o link do localhost aqui..."
+                      className="flex-1 text-xs p-2 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleManualLogin}
+                      disabled={isLoading}
+                      className="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {isLoading ? '...' : 'Logar'}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowManualInput(false)}
+                    className="text-[10px] text-gray-400 hover:underline block mx-auto"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         
         <div className="pt-3 border-t border-accent/10">
           <p className="text-[8px] font-bold text-accent uppercase tracking-[0.3em]">
             GBR Intelligent Systems
+          </p>
+          <p className="text-[7px] text-slate-400 mt-1 font-mono opacity-40">
+            URL: {getAppBaseUrl()}
           </p>
         </div>
       </div>
