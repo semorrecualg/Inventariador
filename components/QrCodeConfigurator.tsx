@@ -41,7 +41,7 @@ const QrCodeConfigurator: React.FC<QrCodeConfiguratorProps> = ({ assets, current
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-8 bg-white border-b border-slate-200 shadow-sm relative z-20">
         <div className="mb-6">
-          <BackButton onClick={onBack} label="Voltar ao Menu" subLabel="Configurar QR Code" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Configurar QR Code" />
         </div>
         <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-tight leading-none">Configurar QR Code</h1>
         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Selecione os campos para incluir no QR Code.</p>

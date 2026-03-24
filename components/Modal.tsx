@@ -11,6 +11,7 @@ interface ModalProps {
   type?: 'info' | 'warning' | 'error' | 'success' | 'confirm' | 'security';
   confirmText?: string;
   cancelText?: string;
+  showCancel?: boolean;
   children?: React.ReactNode;
 }
 
@@ -23,6 +24,7 @@ const Modal: React.FC<ModalProps> = ({
   type = 'info',
   confirmText = 'Confirmar',
   cancelText = 'Cancelar',
+  showCancel = false,
   children
 }) => {
   if (!isOpen) return null;
@@ -79,7 +81,7 @@ const Modal: React.FC<ModalProps> = ({
           {children}
           
           <div className="mt-8 space-y-3">
-            {type === 'confirm' ? (
+            {(type === 'confirm' || showCancel) ? (
               <>
                 <button
                   onClick={() => {
@@ -99,10 +101,13 @@ const Modal: React.FC<ModalProps> = ({
               </>
             ) : (
               <button
-                onClick={onClose}
+                onClick={() => {
+                  onConfirm?.();
+                  onClose();
+                }}
                 className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs shadow-lg active:scale-[0.98] transition-all"
               >
-                OK
+                {onConfirm ? confirmText : 'OK'}
               </button>
             )}
           </div>

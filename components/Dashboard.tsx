@@ -253,7 +253,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Relatórios" subLabel={`${user?.tenantId || 'S/ TENANT'} | ${user?.unitId || 'S/ UNIDADE'}`} />
+          <BackButton onClick={onBack} label="Voltar" subLabel={`${user?.tenantId || 'S/ TENANT'} | ${user?.unitId || 'S/ UNIDADE'}`} />
         </div>
         <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
           <BarChart3 size={20} />

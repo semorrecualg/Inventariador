@@ -441,7 +441,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {isAdminMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-white/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
           <div className="fixed top-8 left-6 z-[10001]">
-            <BackButton onClick={() => setIsAdminMenuOpen(false)} label="Retornar" />
+            <BackButton onClick={() => setIsAdminMenuOpen(false)} label="Voltar" />
           </div>
           <div className="w-full max-w-sm space-y-3">
               <div className="text-center mb-6">
@@ -713,13 +713,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {isAnalyticsMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
-          <button 
-            onClick={() => setIsAnalyticsMenuOpen(false)} 
-            className="fixed top-14 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
-          >
-            <ChevronRight size={16} className="rotate-180" />
-            Voltar
-          </button>
+          <div className="fixed top-8 left-6 z-[10001]">
+            <BackButton onClick={() => setIsAnalyticsMenuOpen(false)} label="Voltar" />
+          </div>
           
           <div className="w-full max-w-sm space-y-4">
             <div className="text-center mb-6">
@@ -782,13 +778,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {isDataMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
-          <button 
-            onClick={() => setIsDataMenuOpen(false)} 
-            className="fixed top-10 left-6 flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-white font-bold uppercase text-[9px] tracking-widest active:scale-90 transition-all z-[10001] hover:bg-white/20"
-          >
-            <ChevronRight size={16} className="rotate-180" />
-            Voltar
-          </button>
+          <div className="fixed top-8 left-6 z-[10001]">
+            <BackButton onClick={() => setIsDataMenuOpen(false)} label="Voltar" />
+          </div>
           
           <div className="w-full max-w-sm space-y-4">
             <div className="text-center mb-6">
@@ -1041,20 +1033,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
         <div className="fixed inset-0 z-[20000] bg-slate-950/95 backdrop-blur-xl flex flex-col animate-fadeIn">
           <div className="px-6 pt-12 pb-6 bg-red-600 text-white flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/30">
-                <Trash2 size={20} />
-              </div>
+              <BackButton onClick={() => setIsSelectiveClearOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Limpeza Seletiva</h2>
                 <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Selecione as Unidades</p>
               </div>
             </div>
-            <button 
-              onClick={() => setIsSelectiveClearOpen(false)}
-              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-xl flex items-center justify-center transition-all active:scale-90"
-            >
-              <X size={20} />
-            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 bg-bg-main no-scrollbar">
@@ -1145,20 +1129,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
         <div className="fixed inset-0 z-[20000] bg-white flex flex-col animate-slideUp">
           <div className="px-6 pt-12 pb-6 bg-emerald-500 text-white flex items-center justify-between shadow-lg">
             <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/30">
-                <BookOpen size={20} />
-              </div>
+              <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
                 <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">GBR v24.50 KARDEK</p>
               </div>
             </div>
-            <button 
-              onClick={() => setIsDocModalOpen(false)}
-              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-xl flex items-center justify-center transition-all active:scale-90"
-            >
-              <X size={20} />
-            </button>
           </div>
           
           <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-bg-main no-scrollbar">

@@ -354,7 +354,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
         <div className="bg-white border-b border-slate-200 shadow-sm z-20">
           <div className="px-4 pt-12 pb-4">
             <div className="mb-4">
-              <BackButton onClick={() => setSelectedAccount(null)} label="Voltar às Contas" subLabel="Conciliação por Conta" />
+              <BackButton onClick={() => setSelectedAccount(null)} label="Voltar" subLabel="Conciliação por Conta" />
             </div>
             
             <div className="flex items-center justify-between">
@@ -457,7 +457,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 pt-14 pb-6 shadow-sm">
         <div className="mb-6">
-          <BackButton onClick={onBack} label="Voltar ao Menu" subLabel="Conciliação por Conta" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Conciliação por Conta" />
         </div>
         
         <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">

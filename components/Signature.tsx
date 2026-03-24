@@ -106,7 +106,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
-        <BackButton onClick={onBack} label="Assinatura" subLabel="Termo de Responsabilidade" />
+        <BackButton onClick={onBack} label="Voltar" subLabel="Termo de Responsabilidade" />
         <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
           <ShieldCheck size={20} />
         </div>

@@ -49,7 +49,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
       {/* Header Fixo */}
       <div className="p-5 pt-14 bg-white border-b border-border shadow-sm">
         <div className="mb-6">
-          <BackButton onClick={onBack} label="Sair do Aplicativo" subLabel="Retornar ao Login" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Sair" />
         </div>
         
         <div className="flex items-center justify-between mb-6">

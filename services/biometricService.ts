@@ -19,7 +19,11 @@ export const isBiometricSupported = (): boolean => {
  * Registra a biometria para um usuário específico (Offline/Internal)
  */
 export const registerBiometric = async (username: string): Promise<boolean> => {
-  if (!isBiometricSupported()) return false;
+  console.log('[Biometric] Iniciando registro para:', username);
+  if (!isBiometricSupported()) {
+    console.warn('[Biometric] Não suportado pelo navegador');
+    return false;
+  }
 
   try {
     const challenge = window.crypto.getRandomValues(new Uint8Array(32));

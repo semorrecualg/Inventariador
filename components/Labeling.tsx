@@ -161,7 +161,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-200 shadow-sm relative z-30">
         <div className="flex items-center justify-between mb-6">
-          <BackButton onClick={onBack} label="Menu Principal" subLabel="Etiquetagem de Ativos" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Etiquetagem de Ativos" />
           <div className="flex space-x-3">
             {isBatchMode && (
               <button 

@@ -56,7 +56,7 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       <div className="px-6 pt-12 pb-8 bg-white border-b border-accent/10 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <BackButton onClick={onBack} label="Retornar ao Menu" subLabel="Autoridade de Escrita" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Autoridade de Escrita" />
           <div className="bg-accent-soft px-4 py-2 rounded-full border border-accent/10 text-accent shadow-sm">
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Protocolo v24.40</span>
           </div>

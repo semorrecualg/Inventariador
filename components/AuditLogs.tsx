@@ -2,15 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  ArrowLeft, 
   Search, 
   Activity, 
-  Download,
   Clock,
   ChevronRight,
   ChevronDown,
-  Info
+  Info,
+  Download
 } from 'lucide-react';
+import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs } from '../services/supabaseService';
 
@@ -93,12 +93,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
       {/* Header */}
       <header className="bg-ink text-bg px-6 py-4 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-4">
-          <button 
-            onClick={onBack}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </button>
+          <BackButton onClick={onBack} label="Voltar" subLabel="Log de Auditoria" />
           <div>
             <h1 className="text-xl font-bold tracking-tight uppercase">Trilha de Auditoria</h1>
             <p className="text-xs opacity-60 font-mono tracking-widest uppercase">Audit Trail System v24.50</p>

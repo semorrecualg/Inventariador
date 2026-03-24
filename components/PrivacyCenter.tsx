@@ -124,7 +124,7 @@ const PrivacyCenter: React.FC<PrivacyCenterProps> = ({ isOpen, onClose }) => {
             onClick={onClose}
             className="px-6 py-2 bg-accent text-white rounded-xl text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
           >
-            Fechar
+            Voltar
           </button>
         </div>
       </motion.div>

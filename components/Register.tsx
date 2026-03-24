@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
-import { ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
+import BackButton from './BackButton';
 import { signUp } from '../services/supabaseService';
 import { DatabaseMode, UserRole } from '../types';
 
@@ -69,7 +70,7 @@ const AssetIcon = ({ className }: { className?: string }) => (
 );
 
 // Register Component
-const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMode }) => {
+const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -157,18 +158,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin, databaseMo
         </p>
       </div>
 
-      <div className="max-w-sm mx-auto w-full">
-        <button onClick={onGoToLogin} className="mb-2 text-ink-muted flex items-center font-bold text-[7px] uppercase tracking-[0.2em] hover:text-accent transition-colors">
-          <ChevronLeft size={12} className="mr-1" /> Voltar ao Login
-        </button>
-        
-        {databaseMode === DatabaseMode.INTERNAL && (
-          <div className="mb-2 p-2 bg-accent-soft border border-accent/10 rounded-xl">
-            <p className="text-[7px] font-bold text-accent uppercase tracking-widest leading-relaxed">
-              Atenção: Área exclusiva para Administradores. Auditores são cadastrados no painel interno.
-            </p>
-          </div>
-        )}
+      <div className="max-w-sm mx-auto w-full mb-4">
+        <BackButton onClick={onGoToLogin} label="Voltar" subLabel="Acesso ao Sistema" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto w-full">

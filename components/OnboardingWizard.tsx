@@ -138,18 +138,21 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
 
       <div className="flex items-center space-x-4 w-full max-w-md mt-4">
         {step > 0 && (
-          <button 
-            onClick={prevStep}
-            className="p-5 bg-white border border-border text-ink rounded-2xl active:scale-95 transition-all"
-          >
-            <ChevronLeft size={20} />
-          </button>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={prevStep}
+              className="p-5 bg-white border border-border text-ink rounded-2xl active:scale-95 transition-all flex items-center space-x-2"
+            >
+              <ChevronLeft size={20} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Voltar</span>
+            </button>
+          </div>
         )}
         <button 
           onClick={nextStep}
           className="flex-1 py-5 bg-accent text-white rounded-2xl font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-accent/20 active:scale-95 transition-all flex items-center justify-center space-x-3"
         >
-          <span>{step === steps.length - 1 ? 'Começar Agora' : 'Continuar'}</span>
+          <span>{step === steps.length - 1 ? 'Começar Agora' : 'Avançar'}</span>
           <ChevronRight size={16} />
         </button>
       </div>

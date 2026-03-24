@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  ArrowLeft, 
   Plus, 
   Calendar, 
   CheckCircle2, 
@@ -14,6 +13,7 @@ import {
   Loader2,
   Activity
 } from 'lucide-react';
+import BackButton from './BackButton';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
 import { fetchCampaigns, createCampaign, updateCampaignStatus, fetchCampaignStats } from '../services/supabaseService';
 
@@ -102,9 +102,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
       {/* Header */}
       <header className="bg-ink text-bg px-6 py-4 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-            <ArrowLeft className="w-6 h-6" />
-          </button>
+          <BackButton onClick={onBack} label="Voltar" subLabel="Eventos de Inventário" />
           <div>
             <h1 className="text-xl font-bold tracking-tight uppercase">Eventos de Inventário</h1>
             <p className="text-xs opacity-60 font-mono tracking-widest uppercase">Campaign Management System</p>
@@ -171,12 +169,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
             animate={{ opacity: 1, x: 0 }}
             className="space-y-4"
           >
-            <button 
-              onClick={() => setSelectedCampaign(null)}
-              className="flex items-center gap-2 text-xs font-bold text-ink-muted uppercase tracking-widest hover:text-ink transition-all"
-            >
-              <ArrowLeft className="w-4 h-4" /> Voltar para lista
-            </button>
+            <BackButton onClick={() => setSelectedCampaign(null)} label="Voltar" subLabel="Lista de Campanhas" />
 
             <div className="bg-white border border-line rounded-2xl p-6 shadow-sm space-y-6">
               <div className="flex justify-between items-start">

@@ -333,7 +333,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn w-full overflow-hidden">
       <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
         <div className="flex items-center space-x-4">
-          <BackButton onClick={onBack} label="Protocolo v24.50" subLabel="Base de Dados" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Base de Dados" />
         </div>
         <div className="flex items-center space-x-2">
           <button 

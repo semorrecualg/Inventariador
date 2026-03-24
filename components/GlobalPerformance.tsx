@@ -88,7 +88,7 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
       {/* Header */}
       <div className="bg-white px-6 pt-12 pb-6 border-b border-slate-200 shadow-sm shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <BackButton onClick={onBack} label="Retornar" subLabel="Análise de Rendimento" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Análise de Rendimento" />
           <div className="w-10" />
         </div>
 

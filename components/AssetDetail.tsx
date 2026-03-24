@@ -410,7 +410,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {/* KARDEX HEADER */}
       <div className={`px-5 pt-8 pb-6 ${headerBg} text-white relative shadow-md z-20`}>
         <div className="flex items-center justify-between mb-6">
-          <BackButton onClick={onBack} label="Retornar" subLabel="Detalhes do Ativo" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Detalhes do Ativo" />
           <div className="flex items-center space-x-3">
             <button onClick={() => setIsQrModalOpen(true)} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
               <QrCode size={22} />

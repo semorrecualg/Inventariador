@@ -302,7 +302,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       {/* Header */}
       <div className="pt-12 pb-6 px-6 bg-white border-b border-border flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center space-x-4">
-          <BackButton onClick={onBack} label="Gestão de Usuários" subLabel="Controle de Acessos" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Controle de Acessos" />
         </div>
         <button 
           onClick={() => setIsAddModalOpen(true)}

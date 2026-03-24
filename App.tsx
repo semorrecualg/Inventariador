@@ -220,6 +220,8 @@ const App: React.FC = () => {
     onConfirm?: () => void;
     onCancel?: () => void;
     showCancel?: boolean;
+    confirmText?: string;
+    cancelText?: string;
   }>({
     isOpen: false,
     title: '',
@@ -311,7 +313,7 @@ const App: React.FC = () => {
     }
   }, [databaseMode, inventory]);
 
-  const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode) => {
+  const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
     const mode = explicitMode || databaseMode;
     if (mode === DatabaseMode.INTERNAL) return;
     
@@ -335,7 +337,7 @@ const App: React.FC = () => {
 
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
       // Passamos o tenantId e o unitId selecionado (se houver)
-      const cloudData = await fetchFullInventory(tenantId, selectedUnit || undefined);
+      const cloudData = await fetchFullInventory(tenantId, explicitUnitId || selectedUnit || undefined);
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
@@ -2329,14 +2331,25 @@ const App: React.FC = () => {
                           message: 'Deseja ativar o acesso por biometria (Digital/FaceID) neste dispositivo para seus próximos acessos?',
                           type: 'info',
                           showCancel: true,
+                          confirmText: 'OK',
+                          cancelText: 'Pular',
                           onConfirm: async () => {
+                            console.log('[App] Usuário confirmou registro de biometria');
                             const success = await registerBiometric(username);
+                            console.log('[App] Resultado do registro de biometria:', success);
                             if (success) {
                               setModalConfig({
                                 isOpen: true,
                                 title: 'Sucesso!',
                                 message: 'Biometria cadastrada com sucesso.',
                                 type: 'success'
+                              });
+                            } else {
+                              setModalConfig({
+                                isOpen: true,
+                                title: 'Erro',
+                                message: 'Não foi possível cadastrar a biometria. Verifique se seu dispositivo suporta esta função ou se as permissões foram concedidas.',
+                                type: 'error'
                               });
                             }
                           }
@@ -2377,6 +2390,10 @@ const App: React.FC = () => {
           {screen === AppScreen.MAIN_MENU && (
             <MainMenu 
               onNavigate={pushScreen} 
+              onBack={() => {
+                setSelectedUnit(null);
+                pushScreen(AppScreen.UNIT_SELECTION);
+              }}
               onLogout={async () => { 
                 if (supabase) await supabase.auth.signOut();
                 setUser(null); 
@@ -2632,11 +2649,8 @@ const App: React.FC = () => {
                 // Se for auditor e estiver no modo nuvem, dispara o sync para a unidade selecionada
                 const isAuditor = user?.role === UserRole.AUDITOR;
                 if (isAuditor && databaseMode !== DatabaseMode.INTERNAL) {
-                  // O syncFromCloud já usa o selectedUnit internamente se disponível
-                  // Mas como o state do selectedUnit pode não ter atualizado ainda, passamos o tenantId
-                  // Na verdade, o syncFromCloud usa o selectedUnit do state. 
-                  // Vamos forçar o sync passando os parâmetros necessários ou garantindo a ordem.
-                  syncFromCloud(user?.tenants || user?.tenantId, databaseMode);
+                  // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
+                  syncFromCloud(user?.tenants || user?.tenantId, databaseMode, u);
                 }
                 
                 pushScreen(AppScreen.MAIN_MENU); 
@@ -2765,7 +2779,10 @@ const App: React.FC = () => {
 
       <Modal
         isOpen={modalConfig.isOpen}
-        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        onClose={() => {
+          if (modalConfig.onCancel) modalConfig.onCancel();
+          setModalConfig(prev => ({ ...prev, isOpen: false }));
+        }}
         onConfirm={() => {
           if (modalConfig.onConfirm) modalConfig.onConfirm();
           setModalConfig(prev => ({ ...prev, isOpen: false }));
@@ -2773,6 +2790,9 @@ const App: React.FC = () => {
         title={modalConfig.title}
         message={modalConfig.message}
         type={modalConfig.type}
+        showCancel={modalConfig.showCancel}
+        confirmText={modalConfig.confirmText}
+        cancelText={modalConfig.cancelText}
       />
 
       <Modal

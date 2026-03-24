@@ -308,7 +308,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       {/* HEADER */}
       <div className="bg-white px-5 pt-12 pb-4 border-b border-accent/10 relative z-20 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <BackButton onClick={onBack} label="Retornar" subLabel="Consulta de Ativos" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Consulta de Ativos" />
           <div className="flex items-center space-x-3">
             <button 
               onClick={clearFilters}
@@ -438,7 +438,7 @@ const Consultation: React.FC<ConsultationProps> = ({
                             onReturnToInventory(asset.ETIQUETA || ''); 
                           }} 
                           className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-600 active:scale-90 shadow-sm hover:bg-emerald-100 transition-all flex items-center space-x-2"
-                          title="Retornar ao Inventário"
+                          title="Voltar ao Inventário"
                         >
                           <Check size={16} strokeWidth={3} />
                           <span className="text-[10px] font-black uppercase tracking-tighter">Selecionar</span>

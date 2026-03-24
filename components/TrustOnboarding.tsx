@@ -203,13 +203,15 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
         </div>
 
         <div className="p-6 bg-bg-main border-t border-border flex items-center justify-between shrink-0">
-          <div className="flex space-x-1">
-            {steps.map((s) => (
-              <div 
-                key={s.id} 
-                className={`w-1.5 h-1.5 rounded-full transition-all ${s.id === step ? 'w-4 bg-accent' : 'bg-border'}`}
-              />
-            ))}
+          <div className="flex items-center space-x-3">
+            {step > 1 && (
+              <button
+                onClick={() => setStep(step - 1)}
+                className="px-6 py-4 bg-white border border-border text-ink rounded-2xl font-bold uppercase tracking-widest text-[10px] active:scale-95 transition-all shadow-sm"
+              >
+                Voltar
+              </button>
+            )}
           </div>
 
           <button
@@ -223,7 +225,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
             disabled={step === steps.length && !acceptedTerms}
             className={`px-8 py-4 rounded-2xl font-bold uppercase tracking-widest text-[10px] flex items-center space-x-2 transition-all shadow-lg active:scale-95 ${step === steps.length && !acceptedTerms ? 'bg-border text-ink-muted cursor-not-allowed' : 'bg-accent text-white shadow-accent/20'}`}
           >
-            <span>{step === steps.length ? "Começar Agora" : "Próximo"}</span>
+            <span>{step === steps.length ? "Começar Agora" : "Avançar"}</span>
             <ChevronRight size={14} />
           </button>
         </div>

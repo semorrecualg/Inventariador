@@ -10,7 +10,6 @@ import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { generateUUID } from '../services/supabaseService';
 
 import { 
-  ArrowLeft,
   MapPin, 
   Check,
   Zap, 
@@ -1071,7 +1070,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     onClick={() => setScannedResult(null)} 
                     className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                   >
-                    Voltar ao Scanner
+                    Voltar
                   </button>
                 </div>
               </div>
@@ -1089,7 +1088,7 @@ const Inventory: React.FC<InventoryProps> = ({
         <>
           <div className="px-5 pt-12 pb-4 bg-white border-b border-border">
             <div className="flex items-center justify-between mb-6">
-              <BackButton onClick={onBack} label="Retornar ao Painel" subLabel="Analytics Precision V24" />
+              <BackButton onClick={onBack} label="Voltar" subLabel="Analytics Precision V24" />
               <button 
                 onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
                 className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'bg-bg-main text-ink-muted'}`}
@@ -1186,13 +1185,11 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="flex flex-col space-y-1.5 mb-1">
               {/* Row 1: Action Buttons & SAFE Status */}
               <div className="flex items-center justify-between space-x-2">
-                <button 
+                <BackButton 
                   onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
-                  className="p-2.5 bg-bg-main border border-border rounded-xl text-ink-muted active:text-ink active:scale-95 transition-all shadow-sm"
-                  title="Voltar para Seleção de Local"
-                >
-                  <ArrowLeft size={16} />
-                </button>
+                  label="Voltar"
+                  subLabel="Seleção de Local"
+                />
                 
                 <div className="flex items-center space-x-2">
                   {isGpsAvailable !== undefined && (
@@ -1649,7 +1646,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   onClick={() => setScannedResult(null)} 
                   className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                 >
-                  Voltar ao Scanner
+                  Voltar
                 </button>
               </div>
             </div>

@@ -7,7 +7,6 @@ import {
   TrendingDown, 
   ArrowLeftRight, 
   PlusCircle, 
-  ArrowLeft,
   Search,
   Filter,
   Download,
@@ -21,6 +20,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../services/supabaseService';
 import { assetControlService } from '../services/assetControlService';
 import { AssetGroup, ChartOfAccount, AccountType, AccountNature, AccountClassification, DepreciationMethod, NCMClassifier } from '../types';
+import BackButton from './BackButton';
 import AssetGroupsTable from './AssetGroupsTable';
 import ChartOfAccountsTable from './ChartOfAccountsTable';
 import NCMClassifierTable from './NCMClassifierTable';
@@ -480,14 +480,9 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
             </div>
           </div>
 
-          <button 
-            onClick={onBack}
-            className="flex items-center gap-2 text-xs md:text-sm text-slate-500 hover:text-emerald-600 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden md:inline">Voltar ao Início</span>
-            <span className="md:hidden">Voltar</span>
-          </button>
+          <div className="mt-4">
+            <BackButton onClick={onBack} label="Voltar" subLabel="Módulo Contábil" />
+          </div>
         </div>
 
         <nav className="flex md:flex-col p-2 md:p-4 space-x-2 md:space-x-0 md:space-y-2 overflow-x-auto md:overflow-y-auto scrollbar-hide">
