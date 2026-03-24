@@ -3,7 +3,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet.heat';
-import { Asset, TransactionOrigin } from '../types';
+import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import BackButton from './BackButton';
 import { Layers, Info, X, Filter, Activity, WifiOff, Database } from 'lucide-react';
 
@@ -15,7 +15,7 @@ declare module 'leaflet' {
 interface AssetMapProps {
   assets: Asset[];
   onBack: () => void;
-  databaseMode: 'INTERNAL' | 'SUPABASE';
+  databaseMode: DatabaseMode;
 }
 
 // Componente para gerenciar a camada de calor (Heatmap)

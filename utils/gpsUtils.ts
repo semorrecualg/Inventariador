@@ -64,8 +64,15 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
   }
 
   return new Promise((resolve, reject) => {
+    const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+
     if (!navigator.geolocation) {
-      reject(new Error('Geolocalização não suportada pelo navegador.'));
+      if (isBypassed) {
+        const fallbackLoc = { lat: -15.7942, lng: -47.8822, accuracy: 100 };
+        resolve(fallbackLoc);
+      } else {
+        reject(new Error('Geolocalização não suportada pelo navegador.'));
+      }
       return;
     }
 
@@ -112,6 +119,15 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
           break;
       }
       
+      const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+      if (isBypassed) {
+        console.warn('GPS Bypassed: Fornecendo coordenadas de teste (Brasília).');
+        const fallbackLoc = { lat: -15.7942, lng: -47.8822, accuracy: 100 };
+        lastLocation = fallbackLoc;
+        resolve(fallbackLoc);
+        return;
+      }
+
       if (lastLocation) {
         console.warn('Usando localização em cache devido a erro final:', msg);
         resolve(lastLocation);

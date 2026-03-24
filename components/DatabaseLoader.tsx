@@ -10,7 +10,8 @@ import {
   CheckCircle2,
   Info,
   HelpCircle,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
@@ -90,8 +91,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
 
       const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
       
-      // Mapeamento v24.50 - Ordem Estrita: EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
+      // Mapeamento v25.00 - Ordem Estrita: Tenant_ID;EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
       const m = {
+        TENANT_ID: rawHeaders.indexOf('TENANT_ID'),
         EMPRESA: rawHeaders.indexOf('EMPRESA'),
         STATUS: rawHeaders.indexOf('STATUS'),
         ETIQUETA: rawHeaders.indexOf('ETIQUETA'),
@@ -115,26 +117,27 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
       };
 
       // Fallback para mapeamento por índice se os cabeçalhos não forem localizados corretamente
-      if (m.EMPRESA === -1) m.EMPRESA = 0;
-      if (m.STATUS === -1) m.STATUS = 1;
-      if (m.ETIQUETA === -1) m.ETIQUETA = 2;
-      if (m.QT === -1) m.QT = 3;
-      if (m.DESCRICAO === -1) m.DESCRICAO = 4;
-      if (m.SERIAL === -1) m.SERIAL = 5;
-      if (m.DATA_AQ === -1) m.DATA_AQ = 6;
-      if (m.CNPJ === -1) m.CNPJ = 7;
-      if (m.FORNECEDOR === -1) m.FORNECEDOR = 8;
-      if (m.NF === -1) m.NF = 9;
-      if (m.ENDERECO === -1) m.ENDERECO = 10;
-      if (m.REGISTRO === -1) m.REGISTRO = 11;
-      if (m.SUBREG === -1) m.SUBREG = 12;
-      if (m.DATA_BAIXA === -1) m.DATA_BAIXA = 13;
-      if (m.CONTA === -1) m.CONTA = 14;
-      if (m.PK === -1) m.PK = 15;
-      if (m.CUSTO === -1) m.CUSTO = 16;
-      if (m.VALOR === -1) m.VALOR = 17;
-      if (m.RECNO === -1) m.RECNO = 18;
-      if (m.RECNO3 === -1) m.RECNO3 = 19;
+      if (m.TENANT_ID === -1) m.TENANT_ID = 0;
+      if (m.EMPRESA === -1) m.EMPRESA = 1;
+      if (m.STATUS === -1) m.STATUS = 2;
+      if (m.ETIQUETA === -1) m.ETIQUETA = 3;
+      if (m.QT === -1) m.QT = 4;
+      if (m.DESCRICAO === -1) m.DESCRICAO = 5;
+      if (m.SERIAL === -1) m.SERIAL = 6;
+      if (m.DATA_AQ === -1) m.DATA_AQ = 7;
+      if (m.CNPJ === -1) m.CNPJ = 8;
+      if (m.FORNECEDOR === -1) m.FORNECEDOR = 9;
+      if (m.NF === -1) m.NF = 10;
+      if (m.ENDERECO === -1) m.ENDERECO = 11;
+      if (m.REGISTRO === -1) m.REGISTRO = 12;
+      if (m.SUBREG === -1) m.SUBREG = 13;
+      if (m.DATA_BAIXA === -1) m.DATA_BAIXA = 14;
+      if (m.CONTA === -1) m.CONTA = 15;
+      if (m.PK === -1) m.PK = 16;
+      if (m.CUSTO === -1) m.CUSTO = 17;
+      if (m.VALOR === -1) m.VALOR = 18;
+      if (m.RECNO === -1) m.RECNO = 19;
+      if (m.RECNO3 === -1) m.RECNO3 = 20;
 
       const baseSinteticaLoc = new Set<string>();
       const activeTagsGlobal = new Set<string>();
@@ -179,6 +182,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
         // Se for ATIVO, nunca elimina (Regra a.1)
 
         const asset: Asset = { id: generateUUID() };
+        asset.TENANT_ID = cleanDisplayValue(row[m.TENANT_ID]);
         asset.EMPRESA = cleanDisplayValue(row[m.EMPRESA]) || "GERAL";
         asset.STATUS = status || "ATIVO";
         asset.ETIQUETA = etiqueta;
@@ -273,7 +277,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
       rows: filteredAssets.length,
       purgedRows: rawExtractedAssetsRef.current.length - filteredAssets.length, 
       originalRows: rawExtractedAssetsRef.current.length,
-      cols: 19, // Atualizado para v24.50
+      cols: 21, // Atualizado para v25.00
       companies: companyStats,
       headers: [], 
       withPlaqueta: filteredAssets.filter(a => !!a.ETIQUETA && normalizeKey(a.ETIQUETA) !== 'ETIQUETAR').length,
@@ -354,35 +358,50 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
               <span className="text-[10px] font-bold uppercase tracking-widest">Requisito de Arquivo</span>
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              O sistema exige arquivos <strong>Excel (.xls)</strong> para garantir a compatibilidade com o motor de processamento legado do Protheus.
+              O sistema exige arquivos <strong>Excel (.xls ou .xlsx)</strong> seguindo o modelo oficial GBR v25.
             </p>
           </div>
 
           <div className="space-y-2">
-            <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Estrutura de Colunas (Ordem A-R)</h4>
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-[9px] text-slate-700 leading-relaxed">
-              0: EMPRESA<br/>
-              1: STATUS<br/>
-              2: ETIQUETA<br/>
-              3: QT<br/>
-              4: DESCRICAODOATIVO<br/>
-              5: SERIAL<br/>
-              6: DATAAQUSIC<br/>
-              7: CNPJ<br/>
-              8: NOMEFORNECEDOR<br/>
-              9: NOTAFISCAL<br/>
-              10: ENDERECO<br/>
-              11: REGISTRO<br/>
-              12: SUBREG<br/>
-              13: DATABAIXA<br/>
-              14: CONTACONTABIL<br/>
-              15: PRIMARYKEY<br/>
-              16: CENTRODECUSTO<br/>
-              17: VLRAQUISIC<br/>
-              18: SN1_RECNO<br/>
-              19: SN3_RECNO
+            <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Estrutura de Colunas (Ordem A-U)</h4>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-[9px] text-slate-700 leading-relaxed max-h-40 overflow-y-auto">
+              0: Tenant_ID<br/>
+              1: EMPRESA<br/>
+              2: STATUS<br/>
+              3: ETIQUETA<br/>
+              4: QT<br/>
+              5: DESCRICAODOATIVO<br/>
+              6: SERIAL<br/>
+              7: DATAAQUSIC<br/>
+              8: CNPJ<br/>
+              9: NOMEFORNECEDOR<br/>
+              10: NOTAFISCAL<br/>
+              11: ENDERECO<br/>
+              12: REGISTRO<br/>
+              13: SUBREG<br/>
+              14: DATABAIXA<br/>
+              15: CONTACONTABIL<br/>
+              16: PRIMARYKEY<br/>
+              17: CENTRODECUSTO<br/>
+              18: VLRAQUISIC<br/>
+              19: SN1_RECNO<br/>
+              20: SN3_RECNO
             </div>
           </div>
+
+          <button 
+            onClick={() => {
+              const headers = ['Tenant_ID', 'EMPRESA', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAODOATIVO', 'SERIAL', 'DATAAQUSIC', 'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'REGISTRO', 'SUBREG', 'DATABAIXA', 'CONTACONTABIL', 'PRIMARYKEY', 'CENTRODECUSTO', 'VLRAQUISIC', 'SN1_RECNO', 'SN3_RECNO'];
+              const ws = XLSX.utils.aoa_to_sheet([headers]);
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, "Template_GBR_v25");
+              XLSX.writeFile(wb, "Template_Carga_Expert_GBR_v25.xlsx");
+            }}
+            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold uppercase tracking-widest text-[10px] flex items-center justify-center space-x-2"
+          >
+            <Download size={16} />
+            <span>Baixar Modelo Excel</span>
+          </button>
 
           <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
             <p className="text-[9px] font-bold text-amber-700 uppercase leading-tight">

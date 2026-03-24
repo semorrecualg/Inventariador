@@ -1,13 +1,13 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint } from 'lucide-react';
 import { supabase, ensureUserProfile, resetPassword, logAuditEvent } from '../services/supabaseService';
+import { authenticateBiometric, hasBiometricRegistered } from '../services/biometricService';
 import { User, DatabaseMode, UserRole } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
 interface LoginProps {
   onLogin: (user: User) => void;
-  onNavigateToRegister: () => void;
   users: User[];
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
@@ -15,7 +15,7 @@ interface LoginProps {
 }
 
 // Login Component
-const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +34,44 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [manualLink, setManualLink] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [hasBio, setHasBio] = useState(false);
+
+  // Check for biometrics when username changes
+  React.useEffect(() => {
+    if (username.length > 3) {
+      hasBiometricRegistered(username.trim().toLowerCase()).then(setHasBio);
+    } else {
+      setHasBio(false);
+    }
+  }, [username]);
+
+  const handleBiometricLogin = async () => {
+    if (!username) return;
+    
+    try {
+      setIsLoading(true);
+      const success = await authenticateBiometric(username.trim().toLowerCase());
+      
+      if (success) {
+        // No modo INTERNO, buscamos o usuário local
+        const localUser = users.find(u => 
+          u.email.toLowerCase() === username.trim().toLowerCase() || 
+          u.username.toLowerCase() === username.trim().toLowerCase()
+        );
+
+        if (localUser) {
+          localStorage.setItem('app_current_user', JSON.stringify(localUser));
+          onLogin(localUser);
+        } else {
+          setError("Usuário biométrico não encontrado no banco local.");
+        }
+      }
+    } catch {
+      setError("Falha na autenticação biométrica.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Detectar erro de OTP expirado na URL
   React.useEffect(() => {
@@ -362,6 +400,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
           )}
         </button>
 
+        {hasBio && !isLoading && (
+          <button 
+            type="button"
+            onClick={handleBiometricLogin}
+            className="w-full bg-white border-2 border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+          >
+            <Fingerprint size={18} />
+            <span>Entrar com Biometria</span>
+          </button>
+        )}
+
         {databaseMode === DatabaseMode.SUPABASE && (
           <div className="pt-2 space-y-2">
             <button 
@@ -374,30 +423,32 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
               {resetSent ? "E-mail de redefinição enviado!" : "Esqueci minha senha"}
             </button>
 
-            {magicLinkSent ? (
-              <div className="bg-green-50 border border-green-100 text-green-700 p-3 rounded-xl text-[10px] font-bold uppercase text-center animate-fadeIn">
-                Link enviado! Verifique seu e-mail. <br/>
-                <span className="text-[8px] opacity-80 mt-1 block">O link expira em 5 minutos e só pode ser usado uma vez.</span>
-              </div>
-            ) : (
-              <button 
-                type="button"
-                onClick={handleMagicLink}
-                disabled={isMagicLinkLoading || isLoading}
-                className="w-full bg-white border border-accent/20 text-accent font-bold py-3 rounded-xl active:scale-[0.98] transition-all uppercase tracking-[0.1em] text-[10px] flex items-center justify-center space-x-2 disabled:opacity-70"
-              >
-                {isMagicLinkLoading ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin" />
-                    <span>Enviando Link...</span>
-                  </>
-                ) : (
-                  <>
-                    <Cloud size={12} />
-                    <span>Entrar sem senha (Magic Link)</span>
-                  </>
-                )}
-              </button>
+            {supabase && (
+              magicLinkSent ? (
+                <div className="bg-green-50 border border-green-100 text-green-700 p-3 rounded-xl text-[10px] font-bold uppercase text-center animate-fadeIn">
+                  Link enviado! Verifique seu e-mail. <br/>
+                  <span className="text-[8px] opacity-80 mt-1 block">O link expira em 5 minutos e só pode ser usado uma vez.</span>
+                </div>
+              ) : (
+                <button 
+                  type="button"
+                  onClick={handleMagicLink}
+                  disabled={isMagicLinkLoading || isLoading}
+                  className="w-full bg-white border border-accent/20 text-accent font-bold py-3 rounded-xl active:scale-[0.98] transition-all uppercase tracking-[0.1em] text-[10px] flex items-center justify-center space-x-2 disabled:opacity-70"
+                >
+                  {isMagicLinkLoading ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Enviando Link...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Cloud size={12} />
+                      <span>Entrar sem senha (Magic Link)</span>
+                    </>
+                  )}
+                </button>
+              )
             )}
           </div>
         )}
@@ -406,41 +457,30 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigateToRegister, users, dat
       <div className="mt-6 text-center space-y-3">
         <div>
           {databaseMode === DatabaseMode.INTERNAL ? (
-            <div className="space-y-2">
-              <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
-                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
-                  <span className="text-accent">Auditores:</span> Solicitem suas credenciais ao Administrador.
-                </p>
-              </div>
-              <button 
-                onClick={onNavigateToRegister}
-                className="text-ink-muted font-bold uppercase text-[9px] tracking-widest hover:text-accent transition-colors"
-              >
-                Administradores: <span className="underline">Registrar Unidade</span>
-              </button>
+            <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
+                <span className="text-accent">Auditores:</span> Solicitem suas credenciais ao Administrador.
+              </p>
             </div>
           ) : (
-            <div className="space-y-1">
-              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Novo no sistema Cloud?</p>
-              <button 
-                onClick={onNavigateToRegister}
-                className="text-accent font-bold uppercase text-[10px] tracking-widest hover:underline"
-              >
-                Cadastre-se Agora
-              </button>
+            <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
+                Acesso restrito a auditores autorizados. <br/>
+                <span className="text-accent">Consulte seu Administrador GBR.</span>
+              </p>
             </div>
           )}
 
-          {/* Link de Resgate (Bypass para erro de localhost) - Disponível para Supabase */}
-          {databaseMode !== DatabaseMode.INTERNAL && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
+          {/* Link de Resgate (Bypass para erro de localhost) - Disponível apenas se Supabase estiver configurado */}
+          {databaseMode !== DatabaseMode.INTERNAL && supabase && (
+            <div className="mt-4 pt-4 border-t border-accent/10">
               {!showManualInput ? (
                 <button
                   type="button"
                   onClick={() => setShowManualInput(true)}
-                  className="text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-1 mx-auto"
+                  className="text-[9px] font-bold text-ink-muted hover:text-accent flex items-center justify-center gap-1 mx-auto uppercase tracking-widest"
                 >
-                  <AlertCircle className="w-3 h-3" />
+                  <AlertCircle size={12} />
                   Problemas com o link do e-mail?
                 </button>
               ) : (

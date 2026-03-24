@@ -32,6 +32,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { deleteAssetPhoto } from '../services/supabaseService';
 import { compressImage } from '../utils/imageUtils';
 import { addToSyncQueue } from '../services/syncService';
+import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
 import { createWorker } from 'tesseract.js';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -281,6 +282,19 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     onBack();
   };
 
+  useEffect(() => {
+    const loadLocalPhotoIfNeeded = async () => {
+      if (!workingAsset._photoUrl) {
+        const localBlob = await getLocalPhoto(String(workingAsset.id));
+        if (localBlob) {
+          const localUrl = URL.createObjectURL(localBlob);
+          setWorkingAsset(prev => ({ ...prev, _photoUrl: localUrl }));
+        }
+      }
+    };
+    loadLocalPhotoIfNeeded();
+  }, [workingAsset.id]);
+
   const handleProtheusSync = async () => {
     if (!protheusApiUrl || isBatch) return;
     
@@ -317,14 +331,18 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         await deleteAssetPhoto(workingAsset._photoUrl);
       }
 
-      // Comprime a imagem antes de subir (Reduz para ~1280px e ~80-100KB, padrão WhatsApp)
-      const compressedBlob = await compressImage(file, 1280, 1280, 0.6);
+      // Comprime a imagem antes de subir (Perfil WhatsApp: ~1024px e ~150KB)
+      const compressedBlob = await compressImage(file, 1024, 1024, 0.6);
+      
+      // Salva localmente para persistência offline e modo INTERNO
+      await saveLocalPhoto(String(workingAsset.id), compressedBlob as Blob);
       
       // Cria URL local para visualização imediata
       const localUrl = URL.createObjectURL(compressedBlob);
       
-      // Adiciona à fila de sincronização offline
-      await addToSyncQueue(String(workingAsset.id), compressedBlob, tenantId || 'default');
+      // Adiciona à fila de sincronização offline (se não for modo INTERNO)
+      // No modo INTERNO, o syncService pode ser ignorado ou usado como backup
+      await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantId || 'default');
 
       // Atualiza o estado local imediatamente com a URL do blob
       const updated = { ...workingAsset, _photoUrl: localUrl };
@@ -341,6 +359,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const removePhoto = async () => {
     if (workingAsset._photoUrl) {
       await deleteAssetPhoto(workingAsset._photoUrl);
+      await deleteLocalPhoto(String(workingAsset.id));
     }
     const updated = { ...workingAsset, _photoUrl: undefined };
     setWorkingAsset(updated);

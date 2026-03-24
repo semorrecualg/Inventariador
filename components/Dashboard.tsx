@@ -260,6 +260,24 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
         </div>
       </div>
 
+      {localStorage.getItem('gbr_gps_bypass') === 'true' && (
+        <div className="mx-4 mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <ShieldAlert size={14} className="text-amber-600" />
+            <span className="text-[9px] font-bold text-amber-900 uppercase tracking-widest">Modo Desenvolvedor Ativo</span>
+          </div>
+          <button 
+            onClick={() => {
+              localStorage.removeItem('gbr_gps_bypass');
+              window.location.reload();
+            }}
+            className="px-3 py-1 bg-amber-600 text-white rounded-lg text-[8px] font-bold uppercase tracking-widest active:scale-95 transition-all"
+          >
+            Resetar GPS
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-24">
         
         {/* BENTO GRID - KPI PRINCIPAIS */}

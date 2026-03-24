@@ -5,13 +5,16 @@ import { ShieldAlert, MapPin, RefreshCw, Info } from 'lucide-react';
 interface GPSComplianceGuardProps {
   children: React.ReactNode;
   onGpsStatusChange?: (isAvailable: boolean) => void;
+  userRole?: string;
 }
 
-const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGpsStatusChange }) => {
-  const [status, setStatus] = useState<'checking' | 'granted' | 'denied' | 'unavailable'>('checking');
+const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGpsStatusChange, userRole }) => {
+  const [status, setStatus] = useState<'checking' | 'granted' | 'denied' | 'unavailable' | 'bypassed'>('checking');
   const [error, setError] = useState<string | null>(null);
+  const [clickCount, setClickCount] = useState(0);
 
   const checkGPS = async () => {
+    if (status === 'bypassed') return;
     setStatus('checking');
     setError(null);
 
@@ -47,8 +50,21 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGps
     );
   };
 
+  const handleBypass = () => {
+    console.warn('GPS Compliance Bypassed for Testing');
+    localStorage.setItem('gbr_gps_bypass', 'true');
+    setStatus('granted');
+    onGpsStatusChange?.(true);
+  };
+
   useEffect(() => {
-    checkGPS();
+    const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+    if (isBypassed) {
+      setStatus('granted');
+      onGpsStatusChange?.(true);
+    } else {
+      checkGPS();
+    }
   }, []);
 
   if (status === 'granted') {
@@ -57,7 +73,16 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGps
 
   return (
     <div className="fixed inset-0 z-[30000] bg-slate-900 flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
-      <div className="w-24 h-24 bg-red-500/10 rounded-[2rem] flex items-center justify-center mb-8 relative">
+      <div 
+        className="w-24 h-24 bg-red-500/10 rounded-[2rem] flex items-center justify-center mb-8 relative cursor-pointer"
+        onClick={() => {
+          const newCount = clickCount + 1;
+          setClickCount(newCount);
+          if (newCount >= 5) {
+            handleBypass();
+          }
+        }}
+      >
         <div className="absolute inset-0 bg-red-500/20 rounded-[2rem] animate-ping" />
         <ShieldAlert size={48} className="text-red-500 relative z-10" />
       </div>
@@ -65,6 +90,12 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGps
       <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">
         Bloqueio de Conformidade
       </h2>
+      
+      {localStorage.getItem('gbr_gps_bypass') === 'true' && (
+        <div className="mb-4 px-3 py-1 bg-amber-500/20 border border-amber-500/30 rounded-full">
+          <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Modo Desenvolvedor Ativo</span>
+        </div>
+      )}
       
       <div className="bg-white/5 border border-white/10 rounded-3xl p-6 mb-8 max-w-sm">
         <div className="flex items-center space-x-3 text-amber-400 mb-3 justify-center">
@@ -84,6 +115,21 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGps
           <RefreshCw size={16} className={status === 'checking' ? 'animate-spin' : ''} />
           <span>{status === 'checking' ? 'Verificando...' : 'Tentar Reativar'}</span>
         </button>
+
+        {(userRole === 'ADMIN' || userRole === 'MASTER') && (
+          <button
+            onClick={handleBypass}
+            className="w-full py-4 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all"
+          >
+            Bypass GPS (Apenas Testes)
+          </button>
+        )}
+
+        {clickCount > 0 && clickCount < 5 && (
+          <p className="text-[8px] text-slate-500 uppercase font-bold">
+            Clique mais {5 - clickCount} vezes para modo desenvolvedor
+          </p>
+        )}
 
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 flex items-start space-x-3 text-left">
           <Info size={16} className="text-blue-400 shrink-0 mt-0.5" />

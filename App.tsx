@@ -32,6 +32,7 @@ import AuditLogs from './components/AuditLogs';
 import CampaignManager from './components/CampaignManager';
 import FloatingHelp from './components/FloatingHelp';
 import PrivacyCenter from './components/PrivacyCenter';
+import OnboardingWizard from './components/OnboardingWizard';
 
 import { motion } from 'motion/react';
 import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw } from 'lucide-react';
@@ -40,6 +41,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
+import { isBiometricSupported, registerBiometric, hasBiometricRegistered } from './services/biometricService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -216,6 +218,8 @@ const App: React.FC = () => {
     message: string;
     type: 'info' | 'error' | 'success' | 'confirm';
     onConfirm?: () => void;
+    onCancel?: () => void;
+    showCancel?: boolean;
   }>({
     isOpen: false,
     title: '',
@@ -241,17 +245,15 @@ const App: React.FC = () => {
     protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
     mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
     mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
-    databaseMode: (localStorage.getItem('app_database_mode') as 'INTERNAL' | 'SUPABASE') || 'INTERNAL'
+    databaseMode: (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL,
+    hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
   });
 
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     try {
       const saved = localStorage.getItem('app_database_mode');
       if (saved) return saved as DatabaseMode;
-      // Se houver configuração de Supabase, o padrão deve ser SUPABASE para facilitar para o auditor
-      if (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY) {
-        return DatabaseMode.SUPABASE;
-      }
+      // O padrão agora é sempre INTERNAL para o primeiro contato
       return DatabaseMode.INTERNAL;
     } catch { return DatabaseMode.INTERNAL; }
   });
@@ -267,15 +269,11 @@ const App: React.FC = () => {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
 
-  // Efeito para garantir que a lista de empresas esteja sempre populada a partir dos ativos se estiver vazia
   useEffect(() => {
-    if (inventory.assets.length > 0 && (!inventory.companies || inventory.companies.length === 0)) {
-      const extractedCompanies = Array.from(new Set(inventory.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
-      if (extractedCompanies.length > 0) {
-        setInventory(prev => ({ ...prev, companies: extractedCompanies }));
-      }
+    if (!inventory.hasCompletedOnboarding && screen !== AppScreen.ONBOARDING) {
+      pushScreen(AppScreen.ONBOARDING);
     }
-  }, [inventory.assets, inventory.companies]);
+  }, [inventory.hasCompletedOnboarding, screen]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (databaseMode === DatabaseMode.INTERNAL) return;
@@ -1427,6 +1425,36 @@ const App: React.FC = () => {
     }
   };
 
+  const handleResetGPS = () => {
+    localStorage.removeItem('gbr_gps_bypass');
+    setModalConfig({
+      isOpen: true,
+      title: 'GPS Resetado',
+      message: 'O bypass de GPS foi removido. O sistema tentará obter a localização real na próxima operação.',
+      type: 'success'
+    });
+  };
+
+  const handleToggleGpsBypass = (val: boolean) => {
+    if (val) {
+      localStorage.setItem('gbr_gps_bypass', 'true');
+      setModalConfig({
+        isOpen: true,
+        title: 'Bypass de GPS Ativado',
+        message: 'O sistema agora usará coordenadas simuladas (Brasília) para testes em desktop.',
+        type: 'success'
+      });
+    } else {
+      localStorage.removeItem('gbr_gps_bypass');
+      setModalConfig({
+        isOpen: true,
+        title: 'Bypass de GPS Desativado',
+        message: 'O sistema voltará a exigir localização real.',
+        type: 'info'
+      });
+    }
+  };
+
   const [isGpsAvailable, setIsGpsAvailable] = useState<boolean | null>(null);
 
   // Verifica disponibilidade de GPS no início
@@ -1454,6 +1482,12 @@ const App: React.FC = () => {
       }
       return newHistory;
     });
+  };
+
+  const completeOnboarding = () => {
+    localStorage.setItem('app_onboarding_completed', 'true');
+    setInventory(prev => ({ ...prev, hasCompletedOnboarding: true }));
+    setHistory([AppScreen.LOGIN]);
   };
 
   const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
@@ -2250,14 +2284,16 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
+          {screen === AppScreen.ONBOARDING && (
+            <OnboardingWizard onComplete={completeOnboarding} />
+          )}
           {screen === AppScreen.LOGIN && (
             <Login 
               users={users} 
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
-              onNavigateToRegister={() => pushScreen(AppScreen.REGISTER)}
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
-              onLogin={(u) => { 
+              onLogin={async (u) => { 
                 setUser(u); 
                 const isEmpty = inventory.assets.length === 0;
 
@@ -2269,8 +2305,46 @@ const App: React.FC = () => {
                 if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
                 } else { 
-                  pushScreen(AppScreen.MODULE_SELECTION); 
-                } 
+                  // Se for ADMIN, vai para seleção de módulo
+                  // Se for AUDITOR, vai para seleção de unidade (empresa)
+                  const isAdmin = u.role === UserRole.ADMIN || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                  if (isAdmin) {
+                    pushScreen(AppScreen.MODULE_SELECTION); 
+                  } else {
+                    pushScreen(AppScreen.UNIT_SELECTION);
+                  }
+                }
+
+                // Oferecer registro de biometria se suportado e ainda não registrado
+                const bioSupported = isBiometricSupported();
+                if (bioSupported) {
+                  const username = (u.username || u.email || '').toLowerCase();
+                  if (username) {
+                    const alreadyRegistered = await hasBiometricRegistered(username);
+                    if (!alreadyRegistered) {
+                      setTimeout(() => {
+                        setModalConfig({
+                          isOpen: true,
+                          title: 'Acesso Biométrico',
+                          message: 'Deseja ativar o acesso por biometria (Digital/FaceID) neste dispositivo para seus próximos acessos?',
+                          type: 'info',
+                          showCancel: true,
+                          onConfirm: async () => {
+                            const success = await registerBiometric(username);
+                            if (success) {
+                              setModalConfig({
+                                isOpen: true,
+                                title: 'Sucesso!',
+                                message: 'Biometria cadastrada com sucesso.',
+                                type: 'success'
+                              });
+                            }
+                          }
+                        });
+                      }, 1500);
+                    }
+                  }
+                }
               }} 
             />
           )}
@@ -2377,6 +2451,9 @@ const App: React.FC = () => {
                 localStorage.setItem('app_protheus_url', val);
                 updateConfig({ protheusApiUrl: val });
               }}
+              onResetGPS={handleResetGPS}
+              onToggleGpsBypass={handleToggleGpsBypass}
+              isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -2446,7 +2523,7 @@ const App: React.FC = () => {
             )
           )}
           {screen === AppScreen.INVENTORY && (
-            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable}>
+            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
               <Inventory 
                 assets={filteredAssetsByUnit} 
                 allAssets={inventory.assets} 
@@ -2483,7 +2560,7 @@ const App: React.FC = () => {
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.LABELING && (
-            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable}>
+            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
               <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
             </GPSComplianceGuard>
           )}
@@ -2532,11 +2609,36 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
-              units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasActiveAssets }))} 
+              units={fullCompaniesWithStatus
+                .filter(c => {
+                  const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                  if (isAdmin) return true;
+                  
+                  // Se for auditor, só vê as unidades autorizadas
+                  const authorizedUnits = user?.units || (user?.tenantId ? [user.tenantId] : []);
+                  return authorizedUnits.some(au => au.toUpperCase() === c.name.toUpperCase());
+                })
+                .map(c => ({ 
+                  name: c.name, 
+                  // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
+                  hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets 
+                }))
+              } 
               onSelect={(u) => { 
                 setSelectedUnit(u); 
                 setIsInventorying(false); 
                 setInventoryLocation(null); 
+                
+                // Se for auditor e estiver no modo nuvem, dispara o sync para a unidade selecionada
+                const isAuditor = user?.role === UserRole.AUDITOR;
+                if (isAuditor && databaseMode !== DatabaseMode.INTERNAL) {
+                  // O syncFromCloud já usa o selectedUnit internamente se disponível
+                  // Mas como o state do selectedUnit pode não ter atualizado ainda, passamos o tenantId
+                  // Na verdade, o syncFromCloud usa o selectedUnit do state. 
+                  // Vamos forçar o sync passando os parâmetros necessários ou garantindo a ordem.
+                  syncFromCloud(user?.tenants || user?.tenantId, databaseMode);
+                }
+                
                 pushScreen(AppScreen.MAIN_MENU); 
               }} 
               onBack={async () => { 
@@ -2558,7 +2660,7 @@ const App: React.FC = () => {
               user={user}
             />
           )}
-          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} />}
+          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} databaseMode={databaseMode} />}
           {screen === AppScreen.ACTIVE_SEARCH && (
             <ActiveSearch 
               assets={filteredAssetsByUnit} 
@@ -2571,6 +2673,7 @@ const App: React.FC = () => {
           {screen === AppScreen.MODULE_SELECTION && (
             <ModuleSelector 
               username={user?.username || ''}
+              userRole={user?.role}
               onLogout={async () => {
                 if (supabase) await supabase.auth.signOut();
                 setUser(null);

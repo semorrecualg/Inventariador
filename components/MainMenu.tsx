@@ -80,6 +80,9 @@ interface MainMenuProps {
   onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
   pendingPhotosCount?: number;
   onProcessSyncQueue?: () => void;
+  onResetGPS?: () => void;
+  onToggleGpsBypass?: (val: boolean) => void;
+  isGpsBypassed?: boolean;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -122,7 +125,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
   mandatoryPhotoOnNewItem,
   onUpdateMandatoryPhotoOnNewItem,
   pendingPhotosCount = 0,
-  onProcessSyncQueue
+  onProcessSyncQueue,
+  onResetGPS,
+  onToggleGpsBypass,
+  isGpsBypassed = false
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
@@ -134,7 +140,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
-  const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const handleSecureAction = (action: () => void) => {
@@ -278,13 +284,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <DatabaseZap size={20} />
             </button>
           )}
-          <button 
-            onClick={() => setIsAnalyticsMenuOpen(true)} 
-            className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
-            title="Painéis e Rendimento"
-          >
-            <BarChart3 size={20} />
-          </button>
+          {isAdmin && (
+            <button 
+              onClick={() => setIsAnalyticsMenuOpen(true)} 
+              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
+              title="Painéis e Rendimento"
+            >
+              <BarChart3 size={20} />
+            </button>
+          )}
           {isAdmin && (
             <button 
               onClick={() => setIsAdminMenuOpen(true)} 
@@ -849,16 +857,34 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />}
                   </button>
                   
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.SUPABASE ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
-                  >
-                    <div className="flex items-center">
-                      <Cloud size={14} className="mr-3" />
-                      <span>2) Banco Externo - Supabase</span>
-                    </div>
-                    {databaseMode === DatabaseMode.SUPABASE && <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />}
-                  </button>
+                  <div className="relative group">
+                    <button 
+                      disabled={databaseMode === DatabaseMode.INTERNAL}
+                      onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
+                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${
+                        databaseMode === DatabaseMode.SUPABASE 
+                          ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm' 
+                          : databaseMode === DatabaseMode.INTERNAL
+                            ? 'bg-slate-900/40 border-white/5 text-white/20 cursor-not-allowed'
+                            : 'bg-white/5 border-white/10 text-white/40'
+                      }`}
+                    >
+                      <div className="flex items-center">
+                        <Cloud size={14} className="mr-3" />
+                        <span>2) Banco Externo - Supabase</span>
+                      </div>
+                      {databaseMode === DatabaseMode.SUPABASE ? (
+                        <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                      ) : databaseMode === DatabaseMode.INTERNAL ? (
+                        <ShieldAlert size={12} className="text-white/20" />
+                      ) : null}
+                    </button>
+                    {databaseMode === DatabaseMode.INTERNAL && (
+                      <div className="absolute left-1/2 -top-8 -translate-x-1/2 bg-slate-800 text-white text-[7px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 border border-white/10">
+                        REQUER UPGRADE PARA SUPABASE_PLUS
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">
                   <p className="text-[7px] font-bold text-accent uppercase leading-relaxed tracking-wide opacity-80">
@@ -947,6 +973,39 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Escolher Unidades para Apagar</p>
                 </div>
               </button>
+
+              {/* GPS CONTROLS */}
+              <div className="w-full p-4 bg-slate-900/50 border border-white/5 rounded-2xl shadow-sm mb-3">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30 shadow-sm"><MapIcon size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Geolocalização (GPS)</h4>
+                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Controle de Localização</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => onToggleGpsBypass?.(!isGpsBypassed)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${isGpsBypassed ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                  >
+                    <div className="flex items-center">
+                      <Activity size={14} className="mr-3" />
+                      <span>Simular GPS (Desktop)</span>
+                    </div>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${isGpsBypassed ? 'bg-blue-500' : 'bg-slate-700'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${isGpsBypassed ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
+                  
+                  <button 
+                    onClick={onResetGPS}
+                    className="w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-start border bg-white/5 border-white/10 text-white/60 hover:bg-white/10 active:scale-95"
+                  >
+                    <RefreshCw size={14} className="mr-3" />
+                    <span>Resetar GPS / Limpar Cache</span>
+                  </button>
+                </div>
+              </div>
 
               <button onClick={() => { 
                 handleSecureAction(() => setIsClearConfirmOpen(true));

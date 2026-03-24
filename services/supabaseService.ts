@@ -1,5 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
+import imageCompression from 'browser-image-compression';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
@@ -793,19 +794,42 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 };
 
 /**
- * Faz upload de uma foto do ativo para o Supabase Storage
+ * Faz upload de uma foto do ativo para o Supabase Storage com compressão client-side
  */
 export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenantId: string): Promise<string | null> => {
   if (!supabase) return null;
 
   try {
+    // 1. Compressão de Imagem (Escalabilidade de Storage)
+    let fileToUpload = file;
+    
+    // Só comprime se for uma imagem e tiver tamanho considerável
+    if (file instanceof File || file instanceof Blob) {
+      try {
+        const options = {
+          maxSizeMB: 0.15, // Perfil WhatsApp: ~150KB (Máxima escalabilidade)
+          maxWidthOrHeight: 1024, // Resolução otimizada para mobile
+          useWebWorker: true,
+          initialQuality: 0.6,
+          fileType: 'image/jpeg'
+        };
+        
+        console.log(`[Storage] Aplicando Perfil WhatsApp (${(file.size / 1024 / 1024).toFixed(2)}MB)...`);
+        fileToUpload = await imageCompression(file as File, options);
+        console.log(`[Storage] Imagem otimizada para ${(fileToUpload.size / 1024).toFixed(2)}KB`);
+      } catch (compressionError) {
+        console.warn('Erro na compressão, enviando original:', compressionError);
+        fileToUpload = file;
+      }
+    }
+
     const fileExt = 'jpg'; // Forçamos jpg para consistência
     const fileName = `${tenantId}/${assetId}/${Date.now()}.${fileExt}`;
     const filePath = `photos/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
       .from('asset-photos')
-      .upload(filePath, file, {
+      .upload(filePath, fileToUpload, {
         cacheControl: '3600',
         upsert: true
       });

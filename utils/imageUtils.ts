@@ -1,71 +1,32 @@
+import imageCompression from 'browser-image-compression';
 
 /**
  * Redimensiona e comprime uma imagem para reduzir o espaço de armazenamento.
- * @param file O arquivo de imagem original.
- * @param maxWidth Largura máxima permitida.
- * @param maxHeight Altura máxima permitida.
- * @param quality Qualidade do JPEG (0 a 1).
- * @returns Uma Promise que resolve em um Blob da imagem processada.
+ * Usa browser-image-compression para melhor suporte a orientação EXIF e performance.
  */
-export const compressImage = (
+export const compressImage = async (
   file: File | Blob,
-  maxWidth: number = 1280,
-  maxHeight: number = 1280,
+  maxWidth: number = 1024,
+  maxHeight: number = 1024,
   quality: number = 0.6
 ): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
+  try {
     // Verifica se é uma imagem
     if (!file.type.startsWith('image/')) {
-      return resolve(file as Blob);
+      return file;
     }
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
 
-        // Calcula as novas dimensões mantendo o aspect ratio
-        if (width > height) {
-          if (width > maxWidth) {
-            height *= maxWidth / width;
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width *= maxHeight / height;
-            height = maxHeight;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Não foi possível obter o contexto do canvas'));
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Erro ao converter canvas para Blob'));
-            }
-          },
-          'image/jpeg',
-          quality
-        );
-      };
-      img.onerror = (err) => reject(err);
+    const options = {
+      maxSizeMB: 0.15, // Alvo de 150KB
+      maxWidthOrHeight: Math.max(maxWidth, maxHeight),
+      useWebWorker: true,
+      initialQuality: quality,
+      fileType: 'image/jpeg'
     };
-    reader.onerror = (err) => reject(err);
-  });
+    
+    return await imageCompression(file as File, options);
+  } catch (error) {
+    console.error('Erro na compressão de imagem:', error);
+    return file;
+  }
 };

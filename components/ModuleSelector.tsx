@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppModule } from '../types';
+import { AppModule, UserRole } from '../types';
 import { 
   ClipboardCheck, 
   Calculator, 
@@ -14,9 +14,11 @@ interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
   onLogout: () => void;
   username: string;
+  userRole?: UserRole;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, username }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, username, userRole }) => {
+  const isAuditor = userRole === UserRole.AUDITOR;
   return (
     <div className="min-h-screen bg-bg-main flex flex-col p-4 sm:p-6 animate-fadeIn overflow-y-auto">
       {/* Header */}
@@ -79,8 +81,9 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
           </button>
 
           {/* Módulo Controle de Ativo Imobilizado */}
-          <button 
-            onClick={() => onSelect(AppModule.ASSET_CONTROL)}
+          {!isAuditor && (
+            <button 
+              onClick={() => onSelect(AppModule.ASSET_CONTROL)}
             className="group relative bg-slate-900 border border-slate-800 rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-500/10 active:scale-[0.98] overflow-hidden"
           >
             <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-emerald-500/10 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-emerald-500/20 transition-colors" />
@@ -107,6 +110,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
               </div>
             </div>
           </button>
+          )}
         </div>
       </div>
 

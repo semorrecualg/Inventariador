@@ -6,6 +6,8 @@ import BackButton from './BackButton';
 import { Check, Trash2, Download, FileText, ShieldCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { generateInventoryBook, generateKardexFichas } from '../utils/reportGenerator';
+import { Loader2, BookOpen, CreditCard } from 'lucide-react';
 
 interface SignatureProps {
   assets: Asset[];
@@ -17,6 +19,7 @@ interface SignatureProps {
 const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitName }) => {
   const sigCanvas = useRef<SignatureCanvas>(null);
   const [isSigned, setIsSigned] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const clear = () => {
     sigCanvas.current?.clear();
@@ -82,6 +85,24 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
     doc.save(`INVENTARIO_${unitName}_${new Date().getTime()}.pdf`);
   };
 
+  const handleGenerateBook = async () => {
+    setIsGenerating(true);
+    try {
+      await generateInventoryBook(assets, unitName);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateKardex = async () => {
+    setIsGenerating(true);
+    try {
+      await generateKardexFichas(assets, unitName);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
@@ -132,6 +153,22 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
               <span>Limpar</span>
             </button>
             <div className="flex space-x-2">
+              <button 
+                onClick={handleGenerateBook}
+                disabled={isGenerating}
+                className="flex items-center space-x-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50"
+              >
+                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                <span>Gerar Book</span>
+              </button>
+              <button 
+                onClick={handleGenerateKardex}
+                disabled={isGenerating}
+                className="flex items-center space-x-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50"
+              >
+                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                <span>Gerar Kardex</span>
+              </button>
               <button 
                 onClick={generatePDF}
                 className="flex items-center space-x-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all"

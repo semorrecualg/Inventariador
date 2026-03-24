@@ -2,7 +2,8 @@
 export enum UserRole {
   ADMIN = 'ADMIN',
   MASTER = 'MASTER',
-  AUDITOR = 'AUDITOR'
+  AUDITOR = 'AUDITOR',
+  AUXILIARY_AUDITOR = 'AUXILIARY_AUDITOR'
 }
 
 export interface User {
@@ -246,7 +247,8 @@ export enum AppScreen {
   MODULE_SELECTION = 'MODULE_SELECTION',
   ASSET_CONTROL_HOME = 'ASSET_CONTROL_HOME',
   AUDIT_LOGS = 'AUDIT_LOGS',
-  CAMPAIGN_MANAGEMENT = 'CAMPAIGN_MANAGEMENT'
+  CAMPAIGN_MANAGEMENT = 'CAMPAIGN_MANAGEMENT',
+  ONBOARDING = 'ONBOARDING'
 }
 
 export enum AppModule {
@@ -272,7 +274,9 @@ export enum InventorySearchMode {
 
 export enum DatabaseMode {
   INTERNAL = 'INTERNAL',
-  SUPABASE = 'SUPABASE'
+  INTERNAL_PLUS = 'INTERNAL_PLUS',
+  SUPABASE = 'SUPABASE',
+  SUPABASE_PLUS = 'SUPABASE_PLUS'
 }
 
 export interface SearchFilters {
@@ -309,8 +313,9 @@ export interface InventoryState {
   protheusApiUrl?: string;
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
-  databaseMode: 'INTERNAL' | 'SUPABASE';
+  databaseMode: DatabaseMode;
   currentCampaignId?: string;
+  hasCompletedOnboarding?: boolean;
 }
 
 export interface SyncQueueItem {

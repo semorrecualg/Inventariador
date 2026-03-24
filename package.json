@@ -18,6 +18,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "@types/react-window": "^1.8.8",
     "@vis.gl/react-google-maps": "^1.7.1",
+    "browser-image-compression": "^2.0.2",
     "framer-motion": "^12.38.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",

@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
@@ -60,6 +60,7 @@ interface AssetCardProps {
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   confirmButtonRef?: React.Ref<HTMLButtonElement>;
+  hasLocalPhoto?: boolean;
 }
 
 const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
@@ -99,7 +100,7 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, confirmButtonRef
+  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, confirmButtonRef, hasLocalPhoto
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
@@ -219,7 +220,7 @@ const AssetCard = React.memo(({
             <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
               {formatEtiqueta(asset.ETIQUETA)}
             </span>
-            {asset._photoUrl && (
+            {(asset._photoUrl || hasLocalPhoto) && (
               <div className="bg-accent/10 p-1 rounded-lg animate-pulse">
                 <Camera size={12} className="text-accent" />
               </div>
@@ -326,6 +327,8 @@ const AssetCard = React.memo(({
 
 AssetCard.displayName = 'AssetCard';
 
+import { getAllLocalPhotoIds } from '../services/photoService';
+
 interface InventoryProps {
   assets: Asset[];
   allAssets: Asset[];
@@ -354,7 +357,7 @@ interface InventoryProps {
   onToggleFullscreen: () => void;
   batterySaver: boolean;
   isGpsAvailable?: boolean | null;
-  databaseMode: 'INTERNAL' | 'SUPABASE';
+  databaseMode: DatabaseMode;
   onSyncFromCloud: () => Promise<void>;
   user: User | null;
   currentCampaignId?: string;
@@ -398,6 +401,20 @@ const Inventory: React.FC<InventoryProps> = ({
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const fetchLocalPhotoIds = async () => {
+      const ids = await getAllLocalPhotoIds();
+      setLocalPhotoIds(new Set(ids));
+    };
+    fetchLocalPhotoIds();
+    
+    // Listener para atualizações de fotos
+    const handlePhotoUpdate = () => fetchLocalPhotoIds();
+    window.addEventListener('gbr_photo_synced', handlePhotoUpdate);
+    return () => window.removeEventListener('gbr_photo_synced', handlePhotoUpdate);
+  }, []);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const [isListening, setIsListening] = useState<string | null>(null);
 
@@ -1394,6 +1411,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       isSelected={selectedIds.has(String(asset.id))} 
                       onToggleSelect={toggleSelect} 
                       confirmButtonRef={confirmButtonRef}
+                      hasLocalPhoto={localPhotoIds.has(String(asset.id))}
                     />
                   </div>
                 )}
