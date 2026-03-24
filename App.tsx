@@ -10,8 +10,9 @@ import DatabaseLoader from './components/DatabaseLoader';
 import AssetDetail from './components/AssetDetail';
 import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
+import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
-import { getCurrentLocation } from './utils/gpsUtils';
+import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
@@ -143,6 +144,12 @@ const App: React.FC = () => {
       clearInterval(interval);
       window.removeEventListener('gbr_photo_synced', handleSynced);
     };
+  }, []);
+
+  // Rastreamento Autônomo GBR v24.50
+  useEffect(() => {
+    startAutonomousTracking();
+    return () => stopAutonomousTracking();
   }, []);
 
   const [, setCurrentModule] = useState<AppModule | null>(() => {
@@ -2439,41 +2446,47 @@ const App: React.FC = () => {
             )
           )}
           {screen === AppScreen.INVENTORY && (
-            <Inventory 
-              assets={filteredAssetsByUnit} 
-              allAssets={inventory.assets} 
-              onBack={popScreen} 
-              onUpdateAsset={updateAsset} 
-              isGpsAvailable={isGpsAvailable}
-              onBulkUpdateAssets={bulkUpdateAssets} 
-              onSelectAsset={handleSelectAsset} 
-              selectedLocation={inventoryLocation} 
-              setSelectedLocation={setInventoryLocation} 
-              isInventorying={isInventorying} 
-              setIsInventorying={setIsInventorying} 
-              selectedUnit={selectedUnit} 
-              onAddNewLocation={addNewLocation} 
-              locationsWithStats={locationsWithStats} 
-              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
-              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
-              searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
-              onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
-              autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
-              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
-              onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
-              onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
-              inventorySearchValue={inventorySearchValue} 
-              clearInventorySearchValue={() => setInventorySearchValue(null)} 
-              immersiveMode={inventory.immersiveMode || false} 
-              onToggleFullscreen={toggleFullscreen}
-              batterySaver={inventory.batterySaver || false}
-              databaseMode={inventory.databaseMode}
-              onSyncFromCloud={syncFromCloud}
-              user={user}
-              currentCampaignId={inventory.currentCampaignId}
-            />
+            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable}>
+              <Inventory 
+                assets={filteredAssetsByUnit} 
+                allAssets={inventory.assets} 
+                onBack={popScreen} 
+                onUpdateAsset={updateAsset} 
+                isGpsAvailable={isGpsAvailable}
+                onBulkUpdateAssets={bulkUpdateAssets} 
+                onSelectAsset={handleSelectAsset} 
+                selectedLocation={inventoryLocation} 
+                setSelectedLocation={setInventoryLocation} 
+                isInventorying={isInventorying} 
+                setIsInventorying={setIsInventorying} 
+                selectedUnit={selectedUnit} 
+                onAddNewLocation={addNewLocation} 
+                locationsWithStats={locationsWithStats} 
+                scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+                onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+                searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
+                onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
+                autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+                scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+                onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
+                onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
+                inventorySearchValue={inventorySearchValue} 
+                clearInventorySearchValue={() => setInventorySearchValue(null)} 
+                immersiveMode={inventory.immersiveMode || false} 
+                onToggleFullscreen={toggleFullscreen}
+                batterySaver={inventory.batterySaver || false}
+                databaseMode={inventory.databaseMode}
+                onSyncFromCloud={syncFromCloud}
+                user={user}
+                currentCampaignId={inventory.currentCampaignId}
+              />
+            </GPSComplianceGuard>
           )}
-          {screen === AppScreen.LABELING && <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />}
+          {screen === AppScreen.LABELING && (
+            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable}>
+              <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
+            </GPSComplianceGuard>
+          )}
           {screen === AppScreen.CONSULTATION && (
             <Consultation 
               assets={filteredAssetsByUnit} 
@@ -2545,7 +2558,7 @@ const App: React.FC = () => {
               user={user}
             />
           )}
-          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} databaseMode={inventory.databaseMode} />}
+          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} />}
           {screen === AppScreen.ACTIVE_SEARCH && (
             <ActiveSearch 
               assets={filteredAssetsByUnit} 

@@ -7,10 +7,11 @@ interface ModalProps {
   onClose: () => void;
   onConfirm?: () => void;
   title: string;
-  message: string;
+  message?: string;
   type?: 'info' | 'warning' | 'error' | 'success' | 'confirm' | 'security';
   confirmText?: string;
   cancelText?: string;
+  children?: React.ReactNode;
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -21,7 +22,8 @@ const Modal: React.FC<ModalProps> = ({
   message,
   type = 'info',
   confirmText = 'Confirmar',
-  cancelText = 'Cancelar'
+  cancelText = 'Cancelar',
+  children
 }) => {
   if (!isOpen) return null;
 
@@ -68,9 +70,13 @@ const Modal: React.FC<ModalProps> = ({
         </div>
         
         <div className="p-8">
-          <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">
-            {message}
-          </p>
+          {message && (
+            <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">
+              {message}
+            </p>
+          )}
+          
+          {children}
           
           <div className="mt-8 space-y-3">
             {type === 'confirm' ? (

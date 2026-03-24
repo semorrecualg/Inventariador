@@ -330,8 +330,8 @@ interface InventoryProps {
   assets: Asset[];
   allAssets: Asset[];
   onBack: () => void;
-  onUpdateAsset: (asset: Asset) => void;
-  onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void;
+  onUpdateAsset: (asset: Asset) => void | Promise<void>;
+  onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void | Promise<void>;
   onSelectAsset: (asset: Asset) => void;
   selectedLocation: string | null;
   setSelectedLocation: (loc: string | null) => void;
@@ -357,6 +357,7 @@ interface InventoryProps {
   databaseMode: 'INTERNAL' | 'SUPABASE';
   onSyncFromCloud: () => Promise<void>;
   user: User | null;
+  currentCampaignId?: string;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 

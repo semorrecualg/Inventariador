@@ -11,6 +11,49 @@ export interface GpsLocation {
 
 let lastLocation: GpsLocation | null = null;
 let lastTimestamp: number = 0;
+let watchId: number | null = null;
+
+/**
+ * Inicia o rastreamento autônomo em segundo plano
+ */
+export const startAutonomousTracking = () => {
+  if (watchId !== null || !navigator.geolocation) return;
+
+  console.log('Iniciando Rastreamento Autônomo GBR v24.50...');
+  
+  const options: PositionOptions = {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 0
+  };
+
+  watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      lastLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      };
+      lastTimestamp = Date.now();
+      // console.log('Autônomo: Coordenada renovada', lastLocation.lat, lastLocation.lng);
+    },
+    (err) => {
+      console.warn('Autônomo: Erro no rastreio em tempo real', err.message);
+    },
+    options
+  );
+};
+
+/**
+ * Para o rastreamento autônomo
+ */
+export const stopAutonomousTracking = () => {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    console.log('Rastreamento Autônomo Finalizado.');
+  }
+};
 
 export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> => {
   const now = Date.now();
