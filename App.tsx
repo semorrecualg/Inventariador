@@ -251,6 +251,7 @@ const App: React.FC = () => {
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
@@ -999,8 +1000,9 @@ const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [inventory]);
 
-  const normalizeKey = useCallback((s: string) => {
-    return s.toString().toUpperCase()
+  const normalizeKey = useCallback((s: unknown) => {
+    if (s === null || s === undefined) return '';
+    return String(s).toUpperCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^A-Z0-9]/g, '')
@@ -1122,11 +1124,13 @@ const App: React.FC = () => {
           const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
           
           // Sincroniza se houver ativos sujos OU se a config mudou (lastUpdated mudou)
-          if (hasSupabase && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime)) {
+          const shouldSyncCloud = hasSupabase && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
+          
+          if (shouldSyncCloud) {
             setIsSyncing(true);
             try {
-              await saveInventory(inventory, dirtyAssets);
-              setLastSyncTime(new Date().toISOString());
+              await saveInventory(inventory, dirtyAssets, true);
+              setLastSyncTime(inventory.lastUpdated || new Date().toISOString());
               setSyncError(null);
             } catch (err) {
               setSyncError('Erro na sincronização');
@@ -1153,7 +1157,7 @@ const App: React.FC = () => {
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { console.warn("Storage cap reached"); }
-    }, 2000);
+    }, 10000);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
 
@@ -2069,31 +2073,64 @@ const App: React.FC = () => {
     const userTenant = user?.tenantId || 'default';
     const userUnits = user?.units || [userTenant];
     const isAuditor = user?.role === UserRole.AUDITOR;
+    const assets = inventory.assets;
 
-    // Se a lista de empresas estiver vazia mas tivermos ativos, extraímos na hora
+    // 1. Agrupar estatísticas por empresa em um único loop O(N)
+    // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
+    const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string> }>();
+    
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      const company = (a.EMPRESA || '').trim().toUpperCase();
+      if (!company) continue;
+      
+      let stats = companyStatsMap.get(company);
+      if (!stats) {
+        stats = { hasData: true, hasActiveAssets: false, unitIds: new Set() };
+        companyStatsMap.set(company, stats);
+      }
+      
+      if (!stats.hasActiveAssets && String(a.STATUS || '').toUpperCase().includes('ATIVO')) {
+        stats.hasActiveAssets = true;
+      }
+      
+      if (a._unitId) {
+        stats.unitIds.add(normalizeKey(a._unitId));
+      }
+    }
+
+    // 2. Definir a lista base de empresas
     const baseCompanies = inventory.companies.length > 0 
       ? inventory.companies 
-      : Array.from(new Set(inventory.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
+      : Array.from(companyStatsMap.keys());
+
+    // 3. Normalizar unidades do usuário para busca rápida
+    const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
 
     return baseCompanies
       .filter(company => {
         if (!isAuditor || userUnits.length === 0) return true;
-        // Se for auditor, só mostra as unidades que estão na sua lista de units
-        return userUnits.some(u => 
-          normalizeKey(u) === normalizeKey(company) || 
-          inventory.assets.some(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company) && normalizeKey(a._unitId || '') === normalizeKey(u))
-        );
+        const normCompany = normalizeKey(company);
+        const stats = companyStatsMap.get(company.trim().toUpperCase());
+        
+        // Se a empresa está na lista de unidades permitidas
+        if (normalizedUserUnits.includes(normCompany)) return true;
+        
+        // Ou se algum ativo desta empresa pertence a uma unidade permitida
+        if (stats) {
+          for (const u of normalizedUserUnits) {
+            if (stats.unitIds.has(u)) return true;
+          }
+        }
+        
+        return false;
       })
       .map(company => {
-        const companyAssets = inventory.assets.filter(a => normalizeKey(a.EMPRESA || '') === normalizeKey(company));
-        const hasData = companyAssets.length > 0;
-        const hasActiveAssets = companyAssets.some(a => 
-          String(a.STATUS || '').toUpperCase().includes('ATIVO')
-        );
+        const stats = companyStatsMap.get(company.trim().toUpperCase());
         return {
           name: company,
-          hasData,
-          hasActiveAssets
+          hasData: !!stats,
+          hasActiveAssets: stats?.hasActiveAssets || false
         };
       });
   }, [inventory.companies, inventory.assets, normalizeKey, user, UserRole.AUDITOR]);
@@ -2339,6 +2376,8 @@ const App: React.FC = () => {
             isAdmin ? (
               <DatabaseLoader 
                 onBack={popScreen} 
+                isSyncing={isSyncing}
+                syncProgress={syncProgress}
                 onDataLoaded={async (a, c) => { 
                   const newInventory = { 
                     ...inventory, 
@@ -2349,16 +2388,29 @@ const App: React.FC = () => {
                   };
                   setInventory(newInventory); 
                   
+                  // Salva localmente para garantir persistência mesmo se o sync falhar
+                  await saveInventory(newInventory);
+                  
                   // Se for Admin e houver Supabase, faz o push total para a nuvem
                   if (isAdmin && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)) {
                     setIsSyncing(true);
+                    setSyncProgress({ current: 0, total: a.length });
                     try {
                       // Limpa a nuvem antes de subir a nova base para garantir espelhamento
                       await clearCloudInventory();
-                      // Sincroniza todos os ativos (em lotes se necessário, mas syncAssetsToCloud já lida com isso)
-                      // Se for admin e estiver no tenant default, não força o tenantId para que o syncAssetsToCloud use a EMPRESA como fallback
+                      
+                      // Sincroniza todos os ativos em lotes
                       const forcedTenantId = (user?.isAdmin && user?.tenantId === 'default') ? undefined : user?.tenantId;
-                      await syncAssetsToCloud(a, forcedTenantId);
+                      
+                      // Usamos o syncAssetsToCloud com callback de progresso se possível, 
+                      // ou fazemos o loop aqui para controlar o progresso
+                      const batchSize = 1000;
+                      for (let i = 0; i < a.length; i += batchSize) {
+                        const batch = a.slice(i, i + batchSize);
+                        await syncAssetsToCloud(batch, forcedTenantId);
+                        setSyncProgress({ current: Math.min(i + batchSize, a.length), total: a.length });
+                      }
+
                       // Sincroniza a config (que contém o lastUpdated)
                       const configToSync = { ...newInventory };
                       // @ts-expect-error - assets is removed for sync
@@ -2372,6 +2424,7 @@ const App: React.FC = () => {
                       setSyncError('Erro no upload total');
                     } finally {
                       setIsSyncing(false);
+                      setSyncProgress(null);
                     }
                   }
                   

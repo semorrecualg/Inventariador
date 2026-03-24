@@ -86,7 +86,7 @@ export const restoreInventory = async (file: File): Promise<InventoryState | nul
   });
 };
 
-export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[]): Promise<void> => {
+export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false): Promise<void> => {
   try {
     // 1. Salva localmente primeiro (Offline-First) com Blindagem Técnica (Criptografia)
     const config = { ...data } as Record<string, unknown>;
@@ -102,14 +102,16 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[])
     await localforage.setItem(INVENTORY_CONFIG_KEY, encryptedConfig);
     await localforage.setItem(INVENTORY_ASSETS_KEY, encryptedAssets);
 
-    // 2. Tenta sincronizar com a nuvem (Supabase) - Os dados na nuvem já são protegidos por TLS e RLS
+    // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se houver ativos sujos ou forçado
     const assetsToSync = dirtyAssets || [];
     
     if (assetsToSync.length > 0) {
       syncAssetsToCloud(assetsToSync).catch(err => console.warn('Cloud sync failed (offline?):', err));
+      // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
+      syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
+    } else if (forceCloudSync) {
+      syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
     }
-    
-    syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
 
   } catch (error) {
     console.error('Error saving inventory to IndexedDB:', error);
@@ -120,8 +122,8 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[])
 export const loadInventory = async (): Promise<InventoryState | null> => {
   try {
     const [encryptedAssets, encryptedConfig] = await Promise.all([
-      localforage.getItem<string>(INVENTORY_ASSETS_KEY),
-      localforage.getItem<string>(INVENTORY_CONFIG_KEY)
+      localforage.getItem<Uint8Array | string>(INVENTORY_ASSETS_KEY),
+      localforage.getItem<Uint8Array | string>(INVENTORY_CONFIG_KEY)
     ]);
 
     if (!encryptedConfig && !encryptedAssets) return null;
@@ -146,14 +148,18 @@ export const clearMultipleInventories = async (companiesToClear: string[]): Prom
   try {
     if (companiesToClear.length === 0) return;
     
-    const assets = await localforage.getItem<Asset[]>(INVENTORY_ASSETS_KEY) || [];
+    const encryptedAssets = await localforage.getItem<Uint8Array | string>(INVENTORY_ASSETS_KEY);
+    if (!encryptedAssets) return;
+
+    const assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
     const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
     
     const remainingAssets = assets.filter(a => 
       !normalizedCompanies.includes((a.EMPRESA || '').toUpperCase().trim())
     );
     
-    await localforage.setItem(INVENTORY_ASSETS_KEY, remainingAssets);
+    const encryptedRemaining = await encryption.encrypt(remainingAssets);
+    await localforage.setItem(INVENTORY_ASSETS_KEY, encryptedRemaining);
   } catch (error) {
     console.error('Error clearing multiple inventories from IndexedDB:', error);
     throw error;
@@ -163,14 +169,15 @@ export const clearMultipleInventories = async (companiesToClear: string[]): Prom
 export const clearInventory = async (companyToClear?: string): Promise<void> => {
   try {
     if (companyToClear) {
-      const assets = await localforage.getItem<Asset[]>(INVENTORY_ASSETS_KEY) || [];
+      const encryptedAssets = await localforage.getItem<Uint8Array | string>(INVENTORY_ASSETS_KEY);
+      if (!encryptedAssets) return;
+
+      const assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
       const normalizedCompany = companyToClear.toUpperCase().trim();
       const remainingAssets = assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedCompany);
       
-      await localforage.setItem(INVENTORY_ASSETS_KEY, remainingAssets);
-      
-      // Se não sobrar nenhum ativo, podemos limpar as configs também ou manter?
-      // Geralmente mantemos as configs globais.
+      const encryptedRemaining = await encryption.encrypt(remainingAssets);
+      await localforage.setItem(INVENTORY_ASSETS_KEY, encryptedRemaining);
     } else {
       await Promise.all([
         localforage.removeItem(INVENTORY_ASSETS_KEY),

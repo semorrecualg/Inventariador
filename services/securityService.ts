@@ -86,7 +86,7 @@ class EncryptionProvider {
     return this.key;
   }
 
-  async encrypt(data: unknown): Promise<string> {
+  async encrypt(data: unknown): Promise<Uint8Array> {
     const key = await this.generateKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encoder = new TextEncoder();
@@ -102,17 +102,24 @@ class EncryptionProvider {
     combined.set(iv);
     combined.set(new Uint8Array(encryptedContent), iv.length);
 
-    return btoa(String.fromCharCode(...combined));
+    return combined;
   }
 
-  async decrypt(encryptedBase64: string): Promise<unknown> {
+  async decrypt(encryptedData: Uint8Array | string): Promise<unknown> {
     try {
       const key = await this.generateKey();
-      const combined = new Uint8Array(
-        atob(encryptedBase64)
-          .split('')
-          .map(c => c.charCodeAt(0))
-      );
+      let combined: Uint8Array;
+
+      if (typeof encryptedData === 'string') {
+        // Suporte legado para Base64
+        combined = new Uint8Array(
+          atob(encryptedData)
+            .split('')
+            .map(c => c.charCodeAt(0))
+        );
+      } else {
+        combined = encryptedData;
+      }
 
       const iv = combined.slice(0, 12);
       const data = combined.slice(12);

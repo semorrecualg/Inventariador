@@ -7,12 +7,16 @@ import {
   Activity,
   CheckSquare,
   Square,
-  CheckCircle2
+  CheckCircle2,
+  Info,
+  HelpCircle,
+  RefreshCw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
 import { generateUUID } from '../services/supabaseService';
 import BackButton from './BackButton';
+import Modal from './Modal';
 
 interface LoadSummary {
   rows: number;
@@ -28,11 +32,22 @@ interface LoadSummary {
 interface DatabaseLoaderProps {
   onBack: () => void;
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
+  isSyncing?: boolean;
+  syncProgress?: { current: number; total: number } | null;
 }
 
-const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded }) => {
+const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, isSyncing, syncProgress }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
   const [summary, setSummary] = useState<LoadSummary | null>(null);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  React.useEffect(() => {
+    const hasSeenHelp = localStorage.getItem('gbr_seen_load_help');
+    if (!hasSeenHelp) {
+      setIsHelpOpen(true);
+      localStorage.setItem('gbr_seen_load_help', 'true');
+    }
+  }, []);
   
   const [availableCompanies, setAvailableCompanies] = useState<{name: string, count: number}[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
@@ -40,8 +55,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
   const rawExtractedAssetsRef = useRef<Asset[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const normalizeKey = (s: string) => {
-    return s.toString().toUpperCase()
+  const normalizeKey = (s: unknown) => {
+    if (s === null || s === undefined) return '';
+    return String(s).toUpperCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^A-Z0-9]/g, '')
@@ -74,7 +90,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
 
       const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
       
-      // Mapeamento v24.50 - Ordem Estrita: EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;
+      // Mapeamento v24.50 - Ordem Estrita: EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
       const m = {
         EMPRESA: rawHeaders.indexOf('EMPRESA'),
         STATUS: rawHeaders.indexOf('STATUS'),
@@ -118,6 +134,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       if (m.CUSTO === -1) m.CUSTO = 16;
       if (m.VALOR === -1) m.VALOR = 17;
       if (m.RECNO === -1) m.RECNO = 18;
+      if (m.RECNO3 === -1) m.RECNO3 = 19;
 
       const baseSinteticaLoc = new Set<string>();
       const activeTagsGlobal = new Set<string>();
@@ -256,7 +273,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
       rows: filteredAssets.length,
       purgedRows: rawExtractedAssetsRef.current.length - filteredAssets.length, 
       originalRows: rawExtractedAssetsRef.current.length,
-      cols: 18, // Atualizado para v24.40
+      cols: 19, // Atualizado para v24.50
       companies: companyStats,
       headers: [], 
       withPlaqueta: filteredAssets.filter(a => !!a.ETIQUETA && normalizeKey(a.ETIQUETA) !== 'ETIQUETAR').length,
@@ -274,14 +291,113 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
     setSelectedCompanies(newSelection);
   };
 
+  if (isSyncing) {
+    return (
+      <div className="flex flex-col h-[100dvh] bg-bg-main items-center justify-center p-8 text-center animate-fadeIn">
+        <div className="w-24 h-24 bg-blue-50 rounded-3xl flex items-center justify-center mb-8 shadow-xl shadow-blue-100/50 border border-blue-100">
+          <RefreshCw className="text-blue-600 animate-spin" size={48} strokeWidth={1.5} />
+        </div>
+        <h2 className="text-2xl font-bold text-ink uppercase tracking-tight mb-3">Sincronizando Nuvem</h2>
+        <p className="text-ink-muted text-[11px] font-bold uppercase tracking-[0.2em] max-w-xs leading-relaxed mb-8">
+          Enviando base de dados para o servidor central (Supabase)
+        </p>
+        
+        {syncProgress && (
+          <div className="w-full max-w-xs">
+            <div className="flex justify-between items-end mb-3">
+              <span className="text-[10px] font-bold text-accent uppercase tracking-widest">Progresso do Upload</span>
+              <span className="text-sm font-black text-ink tracking-tighter">
+                {Math.round((syncProgress.current / syncProgress.total) * 100)}%
+              </span>
+            </div>
+            <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5 shadow-inner">
+              <div 
+                className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-500 shadow-sm"
+                style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
+              ></div>
+            </div>
+            <p className="text-[9px] text-ink-muted font-bold uppercase tracking-widest mt-4">
+              {syncProgress.current.toLocaleString()} de {syncProgress.total.toLocaleString()} ativos
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn w-full overflow-hidden">
       <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
         <div className="flex items-center space-x-4">
           <BackButton onClick={onBack} label="Protocolo v24.50" subLabel="Base de Dados" />
         </div>
-        <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
+        <div className="flex items-center space-x-2">
+          <button 
+            onClick={() => setIsHelpOpen(true)}
+            className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"
+          >
+            <HelpCircle size={20} />
+          </button>
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
+        </div>
       </div>
+
+      <Modal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        title="Guia de Carga Expert"
+      >
+        <div className="space-y-4">
+          <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 space-y-3">
+            <div className="flex items-center space-x-2 text-blue-600">
+              <Info size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Requisito de Arquivo</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              O sistema exige arquivos <strong>Excel (.xls)</strong> para garantir a compatibilidade com o motor de processamento legado do Protheus.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Estrutura de Colunas (Ordem A-R)</h4>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-[9px] text-slate-700 leading-relaxed">
+              0: EMPRESA<br/>
+              1: STATUS<br/>
+              2: ETIQUETA<br/>
+              3: QT<br/>
+              4: DESCRICAODOATIVO<br/>
+              5: SERIAL<br/>
+              6: DATAAQUSIC<br/>
+              7: CNPJ<br/>
+              8: NOMEFORNECEDOR<br/>
+              9: NOTAFISCAL<br/>
+              10: ENDERECO<br/>
+              11: REGISTRO<br/>
+              12: SUBREG<br/>
+              13: DATABAIXA<br/>
+              14: CONTACONTABIL<br/>
+              15: PRIMARYKEY<br/>
+              16: CENTRODECUSTO<br/>
+              17: VLRAQUISIC<br/>
+              18: SN1_RECNO<br/>
+              19: SN3_RECNO
+            </div>
+          </div>
+
+          <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
+            <p className="text-[9px] font-bold text-amber-700 uppercase leading-tight">
+              ⚠️ Importante: A ordem das colunas é utilizada como fallback caso os cabeçalhos não sejam identificados.
+            </p>
+          </div>
+
+          <button 
+            onClick={() => setIsHelpOpen(false)}
+            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-[10px]"
+          >
+            Entendi
+          </button>
+        </div>
+      </Modal>
 
       <div className="flex-1 overflow-y-auto p-5 no-scrollbar pb-24">
         {step === 'SOURCE' && (
@@ -290,7 +406,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded })
                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v24.50</span>
                <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-1.5 mb-2">Reestruturação</h3>
                <p className="text-[10px] font-bold text-slate-400 leading-relaxed uppercase tracking-widest">
-                Suporte nativo para Centro de Custo, Valor e Fornecedor. Índices otimizados para 18 colunas.
+                Suporte nativo para Centro de Custo, Valor e Fornecedor. Utilize arquivos <strong>.xls</strong> com 18 colunas.
                </p>
             </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">

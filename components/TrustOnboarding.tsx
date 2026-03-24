@@ -119,6 +119,34 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
           </div>
         </div>
       )
+    },
+    {
+      id: 4,
+      title: "Carga de Dados Expert",
+      subtitle: "Prepare sua base de dados para o Protocolo v24.50.",
+      icon: <Database className="w-16 h-16 text-accent" />,
+      content: (
+        <div className="space-y-4">
+          <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 space-y-3">
+            <div className="flex items-center space-x-2 text-blue-600">
+              <Info size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Requisitos de Arquivo</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Para garantir a integridade da carga, utilize arquivos <strong>Excel (.xls)</strong> com a estrutura de colunas do <strong>Carga Expert</strong>.
+            </p>
+            <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
+              <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ordem das Colunas (A-R)</h4>
+              <p className="text-[9px] text-slate-700 leading-tight font-mono">
+                EMPRESA; STATUS; ETIQUETA; QT; DESCRICAO; SERIAL; DATA_AQ; CNPJ; FORNECEDOR; NF; ENDERECO; REGISTRO; SUBREG; DATA_BAIXA; CONTA; PK; CUSTO; VALOR; SN1_RECNO; SN3_RECNO
+              </p>
+            </div>
+          </div>
+          <p className="text-[9px] text-ink-muted italic text-center">
+            &quot;A ordem das colunas é vital para o fallback automático do sistema.&quot;
+          </p>
+        </div>
+      )
     }
   ];
 

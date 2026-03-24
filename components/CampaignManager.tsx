@@ -11,7 +11,8 @@ import {
   BarChart3, 
   ChevronRight,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Activity
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
 import { fetchCampaigns, createCampaign, updateCampaignStatus, fetchCampaignStats } from '../services/supabaseService';

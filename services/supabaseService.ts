@@ -224,20 +224,24 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
     };
   });
 
-  // Tenta fazer upsert dos ativos
-  const { error } = await supabase
-    .from('assets')
-    .upsert(assetsWithTenant, { onConflict: 'id' });
+  // Tenta fazer upsert dos ativos em lotes para evitar erros de tamanho de payload
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < assetsWithTenant.length; i += BATCH_SIZE) {
+    const batch = assetsWithTenant.slice(i, i + BATCH_SIZE);
+    const { error } = await supabase
+      .from('assets')
+      .upsert(batch, { onConflict: 'id' });
 
-  if (error) {
-    // Handle network errors gracefully
-    if (error.message === 'Failed to fetch') {
-      console.warn('Supabase sync failed: Network error or invalid URL.');
-      throw new Error('Erro de conexão');
+    if (error) {
+      // Handle network errors gracefully
+      if (error.message === 'Failed to fetch') {
+        console.warn('Supabase sync failed: Network error or invalid URL.');
+        throw new Error('Erro de conexão');
+      }
+
+      console.error('Error syncing assets to Supabase:', error);
+      throw error;
     }
-
-    console.error('Error syncing assets to Supabase:', error);
-    throw error;
   }
 };
 
