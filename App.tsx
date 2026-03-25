@@ -1479,18 +1479,6 @@ const App: React.FC = () => {
     }
   };
 
-  const availableUnits = useMemo(() => {
-    const fromAssets = inventory.assets.map(a => a._unitId || a._tenantId).filter(Boolean);
-    const fromCompanies = inventory.companies.map(c => c.toLowerCase().replace(/\s/g, '_')).filter(Boolean);
-    const fromUsers = users.flatMap(u => {
-      const t = [];
-      if (u.unitId) t.push(u.unitId);
-      if (u.units) t.push(...u.units);
-      return t;
-    }).filter(Boolean);
-    return Array.from(new Set([...fromAssets, ...fromCompanies, ...fromUsers])) as string[];
-  }, [inventory.assets, inventory.companies, users]);
-
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);
     setInventory(prev => ({ ...prev, databaseMode: mode }));
@@ -2340,6 +2328,29 @@ const App: React.FC = () => {
       });
   }, [inventory.companies, inventory.assets, normalizeKey, user, UserRole.AUDITOR]);
 
+  const availableUnits = useMemo(() => {
+    const fromAssets = inventory.assets.map(a => a._unitId || a._tenantId).filter(Boolean);
+    const fromCompanies = inventory.companies.map(c => c.toLowerCase().replace(/\s/g, '_')).filter(Boolean);
+    const fromUsers = users.flatMap(u => {
+      const t = [];
+      if (u.unitId) t.push(u.unitId);
+      if (u.units) t.push(...u.units);
+      return t;
+    }).filter(Boolean);
+    
+    const allUnits = Array.from(new Set([...fromAssets, ...fromCompanies, ...fromUsers])) as string[];
+    
+    // Se a base estiver vazia, mostramos todas para permitir atribuição inicial
+    if (inventory.assets.length === 0) return allUnits;
+    
+    // Filtrar apenas unidades que possuem ativos com status "ATIVO"
+    return allUnits.filter(unit => {
+      // Procurar na lista de empresas com status
+      const companyInfo = fullCompaniesWithStatus.find(c => c.name.toUpperCase() === unit.toUpperCase());
+      return companyInfo ? companyInfo.hasActiveAssets : false;
+    });
+  }, [inventory.assets, inventory.companies, users, fullCompaniesWithStatus]);
+
   // Auto-sync on Company Selection if base is empty
   useEffect(() => {
     const rawTenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
@@ -2755,11 +2766,23 @@ const App: React.FC = () => {
               units={fullCompaniesWithStatus
                 .filter(c => {
                   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
-                  if (isAdmin) return true;
                   
-                  // Se for auditor, só vê as unidades autorizadas
+                  // Regra: Mostrar apenas unidades que possuem ativos com status "ATIVO"
+                  // Se a base estiver vazia (especialmente no modo nuvem), mostramos todas para permitir o primeiro sync
+                  const hasAssets = inventory.assets.length > 0;
+                  const hasActiveAssets = c.hasActiveAssets;
+                  
+                  // Se não há ativos carregados, mostramos a unidade para que o usuário possa selecioná-la e baixar os dados
+                  // Se há ativos carregados, filtramos rigorosamente pelo status "ATIVO"
+                  const shouldShowByStatus = !hasAssets || hasActiveAssets;
+
+                  if (isAdmin) return shouldShowByStatus;
+                  
+                  // Se for auditor, só vê as unidades autorizadas E que tenham ativos ativos
                   const authorizedUnits = user?.units || (user?.tenantId ? [user.tenantId] : []);
-                  return authorizedUnits.some(au => au.toUpperCase() === c.name.toUpperCase());
+                  const isAuthorized = authorizedUnits.some(au => au.toUpperCase() === c.name.toUpperCase());
+                  
+                  return isAuthorized && shouldShowByStatus;
                 })
                 .map(c => ({ 
                   name: c.name, 
