@@ -12,6 +12,31 @@
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
+
+  /* Palette for Phases and Modules */
+  --color-phase-welcome: #0284C7;
+  --color-phase-internal: #3B82F6;
+  --color-phase-supabase: #10B981;
+  --color-phase-data: #F59E0B;
+  --color-mod-inventory: #0284C7;
+  --color-mod-control: #EA580C;
+
+  /* TagInventario Colors */
+  --color-tag-pending: #64748B;
+  --color-tag-checked: #10B981;
+  --color-tag-divergence: #EF4444;
+  --color-tag-new: #3B82F6;
+  --color-tag-labeling: #F59E0B;
+
+  /* ConservationState Colors */
+  --color-state-new: #10B981;
+  --color-state-good: #3B82F6;
+  --color-state-repair: #F59E0B;
+  --color-state-useless: #EF4444;
+
+  /* DatabaseMode Colors */
+  --color-db-internal: #3B82F6;
+  --color-db-supabase: #10B981;
 }
 
 :root {

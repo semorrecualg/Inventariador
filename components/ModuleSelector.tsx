@@ -50,12 +50,12 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
           {/* Módulo Inventariador */}
           <button 
             onClick={() => onSelect(AppModule.INVENTORY)}
-            className="group relative bg-white border border-border rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-accent hover:shadow-2xl hover:shadow-accent/10 active:scale-[0.98] overflow-hidden"
+            className="group relative bg-white border border-border rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-mod-inventory hover:shadow-2xl hover:shadow-mod-inventory/10 active:scale-[0.98] overflow-hidden"
           >
-            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-accent/5 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-accent/10 transition-colors" />
+            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-mod-inventory/5 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-mod-inventory/10 transition-colors" />
             
             <div className="relative z-10">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-accent/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-accent mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-mod-inventory/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-mod-inventory mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
                 <ClipboardCheck size={28} className="sm:w-8 sm:h-8" />
               </div>
               
@@ -84,12 +84,12 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
           {!isAuditor && (
             <button 
               onClick={() => onSelect(AppModule.ASSET_CONTROL)}
-            className="group relative bg-slate-900 border border-slate-800 rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-500/10 active:scale-[0.98] overflow-hidden"
+            className="group relative bg-slate-900 border border-slate-800 rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 text-left transition-all hover:border-mod-control/50 hover:shadow-2xl hover:shadow-mod-control/10 active:scale-[0.98] overflow-hidden"
           >
-            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-emerald-500/10 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-emerald-500/20 transition-colors" />
+            <div className="absolute top-0 right-0 w-32 h-32 sm:w-48 sm:h-48 bg-mod-control/10 rounded-full -mr-16 -mt-16 sm:-mr-24 sm:-mt-24 blur-3xl group-hover:bg-mod-control/20 transition-colors" />
             
             <div className="relative z-10">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-emerald-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-mod-control/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-mod-control mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
                 <Calculator size={28} className="sm:w-8 sm:h-8" />
               </div>
               

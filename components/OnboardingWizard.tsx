@@ -8,15 +8,18 @@ import {
   FileSpreadsheet, 
   CheckCircle2,
   ShieldCheck,
-  Zap
+  Zap,
+  X,
+  Palette
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface OnboardingWizardProps {
   onComplete: () => void;
+  onCancel?: () => void;
 }
 
-const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
+const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onCancel }) => {
   const [step, setStep] = useState(0);
 
   const steps = [
@@ -24,8 +27,8 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
       title: "Bem-vindo ao GBR v25",
       subtitle: "A solução definitiva para o controle de Ativo Imobilizado.",
       description: "Estamos prontos para transformar a forma como sua empresa gerencia o patrimônio. Vamos configurar seu primeiro acesso.",
-      icon: <ShieldCheck size={48} className="text-accent" />,
-      color: "bg-accent"
+      icon: <ShieldCheck size={48} className="text-phase-welcome" />,
+      color: "bg-phase-welcome"
     },
     {
       title: "Modo INTERNO (Básico)",
@@ -37,8 +40,8 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
         "Carga Expert de Dados",
         "Relatórios em Excel"
       ],
-      icon: <Database size={48} className="text-blue-500" />,
-      color: "bg-blue-500"
+      icon: <Database size={48} className="text-phase-internal" />,
+      color: "bg-phase-internal"
     },
     {
       title: "O Pulo do Gato: SUPABASE",
@@ -50,22 +53,35 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
         "Dashboard Centralizado",
         "Segurança de Nível Bancário"
       ],
-      icon: <Cloud size={48} className="text-emerald-500" />,
-      color: "bg-emerald-500"
+      icon: <Cloud size={48} className="text-phase-supabase" />,
+      color: "bg-phase-supabase"
     },
     {
       title: "Carga Expert de Dados",
       subtitle: "Sua base de dados em segundos.",
       description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Tenant ID (ID do locatário) será gerado automaticamente para sua empresa.",
-      icon: <FileSpreadsheet size={48} className="text-amber-500" />,
-      color: "bg-amber-500"
+      icon: <FileSpreadsheet size={48} className="text-phase-data" />,
+      color: "bg-phase-data"
+    },
+    {
+      title: "Linguagem Visual GBR",
+      subtitle: "Cores que comunicam status.",
+      description: "Nosso sistema utiliza uma paleta inteligente para facilitar sua vida no campo. Cada cor tem um significado específico para status e conservação.",
+      features: [
+        "Verde: Conferido / Novo",
+        "Vermelho: Divergência / Inservível",
+        "Amarelo: Recuperável / Pendente",
+        "Azul: Novo Item / Bom"
+      ],
+      icon: <Palette size={48} className="text-accent" />,
+      color: "bg-accent"
     },
     {
       title: "Tudo Pronto!",
       subtitle: "Você começará na versão INTERNO.",
       description: "Como administrador, você terá total controle. Explore as funcionalidades e, quando estiver pronto para escalar, ative o módulo SUPABASE.",
-      icon: <CheckCircle2 size={48} className="text-accent" />,
-      color: "bg-accent"
+      icon: <CheckCircle2 size={48} className="text-phase-welcome" />,
+      color: "bg-phase-welcome"
     }
   ];
 
@@ -87,6 +103,14 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
 
   return (
     <div className="fixed inset-0 z-[1000] bg-bg-main flex flex-col items-center justify-center p-6 overflow-hidden">
+      {onCancel && (
+        <button 
+          onClick={onCancel}
+          className="absolute top-6 right-6 z-[1001] p-3 bg-white border border-border text-ink rounded-full shadow-lg active:scale-95 transition-all"
+        >
+          <X size={20} />
+        </button>
+      )}
       <div className="absolute top-0 left-0 w-full h-1 bg-border">
         <motion.div 
           className="h-full bg-accent"

@@ -34,9 +34,10 @@ import FloatingHelp from './components/FloatingHelp';
 import PrivacyCenter from './components/PrivacyCenter';
 import OnboardingWizard from './components/OnboardingWizard';
 import BiometricRegistration from './components/BiometricRegistration';
+import ThemePalette from './components/ThemePalette';
 
 import { motion } from 'motion/react';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -125,6 +126,7 @@ const App: React.FC = () => {
   });
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
@@ -1562,7 +1564,11 @@ const App: React.FC = () => {
   const completeOnboarding = () => {
     localStorage.setItem('app_onboarding_completed', 'true');
     setInventory(prev => ({ ...prev, hasCompletedOnboarding: true }));
-    setHistory([AppScreen.LOGIN]);
+    if (history.length > 1) {
+      popScreen();
+    } else {
+      setHistory([AppScreen.LOGIN]);
+    }
   };
 
   const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
@@ -2443,7 +2449,7 @@ const App: React.FC = () => {
             </div>
           )}
           {screen === AppScreen.ONBOARDING && (
-            <OnboardingWizard onComplete={completeOnboarding} />
+            <OnboardingWizard onComplete={completeOnboarding} onCancel={popScreen} />
           )}
           {screen === AppScreen.LOGIN && (
             <Login 
@@ -2889,6 +2895,10 @@ const App: React.FC = () => {
               setShowOnboardingTips(false);
               localStorage.setItem('app_show_onboarding', 'false');
             }} 
+            onOpenOnboarding={() => {
+              pushScreen(AppScreen.ONBOARDING);
+            }}
+            onOpenPalette={() => setIsPaletteOpen(true)}
           />
         )}
 
@@ -2919,6 +2929,24 @@ const App: React.FC = () => {
 
         {/* Immersive Mode handled automatically on first interaction */}
       </div>
+
+      {isPaletteOpen && (
+        <div className="fixed inset-0 z-[2000] bg-bg-main/80 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white border border-border rounded-[2.5rem] shadow-2xl w-full max-w-5xl relative max-h-[90vh] overflow-y-auto"
+          >
+            <button 
+              onClick={() => setIsPaletteOpen(false)}
+              className="absolute top-6 right-6 z-[2001] p-3 bg-white border border-border text-ink rounded-full shadow-lg active:scale-95 transition-all"
+            >
+              <X size={20} />
+            </button>
+            <ThemePalette />
+          </motion.div>
+        </div>
+      )}
 
       <Modal
         isOpen={modalConfig.isOpen}
