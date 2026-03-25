@@ -57,6 +57,19 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onCance
       color: "bg-phase-supabase"
     },
     {
+      title: "Planos e Investimento",
+      subtitle: "Escolha a escala do seu projeto.",
+      description: "O GBR v25 oferece flexibilidade para pequenos inventários ou grandes operações corporativas. Escolha o modelo que melhor se adapta à sua necessidade.",
+      features: [
+        "Interno: Gratuito (Teste/Solo)",
+        "Plus: Assinatura Mensal (Equipes)",
+        "Enterprise: Sob Consulta (ERP/Protheus)",
+        "Suporte Especializado 24/7"
+      ],
+      icon: <Zap size={48} className="text-amber-500" />,
+      color: "bg-amber-500"
+    },
+    {
       title: "Carga Expert de Dados",
       subtitle: "Sua base de dados em segundos.",
       description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Tenant ID (ID do locatário) será gerado automaticamente para sua empresa.",

@@ -122,4 +122,28 @@ Para que um auditor atenda aos requisitos de segurança, isolamento de dados (Mu
 ---
 
 *Documentação atualizada em: 20 de Março de 2026*
-*Versão do App: 24.50.06 KARDEK ENTERPRISE*
+*## 12. Modelos de Negócio e Versões
+
+O GBR v24.50 KARDEK opera em três níveis de serviço, cada um projetado para diferentes escalas de auditoria patrimonial:
+
+### 12.1. Modo INTERNO (Básico)
+*   **Público:** Auditores solo, testes de campo, inventários de pequeno porte.
+*   **Investimento:** Gratuito / Trial.
+*   **Limitações:** 1 Usuário, Armazenamento Local (IndexedDB), Sem Sincronismo em Nuvem.
+*   **Valor:** Agilidade no primeiro contato e validação de processos.
+
+### 12.2. Modo SUPABASE (Plus)
+*   **Público:** Equipes de auditoria, empresas com múltiplas unidades.
+*   **Investimento:** Assinatura Mensal (SaaS).
+*   **Destaques:** Multi-usuários, Sincronismo em Tempo Real, Dashboard Centralizado, Backup Automático.
+*   **Valor:** Colaboração e integridade de dados em larga escala.
+
+### 12.3. Modo ENTERPRISE (Custom)
+*   **Público:** Grandes corporações com ERP Protheus.
+*   **Investimento:** Sob Consulta / Projeto Fechado.
+*   **Destaques:** Integração Nativa Protheus, Suporte 24/7, Analytics Avançado, Governança Total.
+*   **Valor:** Inteligência de ativos e conformidade fiscal absoluta.
+
+---
+
+Versão do App: 24.50.06 KARDEK ENTERPRISE*
