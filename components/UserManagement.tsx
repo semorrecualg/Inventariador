@@ -20,7 +20,8 @@ import {
   Check,
   Cloud,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
 
@@ -386,6 +387,18 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Username e Senha de Acesso</p>
             </div>
             <form onSubmit={handleSaveEdit} className="space-y-5">
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6">
+                <div className="flex items-start">
+                  <AlertCircle className="text-amber-600 mr-3 shrink-0 mt-0.5" size={18} />
+                  <div>
+                    <h4 className="text-[10px] font-bold text-amber-800 uppercase tracking-tight">Aviso sobre Senhas</h4>
+                    <p className="text-[9px] text-amber-700 mt-1 leading-relaxed">
+                      Alterar a senha aqui <strong>NÃO</strong> altera a senha do usuário no Supabase Cloud se ele já estiver ativado. 
+                      Para usuários já existentes, utilize o botão <strong>&quot;Enviar Link de Redefinição&quot;</strong> abaixo para que o próprio usuário defina sua nova senha.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
                 <div className="relative">

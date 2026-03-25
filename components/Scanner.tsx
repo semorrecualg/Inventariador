@@ -395,7 +395,7 @@ const Scanner: React.FC<ScannerProps> = ({
           >
             <Camera size={isInline ? 16 : 20} className={`mb-1 ${isLoading ? 'animate-spin' : ''}`} />
             <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
-              Reset
+              Reiniciar
             </span>
           </button>
         </div>

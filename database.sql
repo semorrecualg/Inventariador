@@ -27,8 +27,8 @@ CREATE POLICY "Admins can view audit logs of their tenant"
 ON public.audit_logs 
 FOR SELECT 
 USING (
-    auth.jwt() ->> 'role' IN ('ADMIN', 'MASTER') 
-    AND (tenant_id = auth.jwt() ->> 'tenantId' OR tenant_id IS NULL)
+    ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
+    AND (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId') OR tenant_id IS NULL)
 );
 
 -- Usuários podem ver seus próprios logs
@@ -41,7 +41,10 @@ USING (user_email = auth.jwt() ->> 'email');
 CREATE POLICY "System can insert audit logs" 
 ON public.audit_logs 
 FOR INSERT 
-WITH CHECK (true);
+WITH CHECK (
+    tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId') 
+    OR tenant_id IS NULL -- Permite logs de sistema ou pré-autenticação
+);
 
 -- 4. Função de Trigger para Auditoria Automática de Ativos
 CREATE OR REPLACE FUNCTION public.process_asset_audit()
@@ -142,18 +145,18 @@ CREATE TABLE IF NOT EXISTS public.inventory_campaigns (
 -- 2. Habilitar RLS
 ALTER TABLE public.inventory_campaigns ENABLE ROW LEVEL SECURITY;
 
--- 3. Políticas de Segurança (RLS)
+-- 3. Políticas de Segurança (RLS) para Campanhas
 CREATE POLICY "Users can view campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR SELECT 
-USING (tenant_id = auth.jwt() ->> 'tenantId');
+USING (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId'));
 
 CREATE POLICY "Admins can manage campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR ALL 
 USING (
-    auth.jwt() ->> 'role' IN ('ADMIN', 'MASTER') 
-    AND tenant_id = auth.jwt() ->> 'tenantId'
+    ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
+    AND tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
 );
 
 -- 4. Adicionar coluna de campanha à tabela de ativos

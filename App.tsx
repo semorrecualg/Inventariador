@@ -33,15 +33,16 @@ import CampaignManager from './components/CampaignManager';
 import FloatingHelp from './components/FloatingHelp';
 import PrivacyCenter from './components/PrivacyCenter';
 import OnboardingWizard from './components/OnboardingWizard';
+import BiometricRegistration from './components/BiometricRegistration';
 
 import { motion } from 'motion/react';
 import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
-import { isBiometricSupported, registerBiometric, hasBiometricRegistered } from './services/biometricService';
+import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 
@@ -270,6 +271,11 @@ const App: React.FC = () => {
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
+  const inventoryRef = useRef<InventoryState>(inventory);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
 
   useEffect(() => {
     if (!inventory.hasCompletedOnboarding && screen !== AppScreen.ONBOARDING) {
@@ -278,7 +284,14 @@ const App: React.FC = () => {
   }, [inventory.hasCompletedOnboarding, screen]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
+    if (!skipLoadingState && isSyncing) return;
     if (databaseMode === DatabaseMode.INTERNAL) return;
+    
+    // GUARD: Check if online
+    if (!navigator.onLine) {
+      console.log('Push ignorado: Dispositivo offline.');
+      return;
+    }
     
     const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (!hasSupabase) return;
@@ -286,7 +299,7 @@ const App: React.FC = () => {
     const dirtyIds = Array.from(dirtyAssetsRef.current);
     if (dirtyIds.length === 0) return;
 
-    const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
+    const dirtyAssets = dirtyIds.map(id => inventoryRef.current.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
 
     if (dirtyAssets.length > 0) {
       if (!skipLoadingState) setIsSyncing(true);
@@ -295,7 +308,7 @@ const App: React.FC = () => {
         await syncAssetsToCloud(dirtyAssets, user?.tenantId);
         
         // Sincroniza a config também para garantir que o timestamp suba
-        const configToSync = { ...inventory };
+        const configToSync = { ...inventoryRef.current };
         // @ts-expect-error - assets is removed for sync
         delete configToSync.assets;
         await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantId);
@@ -303,6 +316,16 @@ const App: React.FC = () => {
         dirtyAssetsRef.current.clear();
         setLastSyncTime(new Date().toISOString());
         setSyncError(null);
+
+        // Log de Auditoria na Nuvem
+        if (databaseMode === DatabaseMode.SUPABASE) {
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'SYNC_PUSH',
+            details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
+            tenant_id: user?.tenantId
+          });
+        }
       } catch (err) {
         setSyncError('Erro ao enviar alterações locais');
         console.error('Push error:', err);
@@ -311,11 +334,31 @@ const App: React.FC = () => {
         if (!skipLoadingState) setIsSyncing(false);
       }
     }
-  }, [databaseMode, inventory]);
+  }, [databaseMode]);
 
   const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
+    if (isSyncing) return;
+    
     const mode = explicitMode || databaseMode;
     if (mode === DatabaseMode.INTERNAL) return;
+
+    // GUARD: Check if online
+    if (!navigator.onLine) {
+      console.log('Sincronização ignorada: Dispositivo offline.');
+      return;
+    }
+
+    // GUARD: Check if on login screen (unless explicitTenantId is provided)
+    if (screen === AppScreen.LOGIN && !explicitTenantId) {
+      console.log('Sincronização ignorada: Usuário na tela de login.');
+      return;
+    }
+
+    // GUARD: Check if user is logged in (unless explicitTenantId is provided, which happens during login/auth check)
+    if (!user && !explicitTenantId) {
+      console.log('Sincronização ignorada: Usuário não autenticado.');
+      return;
+    }
     
     const rawTenantId = explicitTenantId || user?.tenantId || 'default';
     const tenantId = Array.isArray(rawTenantId) ? rawTenantId : [rawTenantId];
@@ -327,6 +370,7 @@ const App: React.FC = () => {
     }
 
     setIsSyncing(true);
+    setIsCloudUpdatePending(false); // Reset pending flag immediately
     try {
       // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
       await pushLocalChanges(true); 
@@ -338,6 +382,8 @@ const App: React.FC = () => {
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
       // Passamos o tenantId e o unitId selecionado (se houver)
       const cloudData = await fetchFullInventory(tenantId, explicitUnitId || selectedUnit || undefined);
+      const syncTimestamp = new Date().toISOString();
+
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
@@ -351,17 +397,28 @@ const App: React.FC = () => {
             assets: cloudData.assets,
             companies: finalCompanies,
             status: DatabaseStatus.LOADED,
-            lastUpdated: new Date().toISOString()
+            lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
+          
+          // Log de Auditoria na Nuvem
+          if (mode === DatabaseMode.SUPABASE) {
+            logAuditEvent({
+              user_email: user?.email || 'unknown',
+              action: 'SYNC_PULL',
+              details: `Sincronização de ${cloudData.assets.length} ativos da nuvem para o local.`,
+              tenant_id: user?.tenantId || (Array.isArray(tenantId) ? tenantId[0] : tenantId)
+            });
+          }
+
           return newState;
         });
-        setLastSyncTime(new Date().toISOString());
+        setLastSyncTime(syncTimestamp);
         setSyncError(null);
         setShowRecoveryToast(true);
         setTimeout(() => setShowRecoveryToast(false), 5000);
       } else {
-        setLastSyncTime(new Date().toISOString());
+        setLastSyncTime(syncTimestamp);
         setSyncError(null);
         if (!explicitTenantId) { // Só mostra modal se não for o sync automático do login
           setModalConfig({
@@ -378,7 +435,7 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [databaseMode, user?.tenantId, inventory]);
+  }, [databaseMode, user?.tenantId, screen, isSyncing, pushLocalChanges, selectedUnit]);
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
@@ -477,34 +534,39 @@ const App: React.FC = () => {
     };
   }, [databaseMode, inventory.lastUpdated, user]);
 
-  // Efeito para forçar sincronização se houver atualização pendente e o usuário for auditor
+  // Efeito para forçar sincronização se houver atualização pendente
   useEffect(() => {
-    if (isCloudUpdatePending && !user?.isAdmin && user?.email !== ADMIN_EMAIL) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Atualização do Banco de Dados',
-        message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
-        type: 'confirm',
-        onConfirm: async () => {
-          setIsCloudUpdatePending(false);
-          try {
-            // 1. Envia o que tiver de local primeiro
-            await pushLocalChanges();
-            // 2. Baixa a nova base
-            await syncFromCloud();
-          } catch (e) {
-            console.error("Falha na sincronização segura:", e);
-            setModalConfig({
-              isOpen: true,
-              title: 'Erro na Sincronização',
-              message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
-              type: 'error'
-            });
+    if (isCloudUpdatePending && !isSyncing && databaseMode !== DatabaseMode.INTERNAL) {
+      if (user?.isAdmin || user?.email === ADMIN_EMAIL) {
+        // Admins sincronizam automaticamente sem modal
+        syncFromCloud();
+      } else {
+        // Auditores recebem confirmação para não perder trabalho local
+        setModalConfig({
+          isOpen: true,
+          title: 'Atualização do Banco de Dados',
+          message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
+          type: 'confirm',
+          onConfirm: async () => {
+            try {
+              // 1. Envia o que tiver de local primeiro
+              await pushLocalChanges();
+              // 2. Baixa a nova base
+              await syncFromCloud();
+            } catch (e) {
+              console.error("Falha na sincronização segura:", e);
+              setModalConfig({
+                isOpen: true,
+                title: 'Erro na Sincronização',
+                message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
+                type: 'error'
+              });
+            }
           }
-        }
-      });
+        });
+      }
     }
-  }, [isCloudUpdatePending, user, syncFromCloud, pushLocalChanges]);
+  }, [isCloudUpdatePending, isSyncing, databaseMode, user, syncFromCloud, pushLocalChanges]);
 
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
@@ -1123,6 +1185,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
+      if (isSyncing) return;
+      
       try {
         if (isDataLoaded) {
           const dirtyIds = Array.from(dirtyAssetsRef.current);
@@ -1214,6 +1278,14 @@ const App: React.FC = () => {
         // Atualiza estado global
         setUser(loggedUser);
         localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        
+        // Log de Auditoria na Nuvem
+        logAuditEvent({
+          user_email: loggedUser.email,
+          action: 'LOGIN',
+          details: `Usuário logado no sistema (${loggedUser.role})`,
+          tenant_id: loggedUser.tenantId
+        });
         
     // Se logou via Supabase, garante que o modo está correto
     setDatabaseMode(DatabaseMode.SUPABASE);
@@ -1419,11 +1491,12 @@ const App: React.FC = () => {
 
   const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
     setDatabaseMode(mode);
+    setInventory(prev => ({ ...prev, databaseMode: mode }));
     localStorage.setItem('app_database_mode', mode);
     
     // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
     if (mode !== DatabaseMode.INTERNAL && inventory.assets.length === 0 && user) {
-      syncFromCloud();
+      syncFromCloud(undefined, mode);
     }
   };
 
@@ -1629,12 +1702,15 @@ const App: React.FC = () => {
       }
     }
 
+    const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
+    const isNew = !existing;
+
     // Adiciona entrada na trilha de auditoria
     const auditEntry: AuditLogEntry = {
       timestamp: new Date().toISOString(),
       user: user?.email || 'unknown',
-      action: 'UPDATE',
-      details: `Alteração de campos: ${Object.keys(updatedAsset).filter(k => !k.startsWith('_')).join(', ')}`,
+      action: isNew ? 'INSERT' : 'UPDATE',
+      details: isNew ? 'Criação de novo item' : `Alteração de campos: ${Object.keys(updatedAsset).filter(k => !k.startsWith('_')).join(', ')}`,
       tenantId: user?.tenantId,
       origin: updatedAsset._origemTransacao
     };
@@ -1647,7 +1723,21 @@ const App: React.FC = () => {
     };
 
     commitAssetUpdate(assetWithHistory);
-  }, [inventory.assets, commitAssetUpdate, user]);
+    
+    // Log de Auditoria na Nuvem (se estiver em modo Supabase)
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: isNew ? 'INSERT' : 'UPDATE',
+        table_name: 'assets',
+        record_id: String(updatedAsset.id),
+        new_data: assetWithHistory,
+        details: auditEntry.details,
+        tenant_id: user?.tenantId,
+        origin: updatedAsset._origemTransacao
+      });
+    }
+  }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
@@ -1775,7 +1865,19 @@ const App: React.FC = () => {
       lastUpdated: new Date().toISOString(),
       status: DatabaseStatus.IN_USE
     }));
-  }, [inventoryLocation, determineTag, normalizeKey]);
+
+    // Log de Auditoria na Nuvem (se estiver em modo Supabase)
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'BULK_UPDATE',
+        table_name: 'assets',
+        details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
+        tenant_id: user?.tenantId,
+        origin: origin
+      });
+    }
+  }, [inventoryLocation, determineTag, normalizeKey, user, databaseMode, history]);
 
   const handleSelectAsset = useCallback((asset: Asset) => {
     // Se viemos da tela de consulta, o detalhe deve ser apenas leitura
@@ -1848,6 +1950,17 @@ const App: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
     XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
+
+    // Log de Auditoria na Nuvem
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'EXPORT',
+        table_name: 'assets',
+        details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
+        tenant_id: user?.tenantId
+      });
+    }
   };
 
   const handleBackup = async () => {
@@ -1879,6 +1992,16 @@ const App: React.FC = () => {
         message: `O backup foi restaurado com sucesso. ${newState.assets.length} ativos carregados.`,
         type: 'info'
       });
+
+      // Log de Auditoria na Nuvem
+      if (databaseMode === DatabaseMode.SUPABASE) {
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'RESTORE',
+          details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
+          tenant_id: user?.tenantId
+        });
+      }
     } else {
       setModalConfig({
         isOpen: true,
@@ -1933,6 +2056,16 @@ const App: React.FC = () => {
           message: `Foram baixados ${cloudData.assets.length} ativos da nuvem com sucesso.`,
           type: 'success'
         });
+
+        // Log de Auditoria na Nuvem
+        if (databaseMode === DatabaseMode.SUPABASE) {
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'DOWNLOAD',
+            details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
+            tenant_id: user?.tenantId
+          });
+        }
       } else {
         setModalConfig({
           isOpen: true,
@@ -1973,6 +2106,15 @@ const App: React.FC = () => {
         try {
           await clearCloudInventory(selectedUnit || undefined, user?.tenantId);
           
+          // Log de Auditoria na Nuvem
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'DELETE',
+            table_name: 'assets',
+            details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
+            tenant_id: user?.tenantId
+          });
+
           // Atualiza o timestamp na nuvem para notificar outros usuários
           try {
             const configToSync = { ...inventory };
@@ -2066,6 +2208,20 @@ const App: React.FC = () => {
     }
     return filtered;
   }, [inventory.assets, selectedUnit, normalizeKey]);
+
+  const filteredAssetsByLocation = useMemo(() => {
+    if (!inventoryLocation) return [];
+    const locKey = normalizeKey(inventoryLocation);
+    const result = [];
+    for (let i = 0; i < filteredAssetsByUnit.length; i++) {
+      const a = filteredAssetsByUnit[i];
+      const effectiveLoc = a._localMaster || a.ENDERECO || "";
+      if (normalizeKey(effectiveLoc) === locKey) {
+        result.push(a);
+      }
+    }
+    return result;
+  }, [filteredAssetsByUnit, inventoryLocation, normalizeKey]);
 
   const handleSignatureConfirm = useCallback(async (signature: string) => {
     if (!selectedUnit) return;
@@ -2309,7 +2465,7 @@ const App: React.FC = () => {
                 } else { 
                   // Se for ADMIN, vai para seleção de módulo
                   // Se for AUDITOR, vai para seleção de unidade (empresa)
-                  const isAdmin = u.role === UserRole.ADMIN || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
                   if (isAdmin) {
                     pushScreen(AppScreen.MODULE_SELECTION); 
                   } else {
@@ -2318,47 +2474,30 @@ const App: React.FC = () => {
                 }
 
                 // Oferecer registro de biometria se suportado e ainda não registrado
-                const bioSupported = isBiometricSupported();
+                const bioSupported = await isBiometricSupported();
                 if (bioSupported) {
                   const username = (u.username || u.email || '').toLowerCase();
                   if (username) {
                     const alreadyRegistered = await hasBiometricRegistered(username);
                     if (!alreadyRegistered) {
-                      setTimeout(() => {
-                        setModalConfig({
-                          isOpen: true,
-                          title: 'Acesso Biométrico',
-                          message: 'Deseja ativar o acesso por biometria (Digital/FaceID) neste dispositivo para seus próximos acessos?',
-                          type: 'info',
-                          showCancel: true,
-                          confirmText: 'OK',
-                          cancelText: 'Pular',
-                          onConfirm: async () => {
-                            console.log('[App] Usuário confirmou registro de biometria');
-                            const success = await registerBiometric(username);
-                            console.log('[App] Resultado do registro de biometria:', success);
-                            if (success) {
-                              setModalConfig({
-                                isOpen: true,
-                                title: 'Sucesso!',
-                                message: 'Biometria cadastrada com sucesso.',
-                                type: 'success'
-                              });
-                            } else {
-                              setModalConfig({
-                                isOpen: true,
-                                title: 'Erro',
-                                message: 'Não foi possível cadastrar a biometria. Verifique se seu dispositivo suporta esta função ou se as permissões foram concedidas.',
-                                type: 'error'
-                              });
-                            }
-                          }
-                        });
-                      }, 1500);
+                      pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
                     }
                   }
                 }
               }} 
+            />
+          )}
+          {screen === AppScreen.BIOMETRIC_REGISTRATION && (
+            <BiometricRegistration 
+              username={user?.username || user?.email || ''} 
+              onComplete={() => {
+                // Após completar, removemos a tela de biometria do histórico
+                // e deixamos o usuário na tela que estava por baixo (definida no onLogin)
+                popScreen();
+              }}
+              onSkip={() => {
+                popScreen();
+              }}
             />
           )}
           {screen === AppScreen.REGISTER && (
@@ -2390,31 +2529,11 @@ const App: React.FC = () => {
           {screen === AppScreen.MAIN_MENU && (
             <MainMenu 
               onNavigate={pushScreen} 
-              onBack={() => {
-                setSelectedUnit(null);
-                pushScreen(AppScreen.UNIT_SELECTION);
-              }}
-              onLogout={async () => { 
-                if (supabase) await supabase.auth.signOut();
-                setUser(null); 
+              onLogout={() => { 
+                // Agora "Sair" do menu principal volta para a seleção de unidade
                 setSelectedUnit(null); 
                 setStartWithDataMenu(false);
-                setConsultationFilters({
-                  ETIQUETA: '',
-                  DESCRICAODOATIVO: '',
-                  SERIAL: '',
-                  CNPJ: '',
-                  NOMEFORNECEDOR: '',
-                  NOTAFISCAL: '',
-                  ENDERECO: '',
-                  CONTACONTABIL: '',
-                  CENTRODECUSTO: '',
-                  DATAAQUSIC_START: '',
-                  DATAAQUSIC_END: '',
-                  Sn1_recno: ''
-                });
-                setCommittedConsultationFilters(null);
-                pushScreen(AppScreen.LOGIN); 
+                pushScreen(AppScreen.UNIT_SELECTION); 
               }} 
               onExport={handleExport} 
               onBackup={handleBackup}
@@ -2542,7 +2661,7 @@ const App: React.FC = () => {
           {screen === AppScreen.INVENTORY && (
             <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
               <Inventory 
-                assets={filteredAssetsByUnit} 
+                assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit} 
                 allAssets={inventory.assets} 
                 onBack={popScreen} 
                 onUpdateAsset={updateAsset} 
@@ -2626,9 +2745,10 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
+              isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL}
               units={fullCompaniesWithStatus
                 .filter(c => {
-                  const isAdmin = user?.role === UserRole.ADMIN || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
                   if (isAdmin) return true;
                   
                   // Se for auditor, só vê as unidades autorizadas
@@ -2656,10 +2776,25 @@ const App: React.FC = () => {
                 pushScreen(AppScreen.MAIN_MENU); 
               }} 
               onBack={async () => { 
-                if (supabase) await supabase.auth.signOut();
-                setUser(null); 
-                setSelectedUnit(null); 
-                pushScreen(AppScreen.LOGIN); 
+                const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                if (isAdmin) {
+                  setCurrentModule(null);
+                  localStorage.removeItem('app_current_module');
+                  pushScreen(AppScreen.MODULE_SELECTION);
+                } else {
+                  if (supabase) {
+                    await logAuditEvent({
+                      user_email: user?.email || 'unknown',
+                      action: 'LOGOUT',
+                      details: 'Usuário saiu do sistema.',
+                      tenant_id: user?.tenantId
+                    });
+                    await supabase.auth.signOut();
+                  }
+                  setUser(null); 
+                  setSelectedUnit(null); 
+                  pushScreen(AppScreen.LOGIN); 
+                }
               }} 
               onSync={syncFromCloud}
               isSyncing={isSyncing}
@@ -2689,7 +2824,15 @@ const App: React.FC = () => {
               username={user?.username || ''}
               userRole={user?.role}
               onLogout={async () => {
-                if (supabase) await supabase.auth.signOut();
+                if (supabase) {
+                  await logAuditEvent({
+                    user_email: user?.email || 'unknown',
+                    action: 'LOGOUT',
+                    details: 'Usuário saiu do sistema.',
+                    tenant_id: user?.tenantId
+                  });
+                  await supabase.auth.signOut();
+                }
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');

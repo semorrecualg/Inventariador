@@ -33,7 +33,8 @@ import {
   User as UserIcon,
   Mic,
   ShieldAlert,
-  Activity
+  Activity,
+  WifiOff
 } from 'lucide-react';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -553,6 +554,47 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   }, [isSearchVisible]);
 
+  const locationStats = useMemo(() => {
+    if (!selectedLocation) return { total: 0, checked: 0, adopted: 0, novos: 0, own: 0, pending: 0 };
+    
+    const currentLocKey = normalizeKeyFast(selectedLocation);
+    let total = 0;
+    let checked = 0;
+    let adopted = 0;
+    let novos = 0;
+    let own = 0;
+
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      const effectiveLoc = a._localMaster || a.ENDERECO || "";
+      const locKey = normalizeKeyFast(effectiveLoc);
+      
+      if (locKey !== currentLocKey) continue;
+
+      const statusUpper = String(a.STATUS || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      
+      if (isBaixado && !isConferido) continue;
+
+      total++;
+      if (isConferido) {
+        checked++;
+        const tag = String(a.TAG_INVENTARIO || '').toUpperCase();
+        if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO) {
+          adopted++;
+        } else if (tag === TagInventario.NOVO_ITEM) {
+          novos++;
+        } else if (tag === TagInventario.CONFERIDO) {
+          own++;
+        }
+      }
+    }
+
+    const pending = total - (adopted + own + novos);
+    return { total, checked, adopted, novos, own, pending };
+  }, [assets, selectedLocation]);
+
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
     const term = normalizeKeyFast(committedSearch);
@@ -892,7 +934,7 @@ const Inventory: React.FC<InventoryProps> = ({
   // Helper para renderizar os modais de confirmação/erro de leitura
   const renderConfirmationModals = () => {
     return (
-      <>
+      <React.Fragment>
         {/* Modal de Item Duplicado */}
         {duplicateAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
@@ -906,7 +948,7 @@ const Inventory: React.FC<InventoryProps> = ({
               {(() => {
                 const isSameLocation = normalizeKey(duplicateAsset._localMaster || "") === normalizeKey(selectedLocation || "");
                 return (
-                  <>
+                  <React.Fragment>
                     <div className={`${isSameLocation ? 'bg-success' : 'bg-warning'} p-8 text-white text-center transition-colors`}>
                       <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
                         {isSameLocation ? <Check size={40} className="text-white" /> : <AlertTriangle size={40} className="text-white" />}
@@ -955,7 +997,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="absolute bottom-0 left-0 h-1.5 w-full bg-bg-main overflow-hidden">
                       <div className={`h-full animate-progress ${isSameLocation ? 'bg-success' : 'bg-warning'}`} style={{ animationDuration: '1s' }} />
                     </div>
-                  </>
+                  </React.Fragment>
                 );
               })()}
             </div>
@@ -1078,17 +1120,17 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>,
           document.body
         )}
-      </>
+      </React.Fragment>
     );
   };
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
-        <>
+        <React.Fragment>
           <div className="px-5 pt-12 pb-4 bg-white border-b border-border">
             <div className="flex items-center justify-between mb-6">
-              <BackButton onClick={onBack} label="Voltar" subLabel="Analytics Precision V24" />
+              <BackButton onClick={onBack} label="Voltar" subLabel="Mapeamento de Ativos" />
               <button 
                 onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
                 className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'bg-bg-main text-ink-muted'}`}
@@ -1152,35 +1194,55 @@ const Inventory: React.FC<InventoryProps> = ({
               .sort()
               .map(loc => {
                 const stats = locationsWithStats[loc];
-              const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
-              const isStarted = stats.checked > 0;
+                const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
+                const isStarted = stats.checked > 0;
+                const isCompleted = progress === 100;
               
               return (
-                <button key={loc} onClick={() => { 
-                  setSelectedLocation(loc); 
-                  setIsInventorying(true); 
-                  if (immersiveMode && !document.fullscreenElement) {
-                    onToggleFullscreen();
-                  }
-                }} className="w-full bg-white border border-border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card">
-                  <div className={`absolute top-0 left-0 bottom-0 transition-all duration-700 ease-out ${isStarted ? 'bg-success/5' : 'bg-transparent'}`} style={{ width: `${progress}%` }} />
+                <button 
+                  key={loc} 
+                  disabled={isCompleted}
+                  onClick={() => { 
+                    setSelectedLocation(loc); 
+                    setIsInventorying(true); 
+                    if (immersiveMode && !document.fullscreenElement) {
+                      onToggleFullscreen();
+                    }
+                  }} 
+                  className={`w-full border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card ${isCompleted ? 'bg-slate-50 border-slate-200 opacity-75 grayscale' : 'bg-white border-border'}`}
+                >
+                  {/* Progress Degrade */}
+                  {isStarted && !isCompleted && (
+                    <div 
+                      className="absolute top-0 left-0 bottom-0 bg-gradient-to-r from-emerald-500/10 to-emerald-500/20 transition-all duration-700 ease-out" 
+                      style={{ width: `${progress}%` }} 
+                    />
+                  )}
+                  
                   <div className="flex items-center space-x-4 relative z-10">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isStarted ? 'bg-success text-white border-success/20 shadow-sm' : 'bg-bg-main text-ink-muted border-border'}`}>
-                      <MapPin size={20} />
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isCompleted ? 'bg-slate-200 text-slate-500 border-slate-300' : isStarted ? 'bg-success text-white border-success/20 shadow-sm' : 'bg-bg-main text-ink-muted border-border'}`}>
+                      {isCompleted ? <WifiOff size={20} /> : <MapPin size={20} />}
                     </div>
                     <div className="text-left">
-                      <span className="text-[13px] font-bold uppercase block leading-none text-ink">{loc}</span>
-                      <span className={`text-[9px] font-bold uppercase mt-2 block ${isStarted ? 'text-success' : 'text-ink-muted'}`}>{stats.checked} / {stats.total} ITENS ({progress}%)</span>
+                      <span className={`text-[13px] font-bold uppercase block leading-none ${isCompleted ? 'text-slate-500 line-through' : 'text-ink'}`}>{loc}</span>
+                      <div className="flex items-center space-x-2 mt-2">
+                        <span className={`text-[9px] font-bold uppercase ${isCompleted ? 'text-slate-400' : isStarted ? 'text-success' : 'text-ink-muted'}`}>
+                          {stats.checked} / {stats.total} ITENS ({progress}%)
+                        </span>
+                        {isCompleted && (
+                          <span className="px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded text-[7px] font-black uppercase tracking-widest">OFF-LINE</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight size={16} className="text-ink-muted/30 relative z-10" />
+                  {!isCompleted && <ChevronRight size={16} className="text-ink-muted/30 relative z-10" />}
                 </button>
               );
             })}
           </div>
-        </>
+        </React.Fragment>
       ) : (
-        <>
+        <React.Fragment>
           <div className="px-3 py-1.5 bg-white border-b border-border shadow-sm z-20">
             <div className="flex flex-col space-y-1.5 mb-1">
               {/* Row 1: Action Buttons & SAFE Status */}
@@ -1264,12 +1326,37 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             </div>
 
-            {/* Row 2: Location Field (Full width) */}
-              <div className="w-full px-3 py-2 bg-bg-main border border-border rounded-xl flex items-center space-x-3 text-ink-muted shadow-sm">
-                <MapPin size={16} className="text-accent shrink-0" />
-                <span className="text-[11px] font-normal uppercase italic tracking-tight flex-1 text-left leading-tight">
+            {/* Row 2: Location Field & Counters */}
+            <div className="mt-1.5 space-y-1.5">
+              <div className="w-full px-3 py-1.5 bg-bg-main border border-border rounded-xl flex items-center space-x-3 text-ink-muted shadow-sm">
+                <MapPin size={14} className="text-accent shrink-0" />
+                <span className="text-[10px] font-bold uppercase italic tracking-tight flex-1 text-left leading-tight">
                   {selectedLocation}
                 </span>
+              </div>
+
+              {/* Counters Grid - FIXED LEGEND */}
+              <div className="grid grid-cols-5 gap-1">
+                <div className="bg-slate-50 border border-slate-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
+                  <span className="text-[12px] font-black text-slate-700 leading-none">{locationStats.total}</span>
+                  <span className="text-[5px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">Total</span>
+                </div>
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
+                  <span className="text-[12px] font-black text-blue-700 leading-none">{locationStats.adopted}</span>
+                  <span className="text-[5px] font-bold text-blue-400 uppercase tracking-tighter mt-0.5">Adotados</span>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
+                  <span className="text-[12px] font-black text-emerald-700 leading-none">{locationStats.own}</span>
+                  <span className="text-[5px] font-bold text-emerald-400 uppercase tracking-tighter mt-0.5">Próprios</span>
+                </div>
+                <div className="bg-purple-50 border border-purple-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
+                  <span className="text-[12px] font-black text-purple-700 leading-none">{locationStats.novos}</span>
+                  <span className="text-[5px] font-bold text-purple-400 uppercase tracking-tighter mt-0.5">Novos</span>
+                </div>
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
+                  <span className="text-[12px] font-black text-amber-700 leading-none">{locationStats.pending}</span>
+                  <span className="text-[5px] font-bold text-amber-400 uppercase tracking-tighter mt-0.5">Pendentes</span>
+                </div>
               </div>
             </div>
 
@@ -1294,9 +1381,10 @@ const Inventory: React.FC<InventoryProps> = ({
               <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-accent text-white border-accent shadow-sm' : 'text-ink-muted border-border'}`}>Inventariado</button>
             </div>
           </div>
+        </div>
 
-          <div 
-            className="flex-1 overflow-hidden bg-bg-main relative"
+        <div 
+          className="flex-1 overflow-hidden bg-bg-main relative"
             onPointerDown={() => {
               if (showNumericKeypad) setShowNumericKeypad(false);
             }}
@@ -1434,17 +1522,17 @@ const Inventory: React.FC<InventoryProps> = ({
             )}
           </div>
 
-        {showNumericKeypad && (
-          <div className="absolute inset-x-0 bottom-0 z-[100]">
-            <NumericKeypad 
-              onInput={(val) => setDisplayValue(prev => prev + val)}
-              onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
-              onClose={() => setShowNumericKeypad(false)}
-            />
-          </div>
-        )}
-      </>
-    )}
+          {showNumericKeypad && (
+            <div className="absolute inset-x-0 bottom-0 z-[100]">
+              <NumericKeypad 
+                onInput={(val) => setDisplayValue(prev => prev + val)}
+                onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
+                onClose={() => setShowNumericKeypad(false)}
+              />
+            </div>
+          )}
+        </React.Fragment>
+      )}
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 

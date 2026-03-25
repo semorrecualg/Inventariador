@@ -200,7 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_ncm_code ON ncm_classifiers(ncm_code);
 CREATE INDEX IF NOT EXISTS idx_movements_asset ON asset_movements(asset_id);
 CREATE INDEX IF NOT EXISTS idx_depreciation_asset ON asset_depreciation_history(asset_id);
 
--- 10. Políticas de RLS (Row Level Security) - Básico
+-- 10. Políticas de RLS (Row Level Security) - Blindagem Técnica GBR v24.50
 -- Habilitar RLS em todas as tabelas
 ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory_config ENABLE ROW LEVEL SECURITY;
@@ -211,16 +211,86 @@ ALTER TABLE ncm_classifiers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE asset_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE asset_depreciation_history ENABLE ROW LEVEL SECURITY;
 
--- Exemplo de política: Permitir tudo para usuários autenticados (ajustar conforme necessário)
--- CREATE POLICY "Permitir tudo para autenticados" ON assets FOR ALL USING (auth.role() = 'authenticated');
--- ... repetir para outras tabelas ...
+-- Funções Auxiliares para RLS
+CREATE OR REPLACE FUNCTION get_auth_tenant() RETURNS TEXT AS $$
+  SELECT (auth.jwt() -> 'user_metadata' ->> 'tenantId')::TEXT;
+$$ LANGUAGE sql STABLE;
 
--- Para simplificar o desenvolvimento inicial, você pode usar:
-CREATE POLICY "Permitir acesso total" ON assets FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON inventory_config FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON user_permissions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON chart_of_accounts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON asset_groups FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON ncm_classifiers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON asset_movements FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir acesso total" ON asset_depreciation_history FOR ALL USING (true) WITH CHECK (true);
+CREATE OR REPLACE FUNCTION is_admin() RETURNS BOOLEAN AS $$
+  SELECT (auth.jwt() -> 'user_metadata' ->> 'role')::TEXT IN ('ADMIN', 'MASTER');
+$$ LANGUAGE sql STABLE;
+
+-- Políticas para ASSETS
+DROP POLICY IF EXISTS "Permitir acesso total" ON assets;
+CREATE POLICY "Tenant Isolation: Assets" ON assets 
+FOR ALL TO authenticated 
+USING (_tenantId = get_auth_tenant())
+WITH CHECK (_tenantId = get_auth_tenant());
+
+-- Políticas para INVENTORY_CONFIG
+DROP POLICY IF EXISTS "Permitir acesso total" ON inventory_config;
+CREATE POLICY "Tenant Isolation: Config" ON inventory_config 
+FOR ALL TO authenticated 
+USING (_tenantId = get_auth_tenant() OR id = 'global_config')
+WITH CHECK (_tenantId = get_auth_tenant());
+
+-- Políticas para USER_PERMISSIONS
+DROP POLICY IF EXISTS "Permitir acesso total" ON user_permissions;
+CREATE POLICY "Self Read: Permissions" ON user_permissions 
+FOR SELECT TO authenticated 
+USING (id = auth.uid() OR (tenantId = get_auth_tenant() AND is_admin()));
+
+CREATE POLICY "Admin Manage: Permissions" ON user_permissions 
+FOR ALL TO authenticated 
+USING (tenantId = get_auth_tenant() AND is_admin())
+WITH CHECK (tenantId = get_auth_tenant() AND is_admin());
+
+-- Políticas para Tabelas Contábeis (Tenant Isolation)
+DROP POLICY IF EXISTS "Permitir acesso total" ON chart_of_accounts;
+CREATE POLICY "Tenant Isolation: Accounts" ON chart_of_accounts FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+
+DROP POLICY IF EXISTS "Permitir acesso total" ON asset_groups;
+CREATE POLICY "Tenant Isolation: Groups" ON asset_groups FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+
+DROP POLICY IF EXISTS "Permitir acesso total" ON ncm_classifiers;
+CREATE POLICY "Tenant Isolation: NCM" ON ncm_classifiers FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+
+DROP POLICY IF EXISTS "Permitir acesso total" ON asset_movements;
+CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+
+DROP POLICY IF EXISTS "Permitir acesso total" ON asset_depreciation_history;
+CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+
+-- ==========================================
+-- POLÍTICAS DE STORAGE (ASSET PHOTOS)
+-- ==========================================
+
+-- Nota: Estas políticas aplicam-se ao bucket 'asset-photos'
+-- O caminho esperado é: photos/{tenantId}/{assetId}/{filename}
+
+-- 1. Permitir Upload (Apenas usuários autenticados no seu próprio tenant)
+-- Supabase Storage usa a tabela storage.objects
+CREATE POLICY "Authenticated Upload: Asset Photos" ON storage.objects 
+FOR INSERT TO authenticated 
+WITH CHECK (
+    bucket_id = 'asset-photos' 
+    AND (storage.foldername(name))[1] = 'photos'
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+);
+
+-- 2. Permitir Leitura (Usuários do mesmo tenant)
+CREATE POLICY "Tenant Read: Asset Photos" ON storage.objects 
+FOR SELECT TO authenticated 
+USING (
+    bucket_id = 'asset-photos' 
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+);
+
+-- 3. Permitir Deleção (Admins do tenant)
+CREATE POLICY "Admin Delete: Asset Photos" ON storage.objects 
+FOR DELETE TO authenticated 
+USING (
+    bucket_id = 'asset-photos' 
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+    AND ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER')
+);

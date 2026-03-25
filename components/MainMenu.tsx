@@ -6,7 +6,7 @@ import BackButton from './BackButton';
 import { 
   Search, 
   BarChart3, 
-  LogOut, 
+  ArrowLeft, 
   ClipboardList, 
   Download, 
   Users,
@@ -182,7 +182,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <ShieldCheck size={10} />
               )}
               <span className="text-[8px] font-black uppercase tracking-tighter">
-                {isSyncing ? 'SYNCING' : syncError ? 'ERROR' : 'SYNC OK'}
+                {isSyncing ? 'SINCRONIZANDO' : syncError ? 'ERRO' : 'SINCRONIZADO'}
               </span>
             </div>
           )}
@@ -256,7 +256,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <ScanLine size={20} className="text-white" />
             </div>
             <span className={`text-[7px] font-black uppercase tracking-widest mt-1.5 ${isFullscreen ? 'text-emerald-600' : 'text-red-600'}`}>
-              {isFullscreen ? 'ON' : 'OFF'}
+              {isFullscreen ? 'LIGADO' : 'DESLIGADO'}
             </span>
           </button>
 
@@ -265,9 +265,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <button 
             onClick={onLogout} 
             className="w-10 h-10 bg-red-50 border border-red-100 rounded-xl text-red-500 flex items-center justify-center active:scale-90 transition-all shadow-sm hover:bg-white"
-            title="Sair do Sistema"
+            title="Trocar Unidade Operacional"
           >
-            <LogOut size={20} />
+            <ArrowLeft size={20} />
           </button>
         </div>
       </div>
@@ -851,14 +851,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   
                   <div className="relative group">
                     <button 
-                      disabled={databaseMode === DatabaseMode.INTERNAL}
                       onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
                       className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${
                         databaseMode === DatabaseMode.SUPABASE 
                           ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm' 
-                          : databaseMode === DatabaseMode.INTERNAL
-                            ? 'bg-slate-900/40 border-white/5 text-white/20 cursor-not-allowed'
-                            : 'bg-white/5 border-white/10 text-white/40'
+                          : 'bg-white/5 border-white/10 text-white/40'
                       }`}
                     >
                       <div className="flex items-center">
@@ -867,15 +864,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       </div>
                       {databaseMode === DatabaseMode.SUPABASE ? (
                         <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                      ) : databaseMode === DatabaseMode.INTERNAL ? (
-                        <ShieldAlert size={12} className="text-white/20" />
                       ) : null}
                     </button>
-                    {databaseMode === DatabaseMode.INTERNAL && (
-                      <div className="absolute left-1/2 -top-8 -translate-x-1/2 bg-slate-800 text-white text-[7px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 border border-white/10">
-                        REQUER UPGRADE PARA SUPABASE_PLUS
-                      </div>
-                    )}
                   </div>
                 </div>
                 <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">

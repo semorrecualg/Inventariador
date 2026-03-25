@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint } from 'lucide-react';
-import { supabase, ensureUserProfile, resetPassword, logAuditEvent } from '../services/supabaseService';
-import { authenticateBiometric, hasBiometricRegistered } from '../services/biometricService';
+import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
+import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
@@ -38,11 +38,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
   // Check for biometrics when username changes
   React.useEffect(() => {
-    if (username.length > 3) {
-      hasBiometricRegistered(username.trim().toLowerCase()).then(setHasBio);
-    } else {
-      setHasBio(false);
-    }
+    const checkBio = async () => {
+      if (username.length > 3) {
+        const supported = await isBiometricSupported();
+        if (supported) {
+          const registered = await hasBiometricRegistered(username.trim().toLowerCase());
+          setHasBio(registered);
+        } else {
+          setHasBio(false);
+        }
+      } else {
+        setHasBio(false);
+      }
+    };
+    checkBio();
   }, [username]);
 
   const handleBiometricLogin = async () => {
@@ -189,9 +198,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
       if (databaseMode === DatabaseMode.SUPABASE) {
         console.log('[Login] Autenticando via Supabase Auth...');
+        
+        let loginEmail = username.trim().toLowerCase();
+        
+        // Se não for um e-mail, tenta buscar o e-mail pelo username
+        if (!loginEmail.includes('@')) {
+          console.log('[Login] Username detectado, buscando e-mail correspondente...');
+          const foundEmail = await getEmailByUsername(username.trim());
+          if (!foundEmail) {
+            throw new Error("Username não encontrado. Verifique se digitou corretamente ou use seu e-mail.");
+          }
+          loginEmail = foundEmail;
+          console.log('[Login] E-mail encontrado:', loginEmail);
+        }
+
         // 1. Autenticação via Supabase Auth (Oficial)
         const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
-          email: username.trim().toLowerCase(),
+          email: loginEmail,
           password: password.trim()
         });
 

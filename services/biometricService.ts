@@ -9,10 +9,20 @@ const bioStore = localforage.createInstance({
   storeName: BIOMETRIC_STORE
 });
 
-export const isBiometricSupported = (): boolean => {
-  return !!(window.PublicKeyCredential && 
-            window.crypto && 
-            window.crypto.subtle);
+export const isBiometricSupported = async (): Promise<boolean> => {
+  if (!(window.PublicKeyCredential && 
+        window.crypto && 
+        window.crypto.subtle)) {
+    return false;
+  }
+  
+  try {
+    // Verifica se o autenticador de plataforma (biometria do dispositivo) está disponível
+    return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch (err) {
+    console.error('[Biometric] Erro ao verificar suporte:', err);
+    return false;
+  }
 };
 
 /**

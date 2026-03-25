@@ -9,7 +9,7 @@ export interface ProvisionResult {
   existing?: boolean;
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.ITE_SUPABASE_URL || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 // Initialize client only if credentials exist to prevent crash
@@ -23,6 +23,35 @@ export const generateUUID = () => {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+};
+
+/**
+ * Registra um evento de auditoria manualmente
+ */
+export const logAuditEvent = async (entry: {
+  user_email: string;
+  action: string;
+  table_name?: string;
+  record_id?: string;
+  old_data?: unknown;
+  new_data?: unknown;
+  details?: string;
+  tenant_id?: string;
+  origin?: string;
+}) => {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert([entry]);
+
+    if (error) {
+      console.error('Erro ao registrar log de auditoria:', error);
+    }
+  } catch (err) {
+    console.error('Erro inesperado ao registrar log:', err);
+  }
 };
 
 export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN', name?: string, unitId?: string, units?: string[]) => {
@@ -72,6 +101,16 @@ export const signUp = async (email: string, password: string, username: string, 
     if (permError) {
       console.warn("Erro ao criar permissões, mas usuário foi criado no Auth:", permError);
     }
+
+    // 3. Log de Auditoria
+    await logAuditEvent({
+      user_email: email,
+      action: 'SIGN_UP',
+      table_name: 'user_permissions',
+      record_id: data.user.id,
+      details: `Novo usuário cadastrado: ${username} (${role})`,
+      tenant_id: tenantId
+    });
   }
 
   return data;
@@ -151,6 +190,16 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     };
   }
 
+  // Log de Auditoria
+  await logAuditEvent({
+    user_email: email,
+    action: 'ENSURE_PROFILE',
+    table_name: 'user_permissions',
+    record_id: userId || 'unknown',
+    details: `Perfil de usuário garantido/criado para ${email}`,
+    tenant_id: metadata?.tenantId || 'default'
+  });
+  
   return newProfile;
 };
 
@@ -183,7 +232,7 @@ export const signOut = async () => {
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | string[]) => {
-  if (!supabase || !assets || assets.length === 0) return;
+  if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return;
 
   // Garante que todos os ativos tenham o tenantId antes de subir
   // E remove URLs de blob locais que não devem ir para a nuvem
@@ -247,7 +296,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantId?: string | string[]) => {
-  if (!supabase) return;
+  if (!supabase || !navigator.onLine) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
   const allowedKeys = [
@@ -359,6 +408,31 @@ export const getUserPermissions = async (email: string) => {
   } catch (err) {
     console.error('Unexpected error fetching permissions:', err);
     return { isAdmin: false };
+  }
+};
+
+/**
+ * Busca o e-mail de um usuário pelo username na tabela user_permissions
+ */
+export const getEmailByUsername = async (username: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('user_permissions')
+      .select('email')
+      .eq('username', username)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Erro ao buscar e-mail por username:', error);
+      return null;
+    }
+
+    return data?.email || null;
+  } catch (err) {
+    console.error('Erro inesperado ao buscar e-mail por username:', err);
+    return null;
   }
 };
 
@@ -599,7 +673,7 @@ export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Ass
  * Busca todo o inventário (ativos e configuração) do Supabase
  */
 export const fetchFullInventory = async (tenantId?: string | string[], unitId?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
-  if (!supabase) return null;
+  if (!supabase || !navigator.onLine) return null;
 
   try {
     // 1. Busca todos os ativos filtrados por tenantId e opcionalmente unitId
@@ -919,35 +993,6 @@ export const fetchAuditLogs = async (tenantId: string, recordId?: string): Promi
   } catch (err) {
     console.error('Erro inesperado ao buscar logs:', err);
     return [];
-  }
-};
-
-/**
- * Registra um evento de auditoria manualmente
- */
-export const logAuditEvent = async (entry: {
-  user_email: string;
-  action: string;
-  table_name?: string;
-  record_id?: string;
-  old_data?: unknown;
-  new_data?: unknown;
-  details?: string;
-  tenant_id?: string;
-  origin?: string;
-}) => {
-  if (!supabase) return;
-
-  try {
-    const { error } = await supabase
-      .from('audit_logs')
-      .insert([entry]);
-
-    if (error) {
-      console.error('Erro ao registrar log de auditoria:', error);
-    }
-  } catch (err) {
-    console.error('Erro inesperado ao registrar log:', err);
   }
 };
 
