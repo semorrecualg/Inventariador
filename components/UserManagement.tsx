@@ -62,8 +62,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantId || 'default');
-  const [newUnits, setNewUnits] = useState<string[]>(currentUser?.unitId ? [currentUser.unitId] : []);
+  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantid || 'default');
+  const [newUnits, setNewUnits] = useState<string[]>(currentUser?.unitid ? [currentUser.unitid] : []);
   const [newCustomUnit, setNewCustomUnit] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [provisionOnCreate, setProvisionOnCreate] = useState(true);
@@ -80,6 +80,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isManualTenant, setIsManualTenant] = useState(false);
+  const [isManualEditTenant, setIsManualEditTenant] = useState(false);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,7 +109,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           newTenantId, 
           newUnits, 
           newName.trim(),
-          newUnits[0] || currentUser?.unitId || 'default',
+          newUnits[0] || currentUser?.unitid || 'default',
           newUnits
         );
         if (result && result.existing) {
@@ -135,9 +137,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       role: newRole,
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER,
       mustChangePassword: true,
-      tenantId: newTenantId,
-      unitId: newUnits[0] || currentUser?.unitId || 'default',
-      units: newUnits.length > 0 ? newUnits : (currentUser?.unitId ? [currentUser.unitId] : ['default']),
+      tenantid: newTenantId,
+      unitid: newUnits[0] || currentUser?.unitid || 'default',
+      units: newUnits.length > 0 ? newUnits : (currentUser?.unitid ? [currentUser.unitid] : ['default']),
       tenants: [newTenantId] // Compatibilidade
     };
 
@@ -161,8 +163,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditEmail(user.email);
     setEditPassword(user.password || '');
     setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
-    setEditTenantId(user.tenantId || 'default');
-    setEditUnits(user.units || user.tenants || (user.unitId ? [user.unitId] : []));
+    setEditTenantId(user.tenantid || 'default');
+    setEditUnits(user.units || user.tenants || (user.unitid ? [user.unitid] : []));
     setEditCustomUnit('');
     setIsEditModalOpen(true);
   };
@@ -195,7 +197,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
         editTenantId, 
         editUnits, 
         editName.trim(),
-        editUnits[0] || selectedUser.unitId || 'default',
+        editUnits[0] || selectedUser.unitid || 'default',
         editUnits
       );
       if (result && result.existing) {
@@ -244,8 +246,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       password, 
       role: editRole, 
       isAdmin: editRole === UserRole.ADMIN || editRole === UserRole.MASTER, 
-      tenantId: editTenantId,
-      unitId: editUnits[0] || selectedUser.unitId || 'default',
+      tenantid: editTenantId,
+      unitid: editUnits[0] || selectedUser.unitid || 'default',
       units: editUnits,
       tenants: [editTenantId]
     };
@@ -320,7 +322,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
             if (currentUser?.role === UserRole.MASTER) {
-              return u.tenantId === currentUser.tenantId || (u.tenants && u.tenants.includes(currentUser.tenantId || ''));
+              return u.tenantid === currentUser.tenantid || (u.tenants && u.tenants.includes(currentUser.tenantid || ''));
             }
             // Outros papéis não devem ver nada (ou apenas a si mesmos)
             return u.email === currentUser?.email;
@@ -340,7 +342,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   <span className="font-bold text-base text-ink tracking-tight truncate">{u.name || 'Sem Nome'}</span>
                   <div className="flex items-center space-x-1">
                     <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">
-                      {u.tenantId || 'S/ TENANT'}
+                      {u.tenantid || 'S/ TENANT'}
                     </span>
                     <span className="bg-accent/5 text-accent text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-accent/10">
                       {u.role}
@@ -353,7 +355,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
-                  {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitId || 'GLOBAL']).map(t => (
+                  {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitid || 'GLOBAL']).map(t => (
                     <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
                   ))}
                 </div>
@@ -460,54 +462,100 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
                 <div className="space-y-1.5">
                   <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
-                  <input 
-                    type="text" 
-                    value={editTenantId} 
-                    onChange={(e) => setEditTenantId(e.target.value.toUpperCase().trim())} 
-                    className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
-                  />
+                  <div className="relative">
+                    {!isManualEditTenant ? (
+                      <>
+                        <select 
+                          value={editTenantId} 
+                          onChange={(e) => {
+                            if (e.target.value === 'MANUAL') {
+                              setIsManualEditTenant(true);
+                            } else {
+                              setEditTenantId(e.target.value);
+                            }
+                          }} 
+                          className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm appearance-none"
+                        >
+                          <option value="default">DEFAULT</option>
+                          {availableUnits.map(unit => (
+                            <option key={unit} value={unit}>{unit}</option>
+                          ))}
+                          <option value="MANUAL">+ OUTRA (DIGITAR MANUALMENTE)</option>
+                        </select>
+                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30 rotate-90 pointer-events-none" size={18} />
+                      </>
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="text" 
+                          autoFocus
+                          value={editTenantId} 
+                          onChange={(e) => setEditTenantId(e.target.value.toUpperCase())} 
+                          className="flex-1 px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                          placeholder="DIGITE O TENANT ID..."
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => setIsManualEditTenant(false)}
+                          className="p-4 bg-slate-100 text-slate-400 rounded-2xl hover:text-slate-600"
+                          title="Voltar para lista"
+                        >
+                          <RefreshCw size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais</label>
-                <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
-                  {Array.from(new Set([...availableUnits, ...editUnits])).map(unit => (
-                    <div 
-                      key={unit} 
-                      onClick={() => {
-                        setEditUnits(prev => 
-                          prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
-                        );
-                      }}
-                      className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
-                    >
-                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${editUnits.includes(unit) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
-                        {editUnits.includes(unit) && <Check size={14} strokeWidth={4} />}
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
+                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-56 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
+                  {Array.from(new Set([editTenantId, ...availableUnits, ...editUnits])).filter(u => u && u !== 'default').map(unit => {
+                    const isSelected = editUnits.includes(unit);
+                    return (
+                      <div 
+                        key={unit} 
+                        onClick={() => {
+                          setEditUnits(prev => 
+                            prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
+                          );
+                        }}
+                        className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
+                      >
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
+                            {isSelected && <Check size={14} strokeWidth={4} />}
+                          </div>
+                          <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
+                        </div>
+                        {unit === editTenantId && (
+                          <span className="text-[8px] font-black bg-accent/10 text-accent px-2 py-0.5 rounded-full uppercase tracking-widest">Sede</span>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{unit}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                   
-                  <div className="pt-2 border-t border-border/50">
+                  <div className="p-2 pt-3 border-t border-border/50 mt-2">
                     <div className="flex items-center space-x-2">
                       <input 
                         type="text" 
-                        placeholder="Novo ID..." 
+                        placeholder="Adicionar ID Manual..." 
                         value={editCustomUnit}
-                        onChange={(e) => setEditCustomUnit(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
+                        onChange={(e) => setEditCustomUnit(e.target.value.toUpperCase())}
+                        className="flex-1 bg-white border border-border rounded-xl px-4 py-3 text-[10px] font-bold outline-none focus:border-accent transition-all"
                       />
                       <button 
                         type="button"
                         onClick={() => {
-                          if (editCustomUnit && !editUnits.includes(editCustomUnit)) {
-                            setEditUnits(prev => [...prev, editCustomUnit]);
+                          const trimmedUnit = editCustomUnit.trim();
+                          if (trimmedUnit && !editUnits.includes(trimmedUnit)) {
+                            setEditUnits(prev => [...prev, trimmedUnit]);
                             setEditCustomUnit('');
                           }
                         }}
-                        className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
+                        className="p-3 bg-accent text-white rounded-xl shadow-lg shadow-accent/20 active:scale-90 transition-all"
                       >
-                        <Plus size={16} />
+                        <Plus size={18} />
                       </button>
                     </div>
                   </div>
@@ -574,45 +622,54 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             </div>
             <form onSubmit={handleAddUser} className="space-y-5">
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais</label>
-                <div className="bg-bg-main rounded-3xl border border-border p-4 max-h-40 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
-                  {Array.from(new Set([...availableUnits, ...newUnits])).map(unit => (
-                    <div 
-                      key={unit} 
-                      onClick={() => {
-                        setNewUnits(prev => 
-                          prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
-                        );
-                      }}
-                      className="flex items-center space-x-3 p-2 hover:bg-white rounded-xl transition-all cursor-pointer group"
-                    >
-                      <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${newUnits.includes(unit) ? 'bg-accent border-accent text-white' : 'border-border bg-white'}`}>
-                        {newUnits.includes(unit) && <Check size={12} strokeWidth={4} />}
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
+                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-56 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
+                  {Array.from(new Set([newTenantId, ...availableUnits, ...newUnits])).filter(u => u && u !== 'default').map(unit => {
+                    const isSelected = newUnits.includes(unit);
+                    return (
+                      <div 
+                        key={unit} 
+                        onClick={() => {
+                          setNewUnits(prev => 
+                            prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
+                          );
+                        }}
+                        className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
+                      >
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
+                            {isSelected && <Check size={14} strokeWidth={4} />}
+                          </div>
+                          <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
+                        </div>
+                        {unit === newTenantId && (
+                          <span className="text-[8px] font-black bg-accent/10 text-accent px-2 py-0.5 rounded-full uppercase tracking-widest">Sede</span>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{unit}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                   
-                  <div className="pt-2 border-t border-border/50">
+                  <div className="p-2 pt-3 border-t border-border/50 mt-2">
                     <div className="flex items-center space-x-2">
                       <input 
                         type="text" 
-                        placeholder="Novo ID..." 
+                        placeholder="Adicionar ID Manual..." 
                         value={newCustomUnit}
-                        onChange={(e) => setNewCustomUnit(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-accent"
+                        onChange={(e) => setNewCustomUnit(e.target.value.toUpperCase())}
+                        className="flex-1 bg-white border border-border rounded-xl px-4 py-3 text-[10px] font-bold outline-none focus:border-accent transition-all"
                       />
                       <button 
                         type="button"
                         onClick={() => {
-                          if (newCustomUnit && !newUnits.includes(newCustomUnit)) {
-                            setNewUnits(prev => [...prev, newCustomUnit]);
+                          const trimmedUnit = newCustomUnit.trim();
+                          if (trimmedUnit && !newUnits.includes(trimmedUnit)) {
+                            setNewUnits(prev => [...prev, trimmedUnit]);
                             setNewCustomUnit('');
                           }
                         }}
-                        className="p-2 bg-accent text-white rounded-xl shadow-sm active:scale-90 transition-all"
+                        className="p-3 bg-accent text-white rounded-xl shadow-lg shadow-accent/20 active:scale-90 transition-all"
                       >
-                        <Plus size={16} />
+                        <Plus size={18} />
                       </button>
                     </div>
                   </div>
@@ -679,12 +736,49 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
                 <div className="space-y-1.5">
                   <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
-                  <input 
-                    type="text" 
-                    value={newTenantId} 
-                    onChange={(e) => setNewTenantId(e.target.value.toUpperCase().trim())} 
-                    className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
-                  />
+                  <div className="relative">
+                    {!isManualTenant ? (
+                      <>
+                        <select 
+                          value={newTenantId} 
+                          onChange={(e) => {
+                            if (e.target.value === 'MANUAL') {
+                              setIsManualTenant(true);
+                            } else {
+                              setNewTenantId(e.target.value);
+                            }
+                          }} 
+                          className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm appearance-none"
+                        >
+                          <option value="default">DEFAULT</option>
+                          {availableUnits.map(unit => (
+                            <option key={unit} value={unit}>{unit}</option>
+                          ))}
+                          <option value="MANUAL">+ OUTRA (DIGITAR MANUALMENTE)</option>
+                        </select>
+                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30 rotate-90 pointer-events-none" size={18} />
+                      </>
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="text" 
+                          autoFocus
+                          value={newTenantId} 
+                          onChange={(e) => setNewTenantId(e.target.value.toUpperCase())} 
+                          className="flex-1 px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                          placeholder="DIGITE O TENANT ID..."
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => setIsManualTenant(false)}
+                          className="p-4 bg-slate-100 text-slate-400 rounded-2xl hover:text-slate-600"
+                          title="Voltar para lista"
+                        >
+                          <RefreshCw size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               <div className="space-y-1.5">

@@ -54,7 +54,7 @@ export const logAuditEvent = async (entry: {
   }
 };
 
-export const signUp = async (email: string, password: string, username: string, tenantId: string, role: string = 'ADMIN', name?: string, unitId?: string, units?: string[]) => {
+export const signUp = async (email: string, password: string, username: string, tenantid: string, role: string = 'ADMIN', name?: string, unitid?: string, units?: string[]) => {
   if (!supabase) throw new Error("Supabase não configurado.");
   
   // 1. Cria o usuário no Supabase Auth
@@ -66,10 +66,10 @@ export const signUp = async (email: string, password: string, username: string, 
         username,
         name: name || username,
         role,
-        tenantId,
-        unitId: unitId || tenantId,
-        units: units || [unitId || tenantId],
-        tenants: [tenantId] // Mantido para compatibilidade
+        tenantid,
+        unitid: unitid || tenantid,
+        units: units || [unitid || tenantid],
+        tenants: [tenantid] // Mantido para compatibilidade
       },
     },
   });
@@ -92,10 +92,10 @@ export const signUp = async (email: string, password: string, username: string, 
         name: name || username,
         role,
         isAdmin: role === 'ADMIN' || role === 'MASTER',
-        tenantId,
-        unitId: unitId || tenantId,
-        units: units || [unitId || tenantId],
-        tenants: [tenantId]
+        tenantid,
+        unitid: unitid || tenantid,
+        units: units || [unitid || tenantid],
+        tenants: [tenantid]
       }], { onConflict: 'email' });
       
     if (permError) {
@@ -109,7 +109,7 @@ export const signUp = async (email: string, password: string, username: string, 
       table_name: 'user_permissions',
       record_id: data.user.id,
       details: `Novo usuário cadastrado: ${username} (${role})`,
-      tenant_id: tenantId
+      tenant_id: tenantid
     });
   }
 
@@ -150,10 +150,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       username: metadata?.username || profile.username || lowerEmail.split('@')[0],
       name: metadata?.name || profile.name || metadata?.username || profile.username || lowerEmail.split('@')[0],
       role: metadata?.role || profile.role || (profile.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
-      tenantId: metadata?.tenantId || profile.tenantId || 'default',
-      unitId: metadata?.unitId || profile.unitId || metadata?.tenantId || profile.tenantId || 'default',
-      units: metadata?.units || profile.units || metadata?.tenants || profile.tenants || [profile.tenantId || 'default'],
-      tenants: metadata?.tenants || profile.tenants || [profile.tenantId || 'default']
+      tenantid: metadata?.tenantid || profile.tenantid || 'default',
+      unitid: metadata?.unitid || profile.unitid || metadata?.tenantid || profile.tenantid || 'default',
+      units: metadata?.units || profile.units || metadata?.tenants || profile.tenants || [profile.tenantid || 'default'],
+      tenants: metadata?.tenants || profile.tenants || [profile.tenantid || 'default']
     };
   }
   
@@ -164,28 +164,60 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     name: metadata?.name || metadata?.username || lowerEmail.split('@')[0],
     role: metadata?.role || UserRole.AUDITOR,
     isAdmin: metadata?.isAdmin || false,
-    tenantId: metadata?.tenantId || 'default',
-    unitId: metadata?.unitId || metadata?.tenantId || 'default',
-    units: metadata?.units || [metadata?.tenantId || 'default'],
-    tenants: metadata?.tenants || [metadata?.tenantId || 'default'],
+    tenantid: metadata?.tenantid || 'default',
+    unitid: metadata?.unitid || metadata?.tenantid || 'default',
+    units: metadata?.units || [metadata?.tenantid || 'default'],
+    tenants: metadata?.tenants || [metadata?.tenantid || 'default'],
     ...(userId ? { id: userId } : {})
   };
 
-  const { data: newProfile, error: createError } = await supabase
-    .from('user_permissions')
-    .insert([insertData])
-    .select()
-    .single();
+  // Lógica de tentativa resiliente para lidar com cache de schema desatualizado
+  const currentPayload = { ...insertData };
+  let error = null;
+  let retryCount = 0;
+  const maxRetries = 5;
+
+  let createdProfile = null;
+
+  while (retryCount < maxRetries) {
+    const { data: newProfile, error: createError } = await supabase
+      .from('user_permissions')
+      .insert([currentPayload])
+      .select()
+      .single();
     
-  if (createError) {
-    console.warn("Não foi possível criar perfil automático:", createError);
+    if (!createError) {
+      createdProfile = newProfile;
+      error = null;
+      break;
+    }
+
+    error = createError;
+    
+    const errorMessage = createError.message || "";
+    const match = errorMessage.match(/Could not find the '(.+)' column/) || 
+                  errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
+                  errorMessage.match(/column (.+) does not exist/);
+    
+    if (match && (match[1] || match[2])) {
+      const missingColumn = (match[1] || match[2]).replace(/"/g, '');
+      console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions. Removendo do payload e tentando novamente...`);
+      delete currentPayload[missingColumn as keyof typeof currentPayload];
+      retryCount++;
+    } else {
+      break;
+    }
+  }
+
+  if (error) {
+    console.warn("Não foi possível criar perfil automático:", error);
     // Fallback para um objeto básico
     return {
       username: metadata?.username || lowerEmail.split('@')[0],
       email: lowerEmail,
       role: metadata?.role || UserRole.AUDITOR,
       isAdmin: metadata?.isAdmin || false,
-      tenantId: metadata?.tenantId || 'default',
+      tenantid: metadata?.tenantid || 'default',
       tenants: metadata?.tenants || ['default']
     };
   }
@@ -197,10 +229,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     table_name: 'user_permissions',
     record_id: userId || 'unknown',
     details: `Perfil de usuário garantido/criado para ${email}`,
-    tenant_id: metadata?.tenantId || 'default'
+    tenant_id: metadata?.tenantid || 'default'
   });
   
-  return newProfile;
+  return createdProfile;
 };
 
 export const signIn = async (email: string, password: string) => {
@@ -231,10 +263,10 @@ export const signOut = async () => {
   if (error) throw error;
 };
 
-export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | string[]) => {
+export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]) => {
   if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return;
 
-  // Garante que todos os ativos tenham o tenantId antes de subir
+  // Garante que todos os ativos tenham o tenantid antes de subir
   // E remove URLs de blob locais que não devem ir para a nuvem
   const assetsWithTenant = assets.map(a => {
     const cleanAsset = { ...a };
@@ -251,16 +283,16 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
     const assetEmpresa = (cleanAsset.EMPRESA || '').toUpperCase().trim();
     let finalTenantId = 'default';
     
-    if (tenantId) {
-      if (Array.isArray(tenantId)) {
+    if (tenantid) {
+      if (Array.isArray(tenantid)) {
         // Se for um array (múltiplos tenants), tenta bater com a empresa do ativo
-        const match = tenantId.find(t => t.toUpperCase().trim() === assetEmpresa);
-        finalTenantId = match || tenantId[0] || 'default';
+        const match = tenantid.find(t => t.toUpperCase().trim() === assetEmpresa);
+        finalTenantId = match || tenantid[0] || 'default';
       } else {
-        finalTenantId = tenantId;
+        finalTenantId = tenantid;
       }
     } else {
-      finalTenantId = a._tenantId || assetEmpresa || 'default';
+      finalTenantId = a._tenantid || assetEmpresa || 'default';
     }
 
     return {
@@ -268,8 +300,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
       _lat: lat,
       _lng: lng,
       _conferido: conferido,
-      _tenantId: finalTenantId,
-      _unitId: a._unitId || null,
+      _tenantid: finalTenantId,
+      _unitid: a._unitid || null,
       EMPRESA: assetEmpresa
     };
   });
@@ -295,7 +327,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantId?: string | str
   }
 };
 
-export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantId?: string | string[]) => {
+export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
   if (!supabase || !navigator.onLine) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
@@ -318,14 +350,14 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'mandatoryPhotoOnDivergence',
     'mandatoryPhotoOnNewItem',
     'databaseMode',
-    '_tenantId'
+    '_tenantid'
   ];
 
-  const configId = tenantId 
-    ? (Array.isArray(tenantId) ? `config_${tenantId[0]}` : `config_${tenantId}`)
+  const configId = tenantid 
+    ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
     : 'global_config';
   const filteredConfig: Record<string, unknown> = { id: configId };
-  if (tenantId) filteredConfig._tenantId = Array.isArray(tenantId) ? tenantId[0] : tenantId;
+  if (tenantid) filteredConfig._tenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   
   Object.keys(config).forEach(key => {
     if (allowedKeys.includes(key)) {
@@ -441,7 +473,7 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
  * Nota: Como é um SPA, usamos signUp. Para evitar deslogar o admin,
  * criamos uma instância temporária do cliente.
  */
-export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantId?: string, tenants?: string[], name?: string, unitId?: string, units?: string[]): Promise<ProvisionResult> => {
+export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantid?: string, tenants?: string[], name?: string, unitid?: string, units?: string[]): Promise<ProvisionResult> => {
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
     throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
   }
@@ -464,10 +496,10 @@ export const provisionUserInAuth = async (email: string, password?: string, user
           username: username || email.split('@')[0],
           name: name || username || email.split('@')[0],
           role: role || 'AUDITOR',
-          tenantId: tenantId || 'default',
-          unitId: unitId || tenantId || 'default',
-          units: units || [unitId || tenantId || 'default'],
-          tenants: tenants || [tenantId || 'default'],
+    tenantid: tenantid || 'default',
+    unitid: unitid || tenantid || 'default',
+    units: units || [unitid || tenantid || 'default'],
+    tenants: tenants || [tenantid || 'default'],
           provisioned_by: 'admin_dashboard'
         }
       }
@@ -480,19 +512,47 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         console.log('Usuário já registrado no Auth. Tentando atualizar permissões...');
         
         if (supabase) {
-          const { error: permError } = await supabase
-            .from('user_permissions')
-            .upsert([{
-              email: email.toLowerCase().trim(),
-              username: username || email.split('@')[0],
-              name: name || username || email.split('@')[0],
-              role: role || 'AUDITOR',
-              isAdmin: role === 'ADMIN' || role === 'MASTER',
-              tenantId: tenantId || 'default',
-              unitId: unitId || tenantId || 'default',
-              units: units || [unitId || tenantId || 'default'],
-              tenants: tenants || [tenantId || 'default']
-            }], { onConflict: 'email' });
+          const currentPayload = {
+            email: email.toLowerCase().trim(),
+            username: username || email.split('@')[0],
+            name: name || username || email.split('@')[0],
+            role: role || 'AUDITOR',
+            isAdmin: role === 'ADMIN' || role === 'MASTER',
+            tenantid: tenantid || 'default',
+            unitid: unitid || tenantid || 'default',
+            units: units || [unitid || tenantid || 'default'],
+            tenants: tenants || [tenantid || 'default']
+          };
+
+          let retryCount = 0;
+          const maxRetries = 5;
+          let permError = null;
+
+          while (retryCount < maxRetries) {
+            const { error: syncError } = await supabase
+              .from('user_permissions')
+              .upsert([currentPayload], { onConflict: 'email' });
+            
+            if (!syncError) {
+              permError = null;
+              break;
+            }
+
+            permError = syncError;
+            const errorMessage = syncError.message || "";
+            const match = errorMessage.match(/Could not find the '(.+)' column/) || 
+                          errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
+                          errorMessage.match(/column (.+) does not exist/);
+            
+            if (match && (match[1] || match[2])) {
+              const missingColumn = (match[1] || match[2]).replace(/"/g, '');
+              console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada durante atualização de usuário existente. Removendo...`);
+              delete currentPayload[missingColumn as keyof typeof currentPayload];
+              retryCount++;
+            } else {
+              break;
+            }
+          }
             
           if (permError) throw permError;
           return { user: { email }, existing: true };
@@ -506,20 +566,48 @@ export const provisionUserInAuth = async (email: string, password?: string, user
     // 2. Garante que o perfil exista na tabela user_permissions
     // Importante: Usamos o cliente principal (supabase) aqui, pois ele tem as permissões de escrita (se o RLS permitir)
     if (supabase && data.user) {
-      const { error: permError } = await supabase
-        .from('user_permissions')
-        .upsert([{
-          id: data.user.id, // Sincroniza ID
-          email: email.toLowerCase().trim(),
-          username: username || email.split('@')[0],
-          name: name || username || email.split('@')[0],
-          role: role || 'AUDITOR',
-          isAdmin: role === 'ADMIN' || role === 'MASTER',
-          tenantId: tenantId || 'default',
-          unitId: unitId || tenantId || 'default',
-          units: units || [unitId || tenantId || 'default'],
-          tenants: tenants || [tenantId || 'default']
-        }], { onConflict: 'email' });
+      const currentPayload = {
+        id: data.user.id, // Sincroniza ID
+        email: email.toLowerCase().trim(),
+        username: username || email.split('@')[0],
+        name: name || username || email.split('@')[0],
+        role: role || 'AUDITOR',
+        isAdmin: role === 'ADMIN' || role === 'MASTER',
+        tenantid: tenantid || 'default',
+        unitid: unitid || tenantid || 'default',
+        units: units || [unitid || tenantid || 'default'],
+        tenants: tenants || [tenantid || 'default']
+      };
+
+      let retryCount = 0;
+      const maxRetries = 5;
+      let permError = null;
+
+      while (retryCount < maxRetries) {
+        const { error: syncError } = await supabase
+          .from('user_permissions')
+          .upsert([currentPayload], { onConflict: 'email' });
+        
+        if (!syncError) {
+          permError = null;
+          break;
+        }
+
+        permError = syncError;
+        const errorMessage = syncError.message || "";
+        const match = errorMessage.match(/Could not find the '(.+)' column/) || 
+                      errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
+                      errorMessage.match(/column (.+) does not exist/);
+        
+        if (match && (match[1] || match[2])) {
+          const missingColumn = (match[1] || match[2]).replace(/"/g, '');
+          console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions durante provisionamento. Removendo...`);
+          delete currentPayload[missingColumn as keyof typeof currentPayload];
+          retryCount++;
+        } else {
+          break;
+        }
+      }
         
       if (permError) {
         console.warn("⚠️ Usuário criado no Auth, mas erro ao criar permissões:", permError);
@@ -548,15 +636,47 @@ export const syncUsersToCloud = async (users: User[]) => {
       name: u.name || u.username,
       role: u.role,
       isAdmin: u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER',
-      tenantId: u.tenantId || 'default',
-      unitId: u.unitId || u.tenantId || 'default',
-      units: u.units || [u.unitId || u.tenantId || 'default'],
-      tenants: u.tenants || [u.tenantId || 'default']
+      tenantid: u.tenantid || 'default',
+      unitid: u.unitid || u.tenantid || 'default',
+      units: u.units || [u.unitid || u.tenantid || 'default'],
+      tenants: u.tenants || [u.tenantid || 'default']
     }));
 
-    const { error } = await supabase
-      .from('user_permissions')
-      .upsert(usersToSync, { onConflict: 'email' });
+    // Lógica de tentativa resiliente
+    let currentBatch = [...usersToSync];
+    let error = null;
+    let retryCount = 0;
+    const maxRetries = 5;
+
+    while (retryCount < maxRetries) {
+      const { error: syncError } = await supabase
+        .from('user_permissions')
+        .upsert(currentBatch, { onConflict: 'email' });
+      
+      if (!syncError) {
+        error = null;
+        break;
+      }
+
+      error = syncError;
+      const errorMessage = syncError.message || "";
+      const match = errorMessage.match(/Could not find the '(.+)' column/) || 
+                    errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
+                    errorMessage.match(/column (.+) does not exist/);
+      
+      if (match && (match[1] || match[2])) {
+        const missingColumn = (match[1] || match[2]).replace(/"/g, '');
+        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions durante sincronização em lote. Removendo...`);
+        currentBatch = currentBatch.map(u => {
+          const newU = { ...u };
+          delete newU[missingColumn as keyof typeof newU];
+          return newU;
+        });
+        retryCount++;
+      } else {
+        break;
+      }
+    }
 
     if (error) {
       console.error('Erro ao sincronizar usuários com Supabase:', error);
@@ -595,15 +715,15 @@ export const deleteUserFromCloud = async (email: string) => {
 /**
  * Busca todos os usuários da tabela de permissões (apenas para admins)
  */
-export const fetchUsersFromCloud = async (tenantId?: string): Promise<User[]> => {
+export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> => {
   if (!supabase) return [];
 
   try {
-    console.log(`[Supabase] Buscando usuários da nuvem (Tenant: ${tenantId || 'todos'})...`);
+    console.log(`[Supabase] Buscando usuários da nuvem (Tenant: ${tenantid || 'todos'})...`);
     let query = supabase.from('user_permissions').select('*');
     
-    if (tenantId && tenantId !== 'default') {
-      query = query.eq('tenantId', tenantId);
+    if (tenantid && tenantid !== 'default') {
+      query = query.eq('tenantid', tenantid);
     }
 
     const { data, error } = await query;
@@ -623,10 +743,10 @@ export const fetchUsersFromCloud = async (tenantId?: string): Promise<User[]> =>
       role: u.role as UserRole,
       isAdmin: u.isAdmin || u.role === 'ADMIN',
       mustChangePassword: false,
-      tenantId: u.tenantId || 'default',
-      unitId: u.unitId || u.tenantId || 'default',
-      units: u.units || [u.unitId || u.tenantId || 'default'],
-      tenants: u.tenants || [u.tenantId || 'default']
+      tenantid: u.tenantid || 'default',
+      unitid: u.unitid || u.tenantid || 'default',
+      units: u.units || [u.unitid || u.tenantid || 'default'],
+      tenants: u.tenants || [u.tenantid || 'default']
     }));
   } catch (err) {
     console.error('Erro inesperado ao buscar usuários:', err);
@@ -637,7 +757,7 @@ export const fetchUsersFromCloud = async (tenantId?: string): Promise<User[]> =>
 /**
  * Busca um ativo específico pela etiqueta no Supabase (para consulta pública via QR Code)
  */
-export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Asset | null> => {
+export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Asset | null> => {
   if (!supabase) return null;
 
   try {
@@ -646,8 +766,8 @@ export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Ass
       .select('*')
       .eq('ETIQUETA', tag.toUpperCase().trim());
     
-    if (tenantId) {
-      query = query.eq('_tenantId', tenantId);
+    if (tenantid) {
+      query = query.eq('_tenantid', tenantid);
     }
 
     const { data, error } = await query.single();
@@ -672,22 +792,22 @@ export const getAssetByTag = async (tag: string, tenantId?: string): Promise<Ass
 /**
  * Busca todo o inventário (ativos e configuração) do Supabase
  */
-export const fetchFullInventory = async (tenantId?: string | string[], unitId?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+export const fetchFullInventory = async (tenantid?: string | string[], unitid?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
   try {
-    // 1. Busca todos os ativos filtrados por tenantId e opcionalmente unitId
+    // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
     let assetsQuery = supabase.from('assets').select('*');
-    if (tenantId) {
-      if (Array.isArray(tenantId)) {
-        assetsQuery = assetsQuery.in('_tenantId', tenantId);
+    if (tenantid) {
+      if (Array.isArray(tenantid)) {
+        assetsQuery = assetsQuery.in('_tenantid', tenantid);
       } else {
-        assetsQuery = assetsQuery.eq('_tenantId', tenantId);
+        assetsQuery = assetsQuery.eq('_tenantid', tenantid);
       }
     }
     
-    if (unitId && unitId !== 'default') {
-      assetsQuery = assetsQuery.eq('_unitId', unitId);
+    if (unitid && unitid !== 'default') {
+      assetsQuery = assetsQuery.eq('_unitid', unitid);
     }
 
     const { data: assets, error: assetsError } = await assetsQuery;
@@ -698,8 +818,8 @@ export const fetchFullInventory = async (tenantId?: string | string[], unitId?: 
     }
 
     // 2. Busca a configuração (pode ser global ou por tenant)
-    const configId = tenantId 
-      ? (Array.isArray(tenantId) ? `config_${tenantId[0]}` : `config_${tenantId}`)
+    const configId = tenantid 
+      ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
       : 'global_config';
     
     let config = {};
@@ -763,7 +883,7 @@ export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<Inventor
 /**
  * Assina mudanças em tempo real na tabela de ativos
  */
-export const subscribeToAssetChanges = (tenantId: string | string[], onUpdate: (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => void) => {
+export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => void) => {
   if (!supabase) return null;
 
   const channel = supabase
@@ -776,18 +896,18 @@ export const subscribeToAssetChanges = (tenantId: string | string[], onUpdate: (
         table: 'assets'
       },
       (payload) => {
-        // Filtra por tenantId no lado do cliente se necessário, 
+        // Filtra por tenantid no lado do cliente se necessário, 
         // embora o ideal seja o RLS do Supabase já filtrar se o usuário estiver logado.
         // No entanto, para canais de broadcast/realtime, às vezes precisamos de filtros extras.
         const newAsset = payload.new as Asset;
         const oldAsset = payload.old as Asset;
         const targetAsset = newAsset || oldAsset;
 
-        if (targetAsset && tenantId) {
-          const assetTenant = targetAsset._tenantId;
-          const isAllowed = Array.isArray(tenantId) 
-            ? tenantId.includes(assetTenant || 'default')
-            : (assetTenant || 'default') === tenantId;
+        if (targetAsset && tenantid) {
+          const assetTenant = targetAsset._tenantid;
+          const isAllowed = Array.isArray(tenantid) 
+            ? tenantid.includes(assetTenant || 'default')
+            : (assetTenant || 'default') === tenantid;
           
           if (isAllowed) {
             onUpdate(payload);
@@ -803,18 +923,18 @@ export const subscribeToAssetChanges = (tenantId: string | string[], onUpdate: (
 /**
  * Limpa todos os ativos e configurações do Supabase (ou apenas de uma empresa específica)
  */
-export const clearCloudInventory = async (companyToClear?: string | string[], tenantId?: string): Promise<void> => {
+export const clearCloudInventory = async (companyToClear?: string | string[], tenantid?: string): Promise<void> => {
   if (!supabase) return;
 
   try {
-    console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantId || 'GLOBAL'}`);
+    console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantid || 'GLOBAL'}`);
     
     // 1. Limpa os ativos
     let query = supabase.from('assets').delete({ count: 'exact' });
     
     // Filtro por Tenant (Segurança RLS)
-    if (tenantId) {
-      query = query.eq('_tenantId', tenantId);
+    if (tenantid) {
+      query = query.eq('_tenantid', tenantid);
     }
     
     if (companyToClear) {
@@ -825,8 +945,8 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
         query = query.eq('EMPRESA', companyToClear.toUpperCase().trim());
       }
     } else {
-      // Limpeza total (se houver tenantId, o filtro acima já limita ao tenant)
-      if (!tenantId) {
+      // Limpeza total (se houver tenantid, o filtro acima já limita ao tenant)
+      if (!tenantid) {
         query = query.neq('id', '00000000-0000-0000-0000-000000000000');
       }
     }
@@ -842,7 +962,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 
     // 2. Limpa a configuração (apenas se estiver limpando TUDO)
     if (!companyToClear) {
-      const configId = tenantId ? `config_${tenantId}` : 'global_config';
+      const configId = tenantid ? `config_${tenantid}` : 'global_config';
       
       // Para o delete, tentamos ser o mais simples possível.
       // Se falhar por causa do cache do schema, ignoramos o erro de configuração
@@ -870,7 +990,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 /**
  * Faz upload de uma foto do ativo para o Supabase Storage com compressão client-side
  */
-export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenantId: string): Promise<string | null> => {
+export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenantid: string): Promise<string | null> => {
   if (!supabase) return null;
 
   try {
@@ -898,7 +1018,7 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
     }
 
     const fileExt = 'jpg'; // Forçamos jpg para consistência
-    const fileName = `${tenantId}/${assetId}/${Date.now()}.${fileExt}`;
+    const fileName = `${tenantid}/${assetId}/${Date.now()}.${fileExt}`;
     const filePath = `photos/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
@@ -968,14 +1088,14 @@ export const resetPassword = async (email: string) => {
 /**
  * Busca os logs de auditoria do Supabase
  */
-export const fetchAuditLogs = async (tenantId: string, recordId?: string): Promise<Record<string, unknown>[]> => {
+export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promise<Record<string, unknown>[]> => {
   if (!supabase) return [];
 
   try {
     let query = supabase
       .from('audit_logs')
       .select('*')
-      .eq('tenant_id', tenantId)
+      .eq('tenantid', tenantid)
       .order('timestamp', { ascending: false });
 
     if (recordId) {
@@ -999,25 +1119,25 @@ export const fetchAuditLogs = async (tenantId: string, recordId?: string): Promi
 /**
  * Atualiza apenas a URL da foto de um ativo na nuvem
  */
-export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, tenantId: string) => {
+export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, tenantid: string) => {
   if (!supabase) return;
   const { error } = await supabase
     .from('assets')
     .update({ _photoUrl: photoUrl })
     .eq('id', assetId)
-    .eq('_tenantId', tenantId);
+    .eq('_tenantid', tenantid);
   if (error) throw error;
 };
 
 /**
  * Busca todas as campanhas de um tenant
  */
-export const fetchCampaigns = async (tenantId: string): Promise<InventoryCampaign[]> => {
+export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('inventory_campaigns')
     .select('*')
-    .eq('tenant_id', tenantId)
+    .eq('tenantid', tenantid)
     .order('start_date', { ascending: false });
   
   if (error) {
@@ -1067,7 +1187,7 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
 /**
  * Busca estatísticas de uma campanha
  */
-export const fetchCampaignStats = async (campaignId: string, tenantId: string) => {
+export const fetchCampaignStats = async (campaignId: string, tenantid: string) => {
   if (!supabase) return null;
   
   try {
@@ -1075,20 +1195,20 @@ export const fetchCampaignStats = async (campaignId: string, tenantId: string) =
     const { count: totalCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantId', tenantId);
+      .eq('_tenantid', tenantid);
       
     // Ativos inventariados nesta campanha
     const { count: inventoriedCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantId', tenantId)
+      .eq('_tenantid', tenantid)
       .eq('_campaignId', campaignId);
 
     // Divergências nesta campanha
     const { count: divergenceCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantId', tenantId)
+      .eq('_tenantid', tenantid)
       .eq('_campaignId', campaignId)
       .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
 

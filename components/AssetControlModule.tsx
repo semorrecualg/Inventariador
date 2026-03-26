@@ -29,12 +29,12 @@ import BaseModal from './BaseModal';
 interface AssetControlModuleProps {
   onBack: () => void;
   username: string;
-  tenantId: string;
+  tenantid: string;
 }
 
 type SubModule = 'DASHBOARD' | 'ASSETS' | 'MOVEMENTS' | 'DEPRECIATION' | 'CATEGORIES' | 'REPORTS';
 
-const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantId }) => {
+const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantid }) => {
   const [activeSubModule, setActiveSubModule] = useState<SubModule>('DASHBOARD');
   const [configTab, setConfigTab] = useState<'ACCOUNTS' | 'GROUPS' | 'NCM'>('ACCOUNTS');
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -69,11 +69,11 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     fetchAssetGroups();
     fetchNCMClassifiers();
     fetchChartOfAccounts();
-  }, [tenantId]);
+  }, [tenantid]);
 
   const fetchChartOfAccounts = async () => {
     try {
-      const data = await assetControlService.getChartOfAccounts(tenantId);
+      const data = await assetControlService.getChartOfAccounts(tenantid);
       setChartOfAccounts(data);
     } catch (err) {
       console.error('Erro ao carregar plano de contas:', err);
@@ -87,7 +87,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       const { data, error } = await supabase
         .from('assets')
         .select('*')
-        .eq('_tenantId', tenantId);
+        .eq('_tenantid', tenantid);
 
       if (error) throw error;
       
@@ -102,7 +102,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const fetchAssetGroups = async () => {
     try {
-      const data = await assetControlService.getAssetGroups(tenantId);
+      const data = await assetControlService.getAssetGroups(tenantid);
       setAssetGroups(data);
     } catch (err) {
       console.error('Erro ao carregar grupos contábeis:', err);
@@ -111,7 +111,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const fetchNCMClassifiers = async () => {
     try {
-      const data = await assetControlService.getNCMClassifiers(tenantId);
+      const data = await assetControlService.getNCMClassifiers(tenantid);
       setNcmClassifiers(data);
     } catch (err) {
       console.error('Erro ao carregar classificadores NCM:', err);
@@ -120,7 +120,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const handleSaveChartOfAccount = async (acc: Partial<ChartOfAccount>) => {
     try {
-      await assetControlService.saveChartOfAccount({ ...acc, _tenantId: tenantId });
+      await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantid });
       fetchChartOfAccounts();
     } catch (err) {
       console.error('Erro ao salvar conta:', err);
@@ -152,7 +152,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const acc of standardData) {
-        await assetControlService.saveChartOfAccount({ ...acc, _tenantId: tenantId });
+        await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantid });
       }
       await fetchChartOfAccounts();
     } catch (err) {
@@ -163,7 +163,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   };
   const handleSaveAssetGroup = async (group: Partial<AssetGroup>) => {
     try {
-      await assetControlService.saveAssetGroup({ ...group, _tenantId: tenantId });
+      await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantid });
       fetchAssetGroups();
     } catch (err) {
       console.error('Erro ao salvar grupo:', err);
@@ -193,7 +193,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const group of standardData) {
-        await assetControlService.saveAssetGroup({ ...group, _tenantId: tenantId });
+        await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantid });
       }
       await fetchAssetGroups();
     } catch (err) {
@@ -205,7 +205,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const handleSaveNCMClassifier = async (cls: Partial<NCMClassifier>) => {
     try {
-      await assetControlService.saveNCMClassifier({ ...cls, _tenantId: tenantId });
+      await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantid });
       fetchNCMClassifiers();
     } catch (err) {
       console.error('Erro ao salvar classificador NCM:', err);
@@ -232,7 +232,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const cls of standardData) {
-        await assetControlService.saveNCMClassifier({ ...cls, _tenantId: tenantId });
+        await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantid });
       }
       await fetchNCMClassifiers();
     } catch (err) {
@@ -245,7 +245,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleNCMLookup = async (ncmCode: string) => {
     if (!ncmCode || ncmCode.length < 4) return;
     try {
-      const classifier = await assetControlService.getNCMClassifierByCode(ncmCode, tenantId);
+      const classifier = await assetControlService.getNCMClassifierByCode(ncmCode, tenantid);
       if (classifier) {
         const group = assetGroups.find(g => g.group_code === classifier.group_code);
         
@@ -274,7 +274,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     try {
       const assetToSave = {
         ...newAssetForm,
-        _tenantId: tenantId,
+        _tenantid: tenantid,
         _valor_residual: newAssetForm._valor_residual || 0,
         _depreciacao_acumulada: 0,
       };

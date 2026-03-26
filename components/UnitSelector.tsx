@@ -129,6 +129,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                  </button>
                );
              })
+           ) : isSyncing ? (
+             <div className="flex flex-col items-center justify-center py-16">
+               <RefreshCw size={60} className="text-accent animate-spin" />
+               <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-accent">Sincronizando Unidades...</p>
+             </div>
            ) : (
              <div className="flex flex-col items-center justify-center py-16 opacity-20">
                <Building2 size={60} className="text-slate-300" />

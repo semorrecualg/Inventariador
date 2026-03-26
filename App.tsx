@@ -167,26 +167,40 @@ const App: React.FC = () => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
     if (!initialCheck.isSafe) {
-      setIsSafeMode(false);
-      setSecurityThreats(initialCheck.threats);
+      setIsSafeMode(prev => prev === false ? prev : false);
+      setSecurityThreats(prev => {
+        // Comparação profunda simples para evitar re-renders desnecessários
+        if (prev.length === initialCheck.threats.length && prev.every((v, i) => v === initialCheck.threats[i])) {
+          return prev;
+        }
+        return initialCheck.threats;
+      });
     }
 
     // Monitor contínuo
     const monitorId = startSecurityMonitor((threats) => {
-      setIsSafeMode(false);
-      setSecurityThreats(threats);
+      setIsSafeMode(prev => prev === false ? prev : false);
+      setSecurityThreats(prev => {
+        if (prev.length === threats.length && prev.every((v, i) => v === threats[i])) {
+          return prev;
+        }
+        return threats;
+      });
       
       // Se detectar debugger ou scripts maliciosos, forçamos logout por segurança
       if (threats.includes('DEBUGGER_DETECTED') || threats.includes('SUSPICIOUS_SCRIPTS')) {
-        setModalConfig({
-          isOpen: true,
-          title: 'Violação de Segurança Detectada',
-          message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
-          type: 'error',
-          onConfirm: () => {
-             localStorage.removeItem('app_current_user');
-             window.location.reload();
-          }
+        setModalConfig(prev => {
+          if (prev.isOpen && prev.title === 'Violação de Segurança Detectada') return prev;
+          return {
+            isOpen: true,
+            title: 'Violação de Segurança Detectada',
+            message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
+            type: 'error',
+            onConfirm: () => {
+               localStorage.removeItem('app_current_user');
+               window.location.reload();
+            }
+          };
         });
       }
     });
@@ -307,13 +321,13 @@ const App: React.FC = () => {
       if (!skipLoadingState) setIsSyncing(true);
       try {
         // Sincroniza os ativos e ESPERA a conclusão (Push)
-        await syncAssetsToCloud(dirtyAssets, user?.tenantId);
+        await syncAssetsToCloud(dirtyAssets, user?.tenantid);
         
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
         // @ts-expect-error - assets is removed for sync
         delete configToSync.assets;
-        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantId);
+        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantid);
 
         dirtyAssetsRef.current.clear();
         setLastSyncTime(new Date().toISOString());
@@ -325,7 +339,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'SYNC_PUSH',
             details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
-            tenant_id: user?.tenantId
+            tenant_id: user?.tenantid
           });
         }
       } catch (err) {
@@ -336,7 +350,7 @@ const App: React.FC = () => {
         if (!skipLoadingState) setIsSyncing(false);
       }
     }
-  }, [databaseMode]);
+  }, [databaseMode, user?.tenantid, isSyncing]);
 
   const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
     if (isSyncing) return;
@@ -362,12 +376,12 @@ const App: React.FC = () => {
       return;
     }
     
-    const rawTenantId = explicitTenantId || user?.tenantId || 'default';
-    const tenantId = Array.isArray(rawTenantId) ? rawTenantId : [rawTenantId];
+    const rawTenantId = explicitTenantId || user?.tenantid || 'default';
+    const tenantid = Array.isArray(rawTenantId) ? rawTenantId : [rawTenantId];
     
-    // Se não temos tenantId e estamos em modo nuvem, não faz sentido tentar sincronizar
-    if (tenantId.length === 0) {
-      console.log('Sincronização ignorada: Nenhum tenantId disponível.');
+    // Se não temos tenantid e estamos em modo nuvem, não faz sentido tentar sincronizar
+    if (tenantid.length === 0) {
+      console.log('Sincronização ignorada: Nenhum tenantid disponível.');
       return;
     }
 
@@ -382,8 +396,8 @@ const App: React.FC = () => {
       setPendingPhotosCount(pendingItems.length);
 
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
-      // Passamos o tenantId e o unitId selecionado (se houver)
-      const cloudData = await fetchFullInventory(tenantId, explicitUnitId || selectedUnit || undefined);
+      // Passamos o tenantid e o unitid selecionado (se houver)
+      const cloudData = await fetchFullInventory(tenantid, explicitUnitId || selectedUnit || undefined);
       const syncTimestamp = new Date().toISOString();
 
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
@@ -409,7 +423,7 @@ const App: React.FC = () => {
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
               details: `Sincronização de ${cloudData.assets.length} ativos da nuvem para o local.`,
-              tenant_id: user?.tenantId || (Array.isArray(tenantId) ? tenantId[0] : tenantId)
+              tenant_id: user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
             });
           }
 
@@ -437,7 +451,7 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [databaseMode, user?.tenantId, screen, isSyncing, pushLocalChanges, selectedUnit]);
+  }, [databaseMode, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
@@ -487,7 +501,7 @@ const App: React.FC = () => {
       }
     });
 
-    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantId || 'default', (payload) => {
+    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantid || 'default', (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
@@ -772,7 +786,7 @@ const App: React.FC = () => {
         // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background)
         if (databaseMode !== DatabaseMode.INTERNAL) {
           try {
-            const cloudData = await fetchFullInventory(user?.tenantId);
+            const cloudData = await fetchFullInventory(user?.tenantid);
             if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
               const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
               const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
@@ -797,8 +811,8 @@ const App: React.FC = () => {
               } 
               // Se a base local estiver vazia E a nuvem também estiver vazia para este tenant
               else if (isLocalEmpty && (!cloudData.assets || cloudData.assets.length === 0)) {
-                console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantId}`);
-                if (user?.tenantId === 'default') {
+                console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
+                if (user?.tenantid === 'default') {
                   setSyncError(`Unidade 'default' sem dados. Verifique se o Tenant ID do usuário está correto.`);
                 }
               }
@@ -843,7 +857,7 @@ const App: React.FC = () => {
         setPublicAsset(foundLocal);
       } else {
         // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam, user?.tenantId).then(foundCloud => {
+        getAssetByTag(etqParam, user?.tenantid).then(foundCloud => {
           if (foundCloud) {
             setPublicAsset(foundCloud);
           }
@@ -921,7 +935,7 @@ const App: React.FC = () => {
     if (isAdmin && databaseMode === DatabaseMode.SUPABASE && user?.email) {
       console.log("🔄 Buscando usuários da nuvem para sincronização...");
       // Se for MASTER, busca apenas do seu tenant. Se for ADMIN global, busca todos.
-      const fetchTenantId = user.role === UserRole.MASTER ? user.tenantId : undefined;
+      const fetchTenantId = user.role === UserRole.MASTER ? user.tenantid : undefined;
       fetchUsersFromCloud(fetchTenantId).then(cloudUsers => {
         if (cloudUsers && cloudUsers.length > 0) {
           console.log(`✅ ${cloudUsers.length} usuários encontrados na nuvem.`);
@@ -1088,7 +1102,7 @@ const App: React.FC = () => {
   });
 
   const { locationsWithStats, allLocations, uniqueCentrosDeCusto } = useMemo(() => {
-    const stats: Record<string, { total: number; checked: number }> = {};
+    const stats: Record<string, { total: number; checked: number; displayName: string }> = {};
     const locationsSet = new Set<string>(manualLocations);
     const centrosDeCustoSet = new Set<string>();
     
@@ -1102,26 +1116,28 @@ const App: React.FC = () => {
         centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
       }
 
-      const assetCompKey = normalizeKey(a.EMPRESA || a._unitId || a._tenantId || '');
+      const assetCompKey = normalizeKey(a.EMPRESA || a._unitid || a._tenantid || '');
       if (currentCompKey && assetCompKey !== currentCompKey) continue;
 
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const effectiveLoc = (isConferido && a._localMaster) ? a._localMaster : (a.ENDERECO || 'SEM LOCAL');
-      const loc = String(effectiveLoc).trim().toUpperCase();
-      if (loc) locationsSet.add(loc);
+      const effectiveLoc = a._localMaster || a.ENDERECO || 'SEM LOCAL';
+      const locDisplay = String(effectiveLoc).trim().toUpperCase();
+      const locKey = normalizeKey(effectiveLoc);
+      
+      if (locDisplay) locationsSet.add(locDisplay);
 
       const statusUpper = String(a.STATUS || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
       
       if (isBaixado && !isConferido) continue;
 
-      if (!stats[loc]) stats[loc] = { total: 0, checked: 0 };
+      if (!stats[locKey]) stats[locKey] = { total: 0, checked: 0, displayName: locDisplay };
       
-      if (!isBaixado) stats[loc].total++;
+      if (!isBaixado) stats[locKey].total++;
       
       if (isConferido) {
-        stats[loc].checked++;
-        if (isBaixado) stats[loc].total++;
+        stats[locKey].checked++;
+        if (isBaixado) stats[locKey].total++;
       }
     }
 
@@ -1150,7 +1166,7 @@ const App: React.FC = () => {
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     
     // 3. ADOTADO EXTERNO (Empresa diferente)
-    const assetCompKey = normalizeKey(asset.EMPRESA || asset._unitId || asset._tenantId || '');
+    const assetCompKey = normalizeKey(asset.EMPRESA || asset._unitid || asset._tenantid || '');
     const currentCompKey = normalizeKey(selectedUnit || '');
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
@@ -1271,10 +1287,10 @@ const App: React.FC = () => {
           role: (permissions.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
           isAdmin: !!permissions.isAdmin || session.user.user_metadata?.isAdmin === true,
           mustChangePassword: false,
-          tenantId: permissions.tenantId || session.user.user_metadata?.tenantId || 'default',
-          unitId: permissions.unitId || session.user.user_metadata?.unitId || permissions.tenantId || session.user.user_metadata?.tenantId || 'default',
-          units: permissions.units || session.user.user_metadata?.units || [permissions.tenantId || session.user.user_metadata?.tenantId || 'default'],
-          tenants: permissions.tenants || [permissions.tenantId || session.user.user_metadata?.tenantId || 'default']
+          tenantid: permissions.tenantid || session.user.user_metadata?.tenantid || 'default',
+          unitid: permissions.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.user_metadata?.tenantid || 'default',
+          units: permissions.units || session.user.user_metadata?.units || [permissions.tenantid || session.user.user_metadata?.tenantid || 'default'],
+          tenants: permissions.tenants || [permissions.tenantid || session.user.user_metadata?.tenantid || 'default']
         };
 
         // Atualiza estado global
@@ -1286,7 +1302,7 @@ const App: React.FC = () => {
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Usuário logado no sistema (${loggedUser.role})`,
-          tenant_id: loggedUser.tenantId
+          tenant_id: loggedUser.tenantid
         });
         
     // Se logou via Supabase, garante que o modo está correto
@@ -1297,7 +1313,7 @@ const App: React.FC = () => {
     pushScreen(AppScreen.MODULE_SELECTION);
     
     // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-    syncFromCloud(loggedUser.tenantId, DatabaseMode.SUPABASE);
+    syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
   } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
@@ -1307,7 +1323,7 @@ const App: React.FC = () => {
           role: UserRole.AUDITOR,
           isAdmin: false,
           mustChangePassword: false,
-          tenantId: 'default',
+          tenantid: 'default',
           tenants: ['default']
         };
         setUser(fallbackUser);
@@ -1416,7 +1432,7 @@ const App: React.FC = () => {
 
       // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
       if (databaseMode === DatabaseMode.SUPABASE) {
-        await clearCloudInventory(companiesToClear, user?.tenantId);
+        await clearCloudInventory(companiesToClear, user?.tenantid);
         
         // Atualiza o timestamp na nuvem - envolvemos em try/catch para não falhar a limpeza se apenas o log falhar
         try {
@@ -1426,7 +1442,7 @@ const App: React.FC = () => {
           await syncConfigToCloud({ 
             ...configToSync, 
             lastUpdated: new Date().toISOString() 
-          } as Omit<InventoryState, 'assets'>, user?.tenantId);
+          } as Omit<InventoryState, 'assets'>, user?.tenantid);
         } catch (syncErr) {
           console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
         }
@@ -1594,8 +1610,8 @@ const App: React.FC = () => {
       updates._origemTransacao = origin; // Aplica o código fixo
       
       // Garantir que tenant e unit estão definidos
-      if (!updates._tenantId) updates._tenantId = user?.tenantId || 'default';
-      if (!updates._unitId) updates._unitId = user?.unitId || 'default';
+      if (!updates._tenantid) updates._tenantid = user?.tenantid || 'default';
+      if (!updates._unitid) updates._unitid = user?.unitid || 'default';
       
       // Log de Auditoria
       const historyEntry: AuditLogEntry = {
@@ -1603,7 +1619,7 @@ const App: React.FC = () => {
         user: user?.name || user?.username || user?.email || 'SISTEMA',
         action: index === -1 ? 'CREATE' : 'UPDATE',
         details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-        tenantId: user?.tenantId || 'default',
+        tenantid: user?.tenantid || 'default',
         origin: origin // Aplica o código fixo no log
       };
       updates._history = [...(updates._history || []), historyEntry];
@@ -1705,7 +1721,7 @@ const App: React.FC = () => {
       user: user?.email || 'unknown',
       action: isNew ? 'INSERT' : 'UPDATE',
       details: isNew ? 'Criação de novo item' : `Alteração de campos: ${Object.keys(updatedAsset).filter(k => !k.startsWith('_')).join(', ')}`,
-      tenantId: user?.tenantId,
+      tenantid: user?.tenantid,
       origin: updatedAsset._origemTransacao
     };
     
@@ -1727,7 +1743,7 @@ const App: React.FC = () => {
         record_id: String(updatedAsset.id),
         new_data: assetWithHistory,
         details: auditEntry.details,
-        tenant_id: user?.tenantId,
+        tenant_id: user?.tenantid,
         origin: updatedAsset._origemTransacao
       });
     }
@@ -1783,8 +1799,8 @@ const App: React.FC = () => {
           };
           
           // Garantir que tenant e unit estão definidos
-          if (!updates._tenantId) updates._tenantId = user?.tenantId || 'default';
-          if (!updates._unitId) updates._unitId = user?.unitId || 'default';
+          if (!updates._tenantid) updates._tenantid = user?.tenantid || 'default';
+          if (!updates._unitid) updates._unitid = user?.unitid || 'default';
           
           // Log de Auditoria para atualização em lote
           const historyEntry: AuditLogEntry = {
@@ -1792,7 +1808,7 @@ const App: React.FC = () => {
             user: user?.name || user?.username || user?.email || 'SISTEMA',
             action: 'BULK_UPDATE',
             details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-            tenantId: user?.tenantId || 'default',
+            tenantid: user?.tenantid || 'default',
             origin: origin // Aplica o código fixo no log
           };
           updates._history = [...(updates._history || []), historyEntry];
@@ -1867,7 +1883,7 @@ const App: React.FC = () => {
         action: 'BULK_UPDATE',
         table_name: 'assets',
         details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-        tenant_id: user?.tenantId,
+        tenant_id: user?.tenantid,
         origin: origin
       });
     }
@@ -1952,7 +1968,7 @@ const App: React.FC = () => {
         action: 'EXPORT',
         table_name: 'assets',
         details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
-        tenant_id: user?.tenantId
+        tenant_id: user?.tenantid
       });
     }
   };
@@ -1993,7 +2009,7 @@ const App: React.FC = () => {
           user_email: user?.email || 'unknown',
           action: 'RESTORE',
           details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
-          tenant_id: user?.tenantId
+          tenant_id: user?.tenantid
         });
       }
     } else {
@@ -2057,7 +2073,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'DOWNLOAD',
             details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
-            tenant_id: user?.tenantId
+            tenant_id: user?.tenantid
           });
         }
       } else {
@@ -2098,7 +2114,7 @@ const App: React.FC = () => {
       // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
       if (databaseMode === DatabaseMode.SUPABASE) {
         try {
-          await clearCloudInventory(selectedUnit || undefined, user?.tenantId);
+          await clearCloudInventory(selectedUnit || undefined, user?.tenantid);
           
           // Log de Auditoria na Nuvem
           logAuditEvent({
@@ -2106,7 +2122,7 @@ const App: React.FC = () => {
             action: 'DELETE',
             table_name: 'assets',
             details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
-            tenant_id: user?.tenantId
+            tenant_id: user?.tenantid
           });
 
           // Atualiza o timestamp na nuvem para notificar outros usuários
@@ -2117,7 +2133,7 @@ const App: React.FC = () => {
             await syncConfigToCloud({ 
               ...configToSync, 
               lastUpdated: new Date().toISOString() 
-            } as Omit<InventoryState, 'assets'>, user?.tenantId);
+            } as Omit<InventoryState, 'assets'>, user?.tenantid);
           } catch (syncErr) {
             console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
           }
@@ -2191,7 +2207,7 @@ const App: React.FC = () => {
     const filtered = [];
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
-      if (normalizeKey(a.EMPRESA || a._unitId || a._tenantId || '') === selKey) {
+      if (normalizeKey(a.EMPRESA || a._unitid || a._tenantid || '') === selKey) {
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         // Registro Ativo: Não pode estar baixado
@@ -2263,7 +2279,7 @@ const App: React.FC = () => {
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
 
   const fullCompaniesWithStatus = useMemo(() => {
-    const userTenant = user?.tenantId || 'default';
+    const userTenant = user?.tenantid || 'default';
     const userUnits = user?.units || [userTenant];
     const isAuditor = user?.role === UserRole.AUDITOR;
     const assets = inventory.assets;
@@ -2287,15 +2303,24 @@ const App: React.FC = () => {
         stats.hasActiveAssets = true;
       }
       
-      if (a._unitId) {
-        stats.unitIds.add(normalizeKey(a._unitId));
+      if (a._unitid) {
+        stats.unitIds.add(normalizeKey(a._unitid));
       }
     }
 
     // 2. Definir a lista base de empresas
-    const baseCompanies = inventory.companies.length > 0 
-      ? inventory.companies 
-      : Array.from(companyStatsMap.keys());
+    const baseCompaniesSet = new Set<string>(inventory.companies);
+    for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
+    
+    // Se for auditor e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
+    // mesmo que ainda não existam ativos locais para elas
+    if (isAuditor && inventory.databaseMode !== DatabaseMode.INTERNAL) {
+      for (const u of userUnits) {
+        if (u) baseCompaniesSet.add(u);
+      }
+    }
+    
+    const baseCompanies = Array.from(baseCompaniesSet);
 
     // 3. Normalizar unidades do usuário para busca rápida
     const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
@@ -2326,14 +2351,14 @@ const App: React.FC = () => {
           hasActiveAssets: stats?.hasActiveAssets || false
         };
       });
-  }, [inventory.companies, inventory.assets, normalizeKey, user, UserRole.AUDITOR]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR]);
 
   const availableUnits = useMemo(() => {
-    const fromAssets = inventory.assets.map(a => a._unitId || a._tenantId).filter(Boolean);
+    const fromAssets = inventory.assets.map(a => a._unitid || a._tenantid).filter(Boolean);
     const fromCompanies = inventory.companies.map(c => c.toLowerCase().replace(/\s/g, '_')).filter(Boolean);
     const fromUsers = users.flatMap(u => {
       const t = [];
-      if (u.unitId) t.push(u.unitId);
+      if (u.unitid) t.push(u.unitid);
       if (u.units) t.push(...u.units);
       return t;
     }).filter(Boolean);
@@ -2353,16 +2378,22 @@ const App: React.FC = () => {
 
   // Auto-sync on Company Selection if base is empty
   useEffect(() => {
-    const rawTenants = user?.tenants || (user?.tenantId ? [user.tenantId] : []);
+    const rawTenants = user?.tenants || (user?.tenantid ? [user.tenantid] : []);
     const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
     const isEmpty = inventory.assets.length === 0;
     
     if (screen === AppScreen.UNIT_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
+      // Evita loops infinitos se o sync falhar ou retornar vazio
+      const lastSyncAttempt = sessionStorage.getItem('last_auto_sync_attempt');
+      const now = Date.now();
+      if (lastSyncAttempt && now - parseInt(lastSyncAttempt) < 30000) {
+        console.log('Auto-sync ignorado: tentativa recente detectada.');
+        return;
+      }
+      sessionStorage.setItem('last_auto_sync_attempt', now.toString());
+
       syncFromCloud(tenants, databaseMode).then(() => {
         // Se após o sync continuar vazio e for admin, manda para a carga
-        // Usamos o estado atualizado do inventory.assets via ref ou checagem direta se possível, 
-        // mas aqui o inventory.assets no closure ainda é o antigo.
-        // No entanto, o próximo ciclo do useEffect pegará o valor atualizado.
       });
     } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
@@ -2373,6 +2404,10 @@ const App: React.FC = () => {
   // Auto-select unit if only one is available for the auditor
   useEffect(() => {
     if (screen === AppScreen.UNIT_SELECTION && !selectedUnit && !isSyncing && inventory.assets.length > 0) {
+      // Se o usuário acabou de vir do menu principal, não auto-selecionamos para permitir que ele saia ou troque
+      const prevScreen = history[history.length - 2];
+      if (prevScreen === AppScreen.MAIN_MENU) return;
+
       const available = fullCompaniesWithStatus.filter(c => c.hasData);
       if (available.length === 1 && user?.role === UserRole.AUDITOR) {
         const unit = available[0].name;
@@ -2383,7 +2418,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.MAIN_MENU);
       }
     }
-  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR]);
+  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, history, pushScreen]);
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
 
@@ -2473,8 +2508,8 @@ const App: React.FC = () => {
                 const isEmpty = inventory.assets.length === 0;
 
                 if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
-                  // Passa o tenantId e o modo explicitamente para garantir sync imediato no login
-                  syncFromCloud(u.tenants || u.tenantId, databaseMode);
+                  // Passa o tenantid e o modo explicitamente para garantir sync imediato no login
+                  syncFromCloud(u.tenants || u.tenantid, databaseMode);
                 }
 
                 if (u.mustChangePassword) { 
@@ -2637,7 +2672,7 @@ const App: React.FC = () => {
                       await clearCloudInventory();
                       
                       // Sincroniza todos os ativos em lotes
-                      const forcedTenantId = (user?.isAdmin && user?.tenantId === 'default') ? undefined : user?.tenantId;
+                      const forcedTenantId = (user?.isAdmin && user?.tenantid === 'default') ? undefined : user?.tenantid;
                       
                       // Usamos o syncAssetsToCloud com callback de progresso se possível, 
                       // ou fazemos o loop aqui para controlar o progresso
@@ -2652,7 +2687,7 @@ const App: React.FC = () => {
                       const configToSync = { ...newInventory };
                       // @ts-expect-error - assets is removed for sync
                       delete configToSync.assets;
-                      await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId || user?.tenantId);
+                      await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId || user?.tenantid);
                       
                       setLastSyncTime(new Date().toISOString());
                       setSyncError(null);
@@ -2747,7 +2782,7 @@ const App: React.FC = () => {
               readOnly={isReadOnlyDetail}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               protheusApiUrl={inventory.protheusApiUrl || ''}
-              tenantId={user?.tenantId || 'default'}
+              tenantid={user?.tenantid || 'default'}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
             />
@@ -2773,14 +2808,15 @@ const App: React.FC = () => {
                   const hasActiveAssets = c.hasActiveAssets;
                   
                   // Se não há ativos carregados, mostramos a unidade para que o usuário possa selecioná-la e baixar os dados
-                  // Se há ativos carregados, filtramos rigorosamente pelo status "ATIVO"
-                  const shouldShowByStatus = !hasAssets || hasActiveAssets;
+                  // Se há ativos carregados, filtramos pelo status "ATIVO", a menos que estejamos no modo nuvem e a unidade ainda não tenha dados locais
+                  const shouldShowByStatus = !hasAssets || hasActiveAssets || (databaseMode !== DatabaseMode.INTERNAL && !c.hasData);
 
                   if (isAdmin) return shouldShowByStatus;
                   
                   // Se for auditor, só vê as unidades autorizadas E que tenham ativos ativos
-                  const authorizedUnits = user?.units || (user?.tenantId ? [user.tenantId] : []);
-                  const isAuthorized = authorizedUnits.some(au => au.toUpperCase() === c.name.toUpperCase());
+                  const authorizedUnits = user?.units || (user?.tenantid ? [user.tenantid] : []);
+                  const normCName = normalizeKey(c.name);
+                  const isAuthorized = authorizedUnits.some(au => normalizeKey(au) === normCName);
                   
                   return isAuthorized && shouldShowByStatus;
                 })
@@ -2799,7 +2835,7 @@ const App: React.FC = () => {
                 const isAuditor = user?.role === UserRole.AUDITOR;
                 if (isAuditor && databaseMode !== DatabaseMode.INTERNAL) {
                   // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
-                  syncFromCloud(user?.tenants || user?.tenantId, databaseMode, u);
+                  syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
                 }
                 
                 pushScreen(AppScreen.MAIN_MENU); 
@@ -2816,7 +2852,7 @@ const App: React.FC = () => {
                       user_email: user?.email || 'unknown',
                       action: 'LOGOUT',
                       details: 'Usuário saiu do sistema.',
-                      tenant_id: user?.tenantId
+                      tenant_id: user?.tenantid
                     });
                     await supabase.auth.signOut();
                   }
@@ -2858,7 +2894,7 @@ const App: React.FC = () => {
                     user_email: user?.email || 'unknown',
                     action: 'LOGOUT',
                     details: 'Usuário saiu do sistema.',
-                    tenant_id: user?.tenantId
+                    tenant_id: user?.tenantid
                   });
                   await supabase.auth.signOut();
                 }
@@ -2887,7 +2923,7 @@ const App: React.FC = () => {
           {screen === AppScreen.ASSET_CONTROL_HOME && (
             <AssetControlModule 
               username={user?.username || ''}
-              tenantId={user?.tenantId || 'default'}
+              tenantid={user?.tenantid || 'default'}
               onBack={() => {
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');

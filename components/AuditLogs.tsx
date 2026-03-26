@@ -43,10 +43,10 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
 
   useEffect(() => {
     const loadLogs = async () => {
-      if (databaseMode === DatabaseMode.SUPABASE && user?.tenantId) {
+      if (databaseMode === DatabaseMode.SUPABASE && user?.tenantid) {
         setLoading(true);
         try {
-          const data = await fetchAuditLogs(user.tenantId);
+          const data = await fetchAuditLogs(user.tenantid);
           setLogs(data as unknown as AuditLogDB[]);
         } catch (error) {
           console.error('Erro ao carregar logs:', error);

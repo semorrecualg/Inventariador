@@ -116,8 +116,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           role: cloudUser.role as UserRole,
           isAdmin: cloudUser.isAdmin,
           mustChangePassword: false,
-          tenantId: cloudUser.tenantId || 'default',
-          tenants: cloudUser.tenants || [cloudUser.tenantId || 'default']
+          tenantid: cloudUser.tenantid || 'default',
+          tenants: cloudUser.tenants || [cloudUser.tenantid || 'default']
         };
         localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
         onLogin(loggedUser);
@@ -243,8 +243,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           role: cloudUser.role as UserRole,
           isAdmin: cloudUser.isAdmin,
           mustChangePassword: false,
-          tenantId: cloudUser.tenantId || 'default',
-          tenants: cloudUser.tenants || [cloudUser.tenantId || 'default']
+          tenantid: cloudUser.tenantid || 'default',
+          tenants: cloudUser.tenants || [cloudUser.tenantid || 'default']
         };
       } else {
         console.log('[Login] Autenticando via Banco Interno...');
@@ -271,7 +271,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno'}`,
-          tenant_id: loggedUser.tenantId
+          tenant_id: loggedUser.tenantid
         });
 
         onLogin(loggedUser);

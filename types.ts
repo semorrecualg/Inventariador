@@ -14,8 +14,8 @@ export interface User {
   role: UserRole;
   isAdmin?: boolean; // Mantido para compatibilidade
   mustChangePassword?: boolean;
-  tenantId?: string; // ID da ORGANIZAÇÃO (ex: CICOPAL)
-  unitId?: string;   // Unidade Operacional Padrão
+  tenantid?: string; // ID da ORGANIZAÇÃO (ex: CICOPAL)
+  unitid?: string;   // Unidade Operacional Padrão
   units?: string[];  // Lista de Unidades Operacionais autorizadas
   tenants?: string[]; // Mantido para compatibilidade (será migrado para units)
 }
@@ -31,7 +31,7 @@ export interface AuditLogEntry {
   user: string;
   action: string;
   details?: string;
-  tenantId?: string;
+  tenantid?: string;
   origin?: TransactionOrigin;
 }
 
@@ -108,8 +108,8 @@ export interface Asset {
   _auditor?: string;
   _history?: AuditLogEntry[];
   _photoUrl?: string;
-  _tenantId?: string; // Organização
-  _unitId?: string;   // Unidade Operacional
+  _tenantid?: string; // Organização
+  _unitid?: string;   // Unidade Operacional
   _lat?: number;
   _lng?: number;
   _aprovado?: boolean;
@@ -142,7 +142,7 @@ export interface NCMClassifier {
   group_code: string; // Código do Grupo (4 dígitos)
   annual_depreciation_rate: number;
   useful_life_months: number;
-  _tenantId: string;
+  _tenantid: string;
 }
 
 export enum DepreciationMethod {
@@ -162,7 +162,7 @@ export interface AssetGroup {
   annual_depreciation_rate: number; // TAXA
   depreciation_method: DepreciationMethod; // TIPODEPREC
   useful_life_months: number;
-  _tenantId: string;
+  _tenantid: string;
 }
 
 export enum AccountType {
@@ -195,7 +195,7 @@ export interface ChartOfAccount {
   classification: AccountClassification; // CLASSIFICACAO
   referential_code?: string; // COD_REF (SPED)
   is_active: boolean; // STATUS
-  _tenantId: string;
+  _tenantid: string;
 }
 
 export interface AssetMovement {
@@ -208,7 +208,7 @@ export interface AssetMovement {
   value?: number;
   description?: string;
   user_email: string;
-  _tenantId: string;
+  _tenantid: string;
 }
 
 export interface DepreciationHistory {
@@ -219,7 +219,7 @@ export interface DepreciationHistory {
   depreciation_value: number;
   accumulated_depreciation: number;
   residual_value: number;
-  _tenantId: string;
+  _tenantid: string;
 }
 
 export enum AppScreen {
@@ -322,7 +322,7 @@ export interface InventoryState {
 export interface SyncQueueItem {
   id: string; // UUID interno da fila
   assetId: string;
-  tenantId: string;
+  tenantid: string;
   photoBlob: Blob;
   timestamp: number;
   attempts: number;
@@ -343,7 +343,7 @@ export interface InventoryCampaign {
   start_date: string;
   end_date?: string;
   status: CampaignStatus;
-  tenant_id: string;
+  tenantid: string;
   created_by: string;
   // Estatísticas calculadas
   total_assets?: number;

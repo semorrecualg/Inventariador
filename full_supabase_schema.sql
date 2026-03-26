@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS assets (
     _auditor TEXT,
     _history JSONB,
     _photoUrl TEXT,
-    _tenantId TEXT NOT NULL,
-    _unitId TEXT, -- Unidade Operacional
+    _tenantid TEXT NOT NULL,
+    _unitid TEXT, -- Unidade Operacional
     _lat DECIMAL(10,8),
     _lng DECIMAL(11,8),
     _aprovado BOOLEAN DEFAULT FALSE,
@@ -94,8 +94,8 @@ CREATE TABLE IF NOT EXISTS inventory_config (
     "protheusApiUrl" TEXT,
     "mandatoryPhotoOnDivergence" BOOLEAN,
     "mandatoryPhotoOnNewItem" BOOLEAN,
-    _tenantId TEXT,
-    _unitId TEXT, -- Unidade Operacional (opcional para config específica)
+    _tenantid TEXT,
+    _unitid TEXT, -- Unidade Operacional (opcional para config específica)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -105,8 +105,8 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT NOT NULL UNIQUE,
     "isAdmin" BOOLEAN DEFAULT FALSE,
-    tenantId TEXT, -- ID da Organização (ex: CICOPAL)
-    unitId TEXT,   -- Unidade Operacional Padrão
+    tenantid TEXT, -- ID da Organização (ex: CICOPAL)
+    unitid TEXT,   -- Unidade Operacional Padrão
     units TEXT[],  -- Lista de Unidades Operacionais autorizadas
     tenants TEXT[], -- Mantido para compatibilidade
     username TEXT,
@@ -127,9 +127,9 @@ CREATE TABLE IF NOT EXISTS chart_of_accounts (
     classification TEXT NOT NULL, -- 'ATIVO', 'PASSIVO', etc.
     referential_code TEXT,
     is_active BOOLEAN DEFAULT TRUE,
-    _tenantId TEXT NOT NULL,
+    _tenantid TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(code, _tenantId)
+    UNIQUE(code, _tenantid)
 );
 
 -- 5. Tabela de Grupos Contábeis (Bens)
@@ -143,9 +143,9 @@ CREATE TABLE IF NOT EXISTS asset_groups (
     annual_depreciation_rate DECIMAL(5,2) NOT NULL,
     depreciation_method TEXT NOT NULL,
     useful_life_months INTEGER NOT NULL,
-    _tenantId TEXT NOT NULL,
+    _tenantid TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(group_code, _tenantId)
+    UNIQUE(group_code, _tenantid)
 );
 
 -- 6. Tabela de Classificador NCM
@@ -156,9 +156,9 @@ CREATE TABLE IF NOT EXISTS ncm_classifiers (
     group_code TEXT NOT NULL,
     annual_depreciation_rate DECIMAL(5,2) NOT NULL,
     useful_life_months INTEGER NOT NULL,
-    _tenantId TEXT NOT NULL,
+    _tenantid TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(ncm_code, _tenantId)
+    UNIQUE(ncm_code, _tenantid)
 );
 
 -- 7. Tabela de Movimentações de Ativos
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS asset_movements (
     value DECIMAL(15,2),
     description TEXT,
     user_email TEXT,
-    _tenantId TEXT NOT NULL,
+    _tenantid TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -185,15 +185,15 @@ CREATE TABLE IF NOT EXISTS asset_depreciation_history (
     depreciation_value DECIMAL(15,2) NOT NULL,
     accumulated_depreciation DECIMAL(15,2) NOT NULL,
     residual_value DECIMAL(15,2) NOT NULL,
-    _tenantId TEXT NOT NULL,
+    _tenantid TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(asset_id, period_month, period_year, _tenantId)
+    UNIQUE(asset_id, period_month, period_year, _tenantid)
 );
 
 -- 9. Índices para Performance
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets("ETIQUETA");
-CREATE INDEX IF NOT EXISTS idx_assets_tenant ON assets(_tenantId);
-CREATE INDEX IF NOT EXISTS idx_config_tenant ON inventory_config(_tenantId);
+CREATE INDEX IF NOT EXISTS idx_assets_tenant ON assets(_tenantid);
+CREATE INDEX IF NOT EXISTS idx_config_tenant ON inventory_config(_tenantid);
 CREATE INDEX IF NOT EXISTS idx_accounts_code ON chart_of_accounts(code);
 CREATE INDEX IF NOT EXISTS idx_groups_code ON asset_groups(group_code);
 CREATE INDEX IF NOT EXISTS idx_ncm_code ON ncm_classifiers(ncm_code);
@@ -213,7 +213,7 @@ ALTER TABLE asset_depreciation_history ENABLE ROW LEVEL SECURITY;
 
 -- Funções Auxiliares para RLS
 CREATE OR REPLACE FUNCTION get_auth_tenant() RETURNS TEXT AS $$
-  SELECT (auth.jwt() -> 'user_metadata' ->> 'tenantId')::TEXT;
+  SELECT (auth.jwt() -> 'user_metadata' ->> 'tenantid')::TEXT;
 $$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION is_admin() RETURNS BOOLEAN AS $$
@@ -224,42 +224,42 @@ $$ LANGUAGE sql STABLE;
 DROP POLICY IF EXISTS "Permitir acesso total" ON assets;
 CREATE POLICY "Tenant Isolation: Assets" ON assets 
 FOR ALL TO authenticated 
-USING (_tenantId = get_auth_tenant())
-WITH CHECK (_tenantId = get_auth_tenant());
+USING (_tenantid = get_auth_tenant())
+WITH CHECK (_tenantid = get_auth_tenant());
 
 -- Políticas para INVENTORY_CONFIG
 DROP POLICY IF EXISTS "Permitir acesso total" ON inventory_config;
 CREATE POLICY "Tenant Isolation: Config" ON inventory_config 
 FOR ALL TO authenticated 
-USING (_tenantId = get_auth_tenant() OR id = 'global_config')
-WITH CHECK (_tenantId = get_auth_tenant());
+USING (_tenantid = get_auth_tenant() OR id = 'global_config')
+WITH CHECK (_tenantid = get_auth_tenant());
 
 -- Políticas para USER_PERMISSIONS
 DROP POLICY IF EXISTS "Permitir acesso total" ON user_permissions;
 CREATE POLICY "Self Read: Permissions" ON user_permissions 
 FOR SELECT TO authenticated 
-USING (id = auth.uid() OR (tenantId = get_auth_tenant() AND is_admin()));
+USING (id = auth.uid() OR (tenantid = get_auth_tenant() AND is_admin()));
 
 CREATE POLICY "Admin Manage: Permissions" ON user_permissions 
 FOR ALL TO authenticated 
-USING (tenantId = get_auth_tenant() AND is_admin())
-WITH CHECK (tenantId = get_auth_tenant() AND is_admin());
+USING (tenantid = get_auth_tenant() AND is_admin())
+WITH CHECK (tenantid = get_auth_tenant() AND is_admin());
 
 -- Políticas para Tabelas Contábeis (Tenant Isolation)
 DROP POLICY IF EXISTS "Permitir acesso total" ON chart_of_accounts;
-CREATE POLICY "Tenant Isolation: Accounts" ON chart_of_accounts FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Accounts" ON chart_of_accounts FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_groups;
-CREATE POLICY "Tenant Isolation: Groups" ON asset_groups FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Groups" ON asset_groups FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON ncm_classifiers;
-CREATE POLICY "Tenant Isolation: NCM" ON ncm_classifiers FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: NCM" ON ncm_classifiers FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_movements;
-CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_depreciation_history;
-CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (_tenantId = get_auth_tenant()) WITH CHECK (_tenantId = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
 
 -- ==========================================
 -- POLÍTICAS DE STORAGE (ASSET PHOTOS)

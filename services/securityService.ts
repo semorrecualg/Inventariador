@@ -107,18 +107,45 @@ class EncryptionProvider {
 
   async decrypt(encryptedData: Uint8Array | string): Promise<unknown> {
     try {
+      if (!encryptedData) return null;
+
+      // Se for string, pode ser JSON legado (não criptografado) ou Base64 criptografado
+      if (typeof encryptedData === 'string') {
+        const trimmed = encryptedData.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            return JSON.parse(trimmed);
+          } catch {
+            // Se falhar o parse, continua tentando decriptografar como Base64
+          }
+        }
+      }
+
       const key = await this.generateKey();
       let combined: Uint8Array;
 
       if (typeof encryptedData === 'string') {
-        // Suporte legado para Base64
-        combined = new Uint8Array(
-          atob(encryptedData)
-            .split('')
-            .map(c => c.charCodeAt(0))
-        );
+        try {
+          // Suporte legado para Base64
+          combined = new Uint8Array(
+            atob(encryptedData)
+              .split('')
+              .map(c => c.charCodeAt(0))
+          );
+        } catch {
+          console.warn('Dados em string não são Base64 válido, tentando parse direto...');
+          try {
+            return JSON.parse(encryptedData);
+          } catch {
+            throw new Error('Formato de dados inválido para decriptografia');
+          }
+        }
       } else {
         combined = encryptedData;
+      }
+
+      if (combined.length < 13) { // IV(12) + pelo menos 1 byte de dado
+        throw new Error('Dados insuficientes para decriptografia');
       }
 
       const iv = combined.slice(0, 12);
@@ -133,7 +160,12 @@ class EncryptionProvider {
       const decoder = new TextDecoder();
       return JSON.parse(decoder.decode(decryptedContent));
     } catch (err) {
-      console.error('Falha na decriptografia de segurança:', err);
+      // Se for erro de autenticação do AES-GCM, a chave provavelmente mudou
+      if (err instanceof Error && err.name === 'OperationError') {
+        console.error('Falha na decriptografia: Chave de segurança inválida ou dados corrompidos.');
+      } else {
+        console.error('Falha na decriptografia de segurança:', err);
+      }
       return null;
     }
   }

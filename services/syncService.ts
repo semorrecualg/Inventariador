@@ -14,12 +14,12 @@ const queueStore = localforage.createInstance({
 /**
  * Adiciona uma foto à fila de sincronização offline
  */
-export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantId: string): Promise<string> => {
+export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantid: string): Promise<string> => {
   const id = crypto.randomUUID();
   const item: SyncQueueItem = {
     id,
     assetId,
-    tenantId,
+    tenantid,
     photoBlob,
     timestamp: Date.now(),
     attempts: 0
@@ -60,11 +60,11 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
   for (const item of items) {
     try {
       // Tenta o upload
-      const photoUrl = await uploadAssetPhoto(item.assetId, item.photoBlob, item.tenantId);
+      const photoUrl = await uploadAssetPhoto(item.assetId, item.photoBlob, item.tenantid);
       
       if (photoUrl) {
         // Atualiza o registro do ativo com a nova URL na nuvem
-        await updateAssetPhotoUrl(item.assetId, photoUrl, item.tenantId);
+        await updateAssetPhotoUrl(item.assetId, photoUrl, item.tenantid);
 
         // Sucesso: Remove da fila
         await queueStore.removeItem(item.id);

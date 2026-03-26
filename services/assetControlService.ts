@@ -4,14 +4,14 @@ import { AssetGroup, AssetMovement, DepreciationHistory, Asset, ChartOfAccount, 
 
 export const assetControlService = {
   // Plano de Contas
-  async getChartOfAccounts(tenantId: string | string[]): Promise<ChartOfAccount[]> {
+  async getChartOfAccounts(tenantid: string | string[]): Promise<ChartOfAccount[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
     let query = supabase.from('chart_of_accounts').select('*');
     
-    if (Array.isArray(tenantId)) {
-      query = query.in('_tenantId', tenantId);
+    if (Array.isArray(tenantid)) {
+      query = query.in('_tenantid', tenantid);
     } else {
-      query = query.eq('_tenantId', tenantId);
+      query = query.eq('_tenantid', tenantid);
     }
     
     const { data, error } = await query.order('code', { ascending: true });
@@ -40,14 +40,14 @@ export const assetControlService = {
   },
 
   // Grupos Contábeis (Bens)
-  async getAssetGroups(tenantId: string | string[]): Promise<AssetGroup[]> {
+  async getAssetGroups(tenantid: string | string[]): Promise<AssetGroup[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
     let query = supabase.from('asset_groups').select('*');
     
-    if (Array.isArray(tenantId)) {
-      query = query.in('_tenantId', tenantId);
+    if (Array.isArray(tenantid)) {
+      query = query.in('_tenantid', tenantid);
     } else {
-      query = query.eq('_tenantId', tenantId);
+      query = query.eq('_tenantid', tenantid);
     }
     
     const { data, error } = await query;
@@ -76,14 +76,14 @@ export const assetControlService = {
   },
 
   // Classificador NCM
-  async getNCMClassifiers(tenantId: string | string[]): Promise<NCMClassifier[]> {
+  async getNCMClassifiers(tenantid: string | string[]): Promise<NCMClassifier[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
     let query = supabase.from('ncm_classifiers').select('*');
     
-    if (Array.isArray(tenantId)) {
-      query = query.in('_tenantId', tenantId);
+    if (Array.isArray(tenantid)) {
+      query = query.in('_tenantid', tenantid);
     } else {
-      query = query.eq('_tenantId', tenantId);
+      query = query.eq('_tenantid', tenantid);
     }
     
     const { data, error } = await query;
@@ -111,14 +111,14 @@ export const assetControlService = {
     if (error) throw error;
   },
 
-  async getNCMClassifierByCode(ncmCode: string, tenantId: string | string[]): Promise<NCMClassifier | null> {
+  async getNCMClassifierByCode(ncmCode: string, tenantid: string | string[]): Promise<NCMClassifier | null> {
     if (!supabase) throw new Error("Supabase não configurado.");
     let query = supabase.from('ncm_classifiers').select('*').eq('ncm_code', ncmCode);
     
-    if (Array.isArray(tenantId)) {
-      query = query.in('_tenantId', tenantId);
+    if (Array.isArray(tenantid)) {
+      query = query.in('_tenantid', tenantid);
     } else {
-      query = query.eq('_tenantId', tenantId);
+      query = query.eq('_tenantid', tenantid);
     }
     
     const { data, error } = await query.single();
@@ -128,13 +128,13 @@ export const assetControlService = {
   },
 
   // Movimentações
-  async getMovements(assetId: string, tenantId: string): Promise<AssetMovement[]> {
+  async getMovements(assetId: string, tenantid: string): Promise<AssetMovement[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
     const { data, error } = await supabase
       .from('asset_movements')
       .select('*')
       .eq('asset_id', assetId)
-      .eq('_tenantId', tenantId)
+      .eq('_tenantid', tenantid)
       .order('date', { ascending: false });
     
     if (error) throw error;
@@ -151,13 +151,13 @@ export const assetControlService = {
   },
 
   // Depreciação
-  async getDepreciationHistory(assetId: string, tenantId: string): Promise<DepreciationHistory[]> {
+  async getDepreciationHistory(assetId: string, tenantid: string): Promise<DepreciationHistory[]> {
     if (!supabase) throw new Error("Supabase não configurado.");
     const { data, error } = await supabase
       .from('asset_depreciation_history')
       .select('*')
       .eq('asset_id', assetId)
-      .eq('_tenantId', tenantId)
+      .eq('_tenantid', tenantid)
       .order('period_year', { ascending: false })
       .order('period_month', { ascending: false });
     

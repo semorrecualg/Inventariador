@@ -28,7 +28,7 @@ ON public.audit_logs
 FOR SELECT 
 USING (
     ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
-    AND (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId') OR tenant_id IS NULL)
+    AND (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') OR tenant_id IS NULL)
 );
 
 -- Usuários podem ver seus próprios logs
@@ -42,7 +42,7 @@ CREATE POLICY "System can insert audit logs"
 ON public.audit_logs 
 FOR INSERT 
 WITH CHECK (
-    tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId') 
+    tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') 
     OR tenant_id IS NULL -- Permite logs de sistema ou pré-autenticação
 );
 
@@ -68,7 +68,7 @@ BEGIN
             OLD.id::text,
             to_jsonb(OLD),
             to_jsonb(NEW),
-            NEW."_tenantId",
+            NEW."_tenantid",
             NEW."_origemTransacao"
         );
         RETURN NEW;
@@ -87,7 +87,7 @@ BEGIN
             'assets',
             OLD.id::text,
             to_jsonb(OLD),
-            OLD."_tenantId"
+            OLD."_tenantid"
         );
         RETURN OLD;
     ELSIF (TG_OP = 'INSERT') THEN
@@ -106,7 +106,7 @@ BEGIN
             'assets',
             NEW.id::text,
             to_jsonb(NEW),
-            NEW."_tenantId",
+            NEW."_tenantid",
             NEW."_origemTransacao"
         );
         RETURN NEW;
@@ -149,14 +149,14 @@ ALTER TABLE public.inventory_campaigns ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can view campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR SELECT 
-USING (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId'));
+USING (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid'));
 
 CREATE POLICY "Admins can manage campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR ALL 
 USING (
     ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
-    AND tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+    AND tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
 );
 
 -- 4. Adicionar coluna de campanha à tabela de ativos

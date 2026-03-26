@@ -342,7 +342,7 @@ interface InventoryProps {
   setIsInventorying: (val: boolean) => void;
   selectedUnit: string | null;
   onAddNewLocation: (newLocation: string) => void;
-  locationsWithStats: Record<string, { total: number; checked: number }>;
+  locationsWithStats: Record<string, { total: number; checked: number; displayName: string }>;
   scannerMode: ScannerMode;
   searchMode: InventorySearchMode;
   onUpdateSearchMode: (mode: InventorySearchMode) => void;
@@ -566,7 +566,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
-      const effectiveLoc = a._localMaster || a.ENDERECO || "";
+      const effectiveLoc = a._localMaster || a.ENDERECO || "SEM LOCAL";
       const locKey = normalizeKeyFast(effectiveLoc);
       
       if (locKey !== currentLocKey) continue;
@@ -581,17 +581,18 @@ const Inventory: React.FC<InventoryProps> = ({
       if (isConferido) {
         checked++;
         const tag = String(a.TAG_INVENTARIO || '').toUpperCase();
-        if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO) {
+        if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO || tag === TagInventario.RE_ADOTADO) {
           adopted++;
         } else if (tag === TagInventario.NOVO_ITEM) {
           novos++;
-        } else if (tag === TagInventario.CONFERIDO) {
+        } else {
+          // Qualquer outro status conferido (CONFERIDO, DIVERGÊNCIA, ETIQUETADO, etc.) conta como Próprio
           own++;
         }
       }
     }
 
-    const pending = total - (adopted + own + novos);
+    const pending = total - checked;
     return { total, checked, adopted, novos, own, pending };
   }, [assets, selectedLocation]);
 
@@ -884,8 +885,8 @@ const Inventory: React.FC<InventoryProps> = ({
         _conferido: true,
         _isNew: true,
         _localMaster: selectedLocation || "",
-        _tenantId: user?.tenantId || 'default',
-        _unitId: selectedUnit || user?.unitId || 'default'
+        _tenantid: user?.tenantid || 'default',
+        _unitid: selectedUnit || user?.unitid || 'default'
     } as Asset;
     
     onUpdateAsset(newAsset);
@@ -1190,17 +1191,18 @@ const Inventory: React.FC<InventoryProps> = ({
               <span>Criar Nova Localidade</span>
             </button>
             {Object.keys(locationsWithStats)
-              .filter(loc => normalizeKey(loc).includes(normalizeKey(locationSearchTerm)))
-              .sort()
-              .map(loc => {
-                const stats = locationsWithStats[loc];
+              .filter(locKey => normalizeKey(locationsWithStats[locKey].displayName).includes(normalizeKey(locationSearchTerm)))
+              .sort((a, b) => locationsWithStats[a].displayName.localeCompare(locationsWithStats[b].displayName))
+              .map(locKey => {
+                const stats = locationsWithStats[locKey];
+                const loc = stats.displayName;
                 const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
                 const isStarted = stats.checked > 0;
                 const isCompleted = progress === 100;
               
               return (
                 <button 
-                  key={loc} 
+                  key={locKey} 
                   disabled={isCompleted}
                   onClick={() => { 
                     setSelectedLocation(loc); 
@@ -1441,37 +1443,6 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             )}
 
-            {/* BARRA DE RESUMO DE AUDITORIA NO LOCAL */}
-            {activeFilter === 'checked' && filteredAssets.length > 0 && (
-              <div className="px-4 py-2 animate-fadeIn">
-                <div className="bg-white border border-border rounded-2xl p-3 flex items-center justify-between shadow-sm">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-accent-soft rounded-lg flex items-center justify-center text-accent">
-                      <MapPin size={16} />
-                    </div>
-                    <div>
-                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Auditoria no Local</p>
-                      <p className="text-[10px] font-bold text-ink uppercase tracking-tight">{selectedLocation}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-4 pr-2">
-                    <div className="text-right">
-                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Adotados</p>
-                      <p className="text-sm font-black text-accent leading-none mt-0.5">
-                        {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') !== normalizeKey(selectedLocation || '')).length}
-                      </p>
-                    </div>
-                    <div className="w-px h-6 bg-border" />
-                    <div className="text-right">
-                      <p className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Próprios</p>
-                      <p className="text-sm font-black text-success leading-none mt-0.5">
-                        {filteredAssets.filter(a => normalizeKey(a.ENDERECO || '') === normalizeKey(selectedLocation || '')).length}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {filteredAssets.length > 0 ? (
               <Virtuoso

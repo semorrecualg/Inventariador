@@ -60,7 +60,7 @@ interface AssetDetailProps {
   readOnly?: boolean;
   protheusIntegrationEnabled?: boolean;
   protheusApiUrl?: string;
-  tenantId?: string;
+  tenantid?: string;
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
 }
@@ -77,7 +77,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   readOnly = false,
   protheusIntegrationEnabled = false,
   protheusApiUrl = '',
-  tenantId = '',
+  tenantid = '',
   mandatoryPhotoOnDivergence = false,
   mandatoryPhotoOnNewItem = false
 }) => {
@@ -342,7 +342,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       
       // Adiciona à fila de sincronização offline (se não for modo INTERNO)
       // No modo INTERNO, o syncService pode ser ignorado ou usado como backup
-      await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantId || 'default');
+      await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantid || 'default');
 
       // Atualiza o estado local imediatamente com a URL do blob
       const updated = { ...workingAsset, _photoUrl: localUrl };

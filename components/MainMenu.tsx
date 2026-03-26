@@ -131,6 +131,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isGpsBypassed = false
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
@@ -235,7 +236,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </h1>
             <div className="flex items-center space-x-1 mt-0.5">
               <span className="text-[7px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-1 rounded border border-blue-100">
-                UNIDADE: {user?.tenantId || 'default'}
+                UNIDADE: {user?.tenantid || 'default'}
               </span>
               {user?.role === UserRole.ADMIN && (
                 <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-1 rounded border border-emerald-100">
@@ -275,6 +276,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {/* ACTION BUTTONS BAR */}
       <div className="px-5 py-3 bg-bg-main border-b border-border flex items-center justify-between overflow-x-auto no-scrollbar">
         <div className="flex items-center space-x-2">
+          <button 
+            onClick={() => setIsPreferencesMenuOpen(true)} 
+            className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
+            title="Ajustes e Preferências de Campo"
+          >
+            <SlidersHorizontal size={20} />
+          </button>
+
           {isAdmin && (
             <button 
               onClick={() => setIsDataMenuOpen(true)} 
@@ -354,7 +363,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Unidade Ativa</p>
-                <p className="text-[9px] font-black text-slate-900 truncate">{user?.tenantId || 'default'}</p>
+                <p className="text-[9px] font-black text-slate-900 truncate">{user?.tenantid || 'default'}</p>
               </div>
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Ativos na Nuvem</p>
@@ -454,7 +463,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><SlidersHorizontal size={16} /></div>
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Settings size={16} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Configurar Campos</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Controle de Edição</p>
@@ -495,30 +504,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><ShieldCheck size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Auto-Conferência</h4>
-                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Registro Automático no Scan</p>
-                  </div>
-                </div>
-                <div className="flex p-1 bg-white border border-slate-200 rounded-xl">
-                  <button 
-                    onClick={() => onUpdateAutoConfirm(true)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
-                  >
-                    SIM
-                  </button>
-                  <button 
-                    onClick={() => onUpdateAutoConfirm(false)}
-                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${!autoConfirmOnScan ? 'bg-slate-400 text-white shadow-md' : 'text-slate-400'}`}
-                  >
-                    NÃO
-                  </button>
-                </div>
-              </div>
-
-              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
-                <div className="flex items-center mb-3">
                   <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Tag size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Evidência Fotográfica</h4>
@@ -547,33 +532,120 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </div>
               
-
-              <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
+              {/* CONFIGURAÇÃO PROTHEUS */}
+              <div className="w-full p-4 bg-indigo-50 border border-indigo-100 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Vibrate size={16} /></div>
+                  <div className="w-8 h-8 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><ShieldCheck size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-indigo-900 uppercase tracking-tight">Módulo Protheus</h4>
+                    <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mt-0.5">Integração ERP SIGAATF</p>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest">Habilitar Módulo</span>
+                    <button 
+                      onClick={() => onUpdateProtheusIntegration(!protheusIntegrationEnabled)}
+                      className={`w-10 h-5 rounded-full relative transition-colors ${protheusIntegrationEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${protheusIntegrationEnabled ? 'left-6' : 'left-1'}`}  />
+                    </button>
+                  </div>
+
+                  {protheusIntegrationEnabled && (
+                    <div className="space-y-1 animate-fadeIn">
+                      <label className="block text-[8px] font-bold text-indigo-400 uppercase tracking-widest ml-1">VITE_PROTHEUS_API_URL</label>
+                      <input 
+                        type="text"
+                        value={protheusApiUrl}
+                        onChange={(e) => onUpdateProtheusApiUrl(e.target.value)}
+                        placeholder="https://api.empresa.com.br"
+                        className="w-full px-3 py-2 bg-white border border-indigo-100 rounded-xl text-[10px] font-bold text-indigo-900 outline-none focus:border-indigo-500 transition-all shadow-sm"
+                      />
+                    </div>
+                  )}
+
+                  <div className="p-2 bg-white/50 border border-indigo-100 rounded-lg">
+                    <p className="text-[7px] font-bold text-indigo-600 uppercase leading-relaxed tracking-wide">
+                      Atenção: A integração exige o campo <span className="text-indigo-900">Sn1_recno</span> na carga de dados.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Security Protocol</div>
+          </div>
+        </div>
+      )}
+
+      {isPreferencesMenuOpen && (
+        <div className="fixed inset-0 z-[10000] bg-slate-50/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
+          <div className="fixed top-8 left-6 z-[10001]">
+            <BackButton onClick={() => setIsPreferencesMenuOpen(false)} label="Voltar" />
+          </div>
+          <div className="w-full max-w-sm space-y-3">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-slate-200 shadow-lg overflow-hidden p-3 text-slate-400">
+                  <SlidersHorizontal size={32} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Ajustes de Campo</h2>
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-1.5">Preferências do Auditor</p>
+              </div>
+            
+            <div className="space-y-3 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
+              {/* AUTO CONFERENCIA */}
+              <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ShieldCheck size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Auto-Conferência</h4>
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Registro Automático no Scan</p>
+                  </div>
+                </div>
+                <div className="flex p-1 bg-slate-50 border border-slate-100 rounded-xl">
+                  <button 
+                    onClick={() => onUpdateAutoConfirm(true)}
+                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-white text-emerald-600 shadow-sm border border-emerald-100' : 'text-slate-400'}`}
+                  >
+                    LIGADO
+                  </button>
+                  <button 
+                    onClick={() => onUpdateAutoConfirm(false)}
+                    className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${!autoConfirmOnScan ? 'bg-white text-slate-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
+                  >
+                    DESLIGADO
+                  </button>
+                </div>
+              </div>
+
+              {/* FEEDBACK SCANNER */}
+              <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mr-4 border border-blue-100"><Vibrate size={16} /></div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Feedback do Scanner</h4>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Confirmação de Leitura</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 p-1 bg-white border border-slate-200 rounded-xl mb-2">
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 border border-slate-100 rounded-xl">
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.VIBRATE)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.VIBRATE ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.VIBRATE ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
                   >
                     <Vibrate size={12} />
                     <span>Vibrar</span>
                   </button>
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.SOUND)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.SOUND ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.SOUND ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
                   >
                     <Volume2 size={12} />
                     <span>Som (Bip)</span>
                   </button>
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.BOTH)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.BOTH ? 'bg-accent text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.BOTH ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
                   >
                     <div className="flex space-x-1">
                       <Vibrate size={10} />
@@ -583,130 +655,74 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </button>
                   <button 
                     onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.NONE)}
-                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.NONE ? 'bg-slate-400 text-white shadow-md' : 'text-slate-400'}`}
+                    className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.NONE ? 'bg-white text-slate-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
                   >
                     <X size={12} />
                     <span>Nenhum</span>
                   </button>
                 </div>
+              </div>
 
-                <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
-                  <div className="flex items-center mb-3">
-                    <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Battery size={16} /></div>
-                    <div className="flex-1">
-                      <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Otimização de Energia</h4>
-                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Performance e Bateria</p>
-                    </div>
+              {/* ENERGIA E TEMA */}
+              <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+                <div className="flex items-center mb-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-4 border ${darkMode ? 'bg-slate-800 text-yellow-400 border-slate-700' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
+                    {darkMode ? <Battery size={16} /> : <Battery size={16} />}
                   </div>
-                  <div className="space-y-2">
-                    <button 
-                      onClick={() => onUpdateDarkMode(!darkMode)}
-                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${darkMode ? 'bg-slate-800 border-slate-700 text-white shadow-md' : 'bg-white border-slate-200 text-slate-500'}`}
-                    >
-                      <div className="flex items-center">
-                        <div className={`w-6 h-6 rounded-md flex items-center justify-center mr-3 ${darkMode ? 'bg-slate-700 text-yellow-400' : 'bg-slate-100 text-slate-400'}`}>
-                          {darkMode ? '🌙' : '☀️'}
-                        </div>
-                        <span>Modo Escuro (OLED)</span>
-                      </div>
-                      <div className={`w-10 h-5 rounded-full relative transition-colors ${darkMode ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${darkMode ? 'left-6' : 'left-1'}`} />
-                      </div>
-                    </button>
-
-                    <button 
-                      onClick={() => onUpdateBatterySaver(!batterySaver)}
-                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${batterySaver ? 'bg-amber-50 border-amber-200 text-amber-700 shadow-md' : 'bg-white border-slate-200 text-slate-500'}`}
-                    >
-                      <div className="flex items-center">
-                        <div className={`w-6 h-6 rounded-md flex items-center justify-center mr-3 ${batterySaver ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
-                          <Battery size={14} />
-                        </div>
-                        <span>Economia de Bateria</span>
-                      </div>
-                      <div className={`w-10 h-5 rounded-full relative transition-colors ${batterySaver ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${batterySaver ? 'left-6' : 'left-1'}`} />
-                      </div>
-                    </button>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Energia e Visibilidade</h4>
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Performance e Bateria</p>
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => onUpdateDarkMode(!darkMode)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${darkMode ? 'bg-slate-800 border-slate-700 text-white shadow-md' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
+                  >
+                    <div className="flex items-center">
+                      <span className="mr-3">{darkMode ? '🌙' : '☀️'}</span>
+                      <span>Modo Escuro (OLED)</span>
+                    </div>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${darkMode ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${darkMode ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
 
-                {/* DOCUMENTAÇÃO */}
+                  <button 
+                    onClick={() => onUpdateBatterySaver(!batterySaver)}
+                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${batterySaver ? 'bg-amber-50 border-amber-100 text-amber-700 shadow-md' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
+                  >
+                    <div className="flex items-center">
+                      <Battery size={14} className="mr-3" />
+                      <span>Economia de Bateria</span>
+                    </div>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${batterySaver ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${batterySaver ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* DOCUMENTAÇÃO */}
+              <div className="grid grid-cols-2 gap-3">
                 <button 
                   onClick={() => setIsDocModalOpen(true)}
-                  className="w-full flex items-center p-4 bg-emerald-50 border border-emerald-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm mt-4"
+                  className="flex flex-col items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-center shadow-sm"
                 >
-                  <div className="w-8 h-8 bg-emerald-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><BookOpen size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-emerald-900 uppercase tracking-tight">Manual do Sistema</h4>
-                    <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-0.5">Documentação v24.50</p>
-                  </div>
-                  <ChevronRight size={14} className="text-emerald-300" />
+                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-2 border border-emerald-100"><BookOpen size={20} /></div>
+                  <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">Manual</h4>
                 </button>
 
                 <button 
                   onClick={() => window.open('/ajuda_sistema.html', '_blank')}
-                  className="w-full flex items-center p-4 bg-indigo-50 border border-indigo-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm mt-3"
+                  className="flex flex-col items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-center shadow-sm"
                 >
-                  <div className="w-8 h-8 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><ExternalLink size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-indigo-900 uppercase tracking-tight">POP Interativo</h4>
-                    <p className="text-[8px] font-bold text-indigo-600 uppercase tracking-widest mt-0.5">Guia de Nova Arquitetura</p>
-                  </div>
-                  <ChevronRight size={14} className="text-indigo-300" />
+                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-2 border border-indigo-100"><ExternalLink size={20} /></div>
+                  <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">Guia POP</h4>
                 </button>
-                
-                <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 flex items-start space-x-2">
-                  <Battery size={14} className="text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-[7px] font-bold text-amber-700 uppercase leading-relaxed tracking-wide">
-                    Dica: O uso de <span className="text-amber-900">SOM</span> consome menos bateria que o <span className="text-amber-900">VIBRAR</span>.
-                  </p>
-                </div>
-
-                {/* CONFIGURAÇÃO PROTHEUS */}
-                <div className="w-full p-4 bg-indigo-50 border border-indigo-100 rounded-2xl shadow-sm mt-4">
-                  <div className="flex items-center mb-3">
-                    <div className="w-8 h-8 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><ShieldCheck size={16} /></div>
-                    <div className="flex-1">
-                      <h4 className="text-[13px] font-bold text-indigo-900 uppercase tracking-tight">Módulo Protheus</h4>
-                      <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mt-0.5">Integração ERP SIGAATF</p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-indigo-100">
-                      <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest">Habilitar Módulo</span>
-                      <button 
-                        onClick={() => onUpdateProtheusIntegration(!protheusIntegrationEnabled)}
-                        className={`w-10 h-5 rounded-full relative transition-colors ${protheusIntegrationEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
-                      >
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${protheusIntegrationEnabled ? 'left-6' : 'left-1'}`}  />
-                      </button>
-                    </div>
-
-                    {protheusIntegrationEnabled && (
-                      <div className="space-y-1 animate-fadeIn">
-                        <label className="block text-[8px] font-bold text-indigo-400 uppercase tracking-widest ml-1">VITE_PROTHEUS_API_URL</label>
-                        <input 
-                          type="text"
-                          value={protheusApiUrl}
-                          onChange={(e) => onUpdateProtheusApiUrl(e.target.value)}
-                          placeholder="https://api.empresa.com.br"
-                          className="w-full px-3 py-2 bg-white border border-indigo-100 rounded-xl text-[10px] font-bold text-indigo-900 outline-none focus:border-indigo-500 transition-all shadow-sm"
-                        />
-                      </div>
-                    )}
-
-                    <div className="p-2 bg-white/50 border border-indigo-100 rounded-lg">
-                      <p className="text-[7px] font-bold text-indigo-600 uppercase leading-relaxed tracking-wide">
-                        Atenção: A integração exige o campo <span className="text-indigo-900">Sn1_recno</span> na carga de dados.
-                      </p>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
-            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Security Protocol</div>
+            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Personalization</div>
           </div>
         </div>
       )}

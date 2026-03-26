@@ -75,7 +75,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tenantId, setTenantId] = useState('');
+  const [tenantid, setTenantid] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,7 +86,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
     setError(null);
     setIsLoading(true);
 
-    if (!tenantId || tenantId.length < 3) {
+    if (!tenantid || tenantid.length < 3) {
       setError("O ID da Empresa deve ter pelo menos 3 caracteres.");
       setIsLoading(false);
       return;
@@ -103,7 +103,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
         finalEmail, 
         password, 
         username, 
-        tenantId.toLowerCase().trim(), 
+        tenantid.toLowerCase().trim(), 
         UserRole.ADMIN,
         name.trim()
       );
@@ -175,8 +175,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
           <input 
             type="text" 
             required
-            value={tenantId}
-            onChange={(e) => setTenantId(e.target.value.toLowerCase().replace(/\s/g, ''))}
+            value={tenantid}
+            onChange={(e) => setTenantid(e.target.value.toLowerCase().replace(/\s/g, ''))}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
             placeholder="EX: empresa_abc"
           />

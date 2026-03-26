@@ -39,22 +39,22 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
   }, [user]);
 
   const loadCampaigns = async () => {
-    if (user?.tenantId) {
+    if (user?.tenantid) {
       setLoading(true);
-      const data = await fetchCampaigns(user.tenantId);
+      const data = await fetchCampaigns(user.tenantid);
       setCampaigns(data);
       setLoading(false);
     }
   };
 
   const handleCreateCampaign = async () => {
-    if (!newCampaignName || !user?.tenantId) return;
+    if (!newCampaignName || !user?.tenantid) return;
 
     const newCampaign: Partial<InventoryCampaign> = {
       name: newCampaignName,
       description: newCampaignDesc,
       status: CampaignStatus.ACTIVE,
-      tenant_id: user.tenantId,
+      tenantid: user.tenantid,
       created_by: user.email,
       start_date: new Date().toISOString()
     };
@@ -80,9 +80,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    if (user?.tenantId) {
+    if (user?.tenantid) {
       setStatsLoading(true);
-      const campaignStats = await fetchCampaignStats(campaign.id, user.tenantId);
+      const campaignStats = await fetchCampaignStats(campaign.id, user.tenantid);
       setStats(campaignStats);
       setStatsLoading(false);
     }
