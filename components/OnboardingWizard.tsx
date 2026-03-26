@@ -19,89 +19,92 @@ interface OnboardingWizardProps {
   onCancel?: () => void;
 }
 
+const steps = [
+  {
+    title: "Bem-vindo ao GBR v25",
+    subtitle: "A solução definitiva para o controle de Ativo Imobilizado.",
+    description: "Estamos prontos para transformar a forma como sua empresa gerencia o patrimônio. Vamos configurar seu primeiro acesso.",
+    icon: <ShieldCheck size={48} className="text-phase-welcome" />,
+    color: "bg-phase-welcome"
+  },
+  {
+    title: "Modo INTERNO (Básico)",
+    subtitle: "Ideal para o primeiro contato e testes.",
+    description: "Nesta versão, você atua como um único auditor em campo. Todos os dados são salvos localmente no seu dispositivo. Perfeito para validar a usabilidade e o scanner.",
+    features: [
+      "1 Usuário Inventariador",
+      "Armazenamento Local",
+      "Carga Expert de Dados",
+      "Relatórios em Excel"
+    ],
+    icon: <Database size={48} className="text-phase-internal" />,
+    color: "bg-phase-internal"
+  },
+  {
+    title: "O Pulo do Gato: SUPABASE",
+    subtitle: "Colaboração em Tempo Real.",
+    description: "A versão PLUS libera o poder da nuvem. Vários auditores trabalhando de forma independente, mas com total integração dos dados em tempo real.",
+    features: [
+      "Multi-usuários (Auditores Auxiliares)",
+      "Sincronização em Nuvem",
+      "Dashboard Centralizado",
+      "Segurança de Nível Bancário"
+    ],
+    icon: <Cloud size={48} className="text-phase-supabase" />,
+    color: "bg-phase-supabase"
+  },
+  {
+    title: "Planos e Investimento",
+    subtitle: "Escolha a escala do seu projeto.",
+    description: "O GBR v25 oferece flexibilidade para pequenos inventários ou grandes operações corporativas. Escolha o modelo que melhor se adapta à sua necessidade.",
+    features: [
+      "Interno: Gratuito (Teste/Solo)",
+      "Plus: Assinatura Mensal (Equipes)",
+      "Enterprise: Sob Consulta (ERP/Protheus)",
+      "Suporte Especializado 24/7"
+    ],
+    icon: <Zap size={48} className="text-amber-500" />,
+    color: "bg-amber-500"
+  },
+  {
+    title: "Carga Expert de Dados",
+    subtitle: "Sua base de dados em segundos.",
+    description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Tenant ID (ID do locatário) será gerado automaticamente para sua empresa.",
+    icon: <FileSpreadsheet size={48} className="text-phase-data" />,
+    color: "bg-phase-data"
+  },
+  {
+    title: "Linguagem Visual GBR",
+    subtitle: "Cores que comunicam status.",
+    description: "Nosso sistema utiliza uma paleta inteligente para facilitar sua vida no campo. Cada cor tem um significado específico para status e conservação.",
+    features: [
+      "Verde: Conferido / Novo",
+      "Vermelho: Divergência / Inservível",
+      "Amarelo: Recuperável / Pendente",
+      "Azul: Novo Item / Bom"
+    ],
+    icon: <Palette size={48} className="text-accent" />,
+    color: "bg-accent"
+  },
+  {
+    title: "Tudo Pronto!",
+    subtitle: "Você começará na versão INTERNO.",
+    description: "Como administrador, você terá total controle. Explore as funcionalidades e, quando estiver pronto para escalar, ative o módulo SUPABASE.",
+    icon: <CheckCircle2 size={48} className="text-phase-welcome" />,
+    color: "bg-phase-welcome"
+  }
+];
+
 const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onCancel }) => {
   const [step, setStep] = useState(0);
-
-  const steps = [
-    {
-      title: "Bem-vindo ao GBR v25",
-      subtitle: "A solução definitiva para o controle de Ativo Imobilizado.",
-      description: "Estamos prontos para transformar a forma como sua empresa gerencia o patrimônio. Vamos configurar seu primeiro acesso.",
-      icon: <ShieldCheck size={48} className="text-phase-welcome" />,
-      color: "bg-phase-welcome"
-    },
-    {
-      title: "Modo INTERNO (Básico)",
-      subtitle: "Ideal para o primeiro contato e testes.",
-      description: "Nesta versão, você atua como um único auditor em campo. Todos os dados são salvos localmente no seu dispositivo. Perfeito para validar a usabilidade e o scanner.",
-      features: [
-        "1 Usuário Inventariador",
-        "Armazenamento Local",
-        "Carga Expert de Dados",
-        "Relatórios em Excel"
-      ],
-      icon: <Database size={48} className="text-phase-internal" />,
-      color: "bg-phase-internal"
-    },
-    {
-      title: "O Pulo do Gato: SUPABASE",
-      subtitle: "Colaboração em Tempo Real.",
-      description: "A versão PLUS libera o poder da nuvem. Vários auditores trabalhando de forma independente, mas com total integração dos dados em tempo real.",
-      features: [
-        "Multi-usuários (Auditores Auxiliares)",
-        "Sincronização em Nuvem",
-        "Dashboard Centralizado",
-        "Segurança de Nível Bancário"
-      ],
-      icon: <Cloud size={48} className="text-phase-supabase" />,
-      color: "bg-phase-supabase"
-    },
-    {
-      title: "Planos e Investimento",
-      subtitle: "Escolha a escala do seu projeto.",
-      description: "O GBR v25 oferece flexibilidade para pequenos inventários ou grandes operações corporativas. Escolha o modelo que melhor se adapta à sua necessidade.",
-      features: [
-        "Interno: Gratuito (Teste/Solo)",
-        "Plus: Assinatura Mensal (Equipes)",
-        "Enterprise: Sob Consulta (ERP/Protheus)",
-        "Suporte Especializado 24/7"
-      ],
-      icon: <Zap size={48} className="text-amber-500" />,
-      color: "bg-amber-500"
-    },
-    {
-      title: "Carga Expert de Dados",
-      subtitle: "Sua base de dados em segundos.",
-      description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Tenant ID (ID do locatário) será gerado automaticamente para sua empresa.",
-      icon: <FileSpreadsheet size={48} className="text-phase-data" />,
-      color: "bg-phase-data"
-    },
-    {
-      title: "Linguagem Visual GBR",
-      subtitle: "Cores que comunicam status.",
-      description: "Nosso sistema utiliza uma paleta inteligente para facilitar sua vida no campo. Cada cor tem um significado específico para status e conservação.",
-      features: [
-        "Verde: Conferido / Novo",
-        "Vermelho: Divergência / Inservível",
-        "Amarelo: Recuperável / Pendente",
-        "Azul: Novo Item / Bom"
-      ],
-      icon: <Palette size={48} className="text-accent" />,
-      color: "bg-accent"
-    },
-    {
-      title: "Tudo Pronto!",
-      subtitle: "Você começará na versão INTERNO.",
-      description: "Como administrador, você terá total controle. Explore as funcionalidades e, quando estiver pronto para escalar, ative o módulo SUPABASE.",
-      icon: <CheckCircle2 size={48} className="text-phase-welcome" />,
-      color: "bg-phase-welcome"
-    }
-  ];
+  console.log("OnboardingWizard render - step:", step);
 
   const nextStep = () => {
+    console.log("Onboarding nextStep - current step:", step, "total steps:", steps.length);
     if (step < steps.length - 1) {
       setStep(step + 1);
     } else {
+      console.log("Onboarding calling onComplete()");
       onComplete();
     }
   };

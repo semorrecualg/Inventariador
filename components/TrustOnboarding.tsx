@@ -216,10 +216,14 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
 
           <button
             onClick={() => {
+              console.log("TrustOnboarding click - step:", step, "acceptedTerms:", acceptedTerms);
               if (step < steps.length) {
                 setStep(step + 1);
               } else if (acceptedTerms) {
+                console.log("TrustOnboarding calling onAccept()");
                 onAccept();
+              } else {
+                console.log("TrustOnboarding cannot call onAccept - terms not accepted");
               }
             }}
             disabled={step === steps.length && !acceptedTerms}

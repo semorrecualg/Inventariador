@@ -190,7 +190,46 @@ CREATE TABLE IF NOT EXISTS asset_depreciation_history (
     UNIQUE(asset_id, period_month, period_year, _tenantid)
 );
 
--- 9. Índices para Performance
+-- 9. Tabela de Logs de Auditoria (Sistema)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    user_email TEXT NOT NULL,
+    action TEXT NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'EXPORT', 'BULK_UPDATE'
+    table_name TEXT,
+    record_id TEXT,
+    old_data JSONB,
+    new_data JSONB,
+    details TEXT,
+    tenant_id TEXT,
+    origin TEXT -- 'INVENTORY', 'LABELING', 'ACCOUNT_RECONCILIATION'
+);
+
+-- 10. Tabela de Logs de Ativos (Histórico Específico)
+CREATE TABLE IF NOT EXISTS asset_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    asset_id TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    action TEXT NOT NULL, -- 'CREATE', 'UPDATE', 'DELETE', 'IMPAIRMENT_TEST'
+    old_data JSONB,
+    new_data JSONB,
+    tenant_id TEXT,
+    timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. Tabela de Campanhas de Inventário
+CREATE TABLE IF NOT EXISTS inventory_campaigns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    description TEXT,
+    start_date TIMESTAMPTZ DEFAULT NOW(),
+    end_date TIMESTAMPTZ,
+    status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'CLOSED', 'ARCHIVED'
+    tenant_id TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+-- 12. Índices para Performance
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets("ETIQUETA");
 CREATE INDEX IF NOT EXISTS idx_assets_tenant ON assets(_tenantid);
 CREATE INDEX IF NOT EXISTS idx_config_tenant ON inventory_config(_tenantid);
@@ -210,6 +249,9 @@ ALTER TABLE asset_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ncm_classifiers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE asset_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE asset_depreciation_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory_campaigns ENABLE ROW LEVEL SECURITY;
 
 -- Funções Auxiliares para RLS
 CREATE OR REPLACE FUNCTION get_auth_tenant() RETURNS TEXT AS $$
@@ -260,6 +302,34 @@ CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authen
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_depreciation_history;
 CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+
+-- Políticas para AUDIT_LOGS
+CREATE POLICY "Tenant Isolation: Audit Logs" ON audit_logs 
+FOR SELECT TO authenticated 
+USING (tenant_id = get_auth_tenant() OR (user_email = auth.jwt() ->> 'email'));
+
+CREATE POLICY "System Insert: Audit Logs" ON audit_logs 
+FOR INSERT TO authenticated 
+WITH CHECK (tenant_id = get_auth_tenant() OR tenant_id IS NULL);
+
+-- Políticas para ASSET_LOGS
+CREATE POLICY "Tenant Isolation: Asset Logs" ON asset_logs 
+FOR SELECT TO authenticated 
+USING (tenant_id = get_auth_tenant());
+
+CREATE POLICY "System Insert: Asset Logs" ON asset_logs 
+FOR INSERT TO authenticated 
+WITH CHECK (tenant_id = get_auth_tenant());
+
+-- Políticas para INVENTORY_CAMPAIGNS
+CREATE POLICY "Tenant Isolation: Campaigns" ON inventory_campaigns 
+FOR SELECT TO authenticated 
+USING (tenant_id = get_auth_tenant());
+
+CREATE POLICY "Admin Manage: Campaigns" ON inventory_campaigns 
+FOR ALL TO authenticated 
+USING (tenant_id = get_auth_tenant() AND is_admin())
+WITH CHECK (tenant_id = get_auth_tenant() AND is_admin());
 
 -- ==========================================
 -- POLÍTICAS DE STORAGE (ASSET PHOTOS)

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building, RefreshCw, Cloud } from 'lucide-react';
+import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
 
 interface UnitSelectorProps {
@@ -89,59 +90,63 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar p-5">
-        <div className="grid grid-cols-1 gap-3 pb-24">
-          {filteredUnits.length > 0 ? (
-            filteredUnits.map((unit) => {
+      <div className="flex-1 overflow-hidden bg-bg-main relative">
+        {filteredUnits.length > 0 ? (
+          <Virtuoso
+            style={{ height: '100%' }}
+            data={filteredUnits}
+            itemContent={(index, unit) => {
               const { style, Icon } = getUnitIdentity(unit.name, unit.hasData);
               return (
-                <button
-                   key={unit.name}
-                   onClick={() => unit.hasData && onSelect(unit.name)}
-                   disabled={!unit.hasData}
-                   className={`bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border transition-all group overflow-hidden relative modern-card ${
-                     unit.hasData 
-                       ? 'hover:border-accent active:scale-[0.99] border-border' 
-                       : 'opacity-60 cursor-not-allowed border-slate-100'
-                   }`}
-                 >
-                   <div className="flex items-center space-x-4 relative z-10">
-                     <div className={`w-12 h-12 ${style} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border`}>
-                       <Icon size={24} strokeWidth={2.5} />
-                     </div>
-                     <div className="text-left">
-                       <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
-                         {unit.name}
-                       </h4>
-                       <div className="flex items-center space-x-1.5 mt-1">
-                          <div className={`w-1.5 h-1.5 rounded-full shadow-sm ${unit.hasData ? 'bg-success shadow-success/50' : 'bg-slate-300'}`}></div>
-                          <span className={`text-[9px] font-bold uppercase tracking-widest ${unit.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
-                            {unit.hasData ? 'Base Master Disponível' : 'Sem Itens Ativos'}
-                          </span>
-                       </div>
-                     </div>
-                   </div>
-                   <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors relative z-10 ${
-                     unit.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
-                   }`}>
-                     <CheckCircle2 size={24} />
-                   </div>
-                 </button>
-               );
-             })
-           ) : isSyncing ? (
-             <div className="flex flex-col items-center justify-center py-16">
-               <RefreshCw size={60} className="text-accent animate-spin" />
-               <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-accent">Sincronizando Unidades...</p>
-             </div>
-           ) : (
-             <div className="flex flex-col items-center justify-center py-16 opacity-20">
-               <Building2 size={60} className="text-slate-300" />
-               <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-slate-400">Unidade não encontrada</p>
-             </div>
-           )}
-         </div>
-       </div>
+                <div className="px-5 py-1.5">
+                  <button
+                    key={unit.name}
+                    onClick={() => unit.hasData && onSelect(unit.name)}
+                    disabled={!unit.hasData}
+                    className={`w-full bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border transition-all group overflow-hidden relative modern-card ${
+                      unit.hasData 
+                        ? 'hover:border-accent active:scale-[0.99] border-border' 
+                        : 'opacity-60 cursor-not-allowed border-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-4 relative z-10">
+                      <div className={`w-12 h-12 ${style} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border`}>
+                        <Icon size={24} strokeWidth={2.5} />
+                      </div>
+                      <div className="text-left">
+                        <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
+                          {unit.name}
+                        </h4>
+                        <div className="flex items-center space-x-1.5 mt-1">
+                           <div className={`w-1.5 h-1.5 rounded-full shadow-sm ${unit.hasData ? 'bg-success shadow-success/50' : 'bg-slate-300'}`}></div>
+                           <span className={`text-[9px] font-bold uppercase tracking-widest ${unit.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
+                             {unit.hasData ? 'Base Master Disponível' : 'Sem Itens Ativos'}
+                           </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors relative z-10 ${
+                      unit.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
+                    }`}>
+                      <CheckCircle2 size={24} />
+                    </div>
+                  </button>
+                </div>
+              );
+            }}
+          />
+        ) : isSyncing ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <RefreshCw size={60} className="text-accent animate-spin" />
+            <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-accent">Sincronizando Unidades...</p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 opacity-20">
+            <Building2 size={60} className="text-slate-300" />
+            <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-slate-400">Unidade não encontrada</p>
+          </div>
+        )}
+      </div>
 
        {/* Info Bar Técnica */}
        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-xl border-t border-border flex justify-between items-center z-50 shadow-lg">

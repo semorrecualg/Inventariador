@@ -54,6 +54,35 @@ export const logAuditEvent = async (entry: {
   }
 };
 
+/**
+ * Registra uma alteração específica de um ativo na tabela asset_logs
+ */
+export const logAssetChange = async (entry: {
+  asset_id: string;
+  user_email: string;
+  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPAIRMENT_TEST';
+  old_data?: unknown;
+  new_data?: unknown;
+  tenant_id?: string;
+}) => {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase
+      .from('asset_logs')
+      .insert([{
+        ...entry,
+        timestamp: new Date().toISOString()
+      }]);
+
+    if (error) {
+      console.error('Erro ao registrar log de ativo:', error);
+    }
+  } catch (err) {
+    console.error('Erro inesperado ao registrar log de ativo:', err);
+  }
+};
+
 export const signUp = async (email: string, password: string, username: string, tenantid: string, role: string = 'ADMIN', name?: string, unitid?: string, units?: string[]) => {
   if (!supabase) throw new Error("Supabase não configurado.");
   
@@ -1112,6 +1141,37 @@ export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promi
     return (data || []) as Record<string, unknown>[];
   } catch (err) {
     console.error('Erro inesperado ao buscar logs:', err);
+    return [];
+  }
+};
+
+/**
+ * Busca os logs específicos de ativos (asset_logs) do Supabase
+ */
+export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promise<Record<string, unknown>[]> => {
+  if (!supabase) return [];
+
+  try {
+    let query = supabase
+      .from('asset_logs')
+      .select('*')
+      .eq('tenant_id', tenantid)
+      .order('timestamp', { ascending: false });
+
+    if (assetId) {
+      query = query.eq('asset_id', assetId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Erro ao buscar logs de ativos:', error);
+      return [];
+    }
+
+    return (data || []) as Record<string, unknown>[];
+  } catch (err) {
+    console.error('Erro inesperado ao buscar logs de ativos:', err);
     return [];
   }
 };

@@ -79,7 +79,7 @@ interface MainMenuProps {
   mandatoryPhotoOnNewItem: boolean;
   onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
   pendingPhotosCount?: number;
-  onProcessSyncQueue?: () => void;
+  syncQueueLength?: number;
   onResetGPS?: () => void;
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
@@ -125,7 +125,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   mandatoryPhotoOnNewItem,
   onUpdateMandatoryPhotoOnNewItem,
   pendingPhotosCount = 0,
-  onProcessSyncQueue,
+  syncQueueLength = 0,
   onResetGPS,
   onToggleGpsBypass,
   isGpsBypassed = false
@@ -173,17 +173,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 ? 'bg-blue-50 border-blue-100 text-blue-500 animate-pulse' 
                 : syncError 
                   ? 'bg-red-50 border-red-100 text-red-500' 
-                  : 'bg-emerald-50 border-emerald-100 text-emerald-500'
+                  : syncQueueLength > 0
+                    ? 'bg-amber-50 border-amber-100 text-amber-500'
+                    : 'bg-emerald-50 border-emerald-100 text-emerald-500'
             }`}>
               {isSyncing ? (
                 <Cloud size={10} className="animate-bounce" />
               ) : syncError ? (
                 <X size={10} />
+              ) : syncQueueLength > 0 ? (
+                <RefreshCw size={10} className="animate-spin-slow" />
               ) : (
                 <ShieldCheck size={10} />
               )}
               <span className="text-[8px] font-black uppercase tracking-tighter">
-                {isSyncing ? 'SINCRONIZANDO' : syncError ? 'ERRO' : 'SINCRONIZADO'}
+                {isSyncing ? 'SINCRONIZANDO' : syncError ? 'ERRO' : syncQueueLength > 0 ? `${syncQueueLength} PENDENTES` : 'SINCRONIZADO'}
               </span>
             </div>
           )}
@@ -313,9 +317,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
           )}
           {pendingPhotosCount > 0 && (
             <button 
-              onClick={onProcessSyncQueue}
+              onClick={() => onNavigate(AppScreen.SYNC_MANAGER)}
               className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600 active:scale-90 transition-all shadow-sm hover:bg-amber-100 flex items-center space-x-2 animate-pulse"
-              title="Sincronizar Fotos Pendentes"
+              title="Gerenciar Sincronização de Fotos"
             >
               <Cloud size={20} />
               <span className="text-[10px] font-black">{pendingPhotosCount}</span>
@@ -499,6 +503,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Eventos</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Campanhas de Inventário</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Cloud size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Sincronização</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Fila Offline</p>
                 </div>
               </button>
 

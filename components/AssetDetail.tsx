@@ -24,6 +24,8 @@ import {
   QrCode,
   Loader2,
   Camera,
+  X,
+  ChevronRight,
   Image as ImageIcon,
   Trash2,
   History
@@ -34,6 +36,8 @@ import { compressImage } from '../utils/imageUtils';
 import { addToSyncQueue } from '../services/syncService';
 import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
 import { createWorker } from 'tesseract.js';
+
+import { reverseGeocode } from '../services/geocodingService';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -90,43 +94,142 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [ocrResults, setOcrResults] = useState<string[]>([]);
   const ocrInputRef = React.useRef<HTMLInputElement>(null);
   const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
+  const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
+  const [impairmentData, setImpairmentData] = useState({
+    valorJusto: workingAsset._valor_justo || 0,
+    valorEmUso: workingAsset._valor_em_uso || 0
+  });
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !ocrTargetField) return;
 
     setIsOCRProcessing(true);
+    setOcrResults([]);
     try {
-      const worker = await createWorker('eng');
+      // Usar português e inglês para melhor reconhecimento de caracteres
+      const worker = await createWorker('por+eng');
       const { data: { text } } = await worker.recognize(file);
       await worker.terminate();
 
-      // Limpeza básica do texto (remover espaços extras, quebras de linha)
+      // 1. Limpeza e Normalização
       const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
       
-      // Atualizar o ativo com o texto reconhecido
-      const updates = { ...workingAsset };
-      updates[ocrTargetField] = cleanedText;
-      setWorkingAsset(updates);
+      // 2. Extração Inteligente com Regex (Filtro de Ruído)
+      const patterns = {
+        plaqueta: /\b\d{6}\b/g, // Padrão GBR: 6 dígitos numéricos
+        serial: /\b[A-Z0-9-]{6,20}\b/g, // Alfanumérico longo para Seriais
+        geral: /\b[A-Z0-9]{4,}\b/g // Qualquer termo com 4+ caracteres (ignora ruídos pequenos)
+      };
+
+      const foundMatches: string[] = [];
       
-      // Se estiver editando esse campo, atualizar o valor da edição
-      if (editingField === ocrTargetField) {
-        setEditValue(cleanedText);
+      // Prioridade por contexto do campo alvo
+      if (ocrTargetField === 'ETIQUETA') {
+        const plaquetaMatches = cleanedText.match(patterns.plaqueta);
+        if (plaquetaMatches) foundMatches.push(...plaquetaMatches);
+      } else if (ocrTargetField === 'SERIAL') {
+        const serialMatches = cleanedText.match(patterns.serial);
+        if (serialMatches) foundMatches.push(...serialMatches);
+      }
+
+      // Adicionar matches genéricos se não houver específicos ou para dar opções
+      const genericMatches = cleanedText.match(patterns.geral);
+      if (genericMatches) {
+        // Filtrar matches genéricos que já estão na lista ou que parecem ruído excessivo
+        genericMatches.forEach(m => {
+          if (!foundMatches.includes(m) && m.length < 25) {
+            foundMatches.push(m);
+          }
+        });
+      }
+
+      const uniqueMatches = Array.from(new Set(foundMatches));
+
+      if (uniqueMatches.length === 1) {
+        // Único resultado: Aplicar direto (Preenchimento Automático)
+        const result = uniqueMatches[0];
+        const updates = { ...workingAsset };
+        updates[ocrTargetField] = result;
+        setWorkingAsset(updates);
+        if (editingField === ocrTargetField) setEditValue(result);
+        setOcrTargetField(null);
+      } else if (uniqueMatches.length > 1) {
+        // Múltiplos resultados: Abrir interface de escolha
+        setOcrResults(uniqueMatches);
+      } else {
+        // Nenhum padrão: Usar o texto bruto limpo
+        const updates = { ...workingAsset };
+        updates[ocrTargetField] = cleanedText.substring(0, 50);
+        setWorkingAsset(updates);
+        if (editingField === ocrTargetField) setEditValue(cleanedText.substring(0, 50));
+        setOcrTargetField(null);
       }
     } catch (err) {
       console.error('Erro no OCR:', err);
     } finally {
       setIsOCRProcessing(false);
-      setOcrTargetField(null);
       if (ocrInputRef.current) ocrInputRef.current.value = '';
     }
+  };
+
+  const selectOCRResult = (val: string) => {
+    if (!ocrTargetField) return;
+    const updates = { ...workingAsset };
+    updates[ocrTargetField] = val;
+    setWorkingAsset(updates);
+    if (editingField === ocrTargetField) setEditValue(val);
+    setOcrResults([]);
+    setOcrTargetField(null);
   };
 
   const triggerOCR = (field: string) => {
     setOcrTargetField(field);
     ocrInputRef.current?.click();
+  };
+
+  const handleReverseGeocoding = async (field: string) => {
+    if (!navigator.geolocation) {
+      alert('Geolocalização não suportada pelo seu navegador.');
+      return;
+    }
+
+    setIsGeocoding(true);
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const result = await reverseGeocode(latitude, longitude);
+          
+          const updates = { ...workingAsset };
+          updates[field] = result.address;
+          setWorkingAsset(updates);
+          
+          if (editingField === field) {
+            setEditValue(result.address);
+          }
+          
+          // Feedback visual de sucesso (opcional, mas bom para UX)
+          console.log('Endereço capturado:', result.address);
+        } catch (err) {
+          console.error('Erro ao obter endereço:', err);
+          alert('Não foi possível obter o endereço automaticamente. Verifique sua conexão.');
+        } finally {
+          setIsGeocoding(false);
+        }
+      },
+      (err) => {
+        console.error('Erro de GPS:', err);
+        setIsGeocoding(false);
+        alert('Erro ao acessar GPS: ' + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   };
 
 
@@ -403,7 +506,24 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
   const headerBg = tagColors.bg;
 
+  const calculateImpairment = () => {
+    const valorContabil = Number(workingAsset._valor_aquisicao || 0) - Number(workingAsset._depreciacao_acumulada || 0);
+    const valorRecuperavel = Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso));
+    const perda = valorContabil > valorRecuperavel ? valorContabil - valorRecuperavel : 0;
 
+    const updated = {
+      ...workingAsset,
+      _valor_justo: Number(impairmentData.valorJusto),
+      _valor_em_uso: Number(impairmentData.valorEmUso),
+      _valor_recuperavel: valorRecuperavel,
+      _perda_impairment: perda,
+      _data_impairment: new Date().toISOString()
+    };
+
+    setWorkingAsset(updated);
+    onUpdate(updated);
+    setIsImpairmentModalOpen(false);
+  };
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
@@ -516,6 +636,33 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           )}
 
+          {ocrResults.length > 0 && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-slideUp">
+                <div className="bg-bg-main p-4 border-b border-border flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">Resultados Detectados</h3>
+                  <button onClick={() => setOcrResults([])} className="p-1 text-ink-muted"><X size={18} /></button>
+                </div>
+                <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto no-scrollbar">
+                  <p className="text-[10px] text-ink-muted uppercase font-bold mb-3 tracking-tight">Toque no valor correto para o campo {ocrTargetField === 'ETIQUETA' ? 'PLAQUETA' : 'SERIAL'}:</p>
+                  {ocrResults.map((res, i) => (
+                    <button 
+                      key={i}
+                      onClick={() => selectOCRResult(res)}
+                      className="w-full p-4 bg-bg-main border border-border rounded-xl text-left flex items-center justify-between active:scale-95 transition-all hover:border-accent group"
+                    >
+                      <span className="text-sm font-bold font-mono text-ink group-hover:text-accent">{res}</span>
+                      <ChevronRight size={16} className="text-ink-muted group-hover:text-accent" />
+                    </button>
+                  ))}
+                </div>
+                <div className="p-4 bg-bg-main border-t border-border">
+                  <button onClick={() => setOcrResults([])} className="w-full py-3 text-[10px] font-bold text-ink-muted uppercase tracking-widest">Cancelar</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {isBatch && (
             <div className="bg-white border border-border rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">
@@ -548,7 +695,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                 {group.fields.map(({ key, label, icon: Icon }) => {
                   const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
-                  const isCurrency = key === 'VLRAQUISIC';
+                  const isCurrency = key === 'VLRAQUISIC' || key.startsWith('_valor') || key.includes('perda');
                   const rawVal = workingAsset[key];
                   let displayVal = String(rawVal || '---');
                   if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
@@ -597,6 +744,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                                 <Camera size={18} />
                               </button>
                             )}
+                            {(key === 'ENDERECO' || key === '_localMaster') && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleReverseGeocoding(key); }}
+                                disabled={isGeocoding}
+                                className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30 disabled:opacity-50"
+                                title="Capturar endereço via GPS"
+                              >
+                                {isGeocoding ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />}
+                              </button>
+                            )}
                             <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-accent text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
                               <Check size={20}/>
                             </button>
@@ -619,7 +776,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                                 {workingAsset._valoresOriginais?.[key] !== undefined ? `PARA: ${displayVal}` : displayVal}
                               </p>
                               {workingAsset._valoresOriginais?.[key] !== undefined && (
-                                <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
+                               <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
                                   DE: {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
                                 </p>
                               )}
@@ -653,6 +810,36 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               </div>
             </div>
           ))}
+
+          {/* TESTE DE IMPAIRMENT (CPC 01) */}
+          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm modern-card">
+            <div className="bg-bg-main px-4 py-2 border-b border-border flex items-center justify-between">
+              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em]">TESTE DE IMPAIRMENT (CPC 01)</span>
+              <button 
+                onClick={() => setIsImpairmentModalOpen(true)}
+                className="text-[8px] font-bold text-accent uppercase tracking-widest bg-accent-soft px-2 py-1 rounded-md border border-accent/10"
+              >
+                Executar Teste
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
+                  <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1">Valor Recuperável</p>
+                  <p className="text-xs font-bold text-slate-900">{formatCurrency(workingAsset._valor_recuperavel || 0)}</p>
+                </div>
+                <div className={`p-2 rounded-lg border ${Number(workingAsset._perda_impairment || 0) > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
+                  <p className="text-[7px] font-bold uppercase tracking-widest mb-1 opacity-70">Perda Estimada</p>
+                  <p className="text-xs font-bold">{formatCurrency(workingAsset._perda_impairment || 0)}</p>
+                </div>
+              </div>
+              {workingAsset._data_impairment && (
+                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest text-right italic">
+                  Último teste: {new Date(workingAsset._data_impairment).toLocaleDateString('pt-BR')}
+                </p>
+              )}
+            </div>
+          </div>
       </div>
       
       {/* AUDIT HISTORY SECTION */}
@@ -747,6 +934,66 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <p className="bg-ink text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.ETIQUETA}</p>
             </div>
             <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-bg-main text-ink rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
+          </div>
+        </div>
+      )}
+
+      {isImpairmentModalOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-3xl border border-border shadow-2xl p-6 flex flex-col space-y-6">
+            <div className="text-center">
+              <h3 className="text-lg font-bold text-ink uppercase tracking-tight">Teste de Impairment</h3>
+              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-1">CPC 01 / IAS 36</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1.5 ml-1">Valor Justo Líquido de Despesa de Venda</label>
+                <input 
+                  type="number"
+                  value={impairmentData.valorJusto}
+                  onChange={(e) => setImpairmentData(prev => ({ ...prev, valorJusto: Number(e.target.value) }))}
+                  className="w-full px-4 py-3 bg-bg-main border border-border rounded-xl text-xs font-bold outline-none focus:border-accent transition-all"
+                  placeholder="0,00"
+                />
+              </div>
+              <div>
+                <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1.5 ml-1">Valor em Uso (Fluxo de Caixa Descontado)</label>
+                <input 
+                  type="number"
+                  value={impairmentData.valorEmUso}
+                  onChange={(e) => setImpairmentData(prev => ({ ...prev, valorEmUso: Number(e.target.value) }))}
+                  className="w-full px-4 py-3 bg-bg-main border border-border rounded-xl text-xs font-bold outline-none focus:border-accent transition-all"
+                  placeholder="0,00"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+              <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                <span>Valor Contábil Líquido:</span>
+                <span>{formatCurrency(Number(workingAsset._valor_aquisicao || 0) - Number(workingAsset._depreciacao_acumulada || 0))}</span>
+              </div>
+              <div className="flex justify-between text-[10px] font-bold text-accent uppercase">
+                <span>Valor Recuperável Estimado:</span>
+                <span>{formatCurrency(Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso)))}</span>
+              </div>
+            </div>
+
+            <div className="flex space-x-3">
+              <button 
+                onClick={() => setIsImpairmentModalOpen(false)}
+                className="flex-1 py-4 bg-bg-main text-ink rounded-2xl font-bold uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={calculateImpairment}
+                className="flex-1 py-4 bg-accent text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+              >
+                Confirmar
+              </button>
+            </div>
           </div>
         </div>
       )}

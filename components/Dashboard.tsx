@@ -17,7 +17,8 @@ import {
   MapPin,
   History,
   User,
-  PackageSearch
+  PackageSearch,
+  Building2
 } from 'lucide-react';
 
 const DASHBOARD_HINTS: Record<string, string> = {
@@ -33,16 +34,62 @@ const DASHBOARD_HINTS: Record<string, string> = {
 
 interface DashboardProps {
   assets: Asset[];
+  allAssets?: Asset[];
   onBack: () => void;
   onOpenActiveSearch?: () => void;
+  currentCampaignId?: string;
   user: {
     tenantid?: string;
     unitid?: string;
+    role?: string;
   } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearch, user }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpenActiveSearch, currentCampaignId, user }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
+
+  const isAdmin = useMemo(() => {
+    return user?.role === 'ADMIN' || user?.role === 'MASTER';
+  }, [user]);
+
+  // Base de cálculo para o dashboard de progresso por unidade
+  const progressBase = useMemo(() => {
+    return isAdmin && allAssets ? allAssets : assets;
+  }, [isAdmin, allAssets, assets]);
+
+  const unitProgress = useMemo(() => {
+    const progress: Record<string, { total: number; conferido: number; percentage: number }> = {};
+    
+    progressBase.forEach(a => {
+      const unit = a._unitid || a.EMPRESA || 'SEM UNIDADE';
+      if (!progress[unit]) {
+        progress[unit] = { total: 0, conferido: 0, percentage: 0 };
+      }
+      
+      const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXADO');
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      
+      // Se houver uma campanha ativa, consideramos conferido apenas se pertencer à campanha
+      const isConferidoInCampaign = currentCampaignId 
+        ? (isConferido && a._campaignId === currentCampaignId)
+        : isConferido;
+      
+      if (!isBaixado) {
+        progress[unit].total++;
+        if (isConferidoInCampaign) {
+          progress[unit].conferido++;
+        }
+      }
+    });
+    
+    Object.keys(progress).forEach(unit => {
+      const p = progress[unit];
+      p.percentage = p.total > 0 ? Math.round((p.conferido / p.total) * 100) : 0;
+    });
+    
+    return Object.entries(progress).sort((a, b) => b[1].percentage - a[1].percentage);
+  }, [progressBase]);
 
   const stats = useMemo(() => {
     const s = {
@@ -385,6 +432,57 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, onOpenActiveSearc
             </div>
           </div>
         </div>
+
+        {/* PROGRESSO POR UNIDADE OPERACIONAL */}
+        <section className="bg-white border border-border rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600">
+                <Building2 size={16} />
+              </div>
+              <div>
+                <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Progresso por Unidade</h3>
+                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Conclusão do Inventário Físico</p>
+              </div>
+              {currentCampaignId && (
+                <div className="flex items-center space-x-1 bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-100">
+                  <Activity size={8} />
+                  <span className="text-[7px] font-bold uppercase tracking-widest">Filtro de Campanha Ativo</span>
+                </div>
+              )}
+            </div>
+            <div className="bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+              <span className="text-[8px] font-bold text-indigo-600 uppercase tracking-widest">{unitProgress.length} Unidades</span>
+            </div>
+          </div>
+
+          <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
+            {unitProgress.map(([unit, data]) => (
+              <div key={unit} className="space-y-1.5 group">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[9px] font-bold text-ink uppercase tracking-tight truncate max-w-[150px]">{unit}</span>
+                    {unit === 'SEDE' && <span className="text-[7px] bg-accent/10 text-accent px-1 rounded font-bold">HQ</span>}
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] font-bold text-ink">{data.percentage}%</span>
+                    <span className="text-[7px] text-ink-muted ml-1 uppercase tracking-tighter">({data.conferido}/{data.total})</span>
+                  </div>
+                </div>
+                <div className="h-1.5 w-full bg-bg-main rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${
+                      data.percentage === 100 ? 'bg-emerald-500' : 
+                      data.percentage > 50 ? 'bg-indigo-500' : 
+                      'bg-amber-500'
+                    }`} 
+                    style={{ width: `${data.percentage}%` }} 
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {/* DISTRIBUIÇÃO POR TAGS - GRID */}
         <section className="space-y-3">

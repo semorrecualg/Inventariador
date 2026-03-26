@@ -133,6 +133,12 @@ export interface Asset {
   _conta_contabil?: string;
   _centro_custo?: string;
   _ncm_code?: string;
+  // Campos Teste de Impairment (CPC 01)
+  _valor_recuperavel?: number;
+  _valor_justo?: number;
+  _valor_em_uso?: number;
+  _perda_impairment?: number;
+  _data_impairment?: string;
 }
 
 export interface NCMClassifier {
@@ -249,7 +255,8 @@ export enum AppScreen {
   AUDIT_LOGS = 'AUDIT_LOGS',
   CAMPAIGN_MANAGEMENT = 'CAMPAIGN_MANAGEMENT',
   ONBOARDING = 'ONBOARDING',
-  BIOMETRIC_REGISTRATION = 'BIOMETRIC_REGISTRATION'
+  BIOMETRIC_REGISTRATION = 'BIOMETRIC_REGISTRATION',
+  SYNC_MANAGER = 'SYNC_MANAGER'
 }
 
 export enum AppModule {

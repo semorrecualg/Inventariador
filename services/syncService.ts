@@ -110,6 +110,13 @@ export const getSyncQueueLength = async (): Promise<number> => {
 };
 
 /**
+ * Remove um item específico da fila
+ */
+export const removeItemFromQueue = async (id: string): Promise<void> => {
+  await queueStore.removeItem(id);
+};
+
+/**
  * Limpa a fila (útil para debug ou reset)
  */
 export const clearSyncQueue = async (): Promise<void> => {

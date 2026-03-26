@@ -35,13 +35,14 @@ import PrivacyCenter from './components/PrivacyCenter';
 import OnboardingWizard from './components/OnboardingWizard';
 import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
+import SyncManager from './components/SyncManager';
 
 import { motion } from 'motion/react';
 import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 
@@ -268,6 +269,8 @@ const App: React.FC = () => {
     hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
   });
 
+  console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
+
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     try {
       const saved = localStorage.getItem('app_database_mode');
@@ -292,12 +295,6 @@ const App: React.FC = () => {
   useEffect(() => {
     inventoryRef.current = inventory;
   }, [inventory]);
-
-  useEffect(() => {
-    if (!inventory.hasCompletedOnboarding && screen !== AppScreen.ONBOARDING) {
-      pushScreen(AppScreen.ONBOARDING);
-    }
-  }, [inventory.hasCompletedOnboarding, screen]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (!skipLoadingState && isSyncing) return;
@@ -870,6 +867,17 @@ const App: React.FC = () => {
     // 1. If no user, must be at LOGIN or REGISTER
     if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER) {
       setHistory([AppScreen.LOGIN]);
+      return;
+    }
+
+    // 1.5 If user is logged in but on LOGIN/REGISTER, go to appropriate screen
+    if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
+      const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || user.email.toLowerCase() === ADMIN_EMAIL;
+      if (isAdmin) {
+        setHistory([AppScreen.MODULE_SELECTION]);
+      } else {
+        setHistory([AppScreen.UNIT_SELECTION]);
+      }
       return;
     }
 
@@ -1565,15 +1573,11 @@ const App: React.FC = () => {
     });
   };
 
-  const completeOnboarding = () => {
+  const completeOnboarding = useCallback(() => {
+    console.log("Finalizando onboarding...");
     localStorage.setItem('app_onboarding_completed', 'true');
     setInventory(prev => ({ ...prev, hasCompletedOnboarding: true }));
-    if (history.length > 1) {
-      popScreen();
-    } else {
-      setHistory([AppScreen.LOGIN]);
-    }
-  };
+  }, []);
 
   const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
@@ -1746,6 +1750,16 @@ const App: React.FC = () => {
         tenant_id: user?.tenantid,
         origin: updatedAsset._origemTransacao
       });
+
+      // Log robusto na tabela asset_logs
+      logAssetChange({
+        asset_id: String(updatedAsset.id),
+        user_email: user?.email || 'unknown',
+        action: isNew ? 'CREATE' : 'UPDATE',
+        old_data: existing,
+        new_data: assetWithHistory,
+        tenant_id: user?.tenantid
+      });
     }
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
@@ -1813,6 +1827,29 @@ const App: React.FC = () => {
           };
           updates._history = [...(updates._history || []), historyEntry];
           
+          // Log de Auditoria na Nuvem para cada item (se estiver em modo Supabase)
+          if (databaseMode === DatabaseMode.SUPABASE) {
+            logAuditEvent({
+              user_email: user?.email || 'unknown',
+              action: 'BULK_UPDATE',
+              table_name: 'assets',
+              record_id: String(a.id),
+              new_data: updates,
+              details: historyEntry.details,
+              tenant_id: user?.tenantid || 'default',
+              origin: origin
+            });
+
+            logAssetChange({
+              asset_id: String(a.id),
+              user_email: user?.email || 'unknown',
+              action: 'UPDATE',
+              old_data: a,
+              new_data: updates,
+              tenant_id: user?.tenantid || 'default'
+            });
+          }
+
           // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
           const targetLoc = isReconciliationWorkflow
             ? (a.ENDERECO || "")
@@ -2452,6 +2489,14 @@ const App: React.FC = () => {
     );
   }
 
+  if (!inventory.hasCompletedOnboarding) {
+    return (
+      <ErrorBoundary>
+        <OnboardingWizard onComplete={completeOnboarding} />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <div className="w-full h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
@@ -2493,9 +2538,6 @@ const App: React.FC = () => {
               <ShieldCheck size={20} className="shrink-0" />
               <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
             </div>
-          )}
-          {screen === AppScreen.ONBOARDING && (
-            <OnboardingWizard onComplete={completeOnboarding} onCancel={popScreen} />
           )}
           {screen === AppScreen.LOGIN && (
             <Login 
@@ -2624,11 +2666,7 @@ const App: React.FC = () => {
               syncError={syncError}
               hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
               pendingPhotosCount={pendingPhotosCount}
-              onProcessSyncQueue={async () => {
-                await processSyncQueue();
-                const items = await getPendingSyncItems();
-                setPendingPhotosCount(items.length);
-              }}
+              syncQueueLength={syncQueueLength}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               onUpdateProtheusIntegration={(val) => {
                 localStorage.setItem('app_protheus_enabled', String(val));
@@ -2869,6 +2907,8 @@ const App: React.FC = () => {
           {screen === AppScreen.DASHBOARD && (
             <Dashboard 
               assets={filteredAssetsByUnit} 
+              allAssets={inventory.assets}
+              currentCampaignId={inventory.currentCampaignId}
               onBack={popScreen} 
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
@@ -2945,6 +2985,16 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
+          {screen === AppScreen.SYNC_MANAGER && (
+            <SyncManager 
+              onBack={popScreen} 
+              onSyncSuccess={async () => {
+                const items = await getPendingSyncItems();
+                setPendingPhotosCount(items.length);
+                setSyncQueueLength(items.length);
+              }}
+            />
+          )}
         </div>
   
         {showOnboardingTips && (

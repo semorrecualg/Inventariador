@@ -9,6 +9,8 @@ import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { generateUUID } from '../services/supabaseService';
 
+import { createWorker } from 'tesseract.js';
+import { reverseGeocode } from '../services/geocodingService';
 import { 
   MapPin, 
   Check,
@@ -27,6 +29,7 @@ import {
   FileText,
   RefreshCw,
   Camera,
+  Loader2,
   Database,
   Keyboard,
   Calendar,
@@ -429,9 +432,13 @@ const Inventory: React.FC<InventoryProps> = ({
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
+  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
@@ -545,6 +552,82 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [normalizeKey]);
+
+  const handleSmartOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsOCRProcessing(true);
+    try {
+      const worker = await createWorker('por+eng');
+      const { data: { text } } = await worker.recognize(file);
+      await worker.terminate();
+
+      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
+      
+      // Tentar encontrar padrão de plaqueta (6 dígitos)
+      const plaquetaMatch = cleanedText.match(/\b\d{6}\b/);
+      
+      if (plaquetaMatch) {
+        const foundTag = plaquetaMatch[0];
+        setDisplayValue(foundTag);
+        setCommittedSearch(foundTag);
+        setIsSearchVisible(true);
+        setShowNumericKeypad(false);
+      } else {
+        // Se não achar plaqueta, tenta qualquer código alfanumérico relevante
+        const genericMatch = cleanedText.match(/\b[A-Z0-9]{4,}\b/);
+        if (genericMatch) {
+          setDisplayValue(genericMatch[0]);
+          setCommittedSearch(genericMatch[0]);
+          setIsSearchVisible(true);
+        }
+      }
+    } catch (err) {
+      console.error('Erro no Smart OCR:', err);
+    } finally {
+      setIsOCRProcessing(false);
+      if (ocrInputRef.current) ocrInputRef.current.value = '';
+    }
+  };
+
+  const handleReverseGeocoding = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocalização não suportada.');
+      return;
+    }
+
+    setIsGeocoding(true);
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const result = await reverseGeocode(latitude, longitude);
+          
+          setManualAsset(prev => ({
+            ...prev,
+            ENDERECO: result.address
+          }));
+        } catch (err) {
+          console.error('Erro ao obter endereço:', err);
+          alert('Erro ao obter endereço automático.');
+        } finally {
+          setIsGeocoding(false);
+        }
+      },
+      (err) => {
+        console.error('Erro GPS:', err);
+        setIsGeocoding(false);
+        alert('Erro GPS: ' + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const triggerSmartOCR = () => {
+    ocrInputRef.current?.click();
+  };
 
   useEffect(() => {
     if (isSearchVisible) {
@@ -1371,10 +1454,26 @@ const Inventory: React.FC<InventoryProps> = ({
                   inputMode="none"
                   onFocus={() => setShowNumericKeypad(true)}
                   value={displayValue} 
-                  className="w-full bg-bg-main border border-border px-4 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
+                  className="w-full bg-bg-main border border-border pl-4 pr-12 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
                   placeholder="DIGITE ETIQUETA..." 
                 />
+                <button 
+                  onClick={triggerSmartOCR}
+                  className="absolute right-12 top-1/2 -translate-y-1/2 p-2 text-ink-muted hover:text-accent active:scale-90 transition-all"
+                  title="Busca por Foto (OCR)"
+                >
+                  <Camera size={20} />
+                </button>
                 <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted active:text-ink"><X size={20} /></button>
+                
+                <input 
+                  type="file" 
+                  ref={ocrInputRef} 
+                  className="hidden" 
+                  accept="image/*" 
+                  capture="environment"
+                  onChange={handleSmartOCR}
+                />
               </div>
             )}
 
@@ -1444,6 +1543,15 @@ const Inventory: React.FC<InventoryProps> = ({
             )}
 
 
+            {showScrollTop && (
+              <button 
+                onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
+                className="absolute bottom-6 right-6 w-12 h-12 bg-accent text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-[90] border-2 border-white/20"
+              >
+                <ChevronRight size={24} className="-rotate-90" />
+              </button>
+            )}
+
             {filteredAssets.length > 0 ? (
               <Virtuoso
                 ref={virtuosoRef}
@@ -1455,6 +1563,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     setShowNumericKeypad(false);
                   }
                 }}
+                atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
                 itemContent={(index, asset) => (
                   <div className="px-4 pt-1.5">
                     <AssetCard 
@@ -1538,6 +1647,18 @@ const Inventory: React.FC<InventoryProps> = ({
 
       {/* Modais de Confirmação e Erro de Leitura */}
       {renderConfirmationModals()}
+
+      {isOCRProcessing && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
+            <Loader2 size={40} className="text-accent animate-spin" />
+          </div>
+          <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Analisando Imagem</h3>
+          <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
+            Identificando etiquetas e códigos...
+          </p>
+        </div>
+      )}
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (
@@ -1804,7 +1925,17 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local:</span>
-                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.ENDERECO}</span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[9px] font-black text-accent uppercase">{manualAsset.ENDERECO}</span>
+                        <button 
+                          onClick={handleReverseGeocoding}
+                          disabled={isGeocoding}
+                          className="p-1.5 bg-accent/10 text-accent rounded-lg border border-accent/10 active:scale-90 transition-all disabled:opacity-50"
+                          title="Capturar endereço via GPS"
+                        >
+                          {isGeocoding ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Status:</span>

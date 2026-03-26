@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   Search, 
@@ -8,11 +8,13 @@ import {
   ChevronRight,
   ChevronDown,
   Info,
-  Download
+  Download,
+  ArrowUp
 } from 'lucide-react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
-import { fetchAuditLogs } from '../services/supabaseService';
+import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
 
 interface AuditLogsProps {
   user: User | null;
@@ -40,14 +42,29 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState<string>('ALL');
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [logType, setLogType] = useState<'SYSTEM' | 'ASSET'>('ASSET');
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   useEffect(() => {
     const loadLogs = async () => {
       if (databaseMode === DatabaseMode.SUPABASE && user?.tenantid) {
         setLoading(true);
         try {
-          const data = await fetchAuditLogs(user.tenantid);
-          setLogs(data as unknown as AuditLogDB[]);
+          const data = logType === 'SYSTEM' 
+            ? await fetchAuditLogs(user.tenantid)
+            : await fetchAssetLogs(user.tenantid);
+          
+          // Normalizar dados de asset_logs para o formato esperado pelo componente
+          const normalizedData = (data as Record<string, unknown>[]).map(log => ({
+            ...log,
+            // Se for asset_logs, mapear campos correspondentes
+            record_id: (log.record_id || log.asset_id) as string,
+            table_name: (log.table_name || 'assets') as string,
+            tenant_id: (log.tenant_id || log.tenantid) as string
+          }));
+
+          setLogs(normalizedData as unknown as AuditLogDB[]);
         } catch (error) {
           console.error('Erro ao carregar logs:', error);
         } finally {
@@ -59,7 +76,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     };
 
     loadLogs();
-  }, [databaseMode, user]);
+  }, [databaseMode, user, logType]);
 
   const filteredLogs = logs.filter(log => {
     const matchesSearch = 
@@ -72,7 +89,9 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     return matchesSearch && matchesAction;
   });
 
-  const actions = ['ALL', 'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'EXPORT', 'BULK_UPDATE'];
+  const actions = logType === 'SYSTEM' 
+    ? ['ALL', 'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'EXPORT', 'BULK_UPDATE']
+    : ['ALL', 'CREATE', 'UPDATE', 'DELETE', 'IMPAIRMENT_TEST'];
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('pt-BR');
@@ -110,6 +129,22 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
 
       {/* Filters */}
       <div className="bg-white border-b border-line p-4 space-y-4 shadow-sm">
+        {/* Log Type Toggle */}
+        <div className="flex p-1 bg-bg rounded-xl border border-line">
+          <button
+            onClick={() => { setLogType('ASSET'); setFilterAction('ALL'); }}
+            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'ASSET' ? 'bg-ink text-bg shadow-sm' : 'text-ink-muted'}`}
+          >
+            Ativos (Granular)
+          </button>
+          <button
+            onClick={() => { setLogType('SYSTEM'); setFilterAction('ALL'); }}
+            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'SYSTEM' ? 'bg-ink text-bg shadow-sm' : 'text-ink-muted'}`}
+          >
+            Sistema (Geral)
+          </button>
+        </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-muted" />
           <input 
@@ -139,7 +174,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-bg/50">
+      <div className="flex-1 bg-bg/50">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-64 space-y-4">
             <div className="w-12 h-12 border-4 border-ink/10 border-t-ink rounded-full animate-spin"></div>
@@ -151,91 +186,110 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
             <p className="text-xs font-bold uppercase tracking-widest">Nenhum registro encontrado</p>
           </div>
         ) : (
-          filteredLogs.map((log) => (
-            <motion.div 
-              key={log.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white border border-line rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all"
-            >
-              <div 
-                className="p-4 cursor-pointer flex items-center justify-between"
-                onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    log.action === 'DELETE' ? 'bg-red-100 text-red-600' :
-                    log.action === 'INSERT' ? 'bg-green-100 text-green-600' :
-                    log.action === 'UPDATE' ? 'bg-blue-100 text-blue-600' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>
-                    <Activity className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-tighter bg-ink text-bg px-1.5 py-0.5 rounded">
-                        {log.action}
-                      </span>
-                      <span className="text-xs font-bold text-ink truncate max-w-[150px]">
-                        {log.user_email}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-muted font-mono">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(log.timestamp)}
-                    </div>
-                  </div>
-                </div>
-                {expandedLogId === log.id ? <ChevronDown className="w-5 h-5 opacity-40" /> : <ChevronRight className="w-5 h-5 opacity-40" />}
-              </div>
-
-              {expandedLogId === log.id && (
-                <div className="px-4 pb-4 border-t border-line bg-bg/30 space-y-4 pt-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Tabela</p>
-                      <p className="text-xs font-mono">{log.table_name || 'N/A'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">ID Registro</p>
-                      <p className="text-xs font-mono truncate">{log.record_id || 'N/A'}</p>
-                    </div>
-                  </div>
-
-                  {log.details && (
-                    <div className="space-y-1">
-                      <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Detalhes</p>
-                      <p className="text-xs bg-white p-2 rounded border border-line">{log.details}</p>
-                    </div>
-                  )}
-
-                  {(!!log.old_data || !!log.new_data) && (
-                    <div className="space-y-2">
-                      <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Alterações de Dados</p>
-                      <div className="grid grid-cols-1 gap-2">
-                        {!!log.old_data && (
-                          <div className="bg-red-50 p-2 rounded border border-red-100">
-                            <p className="text-[8px] font-bold text-red-600 uppercase mb-1">Dados Anteriores</p>
-                            <pre className="text-[10px] font-mono overflow-x-auto">
-                              {JSON.stringify(log.old_data, null, 2)}
-                            </pre>
-                          </div>
-                        )}
-                        {!!log.new_data && (
-                          <div className="bg-green-50 p-2 rounded border border-green-100">
-                            <p className="text-[8px] font-bold text-green-600 uppercase mb-1">Novos Dados</p>
-                            <pre className="text-[10px] font-mono overflow-x-auto">
-                              {JSON.stringify(log.new_data, null, 2)}
-                            </pre>
-                          </div>
-                        )}
+          <div className="h-full relative">
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={filteredLogs}
+              atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
+              itemContent={(index, log) => (
+              <div className="px-4 py-1.5">
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white border border-line rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all"
+                >
+                  <div 
+                    className="p-4 cursor-pointer flex items-center justify-between"
+                    onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                        log.action === 'DELETE' ? 'bg-red-100 text-red-600' :
+                        log.action === 'INSERT' ? 'bg-green-100 text-green-600' :
+                        log.action === 'UPDATE' ? 'bg-blue-100 text-blue-600' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        <Activity className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-tighter bg-ink text-bg px-1.5 py-0.5 rounded">
+                            {log.action}
+                          </span>
+                          <span className="text-xs font-bold text-ink truncate max-w-[150px]">
+                            {log.user_email}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-muted font-mono">
+                          <Clock className="w-3 h-3" />
+                          {formatDate(log.timestamp)}
+                        </div>
                       </div>
                     </div>
+                    {expandedLogId === log.id ? <ChevronDown className="w-5 h-5 opacity-40" /> : <ChevronRight className="w-5 h-5 opacity-40" />}
+                  </div>
+
+                  {expandedLogId === log.id && (
+                    <div className="px-4 pb-4 border-t border-line bg-bg/30 space-y-4 pt-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Tabela</p>
+                          <p className="text-xs font-mono">{log.table_name || 'N/A'}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">ID Registro</p>
+                          <p className="text-xs font-mono truncate">{log.record_id || 'N/A'}</p>
+                        </div>
+                      </div>
+
+                      {log.details && (
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Detalhes</p>
+                          <p className="text-xs bg-white p-2 rounded border border-line">{log.details}</p>
+                        </div>
+                      )}
+
+                      {(!!log.old_data || !!log.new_data) && (
+                        <div className="space-y-2">
+                          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Alterações de Dados</p>
+                          <div className="grid grid-cols-1 gap-2">
+                            {!!log.old_data && (
+                              <div className="bg-red-50 p-2 rounded border border-red-100">
+                                <p className="text-[8px] font-bold text-red-600 uppercase mb-1">Dados Anteriores</p>
+                                <pre className="text-[10px] font-mono overflow-x-auto">
+                                  {JSON.stringify(log.old_data, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {!!log.new_data && (
+                              <div className="bg-green-50 p-2 rounded border border-green-100">
+                                <p className="text-[8px] font-bold text-green-600 uppercase mb-1">Novos Dados</p>
+                                <pre className="text-[10px] font-mono overflow-x-auto">
+                                  {JSON.stringify(log.new_data, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-            </motion.div>
-          ))
+                </motion.div>
+              </div>
+            )}
+          />
+          
+          {/* Scroll to top button */}
+          {showScrollTop && (
+            <button
+              onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
+              className="absolute bottom-6 right-6 w-12 h-12 bg-ink text-bg rounded-full shadow-2xl flex items-center justify-center animate-bounce z-30 border-4 border-white active:scale-90 transition-all"
+            >
+              <ArrowUp size={24} strokeWidth={3} />
+            </button>
+          )}
+          </div>
         )}
       </div>
 

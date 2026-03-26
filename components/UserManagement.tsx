@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { User, UserRole } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
@@ -21,8 +21,10 @@ import {
   Cloud,
   Loader2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  ArrowUp
 } from 'lucide-react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
 
 interface UserManagementProps {
@@ -38,6 +40,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -315,9 +319,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
-        {users
-          .filter(u => {
+      <div className="flex-1 overflow-hidden bg-bg-main relative">
+        <Virtuoso
+          ref={virtuosoRef}
+          style={{ height: '100%' }}
+          atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
+          data={users.filter(u => {
             // Admin global vê tudo
             if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
@@ -326,57 +333,70 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             }
             // Outros papéis não devem ver nada (ou apenas a si mesmos)
             return u.email === currentUser?.email;
-          })
-          .map((u) => (
-          <div 
-            key={u.email} 
-            onDoubleClick={() => handleOpenEdit(u)}
-            className="bg-white p-6 rounded-[2.5rem] border border-border shadow-sm flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer hover:border-accent modern-card"
-          >
-            <div className="flex items-center space-x-5 flex-1 min-w-0">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner border ${u.isAdmin ? 'bg-warning/10 text-warning border-warning/20' : 'bg-accent-soft text-accent border-accent/10'}`}>
-                {u.isAdmin ? <Shield size={32} /> : <UserCircle size={32} />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center space-x-3 mb-1">
-                  <span className="font-bold text-base text-ink tracking-tight truncate">{u.name || 'Sem Nome'}</span>
-                  <div className="flex items-center space-x-1">
-                    <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">
-                      {u.tenantid || 'S/ TENANT'}
-                    </span>
-                    <span className="bg-accent/5 text-accent text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-accent/10">
-                      {u.role}
-                    </span>
+          })}
+          itemContent={(index, u) => (
+            <div className="px-6 py-2">
+              <div 
+                key={u.email} 
+                onDoubleClick={() => handleOpenEdit(u)}
+                className="bg-white p-6 rounded-[2.5rem] border border-border shadow-sm flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer hover:border-accent modern-card"
+              >
+                <div className="flex items-center space-x-5 flex-1 min-w-0">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner border ${u.isAdmin ? 'bg-warning/10 text-warning border-warning/20' : 'bg-accent-soft text-accent border-accent/10'}`}>
+                    {u.isAdmin ? <Shield size={32} /> : <UserCircle size={32} />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center space-x-3 mb-1">
+                      <span className="font-bold text-base text-ink tracking-tight truncate">{u.name || 'Sem Nome'}</span>
+                      <div className="flex items-center space-x-1">
+                        <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">
+                          {u.tenantid || 'S/ TENANT'}
+                        </span>
+                        <span className="bg-accent/5 text-accent text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-accent/10">
+                          {u.role}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <p className="text-[10px] font-bold text-accent tracking-widest truncate uppercase">User: {u.username}</p>
+                      <p className="text-[10px] font-medium text-ink-muted tracking-tight truncate">{u.email}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
+                      {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitid || 'GLOBAL']).map(t => (
+                        <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-col space-y-0.5">
-                  <p className="text-[10px] font-bold text-accent tracking-widest truncate uppercase">User: {u.username}</p>
-                  <p className="text-[10px] font-medium text-ink-muted tracking-tight truncate">{u.email}</p>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
-                  {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitid || 'GLOBAL']).map(t => (
-                    <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
-                  ))}
+                
+                <div className="flex items-center space-x-3 ml-4">
+                  <div className="hidden group-hover:flex items-center space-x-2">
+                    <button onClick={() => handleOpenEdit(u)} className="w-11 h-11 flex items-center justify-center text-accent bg-accent-soft border border-accent/10 rounded-xl transition-all shadow-sm hover:bg-accent/20">
+                      <Edit3 size={20} />
+                    </button>
+                    {!u.isAdmin && (
+                      <button onClick={(e) => { e.stopPropagation(); removeUser(u.email); }} className="w-11 h-11 flex items-center justify-center text-danger bg-danger/10 border border-danger/20 rounded-xl transition-all shadow-sm hover:bg-danger/20">
+                        <Trash2 size={20} />
+                      </button>
+                    )}
+                  </div>
+                  <ChevronRight size={20} className="text-ink-muted/20 group-hover:hidden" />
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center space-x-3 ml-4">
-              <div className="hidden group-hover:flex items-center space-x-2">
-                 <button onClick={() => handleOpenEdit(u)} className="w-11 h-11 flex items-center justify-center text-accent bg-accent-soft border border-accent/10 rounded-xl transition-all shadow-sm hover:bg-accent/20">
-                  <Edit3 size={20} />
-                </button>
-                {!u.isAdmin && (
-                  <button onClick={(e) => { e.stopPropagation(); removeUser(u.email); }} className="w-11 h-11 flex items-center justify-center text-danger bg-danger/10 border border-danger/20 rounded-xl transition-all shadow-sm hover:bg-danger/20">
-                    <Trash2 size={20} />
-                  </button>
-                )}
-              </div>
-              <ChevronRight size={20} className="text-ink-muted/20 group-hover:hidden" />
-            </div>
-          </div>
-        ))}
+          )}
+        />
+        
+        {/* Scroll to top button */}
+        {showScrollTop && (
+          <button
+            onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
+            className="absolute bottom-6 right-6 w-12 h-12 bg-accent text-white rounded-full shadow-2xl flex items-center justify-center animate-bounce z-30 border-4 border-white active:scale-90 transition-all"
+          >
+            <ArrowUp size={24} strokeWidth={3} />
+          </button>
+        )}
       </div>
 
       {/* Modal de Edição */}
