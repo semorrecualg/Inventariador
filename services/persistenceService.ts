@@ -88,33 +88,41 @@ export const restoreInventory = async (file: File): Promise<InventoryState | nul
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false): Promise<void> => {
   try {
+    console.log('>>> [Persistence] Iniciando salvamento do inventário...');
     // 1. Salva localmente primeiro (Offline-First) com Blindagem Técnica (Criptografia)
     const config = { ...data } as Record<string, unknown>;
     const assets = data.assets;
     delete config.assets;
 
+    console.log(`>>> [Persistence] Criptografando ${assets.length} ativos e configurações...`);
     // Criptografamos os dados antes de salvar no IndexedDB
     const [encryptedConfig, encryptedAssets] = await Promise.all([
       encryption.encrypt(config),
       encryption.encrypt(assets)
     ]);
 
-    await localforage.setItem(INVENTORY_CONFIG_KEY, encryptedConfig);
-    await localforage.setItem(INVENTORY_ASSETS_KEY, encryptedAssets);
+    console.log('>>> [Persistence] Gravando no IndexedDB...');
+    await Promise.all([
+      localforage.setItem(INVENTORY_CONFIG_KEY, encryptedConfig),
+      localforage.setItem(INVENTORY_ASSETS_KEY, encryptedAssets)
+    ]);
+    console.log('>>> [Persistence] Gravado com sucesso no IndexedDB.');
 
     // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se houver ativos sujos ou forçado
     const assetsToSync = dirtyAssets || [];
     
     if (assetsToSync.length > 0) {
+      console.log(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
       syncAssetsToCloud(assetsToSync).catch(err => console.warn('Cloud sync failed (offline?):', err));
       // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
       syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
     } else if (forceCloudSync) {
+      console.log('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
       syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
     }
 
   } catch (error) {
-    console.error('Error saving inventory to IndexedDB:', error);
+    console.error('>>> [Persistence] Erro ao salvar inventário no IndexedDB:', error);
     throw error;
   }
 };

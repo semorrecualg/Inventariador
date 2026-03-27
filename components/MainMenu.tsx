@@ -367,7 +367,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Unidade Ativa</p>
-                <p className="text-[9px] font-black text-slate-900 truncate">{user?.tenantid || 'default'}</p>
+                <p className="text-[9px] font-black text-slate-900 truncate">{selectedUnit || user?.tenantid || 'default'}</p>
               </div>
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Ativos na Nuvem</p>

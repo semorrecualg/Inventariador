@@ -37,6 +37,12 @@ interface UserManagementProps {
 }
 
 const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits }) => {
+  console.log('>>> [UserManagement] Rendered with:', { 
+    currentUserEmail: currentUser?.email, 
+    currentUserTenant: currentUser?.tenantid,
+    availableUnitsCount: availableUnits?.length,
+    availableUnits: availableUnits
+  });
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);

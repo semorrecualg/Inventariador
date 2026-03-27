@@ -181,22 +181,23 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       role: metadata?.role || profile.role || (profile.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
       tenantid: metadata?.tenantid || profile.tenantid || 'default',
       unitid: metadata?.unitid || profile.unitid || metadata?.tenantid || profile.tenantid || 'default',
-      units: metadata?.units || profile.units || metadata?.tenants || profile.tenants || [profile.tenantid || 'default'],
-      tenants: metadata?.tenants || profile.tenants || [profile.tenantid || 'default']
+      units: metadata?.units || profile.units || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : ['default'])),
+      tenants: metadata?.tenants || profile.tenants || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : ['default']))
     };
   }
   
   // 2. Se não existir, cria um perfil padrão
+  const defaultTenant = metadata?.tenantid || 'default';
   const insertData = {
     email: lowerEmail,
     username: metadata?.username || lowerEmail.split('@')[0],
     name: metadata?.name || metadata?.username || lowerEmail.split('@')[0],
     role: metadata?.role || UserRole.AUDITOR,
     isAdmin: metadata?.isAdmin || false,
-    tenantid: metadata?.tenantid || 'default',
-    unitid: metadata?.unitid || metadata?.tenantid || 'default',
-    units: metadata?.units || [metadata?.tenantid || 'default'],
-    tenants: metadata?.tenants || [metadata?.tenantid || 'default'],
+    tenantid: defaultTenant,
+    unitid: metadata?.unitid || defaultTenant,
+    units: metadata?.units || [defaultTenant],
+    tenants: metadata?.tenants || [defaultTenant],
     ...(userId ? { id: userId } : {})
   };
 
@@ -763,6 +764,18 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     }
 
     console.log(`[Supabase] ${data?.length || 0} usuários encontrados na nuvem.`);
+    
+    if (data && data.length > 0) {
+      const felipe = data.find(u => u.email.toLowerCase() === 'felipe.messias@gmail.com');
+      if (felipe) {
+        console.log('>>> [Supabase] Felipe found in cloud:', {
+          email: felipe.email,
+          tenantid: felipe.tenantid,
+          unitid: felipe.unitid,
+          units: felipe.units
+        });
+      }
+    }
 
     return (data || []).map(u => ({
       username: u.username || u.email.split('@')[0],

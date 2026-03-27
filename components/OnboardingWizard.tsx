@@ -100,12 +100,20 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onCance
   console.log("OnboardingWizard render - step:", step);
 
   const nextStep = () => {
-    console.log("Onboarding nextStep - current step:", step, "total steps:", steps.length);
-    if (step < steps.length - 1) {
-      setStep(step + 1);
-    } else {
-      console.log("Onboarding calling onComplete()");
-      onComplete();
+    try {
+      console.log("Onboarding nextStep - current step:", step, "total steps:", steps.length);
+      if (step < steps.length - 1) {
+        setStep(step + 1);
+      } else {
+        console.log("Onboarding calling onComplete()...");
+        if (typeof onComplete === 'function') {
+          onComplete();
+        } else {
+          console.error("Onboarding error: onComplete is not a function", onComplete);
+        }
+      }
+    } catch (error) {
+      console.error("Onboarding nextStep error:", error);
     }
   };
 

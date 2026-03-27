@@ -38,7 +38,7 @@ import ThemePalette from './components/ThemePalette';
 import SyncManager from './components/SyncManager';
 
 import { motion } from 'motion/react';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -216,7 +216,9 @@ const App: React.FC = () => {
       const saved = localStorage.getItem('app_screen_history');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) && parsed.length > 0 ? parsed : [AppScreen.LOGIN];
+        const history = Array.isArray(parsed) && parsed.length > 0 ? parsed : [AppScreen.LOGIN];
+        // Sanitize: remove ONBOARDING from history as it's now an overlay
+        return history.filter(s => s !== AppScreen.ONBOARDING);
       }
       return [AppScreen.LOGIN];
     } catch { return [AppScreen.LOGIN]; }
@@ -373,15 +375,12 @@ const App: React.FC = () => {
       return;
     }
     
-    const rawTenantId = explicitTenantId || user?.tenantid || 'default';
-    const tenantid = Array.isArray(rawTenantId) ? rawTenantId : [rawTenantId];
+    const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const rawTenantId = explicitTenantId || user?.tenantid;
     
-    // Se não temos tenantid e estamos em modo nuvem, não faz sentido tentar sincronizar
-    if (tenantid.length === 0) {
-      console.log('Sincronização ignorada: Nenhum tenantid disponível.');
-      return;
-    }
-
+    // Se for admin global, não filtramos por tenantid para que ele veja tudo
+    const tenantid = isGlobalAdmin && !explicitTenantId ? undefined : (Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined));
+    
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
     try {
@@ -452,6 +451,9 @@ const App: React.FC = () => {
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
+    // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
+    if (!user || databaseMode === DatabaseMode.INTERNAL) return;
+
     // Update pending photos count
     const updatePendingCount = async () => {
       const items = await getPendingSyncItems();
@@ -479,12 +481,6 @@ const App: React.FC = () => {
 
     // Check periodically
     const interval = setInterval(updatePendingCount, 10000);
-
-    if (databaseMode === DatabaseMode.INTERNAL) return () => {
-      window.removeEventListener('gbr_photo_synced', handlePhotoSynced);
-      delete (window as unknown as { onOpenMap?: () => void }).onOpenMap;
-      clearInterval(interval);
-    };
 
     const subscription = subscribeToInventoryChanges((newConfig) => {
       if (newConfig && newConfig.lastUpdated) {
@@ -542,42 +538,47 @@ const App: React.FC = () => {
     });
 
     return () => {
+      window.removeEventListener('gbr_photo_synced', handlePhotoSynced);
+      delete (window as unknown as { onOpenMap?: () => void }).onOpenMap;
+      clearInterval(interval);
       if (subscription) subscription.unsubscribe();
       if (assetSubscription) assetSubscription.unsubscribe();
     };
   }, [databaseMode, inventory.lastUpdated, user]);
 
   // Efeito para forçar sincronização se houver atualização pendente
+  // Cloud Update Pending Handler
   useEffect(() => {
-    if (isCloudUpdatePending && !isSyncing && databaseMode !== DatabaseMode.INTERNAL) {
-      if (user?.isAdmin || user?.email === ADMIN_EMAIL) {
-        // Admins sincronizam automaticamente sem modal
-        syncFromCloud();
-      } else {
-        // Auditores recebem confirmação para não perder trabalho local
-        setModalConfig({
-          isOpen: true,
-          title: 'Atualização do Banco de Dados',
-          message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
-          type: 'confirm',
-          onConfirm: async () => {
-            try {
-              // 1. Envia o que tiver de local primeiro
-              await pushLocalChanges();
-              // 2. Baixa a nova base
-              await syncFromCloud();
-            } catch (e) {
-              console.error("Falha na sincronização segura:", e);
-              setModalConfig({
-                isOpen: true,
-                title: 'Erro na Sincronização',
-                message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
-                type: 'error'
-              });
-            }
+    // Só processamos atualizações pendentes se o usuário estiver logado
+    if (!user || !isCloudUpdatePending || isSyncing || databaseMode === DatabaseMode.INTERNAL) return;
+
+    if (user?.isAdmin || user?.email === ADMIN_EMAIL) {
+      // Admins sincronizam automaticamente sem modal
+      syncFromCloud();
+    } else {
+      // Auditores recebem confirmação para não perder trabalho local
+      setModalConfig({
+        isOpen: true,
+        title: 'Atualização do Banco de Dados',
+        message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
+        type: 'confirm',
+        onConfirm: async () => {
+          try {
+            // 1. Envia o que tiver de local primeiro
+            await pushLocalChanges();
+            // 2. Baixa a nova base
+            await syncFromCloud();
+          } catch (e) {
+            console.error("Falha na sincronização segura:", e);
+            setModalConfig({
+              isOpen: true,
+              title: 'Erro na Sincronização',
+              message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
+              type: 'error'
+            });
           }
-        });
-      }
+        }
+      });
     }
   }, [isCloudUpdatePending, isSyncing, databaseMode, user, syncFromCloud, pushLocalChanges]);
 
@@ -648,16 +649,18 @@ const App: React.FC = () => {
   // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
+      console.log("App init - Iniciando carregamento de dados...");
       let savedInventory: InventoryState | null = null;
       try {
         savedInventory = await loadInventory();
         const saved = savedInventory;
         
-        // Se não houver dados locais e estivermos em modo nuvem, tenta sincronizar (apenas se houver usuário logado)
-        if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
-          await syncFromCloud();
-          return;
-        }
+        // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
+        // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso
+        // if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
+        //   await syncFromCloud();
+        //   return;
+        // }
 
         if (saved && saved.assets && saved.assets.length > 0) {
           // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
@@ -769,6 +772,7 @@ const App: React.FC = () => {
       } catch (e) { 
         console.error("Data load failed", e); 
       } finally {
+        console.log("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
         
         // @ts-expect-error - appStarted is a custom property for the loader fallback
@@ -870,14 +874,16 @@ const App: React.FC = () => {
       return;
     }
 
-    // 1.5 If user is logged in but on LOGIN/REGISTER, go to appropriate screen
-    if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
+    // 1.5 If user is logged in but on LOGIN/REGISTER/ONBOARDING, go to appropriate screen
+    if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER || currentScreen === AppScreen.ONBOARDING)) {
       const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || user.email.toLowerCase() === ADMIN_EMAIL;
-      if (isAdmin) {
-        setHistory([AppScreen.MODULE_SELECTION]);
-      } else {
-        setHistory([AppScreen.UNIT_SELECTION]);
-      }
+      setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
+      return;
+    }
+
+    // 1.6 If on ONBOARDING screen but no user, must go to LOGIN
+    if (!user && currentScreen === AppScreen.ONBOARDING) {
+      setHistory([AppScreen.LOGIN]);
       return;
     }
 
@@ -923,11 +929,13 @@ const App: React.FC = () => {
     } catch { return []; }
   });
 
+  const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
+
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(users));
     
-    if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE) {
+    if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       if (isAdmin) {
         syncUsersToCloud(users).catch(err => {
@@ -935,7 +943,7 @@ const App: React.FC = () => {
         });
       }
     }
-  }, [users, databaseMode]);
+  }, [users, databaseMode, hasFetchedUsers]);
 
   // Busca usuários da nuvem ao carregar para admins
   useEffect(() => {
@@ -979,9 +987,13 @@ const App: React.FC = () => {
             return merged;
           });
         }
+        setHasFetchedUsers(true);
       }).catch(err => {
         console.error("❌ Erro ao buscar usuários da nuvem:", err);
+        setHasFetchedUsers(true); // Permite sync mesmo em erro para não travar
       });
+    } else {
+      setHasFetchedUsers(true); // Se não for admin ou não estiver em modo supabase, permite sync
     }
   }, [user?.email, databaseMode]);
 
@@ -1574,10 +1586,32 @@ const App: React.FC = () => {
   };
 
   const completeOnboarding = useCallback(() => {
-    console.log("Finalizando onboarding...");
-    localStorage.setItem('app_onboarding_completed', 'true');
-    setInventory(prev => ({ ...prev, hasCompletedOnboarding: true }));
-  }, []);
+    try {
+      console.log("Finalizando onboarding - Início da função");
+      
+      // 1. Persistência imediata
+      localStorage.setItem('app_onboarding_completed', 'true');
+      console.log("Finalizando onboarding - LocalStorage persistido");
+      
+      // 2. Atualização de estado
+      setInventory(prev => {
+        console.log("Finalizando onboarding - Atualizando estado do inventário");
+        const newState = { ...prev, hasCompletedOnboarding: true };
+        saveInventory(newState).catch(e => console.error('Erro ao salvar no IndexedDB:', e));
+        return newState;
+      });
+      
+      // 3. Navegação forçada se necessário
+      const currentScreen = history[history.length - 1];
+      if (currentScreen === AppScreen.ONBOARDING || currentScreen === AppScreen.LOGIN) {
+        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        console.log("Finalizando onboarding - Redirecionando usuário. isAdmin:", isAdmin);
+        setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
+      }
+    } catch (error) {
+      console.error("Erro crítico no completeOnboarding:", error);
+    }
+  }, [history, user, ADMIN_EMAIL]);
 
   const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
@@ -2434,7 +2468,11 @@ const App: React.FC = () => {
       });
     } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
-      pushScreen(AppScreen.LOAD_DATABASE);
+      // Mas apenas se for realmente um administrador do sistema
+      const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
+      if (isSystemAdmin) {
+        pushScreen(AppScreen.LOAD_DATABASE);
+      }
     }
   }, [screen, inventory.assets.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen]);
 
@@ -2458,6 +2496,8 @@ const App: React.FC = () => {
   }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, history, pushScreen]);
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
+  
+  console.log("App render - screen:", screen, "selectedUnit:", selectedUnit, "hasCompletedOnboarding:", inventory.hasCompletedOnboarding, "hasAcceptedTerms:", hasAcceptedTerms);
 
   if (publicAsset) {
     return (
@@ -2476,10 +2516,12 @@ const App: React.FC = () => {
   }
 
   if (!hasAcceptedTerms) {
+    console.log("Rendering TrustOnboarding overlay - hasAcceptedTerms is false");
     return (
       <ErrorBoundary>
         <TrustOnboarding 
           onAccept={() => {
+            console.log("TrustOnboarding onAccept called in App.tsx - setting hasAcceptedTerms to true");
             setHasAcceptedTerms(true);
             localStorage.setItem('app_accepted_terms', 'true');
           }} 
@@ -2490,6 +2532,7 @@ const App: React.FC = () => {
   }
 
   if (!inventory.hasCompletedOnboarding) {
+    console.log("Rendering OnboardingWizard overlay - hasCompletedOnboarding is false");
     return (
       <ErrorBoundary>
         <OnboardingWizard onComplete={completeOnboarding} />
@@ -2641,7 +2684,7 @@ const App: React.FC = () => {
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
                 count: filteredAssetsByUnit.length, 
-                totalDatabase: inventory.assets.length, 
+                totalDatabase: selectedUnit ? filteredAssetsByUnit.length : inventory.assets.length, 
                 date: inventory.lastUpdated 
               }} 
               autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
@@ -2689,6 +2732,9 @@ const App: React.FC = () => {
                 isSyncing={isSyncing}
                 syncProgress={syncProgress}
                 onDataLoaded={async (a, c) => { 
+                  console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
+                  console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}`);
+                  
                   const newInventory = { 
                     ...inventory, 
                     assets: a, 
@@ -2696,55 +2742,76 @@ const App: React.FC = () => {
                     lastUpdated: new Date().toISOString(), 
                     status: DatabaseStatus.LOADED 
                   };
-                  setInventory(newInventory); 
                   
-                  // Salva localmente para garantir persistência mesmo se o sync falhar
-                  await saveInventory(newInventory);
-                  
-                  // Se for Admin e houver Supabase, faz o push total para a nuvem
-                  if (isAdmin && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)) {
+                  // Mostra tela de sincronização imediatamente se for admin
+                  const shouldSync = isAdmin && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+                  if (shouldSync) {
                     setIsSyncing(true);
                     setSyncProgress({ current: 0, total: a.length });
-                    try {
-                      // Limpa a nuvem antes de subir a nova base para garantir espelhamento
-                      await clearCloudInventory();
-                      
-                      // Sincroniza todos os ativos em lotes
-                      const forcedTenantId = (user?.isAdmin && user?.tenantid === 'default') ? undefined : user?.tenantid;
-                      
-                      // Usamos o syncAssetsToCloud com callback de progresso se possível, 
-                      // ou fazemos o loop aqui para controlar o progresso
-                      const batchSize = 1000;
-                      for (let i = 0; i < a.length; i += batchSize) {
-                        const batch = a.slice(i, i + batchSize);
-                        await syncAssetsToCloud(batch, forcedTenantId);
-                        setSyncProgress({ current: Math.min(i + batchSize, a.length), total: a.length });
-                      }
-
-                      // Sincroniza a config (que contém o lastUpdated)
-                      const configToSync = { ...newInventory };
-                      // @ts-expect-error - assets is removed for sync
-                      delete configToSync.assets;
-                      await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId || user?.tenantid);
-                      
-                      setLastSyncTime(new Date().toISOString());
-                      setSyncError(null);
-                    } catch (err) {
-                      console.error('Erro ao sincronizar nova carga com a nuvem:', err);
-                      setSyncError('Erro no upload total');
-                    } finally {
-                      setIsSyncing(false);
-                      setSyncProgress(null);
-                    }
                   }
-                  
-                  setStartWithDataMenu(false);
-                  pushScreen(AppScreen.UNIT_SELECTION); 
+
+                  try {
+                    console.log('>>> [DatabaseLoader] Salvando inventário localmente...');
+                    setInventory(newInventory); 
+                    await saveInventory(newInventory);
+                    console.log('>>> [DatabaseLoader] Inventário local salvo com sucesso.');
+                    
+                    if (shouldSync) {
+                      console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
+                      try {
+                        const forcedTenantId = (user?.isAdmin && user?.tenantid === 'default') ? undefined : user?.tenantid;
+                        
+                        // Limpa a nuvem antes de subir a nova base para garantir espelhamento
+                        // Passamos o tenantId para garantir que só limpamos os dados deste cliente
+                        await clearCloudInventory(undefined, forcedTenantId);
+                        
+                        // Sincroniza todos os ativos em lotes
+                        const batchSize = 1000;
+                        for (let i = 0; i < a.length; i += batchSize) {
+                          const batch = a.slice(i, i + batchSize);
+                          await syncAssetsToCloud(batch, forcedTenantId);
+                          setSyncProgress({ current: Math.min(i + batchSize, a.length), total: a.length });
+                        }
+
+                        // Sincroniza a config (que contém o lastUpdated)
+                        const configToSync = { ...newInventory };
+                        // @ts-expect-error - assets is removed for sync
+                        delete configToSync.assets;
+                        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId || user?.tenantid);
+                        
+                        setLastSyncTime(new Date().toISOString());
+                        setSyncError(null);
+                        console.log('>>> [DatabaseLoader] Sincronização concluída com sucesso.');
+                      } catch (err) {
+                        console.error('>>> [DatabaseLoader] Erro ao sincronizar com a nuvem:', err);
+                        setSyncError('Erro no upload total');
+                      } finally {
+                        setIsSyncing(false);
+                        setSyncProgress(null);
+                      }
+                    }
+                    
+                    console.log('>>> [DatabaseLoader] Finalizando carga e navegando para UNIT_SELECTION');
+                    setStartWithDataMenu(false);
+                    pushScreen(AppScreen.UNIT_SELECTION); 
+                  } catch (error) {
+                    console.error('>>> [DatabaseLoader] Erro crítico na ativação:', error);
+                    setIsSyncing(false);
+                    // Opcional: mostrar um erro para o usuário
+                  }
                 }} 
               />
             ) : (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p>
+              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+                <ShieldAlert size={48} className="text-red-500 mb-4" />
+                <p className="text-ink-muted uppercase font-black tracking-widest mb-2">Acesso Restrito</p>
+                <p className="text-[10px] text-ink-muted uppercase font-bold mb-6">Você não tem permissão para acessar esta área.</p>
+                <button 
+                  onClick={() => pushScreen(AppScreen.UNIT_SELECTION)}
+                  className="px-6 py-3 bg-accent text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all"
+                >
+                  Voltar para Seleção
+                </button>
               </div>
             )
           )}
@@ -2994,6 +3061,9 @@ const App: React.FC = () => {
                 setSyncQueueLength(items.length);
               }}
             />
+          )}
+          {screen === AppScreen.ONBOARDING && (
+            <OnboardingWizard onComplete={completeOnboarding} onCancel={popScreen} />
           )}
         </div>
   

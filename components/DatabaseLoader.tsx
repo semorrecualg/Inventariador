@@ -566,7 +566,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
               </div>
             </div>
 
-            <button onClick={() => onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort())} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3">
+            <button onClick={() => {
+              console.log('>>> [DatabaseLoader] Botão ATIVAR SISTEMA clicado.');
+              onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort());
+            }} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3">
               <span>ATIVAR SISTEMA</span> <ArrowRight size={18} />
             </button>
           </div>

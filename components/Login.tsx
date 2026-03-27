@@ -244,6 +244,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           isAdmin: cloudUser.isAdmin,
           mustChangePassword: false,
           tenantid: cloudUser.tenantid || 'default',
+          unitid: cloudUser.unitid || cloudUser.tenantid || 'default',
+          units: cloudUser.units || [cloudUser.tenantid || 'default'],
           tenants: cloudUser.tenants || [cloudUser.tenantid || 'default']
         };
       } else {
