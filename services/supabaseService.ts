@@ -332,6 +332,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       _conferido: conferido,
       _tenantid: finalTenantId,
       _unitid: a._unitid || null,
+      _version: a._version || 1,
+      _is_deleted: a._is_deleted || false,
       EMPRESA: assetEmpresa
     };
   });
@@ -806,7 +808,8 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     let query = supabase
       .from('assets')
       .select('*')
-      .eq('ETIQUETA', tag.toUpperCase().trim());
+      .eq('ETIQUETA', tag.toUpperCase().trim())
+      .or('_is_deleted.is.null,_is_deleted.eq.false');
     
     if (tenantid) {
       query = query.eq('_tenantid', tenantid);
@@ -839,7 +842,8 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
-    let assetsQuery = supabase.from('assets').select('*');
+    // Filtramos ativos deletados (_is_deleted != true)
+    let assetsQuery = supabase.from('assets').select('*').or('_is_deleted.is.null,_is_deleted.eq.false');
     if (tenantid) {
       if (Array.isArray(tenantid)) {
         assetsQuery = assetsQuery.in('_tenantid', tenantid);

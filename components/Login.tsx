@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint } from 'lucide-react';
 import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
-import { User, DatabaseMode, UserRole } from '../types';
+import { User, DatabaseMode, UserRole, AppScreen } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 
 interface LoginProps {
@@ -225,7 +225,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou use o 'Magic Link' abaixo.");
           }
           if (authError.message.includes("Invalid login credentials")) {
-            throw new Error("E-mail ou senha incorretos. Verifique se não há erros de digitação.");
+            throw new Error("E-mail ou senha incorretos. Se você ainda não tem uma conta, clique em 'Criar Nova Conta' abaixo.");
           }
           throw new Error(`Erro Supabase: ${authError.message}`);
         }
@@ -424,6 +424,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             <span>Acessar Sistema</span>
           )}
         </button>
+
+        {databaseMode === DatabaseMode.SUPABASE && (
+          <button 
+            type="button"
+            onClick={() => {
+              // Navega para a tela de registro
+              const pushScreen = window.pushScreen;
+              if (pushScreen) {
+                pushScreen(AppScreen.REGISTER);
+              } else {
+                // Fallback se pushScreen não estiver no window
+                window.dispatchEvent(new CustomEvent('app_navigate', { detail: AppScreen.REGISTER }));
+              }
+            }}
+            className="w-full bg-white border border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+          >
+            <span>Criar Nova Conta</span>
+          </button>
+        )}
 
         {hasBio && !isLoading && (
           <button 

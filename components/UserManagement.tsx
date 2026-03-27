@@ -164,6 +164,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setNewPassword('');
     setNewRole(UserRole.AUDITOR);
     setIsAddModalOpen(false);
+    
+    // Feedback de sucesso para o usuário
+    showModal("Sucesso", `O usuário ${newName || username} foi cadastrado com sucesso!`, "success");
   };
 
   const handleOpenEdit = (user: User) => {
@@ -265,6 +268,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setUsers(prev => {
       const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
       console.log('[UserManagement] Lista de usuários atualizada localmente.');
+      localStorage.setItem('app_users', JSON.stringify(updated));
       return updated;
     });
 
@@ -279,6 +283,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     setIsEditModalOpen(false);
     setSelectedUser(null);
+    
+    // Feedback de sucesso para o usuário
+    showModal("Sucesso", `As credenciais de ${name || username} foram atualizadas com sucesso!`, "success");
   };
 
   const removeUser = (email: string) => {

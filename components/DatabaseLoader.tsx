@@ -23,6 +23,7 @@ interface LoadSummary {
   rows: number;
   purgedRows: number;
   originalRows: number;
+  divergentBaixaCount: number; // ATIVO com DATABAIXA
   cols: number;
   companies: Record<string, number>;
   headers: string[];
@@ -35,9 +36,16 @@ interface DatabaseLoaderProps {
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
   isSyncing?: boolean;
   syncProgress?: { current: number; total: number } | null;
+  excludedAccounts?: string[];
 }
 
-const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, isSyncing, syncProgress }) => {
+const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
+  onBack, 
+  onDataLoaded, 
+  isSyncing, 
+  syncProgress,
+  excludedAccounts = []
+}) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -159,27 +167,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
         const status = cleanDisplayValue(row[m.STATUS]);
         const etiqueta = cleanDisplayValue(row[m.ETIQUETA]);
         const conta = cleanDisplayValue(row[m.CONTA]);
-        const pkNorm = normalizeKey(etiqueta);
+        const dataBaixa = cleanDisplayValue(row[m.DATA_BAIXA]);
         
-        const isBaixado = status.includes('BAIXADO');
         const isAtivo = status.includes('ATIVO');
 
-        // REGRA FUNDAMENTAL DE ELIMINAÇÃO (GBR Protocol v24)
-        if (isBaixado) {
-          // b.1) Eliminar se CONTA_CONTABIL contém 131105001 ou 131105002
-          if (conta.includes('131105001') || conta.includes('131105002')) return;
-          
-          // b.2) Eliminar se ETIQUETA está vazia
-          if (!etiqueta || etiqueta.trim() === "") return;
-          
-          // b.3.1) Eliminar se ETIQUETA existe em algum registro ATIVO
-          if (activeTagsGlobal.has(pkNorm)) return;
-          
-          // b.3.2) Se ETIQUETA preenchida e NÃO existe em registros ATIVO, NÃO ELIMINAR (segue para criação)
-        } else if (!isAtivo) {
-          // Se não é BAIXADO nem ATIVO, por segurança mantemos (Regra a.1 estendida)
-        }
-        // Se for ATIVO, nunca elimina (Regra a.1)
+        // REGRA DE OURO GBR v25: Somente Importamos ATIVOS
+        if (!isAtivo) return;
+
+        // Filtro de Contas Excluídas (Parametrizado)
+        if (excludedAccounts?.includes(conta)) return;
 
         const asset: Asset = { id: generateUUID() };
         asset.TENANT_ID = cleanDisplayValue(row[m.TENANT_ID]);
@@ -196,11 +192,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
         asset.ENDERECO = cleanDisplayValue(row[m.ENDERECO]) || "ENDERECO NAO INFORMADO";
         asset.REGISTRO = cleanDisplayValue(row[m.REGISTRO]);
         asset.SUBREG = cleanDisplayValue(row[m.SUBREG]);
-        asset.DATABAIXA = cleanDisplayValue(row[m.DATA_BAIXA]);
+        asset.DATABAIXA = dataBaixa;
         asset.CONTACONTABIL = conta;
         asset.PRIMARYKEY = cleanDisplayValue(row[m.PK]);
         asset.CENTRODECUSTO = cleanDisplayValue(row[m.CUSTO]);
         asset.VLRAQUISIC = cleanDisplayValue(row[m.VALOR]);
+
+        // SINALIZAÇÃO DA REGRA DE OURO: ATIVO COM DATA DE BAIXA
+        if (dataBaixa && dataBaixa.trim() !== "" && dataBaixa !== "0") {
+          asset._is_divergent_baixa = true;
+        }
         
         const recnoVal = row[m.RECNO];
         if (recnoVal !== undefined && recnoVal !== null && recnoVal !== "") {
@@ -277,6 +278,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
       rows: filteredAssets.length,
       purgedRows: rawExtractedAssetsRef.current.length - filteredAssets.length, 
       originalRows: rawExtractedAssetsRef.current.length,
+      divergentBaixaCount: filteredAssets.filter(a => a._is_divergent_baixa).length,
       cols: 21, // Atualizado para v25.00
       companies: companyStats,
       headers: [], 
@@ -537,9 +539,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ onBack, onDataLoaded, i
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Com Plaqueta</span>
                     <span className="text-lg font-bold text-emerald-600">{summary.withPlaqueta}</span>
                   </div>
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Descartados</span>
-                    <span className="text-lg font-bold text-rose-500">{summary.purgedRows}</span>
+                  <div className="bg-red-50 p-4 rounded-xl border border-red-100 shadow-inner">
+                    <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest block mb-1">Divergência Baixa</span>
+                    <span className="text-lg font-bold text-red-600">{summary.divergentBaixaCount}</span>
                   </div>
                </div>
 

@@ -11,6 +11,7 @@ import {
   Check,
   Barcode,
   AlertCircle,
+  AlertTriangle,
   QrCode,
   Filter,
   X,
@@ -424,48 +425,83 @@ const Consultation: React.FC<ConsultationProps> = ({
                     style={{ height: '100%' }}
                     data={filteredAssets}
                     atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
-                    itemContent={(index, asset) => (
-                      <div className="px-5 py-1.5">
-                        <div 
-                          onClick={() => onSelectAsset(asset)} 
-                          className="w-full flex items-center p-3 bg-white rounded-xl border border-slate-200 shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer hover:border-accent/30 group"
-                        >
-                          <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-accent-soft group-hover:text-accent mr-4 shrink-0 border border-slate-100 transition-colors">
-                            <Barcode size={20} />
-                          </div>
-                          <div className="flex-1 min-w-0 pr-2">
-                            <span className="text-base font-bold text-slate-900 font-mono leading-none block mb-0.5 tracking-tight">{asset.ETIQUETA || 'S/ ETQ'}</span>
-                            <p className="text-[10px] font-bold text-slate-500 uppercase truncate tracking-tight">
-                              {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
-                            </p>
-                            <div className="flex items-center space-x-1.5 mt-1">
-                              <span className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">SN: {asset.SERIAL || '---'}</span>
-                              <span className="text-slate-200">•</span>
-                              <span className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">{asset.ENDERECO || '---'}</span>
+                    itemContent={(index, asset) => {
+                      const isDivergent = asset._is_divergent_baixa;
+                      return (
+                        <div className="px-5 py-1.5">
+                          <div 
+                            onClick={() => onSelectAsset(asset)} 
+                            className={`w-full flex items-center p-3 rounded-xl border shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer group ${
+                              isDivergent 
+                                ? 'bg-red-50 border-red-200 hover:border-red-400' 
+                                : 'bg-white border-slate-200 hover:border-accent/30'
+                            }`}
+                          >
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-4 shrink-0 border transition-colors ${
+                              isDivergent 
+                                ? 'bg-red-100 text-red-600 border-red-200' 
+                                : 'bg-slate-50 text-slate-400 group-hover:bg-accent-soft group-hover:text-accent border-slate-100'
+                            }`}>
+                              {isDivergent ? <AlertTriangle size={20} strokeWidth={3} /> : <Barcode size={20} />}
                             </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            {isReturnMode && onReturnToInventory && (
+                            <div className="flex-1 min-w-0 pr-2">
+                              <div className="flex items-center space-x-2 mb-0.5">
+                                <span className={`text-base font-bold font-mono leading-none tracking-tight ${isDivergent ? 'text-red-700' : 'text-slate-900'}`}>
+                                  {asset.ETIQUETA || 'S/ ETQ'}
+                                </span>
+                                {isDivergent && (
+                                  <span className="bg-red-600 text-white text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter animate-pulse">
+                                    Divergência
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-[10px] font-bold uppercase truncate tracking-tight ${isDivergent ? 'text-red-600/70' : 'text-slate-500'}`}>
+                                {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
+                              </p>
+                              <div className="flex items-center space-x-1.5 mt-1">
+                                <span className={`text-[7px] font-bold uppercase tracking-widest ${isDivergent ? 'text-red-400' : 'text-slate-300'}`}>
+                                  SN: {asset.SERIAL || '---'}
+                                </span>
+                                <span className={isDivergent ? 'text-red-200' : 'text-slate-200'}>•</span>
+                                <span className={`text-[7px] font-bold uppercase tracking-widest ${isDivergent ? 'text-red-400' : 'text-slate-300'}`}>
+                                  {asset.ENDERECO || '---'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              {isReturnMode && onReturnToInventory && (
+                                <button 
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    onReturnToInventory(asset.ETIQUETA || ''); 
+                                  }} 
+                                  className={`p-3 rounded-xl active:scale-90 shadow-sm transition-all flex items-center space-x-2 ${
+                                    isDivergent 
+                                      ? 'bg-red-600 text-white border border-red-700' 
+                                      : 'bg-emerald-50 border border-emerald-200 text-emerald-600 hover:bg-emerald-100'
+                                  }`}
+                                  title="Voltar ao Inventário"
+                                >
+                                  <Check size={16} strokeWidth={3} />
+                                  <span className="text-[10px] font-black uppercase tracking-tighter">Selecionar</span>
+                                </button>
+                              )}
                               <button 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  onReturnToInventory(asset.ETIQUETA || ''); 
-                                }} 
-                                className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-600 active:scale-90 shadow-sm hover:bg-emerald-100 transition-all flex items-center space-x-2"
-                                title="Voltar ao Inventário"
+                                onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} 
+                                className={`p-3 border rounded-xl active:scale-90 shadow-sm transition-colors ${
+                                  isDivergent 
+                                    ? 'bg-red-100 border-red-200 text-red-600 hover:bg-red-200' 
+                                    : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-blue-600'
+                                }`}
                               >
-                                <Check size={16} strokeWidth={3} />
-                                <span className="text-[10px] font-black uppercase tracking-tighter">Selecionar</span>
+                                <QrCode size={16} />
                               </button>
-                            )}
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedAssetForQr(asset); setIsQrModalOpen(true); }} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 active:scale-90 shadow-sm hover:text-blue-600 transition-colors">
-                              <QrCode size={16} />
-                            </button>
+                            </div>
+                            <ChevronRight size={16} className={`transition-colors ml-1 ${isDivergent ? 'text-red-400 group-hover:text-red-600' : 'text-slate-300 group-hover:text-blue-400'}`} />
                           </div>
-                          <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400 transition-colors ml-1" />
                         </div>
-                      </div>
-                    )}
+                      );
+                    }}
                   />
                 </div>
               </div>

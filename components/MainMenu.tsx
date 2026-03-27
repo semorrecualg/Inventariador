@@ -4,6 +4,7 @@ import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole } from '../ty
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
+  Info,
   Search, 
   BarChart3, 
   ArrowLeft, 
@@ -24,6 +25,7 @@ import {
   Volume2,
   Battery,
   TrendingUp,
+  TrendingDown,
   ListChecks,
   Database,
   Cloud,
@@ -80,6 +82,10 @@ interface MainMenuProps {
   onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
   pendingPhotosCount?: number;
   syncQueueLength?: number;
+  deletedAssetsCount?: number;
+  impairmentAssetsCount?: number;
+  excludedAccounts?: string[];
+  onUpdateExcludedAccounts?: (accounts: string[]) => void;
   onResetGPS?: () => void;
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
@@ -126,6 +132,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateMandatoryPhotoOnNewItem,
   pendingPhotosCount = 0,
   syncQueueLength = 0,
+  deletedAssetsCount = 0,
+  impairmentAssetsCount = 0,
+  excludedAccounts = [],
+  onUpdateExcludedAccounts,
   onResetGPS,
   onToggleGpsBypass,
   isGpsBypassed = false
@@ -136,6 +146,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isSelectiveClearOpen, setIsSelectiveClearOpen] = useState(false);
+  const [isExcludedAccountsOpen, setIsExcludedAccountsOpen] = useState(false);
+  const [tempExcludedAccounts, setTempExcludedAccounts] = useState<string>('');
   const [selectedToClear, setSelectedToClear] = useState<string[]>([]);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
@@ -148,6 +160,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
     setPendingAction(() => action);
     setIsSecurityPinOpen(true);
   };
+
+  // Protocolo de Governança GBR v25.00: Identificação de Ambiente
+  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
@@ -799,6 +814,28 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
                 <ChevronRight size={14} className="text-white/20" />
               </button>
+
+              <button 
+                disabled={!hasData} 
+                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.IMPAIRMENT_REPORT); }} 
+                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-red-500/20 text-red-500 rounded-lg flex items-center justify-center mr-4 border border-red-500/30">
+                  <TrendingDown size={20} />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2">
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Relatório de Impairment</h4>
+                    {impairmentAssetsCount > 0 && (
+                      <span className="bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse">
+                        {impairmentAssetsCount}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">CPC 01 - Perdas por Desvalorização</p>
+                </div>
+                <ChevronRight size={14} className="text-white/20" />
+              </button>
             </div>
           </div>
         </div>
@@ -962,17 +999,31 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </button>
               </div>
 
-              <button onClick={() => { 
-                setIsDataMenuOpen(false); 
-                setIsAdminMenuOpen(false);
-                onNavigate(AppScreen.LOAD_DATABASE); 
-              }} className="w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20">
+              <button 
+                disabled={isMobileDevice}
+                onClick={() => { 
+                  setIsDataMenuOpen(false); 
+                  setIsAdminMenuOpen(false);
+                  onNavigate(AppScreen.LOAD_DATABASE); 
+                }} 
+                className={`w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20 ${isMobileDevice ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
+              >
                 <div className="w-10 h-10 bg-white/20 text-white rounded-lg flex items-center justify-center mr-4"><DatabaseZap size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold uppercase tracking-tight">Carga Expert</h4>
-                  <p className="text-[8px] font-bold text-white/70 uppercase tracking-widest mt-0.5">Importar Base Master</p>
+                  <p className="text-[8px] font-bold text-white/70 uppercase tracking-widest mt-0.5">
+                    {isMobileDevice ? 'BLOQUEADO EM MOBILE' : 'Importar Base Master'}
+                  </p>
                 </div>
               </button>
+
+              {isMobileDevice && (
+                <div className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+                  <p className="text-[7px] font-bold text-red-400 uppercase leading-relaxed tracking-wide text-center">
+                    Protocolo GBR: Carga de dados permitida apenas via Desktop.
+                  </p>
+                </div>
+              )}
 
               <button onClick={() => { 
                 setIsSelectiveClearOpen(true);
@@ -982,6 +1033,38 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Limpeza Seletiva</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Escolher Unidades para Apagar</p>
                 </div>
+              </button>
+
+              <button onClick={() => { 
+                setTempExcludedAccounts(excludedAccounts.join(', '));
+                setIsExcludedAccountsOpen(true);
+              }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><ShieldAlert size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Filtros de Carga</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Contas Contábeis Ignoradas</p>
+                </div>
+              </button>
+
+              <button 
+                onClick={() => { 
+                  setIsDataMenuOpen(false); 
+                  onNavigate(AppScreen.SOFT_DELETE_REPORT); 
+                }} 
+                className="w-full flex items-center p-4 bg-red-500/10 border border-red-500/20 rounded-2xl active:scale-[0.98] transition-all text-left relative overflow-hidden group"
+              >
+                <div className="w-10 h-10 bg-red-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-red-500/20 group-hover:scale-110 transition-transform">
+                  <Trash2 size={20} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">Itens para Baixa</h4>
+                  <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5 italic">Auditoria de Soft-Delete</p>
+                </div>
+                {deletedAssetsCount > 0 && (
+                  <div className="absolute top-4 right-4 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-lg animate-pulse">
+                    {deletedAssetsCount}
+                  </div>
+                )}
               </button>
 
               {/* GPS CONTROLS */}
@@ -1045,6 +1128,66 @@ const MainMenu: React.FC<MainMenuProps> = ({
         confirmText="Sim, Apagar Tudo"
         cancelText="Cancelar"
       />
+
+      {/* MODAL DE CONTAS EXCLUÍDAS */}
+      {isExcludedAccountsOpen && (
+        <div className="fixed inset-0 z-[20000] bg-slate-950/95 backdrop-blur-xl flex flex-col animate-fadeIn">
+          <div className="px-6 pt-12 pb-6 bg-blue-600 text-white flex items-center justify-between shadow-lg">
+            <div className="flex items-center space-x-4">
+              <BackButton onClick={() => setIsExcludedAccountsOpen(false)} label="Voltar" />
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight">Filtros de Carga</h2>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Contas Contábeis Ignoradas</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 bg-bg-main no-scrollbar">
+            <div className="max-w-md mx-auto space-y-6">
+              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center space-x-3 mb-4 text-blue-600">
+                  <ShieldAlert size={20} />
+                  <h3 className="text-sm font-black uppercase tracking-tight">Configuração de Saneamento</h3>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed mb-6">
+                  Insira as contas contábeis que devem ser <strong>IGNORADAS</strong> durante a carga de dados (Carga Expert) caso o status do item seja <strong>BAIXADO</strong>. Separe as contas por vírgula.
+                </p>
+                
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Contas (Ex: 131105001, 131105002)</label>
+                  <textarea 
+                    value={tempExcludedAccounts}
+                    onChange={(e) => setTempExcludedAccounts(e.target.value)}
+                    placeholder="Digite as contas separadas por vírgula..."
+                    className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl flex items-start space-x-3">
+                <Info size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-[10px] text-amber-700 leading-relaxed">
+                  <strong>Nota:</strong> Esta regra é aplicada apenas no momento da importação da planilha. Alterar esta lista não afetará os dados que já estão no banco de dados.
+                </p>
+              </div>
+
+              <button 
+                onClick={() => {
+                  const accounts = tempExcludedAccounts
+                    .split(',')
+                    .map(a => a.trim())
+                    .filter(a => a.length > 0);
+                  onUpdateExcludedAccounts?.(accounts);
+                  setIsExcludedAccountsOpen(false);
+                }}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-600/20 active:scale-95 transition-all"
+              >
+                Salvar Configuração
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DE LIMPEZA SELETIVA */}
       {isSelectiveClearOpen && (

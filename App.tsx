@@ -2,12 +2,21 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin } from './types';
+
+// Extend Window interface for pushScreen
+declare global {
+  interface Window {
+    pushScreen?: (s: AppScreen) => void;
+  }
+}
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
 import MainMenu from './components/MainMenu';
 import DatabaseLoader from './components/DatabaseLoader';
 import AssetDetail from './components/AssetDetail';
+import SoftDeleteReport from './components/SoftDeleteReport';
+import ImpairmentReport from './components/ImpairmentReport';
 import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
 import GPSComplianceGuard from './components/GPSComplianceGuard';
@@ -47,6 +56,7 @@ import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
+const MAX_SYNC_QUEUE_SIZE = 100; // Limite de segurança para fila de sincronização
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -131,6 +141,7 @@ const App: React.FC = () => {
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
+  const [isSyncLocked, setIsSyncLocked] = useState(false);
 
   // Monitor de Sincronização Offline
   useEffect(() => {
@@ -138,6 +149,19 @@ const App: React.FC = () => {
       const { getSyncQueueLength } = await import('./services/syncService');
       const len = await getSyncQueueLength();
       setSyncQueueLength(len);
+
+      // Ativa trava se exceder o limite de segurança
+      if (len >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
+        setIsSyncLocked(true);
+        setModalConfig({
+          isOpen: true,
+          title: 'Bloqueio de Segurança: Fila de Sincronização',
+          message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Para garantir a integridade dos dados, novas operações de inventário estão suspensas até que a fila seja processada. Conecte-se a uma rede estável para sincronizar.`,
+          type: 'error'
+        });
+      } else if (len < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
+        setIsSyncLocked(false);
+      }
     };
 
     checkSyncQueue();
@@ -150,7 +174,7 @@ const App: React.FC = () => {
       clearInterval(interval);
       window.removeEventListener('gbr_photo_synced', handleSynced);
     };
-  }, []);
+  }, [isSyncLocked]);
 
   // Rastreamento Autônomo GBR v24.50
   useEffect(() => {
@@ -249,7 +273,7 @@ const App: React.FC = () => {
     type: 'info'
   });
 
-  const [inventory, setInventory] = useState<InventoryState>({ 
+  const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
     assets: [], 
     companies: [], 
     lastUpdated: null, 
@@ -267,8 +291,14 @@ const App: React.FC = () => {
     protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
     mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
     mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
-    databaseMode: (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL,
+    excludedAccounts: JSON.parse(localStorage.getItem('app_excluded_accounts') || '["131105001", "131105002"]'),
+    databaseMode: mode,
     hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
+  });
+
+  const [inventory, setInventory] = useState<InventoryState>(() => {
+    const mode = (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL;
+    return getInitialInventoryState(mode);
   });
 
   console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
@@ -649,10 +679,10 @@ const App: React.FC = () => {
   // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
-      console.log("App init - Iniciando carregamento de dados...");
+      console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
       let savedInventory: InventoryState | null = null;
       try {
-        savedInventory = await loadInventory();
+        savedInventory = await loadInventory(databaseMode);
         const saved = savedInventory;
         
         // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
@@ -1279,9 +1309,32 @@ const App: React.FC = () => {
   }, []);
 
   const pushScreen = useCallback((s: AppScreen) => {
+    // Protocolo de Governança GBR v25.00: Identificação de Ambiente
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // A restrição de carga de dados agora foca no dispositivo físico (Mobile Device) 
+    // e não apenas no tamanho da janela, permitindo que administradores em notebooks/desktops operem livremente.
+    if (s === AppScreen.LOAD_DATABASE && isMobileDevice) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Acesso Restrito',
+        message: 'A carga de base de dados (Excel/CSV) é permitida exclusivamente em ambiente DESKTOP para garantir a integridade do processamento e conformidade com o protocolo de auditoria.',
+        type: 'error'
+      });
+      return;
+    }
+
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
     else setHistory(prev => [...prev, s]);
   }, []);
+
+  // Expose pushScreen to window for components that need it
+  useEffect(() => {
+    window.pushScreen = pushScreen;
+    return () => {
+      delete window.pushScreen;
+    };
+  }, [pushScreen]);
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
@@ -1443,12 +1496,12 @@ const App: React.FC = () => {
     
     // Backup de segurança antes da limpeza em massa
     const backupFileName = `GBR_MOBILE+KBP+LIMPEZA_MASSA+${dateStr}+${timeStr}`;
-    await backupInventory(backupFileName);
+    await backupInventory(databaseMode, backupFileName);
 
     setIsSyncing(true);
     try {
       // 1. Limpa localmente todas as empresas selecionadas em uma única operação
-      await clearMultipleInventories(companiesToClear);
+      await clearMultipleInventories(companiesToClear, databaseMode);
 
       // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
       if (databaseMode === DatabaseMode.SUPABASE) {
@@ -1515,14 +1568,52 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateDatabaseMode = (mode: DatabaseMode) => {
-    setDatabaseMode(mode);
-    setInventory(prev => ({ ...prev, databaseMode: mode }));
-    localStorage.setItem('app_database_mode', mode);
-    
-    // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
-    if (mode !== DatabaseMode.INTERNAL && inventory.assets.length === 0 && user) {
-      syncFromCloud(undefined, mode);
+  const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
+    setIsSyncing(true);
+    try {
+      // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
+      console.log(`>>> [ModeSwitch] Salvando estado atual (${databaseMode}) antes da troca...`);
+      await saveInventory(inventory);
+
+      // 2. Troca o modo no localStorage e no estado de controle
+      setDatabaseMode(mode);
+      localStorage.setItem('app_database_mode', mode);
+
+      // 3. Tenta carregar o estado do novo modo do IndexedDB
+      console.log(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
+      const loaded = await loadInventory(mode);
+      
+      if (loaded && loaded.assets && loaded.assets.length > 0) {
+        console.log(`>>> [ModeSwitch] Dados encontrados para ${mode}. Restaurando...`);
+        setInventory(loaded);
+      } else {
+        console.log(`>>> [ModeSwitch] Nenhum dado local para ${mode}. Iniciando base limpa.`);
+        const cleanState = getInitialInventoryState(mode);
+        setInventory(cleanState);
+        
+        // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
+        if (mode.startsWith('SUPABASE') && user) {
+          console.log(`>>> [ModeSwitch] Modo Nuvem detectado. Iniciando sincronização automática...`);
+          await syncFromCloud(undefined, mode);
+        }
+      }
+      
+      setModalConfig({
+        isOpen: true,
+        title: 'Modo Alterado',
+        message: `O sistema agora está operando no modo ${mode}. As bases de dados são 100% independentes.`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Erro ao trocar modo de banco de dados:', error);
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro na Troca de Modo',
+        message: 'Não foi possível alternar o modo de banco de dados com segurança. Tente novamente.',
+        type: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1753,6 +1844,9 @@ const App: React.FC = () => {
     const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
     const isNew = !existing;
 
+    // Incrementa versão para controle de concorrência (Optimistic Concurrency Control)
+    const nextVersion = (updatedAsset._version || 1) + (isNew ? 0 : 1);
+
     // Adiciona entrada na trilha de auditoria
     const auditEntry: AuditLogEntry = {
       timestamp: new Date().toISOString(),
@@ -1765,6 +1859,7 @@ const App: React.FC = () => {
     
     const assetWithHistory = {
       ...assetWithGps,
+      _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
       _auditor: user?.email || assetWithGps._auditor,
       _dataLeitura: new Date().toISOString()
@@ -1797,6 +1892,194 @@ const App: React.FC = () => {
     }
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
+  const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
+    if (numberOfUnits < 2) return;
+
+    const newAssets: Asset[] = [];
+    const timestamp = new Date().toISOString();
+    const auditor = user?.name || user?.username || user?.email || 'AUDITOR';
+
+    // Campos de valor que devem ser rateados
+    const valueFields = [
+      '_valor_aquisicao',
+      '_valor_residual',
+      '_depreciacao_acumulada',
+      '_perda_impairment',
+      '_valor_recuperavel',
+      '_valor_justo',
+      '_valor_em_uso'
+    ] as const;
+
+    // Função auxiliar para rateio com ajuste de arredondamento na última unidade
+    const calculateSplit = (total: number, units: number, index: number, pcts?: number[]) => {
+      if (pcts && pcts.length === units) {
+        // Rateio por Percentual
+        const pct = pcts[index] / 100;
+        const val = Math.round(total * pct * 100) / 100;
+        
+        if (index === units - 1) {
+          // Ajuste fino na última unidade para bater o total exato
+          let sumPrevious = 0;
+          for (let j = 0; j < units - 1; j++) {
+            sumPrevious += Math.round(total * (pcts[j] / 100) * 100) / 100;
+          }
+          return Math.round((total - sumPrevious) * 100) / 100;
+        }
+        return val;
+      }
+
+      // Rateio Igual (Default)
+      const baseValue = Math.floor((total / units) * 100) / 100;
+      if (index === units - 1) {
+        // Última unidade recebe a diferença de arredondamento
+        return Math.round((total - (baseValue * (units - 1))) * 100) / 100;
+      }
+      return baseValue;
+    };
+
+    // 1. Marcar o pai como unitarizado (Valor contábil do pai permanece para histórico, mas ele sai do giro)
+    const updatedParent: Asset = {
+      ...parentAsset,
+      _is_unitized: true,
+      _conferido: true,
+      _dataLeitura: timestamp,
+      _auditor: auditor,
+      TAG_INVENTARIO: TagInventario.CONFERIDO,
+      _history: [
+        ...(parentAsset._history || []),
+        {
+          timestamp,
+          user: auditor,
+          action: 'UNITARIZAÇÃO',
+          details: `Ativo desmembrado em ${numberOfUnits} unidades. Método: ${percentages ? 'Percentual' : 'Igual'}.`
+        }
+      ]
+    };
+
+    // 2. Criar os filhos com rateio de valores
+    for (let i = 0; i < numberOfUnits; i++) {
+      const childId = `UNIT-${parentAsset.id}-${i + 1}-${Date.now()}`;
+      
+      // Inicializa o objeto do filho
+      const child: Asset = {
+        ...parentAsset,
+        id: childId,
+        _parent_id: parentAsset.id,
+        _isNew: true,
+        _conferido: false,
+        ETIQUETA: 'ETIQUETAR',
+        QT: 1,
+        _plaquetaMaster: 'ETIQUETAR',
+        _dataLeitura: undefined,
+        _auditor: undefined,
+        TAG_INVENTARIO: TagInventario.FALTA_ETIQUETAR,
+        _history: [
+          {
+            timestamp,
+            user: auditor,
+            action: 'CRIAÇÃO POR UNITARIZAÇÃO',
+            details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${parentAsset.ETIQUETA}. ${percentages ? `Percentual: ${percentages[i]}%` : ''}`
+          }
+        ]
+      };
+
+      // Rateia os campos numéricos
+      valueFields.forEach(field => {
+        const totalValue = Number(parentAsset[field] || 0);
+        if (totalValue > 0) {
+          child[field] = calculateSplit(totalValue, numberOfUnits, i, percentages);
+        }
+      });
+
+      // Rateia VLRAQUISIC (se for numérico ou string conversível)
+      const vlrAquisicTotal = typeof parentAsset.VLRAQUISIC === 'number' 
+        ? parentAsset.VLRAQUISIC 
+        : parseFloat(String(parentAsset.VLRAQUISIC || '0').replace(',', '.'));
+      
+      if (!isNaN(vlrAquisicTotal) && vlrAquisicTotal > 0) {
+        const splitVlr = calculateSplit(vlrAquisicTotal, numberOfUnits, i, percentages);
+        child.VLRAQUISIC = typeof parentAsset.VLRAQUISIC === 'number' ? splitVlr : splitVlr.toFixed(2);
+      }
+
+      newAssets.push(child);
+    }
+
+    // 3. Atualizar estado
+    setInventory(prev => ({
+      ...prev,
+      assets: [
+        ...prev.assets.map(a => String(a.id) === String(parentAsset.id) ? updatedParent : a),
+        ...newAssets
+      ],
+      lastUpdated: timestamp
+    }));
+
+    // 4. Sincronizar se necessário
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      try {
+        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || 'default');
+      } catch (err) {
+        console.error('Erro ao sincronizar unitarização:', err);
+      }
+    }
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Unitarização Concluída',
+      message: `${numberOfUnits} novas fichas foram geradas com valores rateados (${percentages ? 'por percentual' : 'igualmente'}). O total dos filhos é 100% igual ao valor do pai.`,
+      type: 'success'
+    });
+  }, [user, databaseMode]);
+
+  const restoreAsset = useCallback(async (assetId: string) => {
+    const assetToRestore = inventory.assets.find(a => String(a.id) === String(assetId));
+    if (!assetToRestore) return;
+
+    const restoredAsset: Asset = {
+      ...assetToRestore,
+      _is_deleted: false,
+      _version: (assetToRestore._version || 1) + 1,
+      _history: [
+        ...(assetToRestore._history || []),
+        {
+          timestamp: new Date().toISOString(),
+          user: user?.email || 'unknown',
+          action: 'RESTORE',
+          details: 'Restauração de ativo previamente excluído'
+        }
+      ]
+    };
+
+    setInventory(prev => ({
+      ...prev,
+      assets: prev.assets.map(a => String(a.id) === String(assetId) ? restoredAsset : a),
+      lastUpdated: new Date().toISOString()
+    }));
+
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      await syncAssetsToCloud([restoredAsset], user?.tenantid || 'default');
+    }
+  }, [inventory.assets, user, databaseMode]);
+
+  const permanentDeleteAsset = useCallback(async (assetId: string) => {
+    if (!window.confirm('Deseja realmente excluir permanentemente este ativo? Esta ação não pode ser desfeita.')) return;
+
+    setInventory(prev => ({
+      ...prev,
+      assets: prev.assets.filter(a => String(a.id) !== String(assetId)),
+      lastUpdated: new Date().toISOString()
+    }));
+
+    if (databaseMode === DatabaseMode.SUPABASE && supabase) {
+      const { error } = await supabase
+        .from('assets')
+        .delete()
+        .eq('id', assetId);
+      
+      if (error) console.error('Erro ao excluir permanentemente:', error);
+    }
+  }, [databaseMode]);
+
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
     if (upperCaseLocation && !allLocations.includes(upperCaseLocation)) {
@@ -1807,6 +2090,85 @@ const App: React.FC = () => {
       });
     }
   };
+
+  const deleteAsset = useCallback(async (assetId: string) => {
+    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    
+    if (!isAdmin) {
+      alert("Apenas administradores podem excluir ativos.");
+      return;
+    }
+
+    const assetToDelete = inventory.assets.find(a => String(a.id) === String(assetId));
+    if (!assetToDelete) return;
+
+    // Soft Delete: Marca como deletado e incrementa versão
+    const deletedAsset: Asset = {
+      ...assetToDelete,
+      _is_deleted: true,
+      _version: (assetToDelete._version || 1) + 1,
+      _dataLeitura: new Date().toISOString(),
+      _auditor: user?.email || 'unknown'
+    };
+
+    // Log de Auditoria
+    const auditEntry: AuditLogEntry = {
+      timestamp: new Date().toISOString(),
+      user: user?.email || 'unknown',
+      action: 'DELETE',
+      details: 'Exclusão lógica (Soft Delete) do ativo',
+      tenantid: user?.tenantid
+    };
+    deletedAsset._history = [...(deletedAsset._history || []), auditEntry];
+
+    // Atualiza estado local (remove da lista visível)
+    setInventory(prev => ({
+      ...prev,
+      assets: prev.assets.filter(a => String(a.id) !== String(assetId)),
+      lastUpdated: new Date().toISOString()
+    }));
+
+    // Sincroniza com a nuvem (envia o flag _is_deleted)
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      try {
+        await syncAssetsToCloud([deletedAsset], user?.tenantid);
+        
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'DELETE',
+          table_name: 'assets',
+          record_id: String(assetId),
+          new_data: deletedAsset,
+          details: 'Soft Delete executado',
+          tenant_id: user?.tenantid
+        });
+
+        logAssetChange({
+          asset_id: String(assetId),
+          user_email: user?.email || 'unknown',
+          action: 'DELETE',
+          old_data: assetToDelete,
+          new_data: deletedAsset,
+          tenant_id: user?.tenantid
+        });
+      } catch (err) {
+        console.error('Erro ao sincronizar exclusão com Supabase:', err);
+      }
+    } else {
+      // Modo INTERNO: Salva no localforage
+      const updatedInventory = {
+        ...inventory,
+        assets: inventory.assets.filter(a => String(a.id) !== String(assetId)),
+        lastUpdated: new Date().toISOString()
+      };
+      await saveInventory(updatedInventory);
+    }
+
+    // Se estiver no detalhe do ativo, volta
+    if (history[history.length - 1] === AppScreen.ASSET_DETAIL) {
+      popScreen();
+    }
+  }, [inventory, user, databaseMode, history, popScreen]);
 
   const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
@@ -2045,7 +2407,7 @@ const App: React.FC = () => {
   };
 
   const handleBackup = async () => {
-    const success = await backupInventory();
+    const success = await backupInventory(databaseMode);
     if (success) {
       setModalConfig({
         isOpen: true,
@@ -2064,7 +2426,7 @@ const App: React.FC = () => {
   };
 
   const handleRestore = async (file: File) => {
-    const newState = await restoreInventory(file);
+    const newState = await restoreInventory(file, databaseMode);
     if (newState) {
       setInventory(newState);
       setModalConfig({
@@ -2177,10 +2539,10 @@ const App: React.FC = () => {
       const backupFileName = `GBR_MOBILE+KBP+DADOS+${unitName}+${dateStr}+${timeStr}`;
       
       // 1. Realiza backup automático antes de limpar
-      await backupInventory(backupFileName);
+      await backupInventory(databaseMode, backupFileName);
       
       // 2. Limpa localmente (apenas a unidade selecionada se houver)
-      await clearInventory(selectedUnit || undefined); 
+      await clearInventory(databaseMode, selectedUnit || undefined); 
       
       // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
       if (databaseMode === DatabaseMode.SUPABASE) {
@@ -2710,6 +3072,13 @@ const App: React.FC = () => {
               hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
               pendingPhotosCount={pendingPhotosCount}
               syncQueueLength={syncQueueLength}
+              deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
+              impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
+              excludedAccounts={inventory.excludedAccounts}
+              onUpdateExcludedAccounts={(accounts) => {
+                localStorage.setItem('app_excluded_accounts', JSON.stringify(accounts));
+                updateConfig({ excludedAccounts: accounts });
+              }}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               onUpdateProtheusIntegration={(val) => {
                 localStorage.setItem('app_protheus_enabled', String(val));
@@ -2731,6 +3100,7 @@ const App: React.FC = () => {
                 onBack={popScreen} 
                 isSyncing={isSyncing}
                 syncProgress={syncProgress}
+                excludedAccounts={inventory.excludedAccounts}
                 onDataLoaded={async (a, c) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
                   console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}`);
@@ -2817,39 +3187,58 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.INVENTORY && (
             <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
-              <Inventory 
-                assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit} 
-                allAssets={inventory.assets} 
-                onBack={popScreen} 
-                onUpdateAsset={updateAsset} 
-                isGpsAvailable={isGpsAvailable}
-                onBulkUpdateAssets={bulkUpdateAssets} 
-                onSelectAsset={handleSelectAsset} 
-                selectedLocation={inventoryLocation} 
-                setSelectedLocation={setInventoryLocation} 
-                isInventorying={isInventorying} 
-                setIsInventorying={setIsInventorying} 
-                selectedUnit={selectedUnit} 
-                onAddNewLocation={addNewLocation} 
-                locationsWithStats={locationsWithStats} 
-                scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
-                onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
-                searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
-                onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
-                autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
-                scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
-                onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
-                onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
-                inventorySearchValue={inventorySearchValue} 
-                clearInventorySearchValue={() => setInventorySearchValue(null)} 
-                immersiveMode={inventory.immersiveMode || false} 
-                onToggleFullscreen={toggleFullscreen}
-                batterySaver={inventory.batterySaver || false}
-                databaseMode={inventory.databaseMode}
-                onSyncFromCloud={syncFromCloud}
-                user={user}
-                currentCampaignId={inventory.currentCampaignId}
-              />
+              {isSyncLocked ? (
+                <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center animate-fadeIn">
+                  <div className="w-20 h-20 bg-red-50 border border-red-100 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
+                    <ShieldAlert size={40} className="text-red-500" />
+                  </div>
+                  <h2 className="text-xl font-bold text-ink uppercase tracking-tight mb-2">Sistema Bloqueado</h2>
+                  <p className="text-xs text-ink-muted uppercase font-bold tracking-widest mb-8 max-w-xs leading-relaxed">
+                    Fila de sincronização excedeu o limite de segurança ({MAX_SYNC_QUEUE_SIZE} itens). 
+                    Aguarde a conclusão do upload para continuar.
+                  </p>
+                  <button 
+                    onClick={popScreen}
+                    className="w-full max-w-xs py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+                  >
+                    Voltar ao Menu
+                  </button>
+                </div>
+              ) : (
+                <Inventory 
+                  assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit} 
+                  allAssets={inventory.assets} 
+                  onBack={popScreen} 
+                  onUpdateAsset={updateAsset} 
+                  isGpsAvailable={isGpsAvailable}
+                  onBulkUpdateAssets={bulkUpdateAssets} 
+                  onSelectAsset={handleSelectAsset} 
+                  selectedLocation={inventoryLocation} 
+                  setSelectedLocation={setInventoryLocation} 
+                  isInventorying={isInventorying} 
+                  setIsInventorying={setIsInventorying} 
+                  selectedUnit={selectedUnit} 
+                  onAddNewLocation={addNewLocation} 
+                  locationsWithStats={locationsWithStats} 
+                  scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+                  onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+                  searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
+                  onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
+                  autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+                  scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+                  onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
+                  onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
+                  inventorySearchValue={inventorySearchValue} 
+                  clearInventorySearchValue={() => setInventorySearchValue(null)} 
+                  immersiveMode={inventory.immersiveMode || false} 
+                  onToggleFullscreen={toggleFullscreen}
+                  batterySaver={inventory.batterySaver || false}
+                  databaseMode={inventory.databaseMode}
+                  onSyncFromCloud={syncFromCloud}
+                  user={user}
+                  currentCampaignId={inventory.currentCampaignId}
+                />
+              )}
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.LABELING && (
@@ -2879,6 +3268,8 @@ const App: React.FC = () => {
               assets={selectedAssets} 
               onBack={popScreen} 
               onUpdate={updateAsset} 
+              onDelete={isAdmin ? deleteAsset : undefined}
+              onUnitize={unitizeAsset}
               onBulkUpdate={bulkUpdateAssets} 
               editableFields={inventory.editableFields || []} 
               qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
@@ -2890,6 +3281,25 @@ const App: React.FC = () => {
               tenantid={user?.tenantid || 'default'}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
+            />
+          )}
+          {screen === AppScreen.SOFT_DELETE_REPORT && (
+            <SoftDeleteReport 
+              assets={inventory.assets}
+              onBack={popScreen}
+              onRestore={restoreAsset}
+              onPermanentDelete={permanentDeleteAsset}
+              isAdmin={isAdmin}
+            />
+          )}
+          {screen === AppScreen.IMPAIRMENT_REPORT && (
+            <ImpairmentReport 
+              assets={inventory.assets}
+              onBack={popScreen}
+              onSelectAsset={(asset) => {
+                setSelectedAssets([asset]);
+                pushScreen(AppScreen.ASSET_DETAIL);
+              }}
             />
           )}
           {screen === AppScreen.SIGNATURE && (

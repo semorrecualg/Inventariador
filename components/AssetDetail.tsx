@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Asset, TagInventario } from '../types';
+import { Asset, TagInventario, TransactionOrigin, AuditLogEntry } from '../types';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
@@ -17,6 +17,7 @@ import {
   Hash, 
   Calendar, 
   AlertCircle, 
+  AlertTriangle,
   Lock,
   Info,
   Briefcase,
@@ -56,6 +57,8 @@ interface AssetDetailProps {
   assets: Asset[];
   onBack: () => void;
   onUpdate: (asset: Asset) => void;
+  onDelete?: (id: string) => void;
+  onUnitize?: (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => void;
   onBulkUpdate: (ids: string[], updates?: Partial<Asset>) => void;
   editableFields: string[];
   uniqueEnderecos: string[];
@@ -73,6 +76,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   assets, 
   onBack, 
   onUpdate, 
+  onDelete,
+  onUnitize,
   onBulkUpdate, 
   editableFields, 
   uniqueEnderecos, 
@@ -99,10 +104,31 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const ocrInputRef = React.useRef<HTMLInputElement>(null);
   const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
   const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
+  const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
+  const [unitizeCount, setUnitizeCount] = useState(2);
+  const [unitizeMethod, setUnitizeMethod] = useState<'EQUAL' | 'PERCENT'>('EQUAL');
+  const [unitizePercentages, setUnitizePercentages] = useState<number[]>([50, 50]);
   const [impairmentData, setImpairmentData] = useState({
     valorJusto: workingAsset._valor_justo || 0,
     valorEmUso: workingAsset._valor_em_uso || 0
   });
+
+  useEffect(() => {
+    if (unitizeMethod === 'PERCENT') {
+      const currentLen = unitizePercentages.length;
+      if (currentLen !== unitizeCount) {
+        const newPercentages = [...unitizePercentages];
+        if (unitizeCount > currentLen) {
+          for (let i = 0; i < unitizeCount - currentLen; i++) {
+            newPercentages.push(0);
+          }
+        } else {
+          newPercentages.splice(unitizeCount);
+        }
+        setUnitizePercentages(newPercentages);
+      }
+    }
+  }, [unitizeCount, unitizeMethod, unitizePercentages.length]);
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -385,6 +411,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     onBack();
   };
 
+  const handleDelete = () => {
+    if (window.confirm('Deseja realmente excluir este ativo? (Exclusão lógica para auditoria)')) {
+      if (onDelete) onDelete(String(workingAsset.id));
+    }
+  };
+
   useEffect(() => {
     const loadLocalPhotoIfNeeded = async () => {
       if (!workingAsset._photoUrl) {
@@ -507,17 +539,34 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const headerBg = tagColors.bg;
 
   const calculateImpairment = () => {
-    const valorContabil = Number(workingAsset._valor_aquisicao || 0) - Number(workingAsset._depreciacao_acumulada || 0);
+    // Fidedignidade: Garantir que o valor contábil seja calculado corretamente (CPC 27 / CPC 01)
+    const vlrAquisicao = Number(workingAsset._valor_aquisicao || 0) || 
+                         parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'));
+    const vlrDepreciacao = Number(workingAsset._depreciacao_acumulada || 0);
+    const valorContabil = vlrAquisicao - vlrDepreciacao;
+    
     const valorRecuperavel = Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso));
     const perda = valorContabil > valorRecuperavel ? valorContabil - valorRecuperavel : 0;
 
-    const updated = {
+    const timestamp = new Date().toISOString();
+    
+    const auditEntry: AuditLogEntry = {
+      action: 'IMPAIRMENT_TEST',
+      details: `Teste de Impairment (CPC 01): Vlr Contábil ${formatCurrency(valorContabil)} | Vlr Recuperável ${formatCurrency(valorRecuperavel)} | Perda ${formatCurrency(perda)}`,
+      timestamp,
+      user: workingAsset._auditor || 'AUDITOR',
+      origin: TransactionOrigin.IMPAIRMENT_AUTOMATION
+    };
+
+    const updated: Asset = {
       ...workingAsset,
       _valor_justo: Number(impairmentData.valorJusto),
       _valor_em_uso: Number(impairmentData.valorEmUso),
       _valor_recuperavel: valorRecuperavel,
       _perda_impairment: perda,
-      _data_impairment: new Date().toISOString()
+      _data_impairment: timestamp,
+      _history: [...(workingAsset._history || []), auditEntry],
+      _origemTransacao: TransactionOrigin.IMPAIRMENT_AUTOMATION
     };
 
     setWorkingAsset(updated);
@@ -612,6 +661,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           </div>
         </div>
       </div>
+
+      {/* REGRA DE OURO: ALERTA DE DIVERGÊNCIA CRÍTICA */}
+      {workingAsset._is_divergent_baixa && (
+        <div className="bg-red-600 p-4 flex items-center space-x-4 animate-pulse shadow-lg z-10">
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-white shrink-0">
+            <AlertTriangle size={24} strokeWidth={2.5} />
+          </div>
+          <div className="flex-1">
+            <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Divergência Crítica (Regra de Ouro)</h4>
+            <p className="text-[9px] font-bold text-white/80 uppercase tracking-tight leading-tight mt-0.5">
+              Este item está marcado como <strong className="text-white underline">ATIVO</strong> na base, porém possui <strong className="text-white underline">DATA DE BAIXA</strong> preenchida ({workingAsset.DATABAIXA}).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
@@ -906,13 +970,33 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
               <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
             </div>
-            <button 
-              onClick={handleFinalize} 
-              className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
-            >
-               <Check size={20} strokeWidth={3} />
-               <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {!isBatch && onUnitize && (
+                <button 
+                  onClick={() => setIsUnitizeModalOpen(true)}
+                  className="p-4 bg-amber-50 text-amber-600 border border-amber-100 rounded-2xl active:scale-95 transition-all"
+                  title="Unitarizar Ativo (Desmembrar)"
+                >
+                  <Briefcase size={20} />
+                </button>
+              )}
+              {!isBatch && onDelete && (
+                <button 
+                  onClick={handleDelete}
+                  className="p-4 bg-rose-50 text-rose-600 border border-rose-100 rounded-2xl active:scale-95 transition-all"
+                  title="Excluir Ativo"
+                >
+                  <Trash2 size={20} />
+                </button>
+              )}
+              <button 
+                onClick={handleFinalize} 
+                className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
+              >
+                 <Check size={20} strokeWidth={3} />
+                 <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -969,14 +1053,30 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
               <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
                 <span>Valor Contábil Líquido:</span>
-                <span>{formatCurrency(Number(workingAsset._valor_aquisicao || 0) - Number(workingAsset._depreciacao_acumulada || 0))}</span>
+                <span>{formatCurrency(
+                  (Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - 
+                  Number(workingAsset._depreciacao_acumulada || 0)
+                )}</span>
               </div>
               <div className="flex justify-between text-[10px] font-bold text-accent uppercase">
                 <span>Valor Recuperável Estimado:</span>
                 <span>{formatCurrency(Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso)))}</span>
+              </div>
+              <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between items-center">
+                <span className="text-[10px] font-bold text-slate-700 uppercase">Perda Estimada:</span>
+                <span className={`text-sm font-black ${
+                  ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) > 
+                  Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso))
+                  ? 'text-red-600' : 'text-emerald-600'
+                }`}>
+                  {formatCurrency(Math.max(0, 
+                    ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) - 
+                    Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso))
+                  ))}
+                </span>
               </div>
             </div>
 
@@ -992,6 +1092,119 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                 className="flex-1 py-4 bg-accent text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
               >
                 Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isUnitizeModalOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-3xl border border-border shadow-2xl p-6 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto">
+            <div className="text-center">
+              <h3 className="text-lg font-bold text-ink uppercase tracking-tight">Unitarizar Ativo</h3>
+              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-1">Desmembramento de Ativo em Lote</p>
+            </div>
+
+            <div className="flex bg-bg-main p-1 rounded-xl border border-border">
+              <button 
+                onClick={() => setUnitizeMethod('EQUAL')}
+                className={`flex-1 py-2 text-[9px] font-bold uppercase tracking-widest rounded-lg transition-all ${unitizeMethod === 'EQUAL' ? 'bg-white shadow-sm text-accent' : 'text-ink-muted'}`}
+              >
+                Rateio Igual
+              </button>
+              <button 
+                onClick={() => setUnitizeMethod('PERCENT')}
+                className={`flex-1 py-2 text-[9px] font-bold uppercase tracking-widest rounded-lg transition-all ${unitizeMethod === 'PERCENT' ? 'bg-white shadow-sm text-accent' : 'text-ink-muted'}`}
+              >
+                Por Percentual
+              </button>
+            </div>
+
+            <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-2">
+              <p className="text-[10px] text-amber-800 font-bold leading-tight">
+                {unitizeMethod === 'EQUAL' 
+                  ? 'Os valores serão divididos igualmente entre as unidades.' 
+                  : 'Informe o percentual de valor para cada unidade. A soma deve ser 100%.'}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1.5 ml-1">Quantidade de Unidades</label>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => setUnitizeCount(Math.max(2, unitizeCount - 1))}
+                  className="w-10 h-10 bg-bg-main border border-border rounded-xl flex items-center justify-center text-xl font-bold active:scale-90"
+                >
+                  -
+                </button>
+                <input 
+                  type="number"
+                  value={unitizeCount}
+                  onChange={(e) => setUnitizeCount(Math.max(2, Number(e.target.value)))}
+                  className="flex-1 text-center py-2 bg-bg-main border border-border rounded-xl text-lg font-bold outline-none focus:border-accent"
+                />
+                <button 
+                  onClick={() => setUnitizeCount(unitizeCount + 1)}
+                  className="w-10 h-10 bg-bg-main border border-border rounded-xl flex items-center justify-center text-xl font-bold active:scale-90"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {unitizeMethod === 'PERCENT' && (
+              <div className="space-y-3 max-h-48 overflow-y-auto pr-2 scrollbar-thin">
+                {unitizePercentages.map((p, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-bg-main p-3 rounded-xl border border-border">
+                    <span className="text-[10px] font-bold text-ink-muted uppercase">Unidade {idx + 1}</span>
+                    <div className="flex items-center space-x-2">
+                      <input 
+                        type="number"
+                        value={p}
+                        onChange={(e) => {
+                          const newP = [...unitizePercentages];
+                          newP[idx] = Number(e.target.value);
+                          setUnitizePercentages(newP);
+                        }}
+                        className="w-16 text-right bg-transparent font-bold text-sm outline-none text-accent"
+                      />
+                      <span className="text-xs font-bold text-ink-muted">%</span>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex justify-between p-2 border-t border-dashed border-border mt-2">
+                  <span className="text-[10px] font-bold text-ink uppercase">Total:</span>
+                  <span className={`text-xs font-bold ${Math.abs(unitizePercentages.reduce((a, b) => a + b, 0) - 100) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                    {unitizePercentages.reduce((a, b) => a + b, 0).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex space-x-3">
+              <button 
+                onClick={() => setIsUnitizeModalOpen(false)}
+                className="flex-1 py-4 bg-bg-main text-ink rounded-2xl font-bold uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                disabled={unitizeMethod === 'PERCENT' && Math.abs(unitizePercentages.reduce((a, b) => a + b, 0) - 100) > 0.01}
+                onClick={() => {
+                  if (onUnitize) {
+                    onUnitize(
+                      workingAsset, 
+                      unitizeCount, 
+                      unitizeMethod === 'PERCENT' ? unitizePercentages : undefined
+                    );
+                  }
+                  setIsUnitizeModalOpen(false);
+                  onBack();
+                }}
+                className="flex-1 py-4 bg-accent text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 disabled:grayscale"
+              >
+                Unitarizar
               </button>
             </div>
           </div>

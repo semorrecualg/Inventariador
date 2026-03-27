@@ -23,7 +23,8 @@ export interface User {
 export enum TransactionOrigin {
   INVENTORY = '1000',
   LABELING = '2000',
-  ACCOUNT_RECONCILIATION = '3000'
+  ACCOUNT_RECONCILIATION = '3000',
+  IMPAIRMENT_AUTOMATION = '4000'
 }
 
 export interface AuditLogEntry {
@@ -117,6 +118,11 @@ export interface Asset {
   _aprovador?: string;
   _assinatura?: string; // Base64 da assinatura
   _campaignId?: string; // ID da Campanha de Inventário
+  _version?: number; // Controle de versão para concorrência otimista
+  _is_deleted?: boolean; // Soft delete para auditoria
+  _parent_id?: string | number; // ID do ativo pai em caso de unitarização
+  _is_unitized?: boolean; // Indica se o ativo foi desmembrado/unitarizado
+  _is_divergent_baixa?: boolean; // Regra de Ouro: ATIVO com DATABAIXA preenchida
   DE_PARA?: string;
   AUDITOR_STATUS_CONFERENCIA?: string;
   _origemTransacao?: TransactionOrigin;
@@ -256,7 +262,9 @@ export enum AppScreen {
   CAMPAIGN_MANAGEMENT = 'CAMPAIGN_MANAGEMENT',
   ONBOARDING = 'ONBOARDING',
   BIOMETRIC_REGISTRATION = 'BIOMETRIC_REGISTRATION',
-  SYNC_MANAGER = 'SYNC_MANAGER'
+  SYNC_MANAGER = 'SYNC_MANAGER',
+  SOFT_DELETE_REPORT = 'SOFT_DELETE_REPORT',
+  IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT'
 }
 
 export enum AppModule {
@@ -321,6 +329,7 @@ export interface InventoryState {
   protheusApiUrl?: string;
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
+  excludedAccounts?: string[]; // Contas contábeis a serem ignoradas na carga se BAIXADO
   databaseMode: DatabaseMode;
   currentCampaignId?: string;
   hasCompletedOnboarding?: boolean;

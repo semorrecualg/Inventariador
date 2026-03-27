@@ -178,12 +178,26 @@ const AssetCard = React.memo(({
 
   const colors = useMemo(() => {
     const baseColors = getColors(visualStatus);
+    
+    // REGRA DE OURO: ATIVO COM DATA DE BAIXA (DIVERGÊNCIA CRÍTICA)
+    if (asset._is_divergent_baixa) {
+      return { 
+        ...baseColors, 
+        bg: 'bg-red-600/10', 
+        border: 'border-red-600/30', 
+        text: 'text-red-700', 
+        badge: 'bg-red-600 text-white', 
+        hex: '#dc2626',
+        icon: AlertTriangle 
+      };
+    }
+
     // Se for baixado e conferido, vamos usar um tom de vermelho mais suave ou manter o alerta
     if (isBaixado && isConferido) {
       return { ...baseColors, bg: 'bg-danger/5', border: 'border-danger/20' };
     }
     return baseColors;
-  }, [visualStatus, isBaixado, isConferido]);
+  }, [visualStatus, isBaixado, isConferido, asset._is_divergent_baixa]);
 
   const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
 
@@ -259,6 +273,11 @@ const AssetCard = React.memo(({
           {isBaixado && (
             <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-danger text-white border border-danger/20">
               BAIXADO
+            </span>
+          )}
+          {asset._is_divergent_baixa && (
+            <span className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700 animate-pulse">
+              DIVERGÊNCIA BAIXA
             </span>
           )}
           {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
@@ -1093,24 +1112,37 @@ const Inventory: React.FC<InventoryProps> = ({
         {scannedAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
             <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
-              <div className="bg-accent p-8 text-white text-center">
+              <div className={`${scannedAsset._is_divergent_baixa ? 'bg-red-600' : 'bg-accent'} p-8 text-white text-center transition-colors`}>
                 <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30 overflow-hidden p-2">
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </div>
-                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
-                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>
+                <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">
+                  {scannedAsset._is_divergent_baixa ? 'Divergência Crítica' : 'Confirmar Inventário'}
+                </h3>
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">
+                  {scannedAsset._is_divergent_baixa ? 'Item ATIVO com DATA DE BAIXA na base' : 'Verifique os dados antes de registrar'}
+                </p>
               </div>
               
               <div className="p-8 space-y-4">
-                <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
+                <div className={`${scannedAsset._is_divergent_baixa ? 'bg-red-50 border-red-100' : 'bg-accent-soft border-accent/10'} p-4 rounded-2xl border transition-colors`}>
                   <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
+                  <p className={`text-xl font-black font-mono ${scannedAsset._is_divergent_baixa ? 'text-red-700' : 'text-ink'}`}>{scannedAsset.ETIQUETA}</p>
                   <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
-                  <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
+                  <div className={`mt-3 pt-3 border-t flex items-center justify-between ${scannedAsset._is_divergent_baixa ? 'border-red-100' : 'border-accent/10'}`}>
                     <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Localização Atual:</span>
-                    <span className="text-[9px] font-black text-accent uppercase">{selectedLocation}</span>
+                    <span className={`text-[9px] font-black uppercase ${scannedAsset._is_divergent_baixa ? 'text-red-600' : 'text-accent'}`}>{selectedLocation}</span>
                   </div>
                 </div>
+
+                {scannedAsset._is_divergent_baixa && (
+                  <div className="p-3 bg-red-600 text-white rounded-xl flex items-center space-x-3 animate-pulse">
+                    <AlertTriangle size={20} />
+                    <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
+                      Atenção: Este item consta como ATIVO mas possui DATA DE BAIXA ({scannedAsset.DATABAIXA}). Proceda com cautela.
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex space-x-3 pt-2">
                   <button 
