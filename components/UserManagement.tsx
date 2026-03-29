@@ -5,6 +5,7 @@ import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
   Plus, 
+  Building2,
   Trash2, 
   X, 
   Shield, 
@@ -75,7 +76,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenantId] = useState(currentUser?.tenantid || '');
+  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantid || '');
   const [newUnits, setNewUnits] = useState<string[]>(
     currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' 
       ? [currentUser.unitid] 
@@ -83,6 +84,28 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   );
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [provisionOnCreate, setProvisionOnCreate] = useState(true);
+
+  // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
+  React.useEffect(() => {
+    if (currentUser) {
+      if (currentUser.tenantid && (!newTenantId || newTenantId === 'GBR')) {
+        setNewTenantId(currentUser.tenantid);
+      }
+      if (currentUser.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
+        setNewUnits([currentUser.unitid]);
+      }
+    }
+  }, [currentUser, newTenantId, newUnits.length]);
+
+  // Fallback: Se o tenantId estiver vazio, tenta inferir do unitsByTenant se houver apenas um
+  React.useEffect(() => {
+    if (!newTenantId && unitsByTenant.size > 0) {
+      const tenants = Array.from(unitsByTenant.keys());
+      if (tenants.length === 1) {
+        setNewTenantId(tenants[0]);
+      }
+    }
+  }, [newTenantId, unitsByTenant]);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
@@ -689,11 +712,17 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <div className="relative">
                   <input 
                     type="text" 
-                    readOnly 
+                    readOnly={!!currentUser?.tenantid && currentUser.tenantid !== 'GBR' && currentUser.tenantid !== ''} 
                     value={newTenantId} 
-                    className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-border text-slate-500 font-bold text-sm outline-none cursor-not-allowed" 
+                    onChange={(e) => setNewTenantId(e.target.value.toUpperCase())}
+                    placeholder="EX: CICOPAL"
+                    className={`w-full px-6 py-4 rounded-3xl border border-border font-bold text-sm outline-none transition-all ${(!currentUser?.tenantid || currentUser.tenantid === 'GBR') ? 'bg-bg-main focus:border-accent focus:bg-white' : 'bg-slate-50 text-slate-500 cursor-not-allowed'}`} 
                   />
-                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  {currentUser?.tenantid && currentUser.tenantid !== 'GBR' && currentUser.tenantid !== '' ? (
+                    <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  ) : (
+                    <Building2 className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
+                  )}
                 </div>
               </div>
 
@@ -701,31 +730,37 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
                 <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {Array.from(unitsByTenant.get(newTenantId.toUpperCase()) || new Set<string>())
-                    .map((unit: string) => {
-                      const isSelected = newUnits.includes(unit);
-                      return (
-                        <div 
-                          key={unit} 
-                          onClick={() => {
-                            setNewUnits((prev: string[]) => 
-                              prev.includes(unit) ? prev.filter((t: string) => t !== unit) : [...prev, unit]
-                            );
-                          }}
-                          className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
-                        >
-                          <div className="flex items-center space-x-3 min-w-0">
-                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
-                              {isSelected && <Check size={14} strokeWidth={4} />}
+                  {newTenantId ? (
+                    <>
+                      {Array.from(unitsByTenant.get(newTenantId.toUpperCase()) || new Set<string>())
+                        .map((unit: string) => {
+                          const isSelected = newUnits.includes(unit);
+                          return (
+                            <div 
+                              key={unit} 
+                              onClick={() => {
+                                setNewUnits((prev: string[]) => 
+                                  prev.includes(unit) ? prev.filter((t: string) => t !== unit) : [...prev, unit]
+                                );
+                              }}
+                              className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
+                            >
+                              <div className="flex items-center space-x-3 min-w-0">
+                                <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
+                                  {isSelected && <Check size={14} strokeWidth={4} />}
+                                </div>
+                                <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
+                              </div>
                             </div>
-                            <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  }
-                  {(!unitsByTenant.get(newTenantId.toUpperCase()) || unitsByTenant.get(newTenantId.toUpperCase())?.size === 0) && (
-                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada</p>
+                          );
+                        })
+                      }
+                      {(!unitsByTenant.get(newTenantId.toUpperCase()) || unitsByTenant.get(newTenantId.toUpperCase())?.size === 0) && (
+                        <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada para {newTenantId}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Aguardando Grupo Empresarial...</p>
                   )}
                 </div>
               </div>

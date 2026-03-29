@@ -1411,8 +1411,8 @@ const App: React.FC = () => {
     const processSession = async (session: Session) => {
       if (!session?.user) return;
       
-      // Se já temos um usuário no estado e é o mesmo, não fazemos nada para evitar loop
-      if (user && user.email === session.user.email) return;
+      // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido (não GBR), não fazemos nada para evitar loop
+      if (user && user.email === session.user.email && user.tenantid && user.tenantid !== 'GBR') return;
 
       setIsLoading(true);
       try {
@@ -2823,9 +2823,11 @@ const App: React.FC = () => {
     }
     for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
     
-    // Se for auditor e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
+    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+    
+    // Se for auditor ou admin e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
     // mesmo que ainda não existam ativos locais para elas
-    if (isAuditor && inventory.databaseMode !== DatabaseMode.INTERNAL) {
+    if ((isAuditor || isAdmin) && inventory.databaseMode !== DatabaseMode.INTERNAL) {
       for (const u of userUnits) {
         if (u) {
           const cleanU = u.toUpperCase().replace(/_/g, ' ').trim();

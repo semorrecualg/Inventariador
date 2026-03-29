@@ -1007,7 +1007,9 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       assetsQuery = assetsQuery.or(`_unitid.eq."${cleanUnitId}",UNIDADE_OPERACIONAL.eq."${cleanUnitId}"`);
     }
 
-    const { data: assets, error: assetsError } = await assetsQuery;
+    let assets: Asset[] = [];
+    const { data: initialAssets, error: assetsError } = await assetsQuery;
+    assets = (initialAssets as unknown as Asset[]) || [];
 
     if (assetsError) {
       // Se o erro for coluna inexistente (_is_deleted), tentamos sem ela
@@ -1030,11 +1032,12 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
           console.error('Erro ao buscar ativos do Supabase (retry):', retryError);
           throw retryError;
         }
-        return { assets: retryAssets as Asset[], config: {} }; // Retornamos config vazia para ser preenchida abaixo
+        // Continue para buscar a configuração
+        assets = retryAssets || [];
+      } else {
+        console.error('Erro ao buscar ativos do Supabase:', assetsError);
+        throw assetsError;
       }
-
-      console.error('Erro ao buscar ativos do Supabase:', assetsError);
-      throw assetsError;
     }
 
     // 2. Busca a configuração (pode ser global ou por tenant)
