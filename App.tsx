@@ -723,7 +723,7 @@ const App: React.FC = () => {
     
     if (inventory.darkMode) {
       body.classList.add('theme-dark');
-    } else if (import.meta.env.VITE_ENVIRONMENT === 'staging') {
+    } else if (import.meta.env.VITE_ENVIRONMENT === 'staging' || import.meta.env.VITE_SUPABASE_SCHEMA === 'staging') {
       body.classList.add('theme-staging');
     } else {
       if (databaseMode === DatabaseMode.SUPABASE) {
