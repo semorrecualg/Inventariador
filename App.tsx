@@ -122,7 +122,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 const App: React.FC = () => {
-  const isStaging = window.location.hostname.includes('ais-pre') || import.meta.env.VITE_ENVIRONMENT === 'staging';
+  const isStaging = window.location.hostname.includes('ais-pre') || window.location.hostname.includes('ais-dev') || import.meta.env.VITE_ENVIRONMENT === 'staging';
 
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -135,10 +135,7 @@ const App: React.FC = () => {
           parsed.is_admin = true;
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
-          // Se estiver em staging e for GBR, limpamos para forçar re-fetch
-          if (isStaging && parsed.tenantid === 'GBR') {
-            parsed.tenantid = '';
-          }
+          // No staging, se for GBR, mantemos mas garantimos que o sync busque tudo
         }
         // Normalizar flags de admin
         const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
@@ -468,8 +465,10 @@ const App: React.FC = () => {
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const rawTenantId = explicitTenantId || user?.tenantid;
     
-    // Se for admin global, não filtramos por tenantid para que ele veja tudo
-    const tenantid = isGlobalAdmin && !explicitTenantId ? undefined : (Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined));
+    // Se for admin global, não filtramos por tenantid para que ele veja tudo (mesmo se explicitTenantId for vazio)
+    const tenantid = isGlobalAdmin && (!explicitTenantId || explicitTenantId === '' || explicitTenantId === 'GBR') 
+      ? undefined 
+      : (Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined));
     
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately

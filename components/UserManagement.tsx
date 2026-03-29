@@ -89,7 +89,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   React.useEffect(() => {
     if (currentUser) {
       // Se o tenant do usuário logado for GBR, mas estivermos em staging, não forçamos o pre-fill com GBR
-      const isStaging = window.location.hostname.includes('ais-pre') || (import.meta as unknown as { env: Record<string, string> }).env?.VITE_ENVIRONMENT === 'staging';
+      const isStaging = window.location.hostname.includes('ais-pre') || window.location.hostname.includes('ais-dev') || (import.meta as unknown as { env: Record<string, string> }).env?.VITE_ENVIRONMENT === 'staging';
       const currentTenant = currentUser.tenantid;
       
       if (currentTenant && (!newTenantId || newTenantId === 'GBR')) {

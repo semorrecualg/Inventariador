@@ -381,6 +381,9 @@ export const signOut = async () => {
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]) => {
   if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return;
 
+  const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
+  console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos para o tenant: ${forcedTenantId || 'Global'}`);
+  
   // Garante que todos os ativos tenham o tenantid antes de subir
   // E remove URLs de blob locais que não devem ir para a nuvem
   const assetsWithTenant = assets.map(a => {
@@ -1098,13 +1101,16 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     } else if (configData) {
       config = configData;
     } else {
-      // Se não achar por ID específico, tenta a global
-      const { data: globalData } = await supabase
+      // Fallback para global_config se a configuração específica não existir
+      const { data: globalConfigData } = await supabase
         .from('inventory_config')
         .select('*')
         .eq('id', 'global_config')
         .maybeSingle();
-      if (globalData) config = globalData;
+      
+      if (globalConfigData) {
+        config = globalConfigData;
+      }
     }
 
     return {
