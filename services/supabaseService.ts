@@ -6,7 +6,8 @@ import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 
 export interface ProvisionResult {
-  user: unknown;
+  user?: unknown;
+  success?: boolean;
   existing?: boolean;
 }
 
@@ -98,6 +99,7 @@ export const signUp = async (email: string, password: string, username: string, 
   if (!supabase) throw new Error("Supabase não configurado.");
   
   // 1. Cria o usuário no Supabase Auth
+  console.log(`[Supabase] Cadastrando usuário ${email} com tenant ${tenantid}...`);
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -115,14 +117,18 @@ export const signUp = async (email: string, password: string, username: string, 
   });
   
   if (error) {
+    console.error('[Supabase] Erro no signUp:', error);
     if (error.message.includes('already registered')) {
       throw new Error('Este e-mail já está cadastrado. Tente fazer login ou recupere sua senha.');
     }
     throw error;
   }
+  
+  console.log(`[Supabase] Usuário cadastrado com sucesso no Auth:`, data.user?.email);
 
   // 2. Cria o perfil na tabela user_permissions para garantir sincronia
   if (data.user) {
+    console.log(`[Supabase] Sincronizando perfil na tabela user_permissions para ${email}...`);
     const { error: permError } = await supabase
       .from('user_permissions')
       .upsert([{
@@ -139,7 +145,10 @@ export const signUp = async (email: string, password: string, username: string, 
       }], { onConflict: 'email' });
       
     if (permError) {
+      console.error('[Supabase] Erro ao sincronizar perfil:', permError);
       console.warn("Erro ao criar permissões, mas usuário foi criado no Auth:", permError);
+    } else {
+      console.log(`[Supabase] Perfil sincronizado com sucesso para ${email}.`);
     }
 
     // 3. Log de Auditoria
@@ -167,15 +176,20 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   const lowerEmail = email.toLowerCase();
   
   // 1. Busca perfil existente
+  console.log(`[Supabase] Buscando perfil para ${lowerEmail}...`);
   const { data: profiles, error: fetchError } = await supabase
     .from('user_permissions')
     .select('*')
     .eq('email', lowerEmail);
     
-  if (fetchError) throw fetchError;
+  if (fetchError) {
+    console.error('[Supabase] Erro ao buscar perfil:', fetchError);
+    throw fetchError;
+  }
   
   if (profiles && profiles.length > 0) {
     const profile = profiles[0];
+    console.log(`[Supabase] Perfil encontrado para ${lowerEmail}:`, profile);
     
     // Se o perfil existe mas não tem o ID (ou o ID é diferente), atualiza para sincronizar
     if (userId && profile.id !== userId) {
@@ -199,19 +213,19 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
 
-    const is_admin = metadata?.isAdmin || profile.is_admin || profile.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
-    const tenantid = normalizeValue(metadata?.tenantid || profile.tenantid || '');
-    const unitid = normalizeValue(metadata?.unitid || profile.unitid || '');
+    const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+    const tenantid = normalizeValue(profile.tenantid || metadata?.tenantid || '');
+    const unitid = normalizeValue(profile.unitid || metadata?.unitid || '');
     
-    const units = normalizeArray(metadata?.units || profile.units || (metadata?.unitid ? [metadata.unitid] : (profile.unitid ? [profile.unitid] : [])));
-    const tenants = normalizeArray(metadata?.tenants || profile.tenants || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : [])));
+    const units = normalizeArray(profile.units || metadata?.units || (profile.unitid ? [profile.unitid] : (metadata?.unitid ? [metadata.unitid] : [])));
+    const tenants = normalizeArray(profile.tenants || metadata?.tenants || (profile.tenantid ? [profile.tenantid] : (metadata?.tenantid ? [metadata.tenantid] : [])));
 
     // Retornamos um objeto limpo, sem campos legados de case incorreto (como tenantId)
-    return {
+    const finalProfile = {
       id: profile.id,
       email: profile.email,
-      username: metadata?.username || profile.username || lowerEmail.split('@')[0],
-      name: metadata?.name || profile.name || metadata?.username || profile.username || lowerEmail.split('@')[0],
+      username: profile.username || metadata?.username || lowerEmail.split('@')[0],
+      name: profile.name || metadata?.name || profile.username || metadata?.username || lowerEmail.split('@')[0],
       role: profile.role || metadata?.role || UserRole.AUDITOR,
       is_admin,
       isAdmin: is_admin,
@@ -221,9 +235,14 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       tenants,
       created_at: profile.created_at
     };
+    
+    console.log(`[Supabase] Perfil final (existente) para ${lowerEmail}:`, finalProfile);
+    return finalProfile;
   }
   
   // 2. Se não existir, cria um perfil padrão
+  console.log(`[Supabase] Perfil não encontrado para ${lowerEmail}. Criando novo perfil...`);
+  
   const normalizeValue = (val: string) => {
     if (!val) return '';
     const upper = val.toUpperCase();
@@ -238,6 +257,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 
   const defaultTenant = normalizeValue(metadata?.tenantid || '');
   const is_admin = metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+  
+  console.log(`[Supabase] Valores iniciais para novo perfil:`, { is_admin, defaultTenant });
 
   const insertData = {
     email: lowerEmail,
@@ -269,12 +290,14 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       .single();
     
     if (!createError) {
+      console.log(`[Supabase] Perfil criado com sucesso na tentativa ${retryCount + 1}:`, newProfile);
       createdProfile = newProfile;
       error = null;
       break;
     }
 
     error = createError;
+    console.warn(`[Supabase] Erro na tentativa ${retryCount + 1} de criar perfil:`, createError);
     
     const errorMessage = createError.message || "";
     const match = errorMessage.match(/Could not find the '(.+)' column/) || 
@@ -297,6 +320,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   if (error) {
     console.warn("Não foi possível criar perfil automático:", error);
     // Fallback para um objeto básico
+    console.warn(`[Supabase] Falha ao criar perfil após ${maxRetries} tentativas. Usando fallback básico.`);
     return {
       username: metadata?.username || lowerEmail.split('@')[0],
       email: lowerEmail,
@@ -317,6 +341,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     tenant_id: metadata?.tenantid || ''
   });
   
+  console.log(`[Supabase] Perfil final para ${email}:`, createdProfile);
   return createdProfile;
 };
 
@@ -326,6 +351,11 @@ export const signIn = async (email: string, password: string) => {
     email,
     password,
   });
+  
+  if (data?.user) {
+    console.log(`[Supabase] Login realizado para ${email}. Metadados:`, data.user.user_metadata);
+  }
+  
   if (error) throw error;
   return data;
 };
@@ -585,12 +615,14 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
  * criamos uma instância temporária do cliente.
  */
 export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantid?: string, tenants?: string[], name?: string, unitid?: string, units?: string[]): Promise<ProvisionResult> => {
+  console.log(`[Supabase] Provisionando usuário ${email}:`, { role, tenantid, unitid, units });
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
     throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
   }
 
   try {
     // Criamos um cliente temporário para não afetar a sessão do Admin logado
+    console.log(`[Supabase] Criando cliente temporário para signUp de ${email}...`);
     const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: false, // Importante: não salvar esta sessão no localStorage
@@ -615,12 +647,13 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         }
       }
     });
-
+    
     if (error) {
+      console.warn(`[Supabase] Erro no signUp de provisionamento para ${email}:`, error);
       // Se o usuário já existe, não falhamos o processo inteiro, 
       // tentamos apenas atualizar as permissões na tabela
       if (error.message.includes('already registered') || error.status === 422) {
-        console.log('Usuário já registrado no Auth. Tentando atualizar permissões...');
+        console.log(`[Supabase] Usuário já registrado no Auth. Tentando atualizar permissões para ${email}...`);
         
         if (supabase) {
           const currentPayload = {
@@ -643,10 +676,10 @@ export const provisionUserInAuth = async (email: string, password?: string, user
             const { error: syncError } = await supabase
               .from('user_permissions')
               .upsert([currentPayload], { onConflict: 'email' });
-            
+              
             if (!syncError) {
-              permError = null;
-              break;
+              console.log(`[Supabase] Permissões sincronizadas para usuário existente ${email}.`);
+              return { success: true, existing: true, user: { email } };
             }
 
             permError = syncError;
@@ -658,25 +691,31 @@ export const provisionUserInAuth = async (email: string, password?: string, user
             if (match && (match[1] || match[2])) {
               const missingColumn = (match[1] || match[2]).replace(/"/g, '');
               console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada durante atualização de usuário existente. Removendo...`);
-              delete currentPayload[missingColumn as keyof typeof currentPayload];
+              delete (currentPayload as Record<string, unknown>)[missingColumn];
               retryCount++;
             } else {
               break;
             }
           }
             
-          if (permError) throw permError;
+          if (permError) {
+            console.error('[Supabase] Falha ao sincronizar permissões para usuário existente:', permError);
+            throw permError;
+          }
           return { user: { email }, existing: true };
         }
       }
       
-      console.error('Erro no signUp do Supabase:', error);
+      console.error('[Supabase] Erro definitivo no signUp do Supabase:', error);
       throw error;
     }
+
+    console.log(`[Supabase] Usuário provisionado com sucesso no Auth:`, data.user?.email);
 
     // 2. Garante que o perfil exista na tabela user_permissions
     // Importante: Usamos o cliente principal (supabase) aqui, pois ele tem as permissões de escrita (se o RLS permitir)
     if (supabase && data.user) {
+      console.log(`[Supabase] Criando perfil na tabela user_permissions para o novo usuário ${email}...`);
       const normalizeValue = (val: string) => {
         if (!val) return '';
         const upper = val.toUpperCase();

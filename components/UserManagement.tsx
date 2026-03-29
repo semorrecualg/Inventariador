@@ -88,8 +88,17 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
   React.useEffect(() => {
     if (currentUser) {
-      if (currentUser.tenantid && (!newTenantId || newTenantId === 'GBR')) {
-        setNewTenantId(currentUser.tenantid);
+      // Se o tenant do usuário logado for GBR, mas estivermos em staging, não forçamos o pre-fill com GBR
+      const isStaging = window.location.hostname.includes('ais-pre') || (import.meta as unknown as { env: Record<string, string> }).env?.VITE_ENVIRONMENT === 'staging';
+      const currentTenant = currentUser.tenantid;
+      
+      if (currentTenant && (!newTenantId || newTenantId === 'GBR')) {
+        // Se for GBR e estiver em staging, preferimos deixar vazio para o usuário escolher ou o sistema inferir
+        if (currentTenant === 'GBR' && isStaging) {
+          // Não forçamos GBR no staging
+        } else {
+          setNewTenantId(currentTenant);
+        }
       }
       if (currentUser.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
         setNewUnits([currentUser.unitid]);

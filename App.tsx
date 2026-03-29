@@ -122,6 +122,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 const App: React.FC = () => {
+  const isStaging = window.location.hostname.includes('ais-pre') || import.meta.env.VITE_ENVIRONMENT === 'staging';
+
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('app_current_user');
@@ -133,6 +135,10 @@ const App: React.FC = () => {
           parsed.is_admin = true;
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
+          // Se estiver em staging e for GBR, limpamos para forçar re-fetch
+          if (isStaging && parsed.tenantid === 'GBR') {
+            parsed.tenantid = '';
+          }
         }
         // Normalizar flags de admin
         const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
@@ -1013,7 +1019,7 @@ const App: React.FC = () => {
           is_admin: true,
           isAdmin: true, 
           mustChangePassword: false,
-          tenantid: 'GBR'
+          tenantid: ''
         });
       } else if (userList[adminIndex].password === 'admin') {
         // Atualiza a senha se for a padrão antiga para facilitar o acesso do usuário
@@ -1425,6 +1431,11 @@ const App: React.FC = () => {
         // Garante que o usuário tenha um perfil na tabela user_permissions
         // Passamos os metadados para garantir que o tenantId e role sejam preservados
         const permissions = await ensureUserProfile(session.user.email!, session.user.user_metadata, session.user.id);
+        console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
+          dbTenant: permissions.tenantid, 
+          metaTenant: session.user.user_metadata?.tenantid,
+          finalTenant: permissions.tenantid || session.user.user_metadata?.tenantid || ''
+        });
         
         const loggedUser: User = {
           username: session.user.user_metadata?.username || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
@@ -1463,6 +1474,13 @@ const App: React.FC = () => {
         if (databaseMode !== DatabaseMode.SUPABASE) {
           setDatabaseMode(DatabaseMode.SUPABASE);
           localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+        }
+
+        // Se estiver em staging e o tenant ainda for GBR ou vazio para o admin, tentamos forçar 'CICOPAL' se o banco permitir
+        if (isStaging && loggedUser.email === 'semorr@gmail.com' && (loggedUser.tenantid === 'GBR' || !loggedUser.tenantid)) {
+          // Se o ensureUserProfile retornou GBR, mas sabemos que deveria ser CICOPAL no staging,
+          // podemos tentar uma correção silenciosa se o usuário concordar ou se for necessário para o fluxo
+          // Por enquanto, apenas logamos e permitimos que o hasChanged pegue se o banco retornar algo diferente
         }
         
         // Navega para a seleção de módulos se estiver na tela de login
