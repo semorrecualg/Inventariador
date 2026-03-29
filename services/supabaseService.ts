@@ -428,6 +428,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     };
   });
 
+  console.log(`>>> [Supabase] Exemplo de _tenantid atribuído: ${assetsWithTenant[0]?._tenantid || 'Nenhum'}`);
+  
   // Tenta fazer upsert dos ativos em lotes para evitar erros de tamanho de payload
   const BATCH_SIZE = 1000;
   for (let i = 0; i < assetsWithTenant.length; i += BATCH_SIZE) {
@@ -1031,6 +1033,8 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
 export const fetchFullInventory = async (tenantid?: string | string[], unitid?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
+  console.log(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(tenantid)}, unitid: ${unitid || 'GERAL'}`);
+
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
     // Filtramos ativos deletados (_is_deleted != true) se a coluna existir
@@ -1041,6 +1045,9 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       } else {
         assetsQuery = assetsQuery.eq('_tenantid', tenantid);
       }
+    } else {
+      // Se tenantid for undefined ou '', buscamos tudo (global)
+      console.log('>>> [Supabase] Buscando ativos sem filtro de tenant (Global)');
     }
     
     if (unitid && unitid !== '') {

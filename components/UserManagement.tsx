@@ -88,17 +88,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
   React.useEffect(() => {
     if (currentUser) {
-      // Se o tenant do usuário logado for GBR, mas estivermos em staging, não forçamos o pre-fill com GBR
-      const isStaging = window.location.hostname.includes('ais-pre') || window.location.hostname.includes('ais-dev') || (import.meta as unknown as { env: Record<string, string> }).env?.VITE_ENVIRONMENT === 'staging';
       const currentTenant = currentUser.tenantid;
       
-      if (currentTenant && (!newTenantId || newTenantId === 'GBR')) {
-        // Se for GBR e estiver em staging, preferimos deixar vazio para o usuário escolher ou o sistema inferir
-        if (currentTenant === 'GBR' && isStaging) {
-          // Não forçamos GBR no staging
-        } else {
-          setNewTenantId(currentTenant);
-        }
+      if (currentTenant && !newTenantId) {
+        setNewTenantId(currentTenant);
       }
       if (currentUser.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
         setNewUnits([currentUser.unitid]);
@@ -721,13 +714,13 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <div className="relative">
                   <input 
                     type="text" 
-                    readOnly={!!currentUser?.tenantid && currentUser.tenantid !== 'GBR' && currentUser.tenantid !== ''} 
+                    readOnly={!!currentUser?.tenantid && currentUser.tenantid !== ''} 
                     value={newTenantId} 
                     onChange={(e) => setNewTenantId(e.target.value.toUpperCase())}
                     placeholder="EX: CICOPAL"
-                    className={`w-full px-6 py-4 rounded-3xl border border-border font-bold text-sm outline-none transition-all ${(!currentUser?.tenantid || currentUser.tenantid === 'GBR') ? 'bg-bg-main focus:border-accent focus:bg-white' : 'bg-slate-50 text-slate-500 cursor-not-allowed'}`} 
+                    className={`w-full px-6 py-4 rounded-3xl border border-border font-bold text-sm outline-none transition-all ${(!currentUser?.tenantid) ? 'bg-bg-main focus:border-accent focus:bg-white' : 'bg-slate-50 text-slate-500 cursor-not-allowed'}`} 
                   />
-                  {currentUser?.tenantid && currentUser.tenantid !== 'GBR' && currentUser.tenantid !== '' ? (
+                  {currentUser?.tenantid && currentUser.tenantid !== '' ? (
                     <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                   ) : (
                     <Building2 className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
@@ -883,7 +876,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       )}
 
       <div className="p-8 bg-white border-t border-border flex flex-col items-center">
-        <p className="text-[10px] font-bold text-ink-muted/30 uppercase tracking-[0.6em] mb-1">GBR Intelligent Systems</p>
+        <p className="text-[10px] font-bold text-ink-muted/30 uppercase tracking-[0.6em] mb-1">AUDITORIA INTELIGENTE</p>
       </div>
 
       <Modal

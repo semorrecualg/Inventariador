@@ -135,7 +135,6 @@ const App: React.FC = () => {
           parsed.is_admin = true;
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
-          // No staging, se for GBR, mantemos mas garantimos que o sync busque tudo
         }
         // Normalizar flags de admin
         const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
@@ -398,6 +397,9 @@ const App: React.FC = () => {
     const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (!hasSupabase) return;
 
+    const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+
     const dirtyIds = Array.from(dirtyAssetsRef.current);
     if (dirtyIds.length === 0) return;
 
@@ -407,13 +409,13 @@ const App: React.FC = () => {
       if (!skipLoadingState) setIsSyncing(true);
       try {
         // Sincroniza os ativos e ESPERA a conclusão (Push)
-        await syncAssetsToCloud(dirtyAssets, user?.tenantid);
+        await syncAssetsToCloud(dirtyAssets, effectiveTenantId);
         
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
         // @ts-expect-error - assets is removed for sync
         delete configToSync.assets;
-        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, user?.tenantid);
+        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, effectiveTenantId);
 
         dirtyAssetsRef.current.clear();
         setLastSyncTime(new Date().toISOString());
@@ -465,10 +467,12 @@ const App: React.FC = () => {
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const rawTenantId = explicitTenantId || user?.tenantid;
     
-    // Se for admin global, não filtramos por tenantid para que ele veja tudo (mesmo se explicitTenantId for vazio)
-    const tenantid = isGlobalAdmin && (!explicitTenantId || explicitTenantId === '' || explicitTenantId === 'GBR') 
+    // Se for admin global, não filtramos por tenantid para que ele veja tudo
+    const tenantid = isGlobalAdmin && (!explicitTenantId || explicitTenantId === '') 
       ? undefined 
       : (Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined));
+    
+    console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
     
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
@@ -491,19 +495,22 @@ const App: React.FC = () => {
       const cloudData = await fetchFullInventory(tenantid, explicitUnitId);
       const syncTimestamp = new Date().toISOString();
 
-      if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
+      console.log(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
+
+      if (cloudData) {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
-          const extractedCompanies = Array.from(new Set(cloudData.assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+          const assets = cloudData.assets || [];
+          const extractedCompanies = Array.from(new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
             ...prev,
             ...cloudData.config,
-            assets: cloudData.assets,
+            assets: assets,
             companies: finalCompanies,
-            status: DatabaseStatus.LOADED,
+            status: assets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
@@ -513,7 +520,7 @@ const App: React.FC = () => {
             logAuditEvent({
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
-              details: `Sincronização de ${cloudData.assets.length} ativos da nuvem para o local.`,
+              details: `Sincronização de ${assets.length} ativos da nuvem para o local.`,
               tenant_id: user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
             });
           }
@@ -522,8 +529,10 @@ const App: React.FC = () => {
         });
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
-        setShowRecoveryToast(true);
-        setTimeout(() => setShowRecoveryToast(false), 5000);
+        if (cloudData.assets && cloudData.assets.length > 0) {
+          setShowRecoveryToast(true);
+          setTimeout(() => setShowRecoveryToast(false), 5000);
+        }
       } else {
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
@@ -1010,8 +1019,8 @@ const App: React.FC = () => {
       const adminIndex = userList.findIndex(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
       if (adminIndex === -1) {
         userList.push({ 
-          username: "ADMIN GBR", 
-          name: "ADMINISTRADOR GBR",
+          username: "ADMINISTRADOR", 
+          name: "ADMINISTRADOR GLOBAL",
           email: ADMIN_EMAIL, 
           password: "Glaucio@1970", 
           role: UserRole.ADMIN,
@@ -1422,8 +1431,8 @@ const App: React.FC = () => {
       
       const currentUser = userRef.current;
       
-      // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido (não GBR), não fazemos nada para evitar loop
-      if (currentUser && currentUser.email === session.user.email && currentUser.tenantid && currentUser.tenantid !== 'GBR') return;
+      // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido, não fazemos nada para evitar loop
+      if (currentUser && currentUser.email === session.user.email && currentUser.tenantid) return;
 
       setIsLoading(true);
       try {
@@ -1475,20 +1484,14 @@ const App: React.FC = () => {
           localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
         }
 
-        // Se estiver em staging e o tenant ainda for GBR ou vazio para o admin, tentamos forçar 'CICOPAL' se o banco permitir
-        if (isStaging && loggedUser.email === 'semorr@gmail.com' && (loggedUser.tenantid === 'GBR' || !loggedUser.tenantid)) {
-          // Se o ensureUserProfile retornou GBR, mas sabemos que deveria ser CICOPAL no staging,
-          // podemos tentar uma correção silenciosa se o usuário concordar ou se for necessário para o fluxo
-          // Por enquanto, apenas logamos e permitimos que o hasChanged pegue se o banco retornar algo diferente
-        }
-        
         // Navega para a seleção de módulos se estiver na tela de login
         if (screen === AppScreen.LOGIN) {
           pushScreen(AppScreen.MODULE_SELECTION);
         }
         
         // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-        syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
+        const isGlobalAdmin = loggedUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        syncFromCloud(isGlobalAdmin ? undefined : loggedUser.tenantid, DatabaseMode.SUPABASE);
   } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
@@ -1597,7 +1600,7 @@ const App: React.FC = () => {
     const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
     
     // Backup de segurança antes da limpeza em massa
-    const backupFileName = `GBR_MOBILE+KBP+LIMPEZA_MASSA+${dateStr}+${timeStr}`;
+    const backupFileName = `INVENTARIO_MOBILE+KBP+LIMPEZA_MASSA+${dateStr}+${timeStr}`;
     await backupInventory(databaseMode, backupFileName);
 
     setIsSyncing(true);
@@ -1607,7 +1610,9 @@ const App: React.FC = () => {
 
       // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
       if (databaseMode === DatabaseMode.SUPABASE) {
-        await clearCloudInventory(companiesToClear, user?.tenantid);
+        const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+        await clearCloudInventory(companiesToClear, effectiveTenantId);
         
         // Atualiza o timestamp na nuvem - envolvemos em try/catch para não falhar a limpeza se apenas o log falhar
         try {
@@ -1617,7 +1622,7 @@ const App: React.FC = () => {
           await syncConfigToCloud({ 
             ...configToSync, 
             lastUpdated: new Date().toISOString() 
-          } as Omit<InventoryState, 'assets'>, user?.tenantid);
+          } as Omit<InventoryState, 'assets'>, effectiveTenantId);
         } catch (syncErr) {
           console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
         }
@@ -2493,8 +2498,8 @@ const App: React.FC = () => {
     });
     const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
-    XLSX.writeFile(wb, `GBR_AUDIT_${new Date().getTime()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "INVENTARIO_AUDIT");
+    XLSX.writeFile(wb, `INVENTARIO_AUDIT_${new Date().getTime()}.xlsx`);
 
     // Log de Auditoria na Nuvem
     if (databaseMode === DatabaseMode.SUPABASE) {
@@ -2637,8 +2642,8 @@ const App: React.FC = () => {
       const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
       const unitName = selectedUnit ? selectedUnit.toUpperCase().trim() : 'GERAL';
       
-      // Nome do arquivo conforme especificação: [GBR_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
-      const backupFileName = `GBR_MOBILE+KBP+DADOS+${unitName}+${dateStr}+${timeStr}`;
+      // Nome do arquivo conforme especificação: [INVENTARIO_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
+      const backupFileName = `INVENTARIO_MOBILE+KBP+DADOS+${unitName}+${dateStr}+${timeStr}`;
       
       // 1. Realiza backup automático antes de limpar
       await backupInventory(databaseMode, backupFileName);
@@ -2649,7 +2654,9 @@ const App: React.FC = () => {
       // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
       if (databaseMode === DatabaseMode.SUPABASE) {
         try {
-          await clearCloudInventory(selectedUnit || undefined, user?.tenantid);
+          const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+          const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+          await clearCloudInventory(selectedUnit || undefined, effectiveTenantId);
           
           // Log de Auditoria na Nuvem
           logAuditEvent({
@@ -2668,7 +2675,7 @@ const App: React.FC = () => {
             await syncConfigToCloud({ 
               ...configToSync, 
               lastUpdated: new Date().toISOString() 
-            } as Omit<InventoryState, 'assets'>, user?.tenantid);
+            } as Omit<InventoryState, 'assets'>, effectiveTenantId);
           } catch (syncErr) {
             console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
           }
@@ -3324,7 +3331,8 @@ const App: React.FC = () => {
                     if (shouldSync) {
                       console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
                       try {
-                        const forcedTenantId = (user?.isAdmin && !user?.tenantid) ? undefined : user?.tenantid;
+                        const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+                        const forcedTenantId = isGlobalAdmin ? undefined : user?.tenantid;
                         
                         // Limpa a nuvem antes de subir a nova base para garantir espelhamento
                         // Passamos o tenantId para garantir que só limpamos os dados deste cliente
@@ -3342,7 +3350,7 @@ const App: React.FC = () => {
                         const configToSync = { ...newInventory };
                         // @ts-expect-error - assets is removed for sync
                         delete configToSync.assets;
-                        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId || user?.tenantid);
+                        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId);
                         
                         setLastSyncTime(new Date().toISOString());
                         setSyncError(null);
