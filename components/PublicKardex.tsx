@@ -60,7 +60,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
             {asset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO'}
           </h2>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-            {asset.EMPRESA || 'UNIDADE NÃO INFORMADA'}
+            {asset.UNIDADE_OPERACIONAL || asset._unitid || 'UNIDADE NÃO INFORMADA'}
           </p>
         </div>
 
@@ -135,7 +135,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
 
           {/* Mostrar outros campos que possam ter sido incluídos no QR Code mas não têm ícone específico */}
           {Object.entries(asset).map(([key, value]) => {
-            const skipKeys = ['id', 'ETIQUETA', 'DESCRICAODOATIVO', 'EMPRESA', 'STATUS', 'DATABAIXA', 'ENDERECO', 'CENTRODECUSTO', 'SERIAL', 'REGISTRO', 'DATAAQUSIC', '_conferido', '_dataLeitura', 'AUDITOR_STATUS_CONFERENCIA'];
+            const skipKeys = ['id', 'ETIQUETA', 'DESCRICAODOATIVO', 'UNIDADE_OPERACIONAL', 'GRUPO_EMPRESARIAL', 'STATUS', 'DATABAIXA', 'ENDERECO', 'CENTRODECUSTO', 'SERIAL', 'REGISTRO', 'DATAAQUSIC', '_conferido', '_dataLeitura', 'AUDITOR_STATUS_CONFERENCIA'];
             if (skipKeys.includes(key) || !value || typeof value === 'object') return null;
             
             return (

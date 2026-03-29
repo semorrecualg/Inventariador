@@ -87,7 +87,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
     setIsLoading(true);
 
     if (!tenantid || tenantid.length < 3) {
-      setError("O ID da Empresa deve ter pelo menos 3 caracteres.");
+      setError("O nome do Grupo Empresarial deve ter pelo menos 3 caracteres.");
       setIsLoading(false);
       return;
     }
@@ -171,17 +171,17 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
         )}
 
         <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">ID da Empresa (Tenant)</label>
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Grupo Empresarial</label>
           <input 
             type="text" 
             required
             value={tenantid}
             onChange={(e) => setTenantid(e.target.value.toLowerCase().replace(/\s/g, ''))}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
-            placeholder="EX: empresa_abc"
+            placeholder="EX: NOME_DO_GRUPO"
           />
           <p className="text-[7px] text-ink-muted uppercase tracking-widest ml-1">
-            Este ID isola seus dados de outras empresas.
+            Identificador único do seu grupo de empresas.
           </p>
         </div>
         <div className="space-y-1">
@@ -190,7 +190,22 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
             type="text" 
             required
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setName(val);
+              // Gerar username automático: primeiro.segundo nome em minúsculo
+              const parts = val.trim().toLowerCase().split(/\s+/);
+              let generated = '';
+              if (parts.length >= 2) {
+                generated = `${parts[0]}.${parts[1]}`;
+              } else if (parts.length === 1) {
+                generated = parts[0];
+              }
+              if (generated) {
+                setUsername(generated);
+                setEmail(generated + "@gbr.com");
+              }
+            }}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
             placeholder="EX: Glaucio Silva"
           />
@@ -202,9 +217,9 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
             required
             value={username}
             onChange={(e) => {
-              const val = e.target.value;
+              const val = e.target.value.toLowerCase();
               setUsername(val);
-              setEmail(val.toLowerCase() + "@gbr.com");
+              setEmail(val + "@gbr.com");
             }}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
             placeholder="EX: joao.silva"

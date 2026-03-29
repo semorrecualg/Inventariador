@@ -1,9 +1,36 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
+
+// Configuração de ícones customizados para o Leaflet
+const defaultIcon = L.icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
+const conferidoIcon = L.icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
+const pendenteIcon = L.icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
+L.Marker.prototype.options.icon = defaultIcon;
 import BackButton from './BackButton';
 import { Layers, Info, X, Filter, Activity, WifiOff, Database } from 'lucide-react';
 
@@ -77,6 +104,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE'>('DENSITY');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [zoomLevel, setZoomLevel] = useState(13);
 
   useEffect(() => {
     const handleStatus = () => setIsOffline(!navigator.onLine);
@@ -87,6 +115,20 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
       window.removeEventListener('offline', handleStatus);
     };
   }, []);
+
+  // Componente para capturar eventos de zoom
+  const ZoomHandler = () => {
+    const map = useMap();
+    useEffect(() => {
+      if (!map) return;
+      const onZoom = () => setZoomLevel(map.getZoom());
+      map.on('zoomend', onZoom);
+      return () => {
+        map.off('zoomend', onZoom);
+      };
+    }, [map]);
+    return null;
+  };
 
   // Opções de filtro de origem
   const originOptions = [
@@ -223,6 +265,38 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
           />
           
           <HeatmapLayer points={heatPoints} />
+          <ZoomHandler />
+          
+          {/* Mostra marcadores individuais apenas em zoom alto (>= 16) */}
+          {zoomLevel >= 16 && filteredAssets.filter(a => a._lat && a._lng).map(a => {
+            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+            const icon = isConferido ? conferidoIcon : pendenteIcon;
+            
+            return (
+              <Marker 
+                key={a.id} 
+                position={[a._lat!, a._lng!]} 
+                icon={icon}
+              >
+                <Popup className="custom-popup">
+                  <div className="p-2 min-w-[180px]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black text-accent uppercase tracking-widest">{a.ETIQUETA || 'S/E'}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase ${isConferido ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {isConferido ? 'Conferido' : 'Pendente'}
+                      </span>
+                    </div>
+                    <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
+                    <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
+                    <div className="mt-2 pt-2 border-t border-border flex justify-between items-center">
+                      <span className="text-[8px] text-ink-muted uppercase font-bold">Patrimônio</span>
+                      <span className="text-[10px] font-black text-ink">{a.REGISTRO}</span>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
         </MapContainer>
 
         {showInfo && (

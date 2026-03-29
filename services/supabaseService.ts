@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import imageCompression from 'browser-image-compression';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
+import { deduplicateRedundantString } from '../utils/formatUtils';
 
 export interface ProvisionResult {
   user: unknown;
@@ -11,10 +12,20 @@ export interface ProvisionResult {
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseSchema = import.meta.env.VITE_SUPABASE_SCHEMA || 'public';
 
 // Initialize client only if credentials exist to prevent crash
+if (supabaseUrl && supabaseAnonKey) {
+  console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
+  console.log(`%c[Supabase] Schema Ativo: ${supabaseSchema}`, "color: #3ecf8e;");
+}
+
 export const supabase = (supabaseUrl && supabaseAnonKey) 
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      db: {
+        schema: supabaseSchema
+      }
+    })
   : null;
 
 // Função para gerar UUID v4 simples para uso local/offline
@@ -96,8 +107,8 @@ export const signUp = async (email: string, password: string, username: string, 
         name: name || username,
         role,
         tenantid,
-        unitid: unitid || tenantid,
-        units: units || [unitid || tenantid],
+        unitid: unitid || '',
+        units: units || (unitid ? [unitid] : []),
         tenants: [tenantid] // Mantido para compatibilidade
       },
     },
@@ -120,10 +131,10 @@ export const signUp = async (email: string, password: string, username: string, 
         username,
         name: name || username,
         role,
-        isAdmin: role === 'ADMIN' || role === 'MASTER',
+        is_admin: role === 'ADMIN' || role === 'MASTER',
         tenantid,
-        unitid: unitid || tenantid,
-        units: units || [unitid || tenantid],
+        unitid: unitid || '',
+        units: units || (unitid ? [unitid] : []),
         tenants: [tenantid]
       }], { onConflict: 'email' });
       
@@ -174,30 +185,71 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
         .eq('email', lowerEmail);
     }
 
+    // Normalização de valores (remove "default"/"DEFAULT")
+    const normalizeValue = (val: string) => {
+      if (!val) return '';
+      const upper = val.toUpperCase();
+      return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+    };
+
+    // Normalização de arrays
+      const normalizeArray = (arr: unknown) => {
+        if (!arr) return [];
+        const array = Array.isArray(arr) ? arr : [arr];
+        return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+      };
+
+    const is_admin = metadata?.isAdmin || profile.is_admin || profile.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+    const tenantid = normalizeValue(metadata?.tenantid || profile.tenantid || '');
+    const unitid = normalizeValue(metadata?.unitid || profile.unitid || '');
+    
+    const units = normalizeArray(metadata?.units || profile.units || (metadata?.unitid ? [metadata.unitid] : (profile.unitid ? [profile.unitid] : [])));
+    const tenants = normalizeArray(metadata?.tenants || profile.tenants || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : [])));
+
+    // Retornamos um objeto limpo, sem campos legados de case incorreto (como tenantId)
     return {
-      ...profile,
+      id: profile.id,
+      email: profile.email,
       username: metadata?.username || profile.username || lowerEmail.split('@')[0],
       name: metadata?.name || profile.name || metadata?.username || profile.username || lowerEmail.split('@')[0],
-      role: metadata?.role || profile.role || (profile.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR),
-      tenantid: metadata?.tenantid || profile.tenantid || 'default',
-      unitid: metadata?.unitid || profile.unitid || metadata?.tenantid || profile.tenantid || 'default',
-      units: metadata?.units || profile.units || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : ['default'])),
-      tenants: metadata?.tenants || profile.tenants || (metadata?.tenantid ? [metadata.tenantid] : (profile.tenantid ? [profile.tenantid] : ['default']))
+      role: profile.role || metadata?.role || UserRole.AUDITOR,
+      is_admin,
+      isAdmin: is_admin,
+      tenantid,
+      unitid,
+      units,
+      tenants,
+      created_at: profile.created_at
     };
   }
   
   // 2. Se não existir, cria um perfil padrão
-  const defaultTenant = metadata?.tenantid || 'default';
+  const normalizeValue = (val: string) => {
+    if (!val) return '';
+    const upper = val.toUpperCase();
+    return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+  };
+
+  const normalizeArray = (arr: unknown) => {
+    if (!arr) return [];
+    const array = Array.isArray(arr) ? arr : [arr];
+    return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+  };
+
+  const defaultTenant = normalizeValue(metadata?.tenantid || '');
+  const is_admin = metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+
   const insertData = {
     email: lowerEmail,
     username: metadata?.username || lowerEmail.split('@')[0],
     name: metadata?.name || metadata?.username || lowerEmail.split('@')[0],
-    role: metadata?.role || UserRole.AUDITOR,
-    isAdmin: metadata?.isAdmin || false,
+    role: metadata?.role || (is_admin ? UserRole.ADMIN : UserRole.AUDITOR),
+    is_admin,
+    isAdmin: is_admin, // Mantemos para compatibilidade se a coluna existir
     tenantid: defaultTenant,
-    unitid: metadata?.unitid || defaultTenant,
-    units: metadata?.units || [defaultTenant],
-    tenants: metadata?.tenants || [defaultTenant],
+    unitid: normalizeValue(metadata?.unitid || ''),
+    units: normalizeArray(metadata?.units || (metadata?.unitid ? [metadata.unitid] : [])),
+    tenants: normalizeArray(metadata?.tenants || (defaultTenant ? [defaultTenant] : [])),
     ...(userId ? { id: userId } : {})
   };
 
@@ -231,7 +283,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     
     if (match && (match[1] || match[2])) {
       const missingColumn = (match[1] || match[2]).replace(/"/g, '');
-      console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions. Removendo do payload e tentando novamente...`);
+      // Silencioso para colunas opcionais conhecidas
+      if (!['is_admin', 'isAdmin', 'name', 'role', 'unitid', 'units', 'tenants'].includes(missingColumn)) {
+        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions. Removendo do payload...`);
+      }
       delete currentPayload[missingColumn as keyof typeof currentPayload];
       retryCount++;
     } else {
@@ -247,8 +302,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       email: lowerEmail,
       role: metadata?.role || UserRole.AUDITOR,
       isAdmin: metadata?.isAdmin || false,
-      tenantid: metadata?.tenantid || 'default',
-      tenants: metadata?.tenants || ['default']
+      tenantid: metadata?.tenantid || '',
+      tenants: metadata?.tenants || []
     };
   }
 
@@ -259,7 +314,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     table_name: 'user_permissions',
     record_id: userId || 'unknown',
     details: `Perfil de usuário garantido/criado para ${email}`,
-    tenant_id: metadata?.tenantid || 'default'
+    tenant_id: metadata?.tenantid || ''
   });
   
   return createdProfile;
@@ -310,19 +365,20 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
     const conferido = Boolean(cleanAsset._conferido);
 
-    const assetEmpresa = (cleanAsset.EMPRESA || '').toUpperCase().trim();
-    let finalTenantId = 'default';
-    
+    const assetEmpresa = (cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().replace(/_/g, ' ').trim();
+    const assetGrupo = (cleanAsset.GRUPO_EMPRESARIAL || cleanAsset._tenantid || '').trim().toUpperCase();
+
+    let finalTenantId = '';
     if (tenantid) {
       if (Array.isArray(tenantid)) {
         // Se for um array (múltiplos tenants), tenta bater com a empresa do ativo
-        const match = tenantid.find(t => t.toUpperCase().trim() === assetEmpresa);
-        finalTenantId = match || tenantid[0] || 'default';
+        const match = tenantid.find(t => t.toUpperCase().replace(/_/g, ' ').trim() === assetGrupo);
+        finalTenantId = match || tenantid[0] || '';
       } else {
         finalTenantId = tenantid;
       }
     } else {
-      finalTenantId = a._tenantid || assetEmpresa || 'default';
+      finalTenantId = assetGrupo || assetEmpresa || '';
     }
 
     return {
@@ -331,10 +387,11 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       _lng: lng,
       _conferido: conferido,
       _tenantid: finalTenantId,
-      _unitid: a._unitid || null,
-      _version: a._version || 1,
-      _is_deleted: a._is_deleted || false,
-      EMPRESA: assetEmpresa
+      _unitid: (cleanAsset._unitid || assetEmpresa || '').toUpperCase().replace(/_/g, ' ').trim() || null,
+      _version: cleanAsset._version || 1,
+      _is_deleted: cleanAsset._is_deleted || false,
+      UNIDADE_OPERACIONAL: assetEmpresa,
+      GRUPO_EMPRESARIAL: deduplicateRedundantString(finalTenantId)
     };
   });
 
@@ -347,6 +404,25 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       .upsert(batch, { onConflict: 'id' });
 
     if (error) {
+      // Se o erro for coluna inexistente (_is_deleted), tentamos sem ela
+      if (error.code === '42703' && error.message?.includes('_is_deleted')) {
+        console.warn('[Supabase] Coluna _is_deleted não encontrada. Tentando upsert sem ela...');
+        const batchWithoutDeletedFlag = batch.map((a) => {
+          const rest = { ...a as Record<string, unknown> };
+          delete rest._is_deleted;
+          return rest;
+        });
+        const { error: retryError } = await supabase
+          .from('assets')
+          .upsert(batchWithoutDeletedFlag, { onConflict: 'id' });
+        
+        if (retryError) {
+          console.error('Erro ao sincronizar ativos (retry sem _is_deleted):', retryError);
+          throw retryError;
+        }
+        continue; // Sucesso no retry, vai para o próximo lote
+      }
+
       // Handle network errors gracefully
       if (error.message === 'Failed to fetch') {
         console.warn('Supabase sync failed: Network error or invalid URL.');
@@ -425,7 +501,10 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
       
       if (match && (match[1] || match[2])) {
         const missingColumn = match[1] || match[2];
-        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada. Removendo do payload e tentando novamente...`);
+        // Silencioso para colunas opcionais conhecidas
+        if (!['darkMode', 'databaseMode', 'batterySaver', 'immersiveMode'].includes(missingColumn)) {
+          console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em inventory_config. Removendo do payload...`);
+        }
         delete currentPayload[missingColumn];
         retryCount++;
       } else {
@@ -485,7 +564,7 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
     const { data, error } = await supabase
       .from('user_permissions')
       .select('email')
-      .eq('username', username)
+      .ilike('username', username)
       .maybeSingle();
 
     if (error) {
@@ -528,10 +607,10 @@ export const provisionUserInAuth = async (email: string, password?: string, user
           username: username || email.split('@')[0],
           name: name || username || email.split('@')[0],
           role: role || 'AUDITOR',
-    tenantid: tenantid || 'default',
-    unitid: unitid || tenantid || 'default',
-    units: units || [unitid || tenantid || 'default'],
-    tenants: tenants || [tenantid || 'default'],
+          tenantid: tenantid || '',
+          unitid: unitid || '',
+          units: units || (unitid ? [unitid] : []),
+          tenants: tenants || (tenantid ? [tenantid] : []),
           provisioned_by: 'admin_dashboard'
         }
       }
@@ -550,10 +629,10 @@ export const provisionUserInAuth = async (email: string, password?: string, user
             name: name || username || email.split('@')[0],
             role: role || 'AUDITOR',
             isAdmin: role === 'ADMIN' || role === 'MASTER',
-            tenantid: tenantid || 'default',
-            unitid: unitid || tenantid || 'default',
-            units: units || [unitid || tenantid || 'default'],
-            tenants: tenants || [tenantid || 'default']
+            tenantid: tenantid || '',
+            unitid: unitid || '',
+            units: units || (unitid ? [unitid] : []),
+            tenants: tenants || (tenantid ? [tenantid] : [])
           };
 
           let retryCount = 0;
@@ -598,17 +677,32 @@ export const provisionUserInAuth = async (email: string, password?: string, user
     // 2. Garante que o perfil exista na tabela user_permissions
     // Importante: Usamos o cliente principal (supabase) aqui, pois ele tem as permissões de escrita (se o RLS permitir)
     if (supabase && data.user) {
+      const normalizeValue = (val: string) => {
+        if (!val) return '';
+        const upper = val.toUpperCase();
+        return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+      };
+      const normalizeArray = (arr: unknown) => {
+        if (!arr) return [];
+        const array = Array.isArray(arr) ? arr : [arr];
+        return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+      };
+      const is_admin = role === 'ADMIN' || role === 'MASTER' || (email.toLowerCase() === 'semorr@gmail.com');
+      const normTenantId = normalizeValue(tenantid || '');
+      const normUnitId = normalizeValue(unitid || '');
+
       const currentPayload = {
         id: data.user.id, // Sincroniza ID
         email: email.toLowerCase().trim(),
         username: username || email.split('@')[0],
         name: name || username || email.split('@')[0],
         role: role || 'AUDITOR',
-        isAdmin: role === 'ADMIN' || role === 'MASTER',
-        tenantid: tenantid || 'default',
-        unitid: unitid || tenantid || 'default',
-        units: units || [unitid || tenantid || 'default'],
-        tenants: tenants || [tenantid || 'default']
+        is_admin,
+        isAdmin: is_admin,
+        tenantid: normTenantId,
+        unitid: normUnitId,
+        units: normalizeArray(units || (normUnitId ? [normUnitId] : [])),
+        tenants: normalizeArray(tenants || (normTenantId ? [normTenantId] : []))
       };
 
       let retryCount = 0;
@@ -662,17 +756,31 @@ export const syncUsersToCloud = async (users: User[]) => {
   if (!supabase || !users || users.length === 0) return;
 
   try {
-    const usersToSync = users.map(u => ({
-      email: u.email.toLowerCase().trim(),
-      username: u.username,
-      name: u.name || u.username,
-      role: u.role,
-      isAdmin: u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER',
-      tenantid: u.tenantid || 'default',
-      unitid: u.unitid || u.tenantid || 'default',
-      units: u.units || [u.unitid || u.tenantid || 'default'],
-      tenants: u.tenants || [u.tenantid || 'default']
-    }));
+    const usersToSync = users.map(u => {
+      const normalizeValue = (val: string) => {
+        if (!val) return '';
+        const upper = val.toUpperCase();
+        return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+      };
+      const normalizeArray = (arr: unknown) => {
+        if (!arr) return [];
+        const array = Array.isArray(arr) ? arr : [arr];
+        return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+      };
+      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
+      return {
+        email: u.email.toLowerCase().trim(),
+        username: u.username,
+        name: u.name || u.username,
+        role: u.role,
+        is_admin,
+        isAdmin: is_admin,
+        tenantid: normalizeValue(u.tenantid || ''),
+        unitid: normalizeValue(u.unitid || ''),
+        units: normalizeArray(u.units || (u.unitid ? [u.unitid] : [])),
+        tenants: normalizeArray(u.tenants || (u.tenantid ? [u.tenantid] : []))
+      };
+    });
 
     // Lógica de tentativa resiliente
     let currentBatch = [...usersToSync];
@@ -698,7 +806,10 @@ export const syncUsersToCloud = async (users: User[]) => {
       
       if (match && (match[1] || match[2])) {
         const missingColumn = (match[1] || match[2]).replace(/"/g, '');
-        console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions durante sincronização em lote. Removendo...`);
+        // Silencioso para colunas opcionais conhecidas
+        if (!['is_admin', 'isAdmin', 'name', 'role', 'unitid', 'units', 'tenants'].includes(missingColumn)) {
+          console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em user_permissions durante sincronização em lote. Removendo...`);
+        }
         currentBatch = currentBatch.map(u => {
           const newU = { ...u };
           delete newU[missingColumn as keyof typeof newU];
@@ -754,7 +865,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     console.log(`[Supabase] Buscando usuários da nuvem (Tenant: ${tenantid || 'todos'})...`);
     let query = supabase.from('user_permissions').select('*');
     
-    if (tenantid && tenantid !== 'default') {
+    if (tenantid && tenantid !== '') {
       query = query.eq('tenantid', tenantid);
     }
 
@@ -779,19 +890,35 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
       }
     }
 
-    return (data || []).map(u => ({
-      username: u.username || u.email.split('@')[0],
-      name: u.name || u.username || u.email.split('@')[0],
-      email: u.email,
-      password: '', // Senhas não são expostas
-      role: u.role as UserRole,
-      isAdmin: u.isAdmin || u.role === 'ADMIN',
-      mustChangePassword: false,
-      tenantid: u.tenantid || 'default',
-      unitid: u.unitid || u.tenantid || 'default',
-      units: u.units || [u.unitid || u.tenantid || 'default'],
-      tenants: u.tenants || [u.tenantid || 'default']
-    }));
+    return (data || []).map(u => {
+      const normalizeValue = (val: string) => {
+        if (!val) return '';
+        const upper = val.toUpperCase();
+        return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+      };
+      const normalizeArray = (arr: unknown) => {
+        if (!arr) return [];
+        const array = Array.isArray(arr) ? arr : [arr];
+        return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+      };
+      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
+      const tenantid = normalizeValue(u.tenantid || '');
+      const unitid = normalizeValue(u.unitid || '');
+      return {
+        username: u.username || u.email.split('@')[0],
+        name: u.name || u.username || u.email.split('@')[0],
+        email: u.email,
+        password: '', // Senhas não são expostas
+        role: u.role as UserRole,
+        is_admin,
+        isAdmin: is_admin,
+        mustChangePassword: false,
+        tenantid,
+        unitid,
+        units: normalizeArray(u.units || (unitid ? [unitid] : [])),
+        tenants: normalizeArray(u.tenants || (tenantid ? [tenantid] : []))
+      };
+    });
   } catch (err) {
     console.error('Erro inesperado ao buscar usuários:', err);
     return [];
@@ -808,8 +935,11 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     let query = supabase
       .from('assets')
       .select('*')
-      .eq('ETIQUETA', tag.toUpperCase().trim())
-      .or('_is_deleted.is.null,_is_deleted.eq.false');
+      .eq('ETIQUETA', tag.toUpperCase().trim());
+    
+    // Tenta filtrar por _is_deleted se a coluna existir (soft delete)
+    // Se falhar, o Supabase retornará erro 42703 (undefined_column)
+    query = query.or('_is_deleted.is.null,_is_deleted.eq.false');
     
     if (tenantid) {
       query = query.eq('_tenantid', tenantid);
@@ -818,6 +948,25 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     const { data, error } = await query.single();
 
     if (error) {
+      // Se o erro for coluna inexistente, tentamos sem o filtro de soft delete
+      if (error.code === '42703' && error.message?.includes('_is_deleted')) {
+        let retryQuery = supabase
+          .from('assets')
+          .select('*')
+          .eq('ETIQUETA', tag.toUpperCase().trim());
+        
+        if (tenantid) {
+          retryQuery = retryQuery.eq('_tenantid', tenantid);
+        }
+        
+        const { data: retryData, error: retryError } = await retryQuery.single();
+        if (retryError && retryError.code !== 'PGRST116') {
+          console.error('Erro ao buscar ativo por etiqueta (retry):', retryError);
+          return null;
+        }
+        return retryData as Asset;
+      }
+
       if (error.code !== 'PGRST116') {
         console.error('Erro ao buscar ativo por etiqueta:', error);
       }
@@ -842,7 +991,7 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
-    // Filtramos ativos deletados (_is_deleted != true)
+    // Filtramos ativos deletados (_is_deleted != true) se a coluna existir
     let assetsQuery = supabase.from('assets').select('*').or('_is_deleted.is.null,_is_deleted.eq.false');
     if (tenantid) {
       if (Array.isArray(tenantid)) {
@@ -852,13 +1001,38 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       }
     }
     
-    if (unitid && unitid !== 'default') {
-      assetsQuery = assetsQuery.eq('_unitid', unitid);
+    if (unitid && unitid !== '') {
+      const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
+      // Busca flexível: tenta bater com _unitid ou UNIDADE_OPERACIONAL
+      assetsQuery = assetsQuery.or(`_unitid.eq."${cleanUnitId}",UNIDADE_OPERACIONAL.eq."${cleanUnitId}"`);
     }
 
     const { data: assets, error: assetsError } = await assetsQuery;
 
     if (assetsError) {
+      // Se o erro for coluna inexistente (_is_deleted), tentamos sem ela
+      if (assetsError.code === '42703' && assetsError.message?.includes('_is_deleted')) {
+        let retryQuery = supabase.from('assets').select('*');
+        if (tenantid) {
+          if (Array.isArray(tenantid)) {
+            retryQuery = retryQuery.in('_tenantid', tenantid);
+          } else {
+            retryQuery = retryQuery.eq('_tenantid', tenantid);
+          }
+        }
+        if (unitid && unitid !== '') {
+          const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
+          retryQuery = retryQuery.or(`_unitid.eq."${cleanUnitId}",UNIDADE_OPERACIONAL.eq."${cleanUnitId}"`);
+        }
+        
+        const { data: retryAssets, error: retryError } = await retryQuery;
+        if (retryError) {
+          console.error('Erro ao buscar ativos do Supabase (retry):', retryError);
+          throw retryError;
+        }
+        return { assets: retryAssets as Asset[], config: {} }; // Retornamos config vazia para ser preenchida abaixo
+      }
+
       console.error('Erro ao buscar ativos do Supabase:', assetsError);
       throw assetsError;
     }
@@ -952,8 +1126,8 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         if (targetAsset && tenantid) {
           const assetTenant = targetAsset._tenantid;
           const isAllowed = Array.isArray(tenantid) 
-            ? tenantid.includes(assetTenant || 'default')
-            : (assetTenant || 'default') === tenantid;
+            ? tenantid.includes(assetTenant || '')
+            : (assetTenant || '') === tenantid;
           
           if (isAllowed) {
             onUpdate(payload);
@@ -986,9 +1160,11 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     if (companyToClear) {
       if (Array.isArray(companyToClear)) {
         const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
-        query = query.in('EMPRESA', normalizedCompanies);
+        // Tenta filtrar por ambas as colunas para garantir compatibilidade durante a transição
+        query = query.or(`UNIDADE_OPERACIONAL.in.(${normalizedCompanies.join(',')})`);
       } else {
-        query = query.eq('EMPRESA', companyToClear.toUpperCase().trim());
+        const normalized = companyToClear.toUpperCase().trim();
+        query = query.or(`UNIDADE_OPERACIONAL.eq.${normalized}`);
       }
     } else {
       // Limpeza total (se houver tenantid, o filtro acima já limita ao tenant)
@@ -1067,6 +1243,20 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
     const fileName = `${tenantid}/${assetId}/${Date.now()}.${fileExt}`;
     const filePath = `photos/${fileName}`;
 
+    // Verificação de Bucket
+    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
+    
+    if (bucketsError) {
+      console.warn('[Storage] Não foi possível verificar buckets:', bucketsError.message);
+    } else {
+      const bucketExists = buckets?.some(b => b.name === 'asset-photos');
+      if (!bucketExists) {
+        const msg = 'Bucket "asset-photos" não encontrado. O administrador deve criá-lo no painel do Supabase via SQL Editor.';
+        console.error(`[Storage] ${msg}`);
+        throw new Error(msg);
+      }
+    }
+
     const { error: uploadError } = await supabase.storage
       .from('asset-photos')
       .upload(filePath, fileToUpload, {
@@ -1083,10 +1273,14 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
       .from('asset-photos')
       .getPublicUrl(filePath);
 
+    if (!data || !data.publicUrl) {
+      throw new Error('Falha ao gerar URL pública para a foto carregada.');
+    }
+
     return data.publicUrl;
   } catch (err) {
-    console.error('Erro inesperado no upload da foto:', err);
-    return null;
+    console.error('Erro no processo de upload:', err);
+    throw err; // Propaga o erro para que o SyncService registre a falha real
   }
 };
 

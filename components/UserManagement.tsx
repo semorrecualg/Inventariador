@@ -34,9 +34,10 @@ interface UserManagementProps {
   currentUser: User | null;
   setUser?: React.Dispatch<React.SetStateAction<User | null>>;
   availableUnits: string[];
+  unitsByTenant: Map<string, Set<string>>;
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant }) => {
   console.log('>>> [UserManagement] Rendered with:', { 
     currentUserEmail: currentUser?.email, 
     currentUserTenant: currentUser?.tenantid,
@@ -62,19 +63,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     type: 'info'
   });
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
   const showModal = (title: string, message: string, type: 'info' | 'warning' | 'error' | 'success' | 'confirm' = 'info', onConfirm?: () => void) => {
     setModalConfig({ isOpen: true, title, message, type, onConfirm });
   };
   
   // States para Novo Usuário
-  const [newUsername, setNewUsername] = useState('');
   const [newName, setNewName] = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantid || 'default');
-  const [newUnits, setNewUnits] = useState<string[]>(currentUser?.unitid ? [currentUser.unitid] : []);
-  const [newCustomUnit, setNewCustomUnit] = useState('');
+  const [newTenantId] = useState(currentUser?.tenantid || '');
+  const [newUnits, setNewUnits] = useState<string[]>(
+    currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' 
+      ? [currentUser.unitid] 
+      : []
+  );
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [provisionOnCreate, setProvisionOnCreate] = useState(true);
 
@@ -86,20 +92,17 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [editRole, setEditRole] = useState<UserRole>(UserRole.AUDITOR);
   const [editTenantId, setEditTenantId] = useState('');
   const [editUnits, setEditUnits] = useState<string[]>([]);
-  const [editCustomUnit, setEditCustomUnit] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isManualTenant, setIsManualTenant] = useState(false);
-  const [isManualEditTenant, setIsManualEditTenant] = useState(false);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const username = newUsername.trim();
     const email = newEmail.toLowerCase().trim();
+    const username = newUsername.trim().toLowerCase() || email.split('@')[0].toLowerCase();
     const password = newPassword.trim();
 
-    if (!username || !email || !password) return;
+    if (!email || !password) return;
 
     // Verificar duplicidade
     if (users.find(u => u.email.toLowerCase() === email || u.username.toUpperCase() === username)) {
@@ -119,7 +122,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           newTenantId, 
           newUnits, 
           newName.trim(),
-          newUnits[0] || currentUser?.unitid || 'default',
+          newUnits[0] || (currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' ? currentUser.unitid : ''),
           newUnits
         );
         if (result && result.existing) {
@@ -139,18 +142,34 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       }
     }
 
+    const normalizeValue = (val: string) => {
+      if (!val) return '';
+      const upper = val.toUpperCase();
+      return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+    };
+
+    const normalizeArray = (arr: unknown[]) => {
+      if (!arr) return [];
+      return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+    };
+
+    const normTenantId = normalizeValue(newTenantId);
+    const normUnitId = normalizeValue(newUnits[0] || (currentUser?.unitid ? currentUser.unitid : ''));
+    const normUnits = normalizeArray(newUnits.length > 0 ? newUnits : (currentUser?.unitid ? [currentUser.unitid] : []));
+
     const newUser: User = {
       username,
       name: newName.trim(),
       email,
       password,
       role: newRole,
-      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER,
+      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
+      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
       mustChangePassword: true,
-      tenantid: newTenantId,
-      unitid: newUnits[0] || currentUser?.unitid || 'default',
-      units: newUnits.length > 0 ? newUnits : (currentUser?.unitid ? [currentUser.unitid] : ['default']),
-      tenants: [newTenantId] // Compatibilidade
+      tenantid: normTenantId,
+      unitid: normUnitId,
+      units: normUnits,
+      tenants: [normTenantId] // Compatibilidade
     };
 
     setUsers(prev => {
@@ -159,6 +178,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return updated;
     });
     
+    setNewName('');
     setNewUsername('');
     setNewEmail('');
     setNewPassword('');
@@ -166,6 +186,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setIsAddModalOpen(false);
     
     // Feedback de sucesso para o usuário
+    setToast({ message: `Usuário ${newName || username} cadastrado!`, type: 'success' });
+    setTimeout(() => setToast(null), 3000);
+    
     showModal("Sucesso", `O usuário ${newName || username} foi cadastrado com sucesso!`, "success");
   };
 
@@ -174,11 +197,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditUsername(user.username);
     setEditName(user.name || '');
     setEditEmail(user.email);
-    setEditPassword(user.password || '');
+    setEditPassword(''); // Senha vazia por padrão ao editar para não sobrescrever se não for alterada
     setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
-    setEditTenantId(user.tenantid || 'default');
-    setEditUnits(user.units || user.tenants || (user.unitid ? [user.unitid] : []));
-    setEditCustomUnit('');
+    setEditTenantId(user.tenantid || '');
+    const currentUnits = user.units || (Array.isArray(user.tenants) ? user.tenants : user.tenants ? [user.tenants] : (user.unitid ? [user.unitid] : []));
+    setEditUnits(currentUnits);
     setIsEditModalOpen(true);
   };
 
@@ -210,7 +233,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
         editTenantId, 
         editUnits, 
         editName.trim(),
-        editUnits[0] || selectedUser.unitid || 'default',
+        editUnits[0] || (selectedUser.unitid && selectedUser.unitid.toUpperCase() !== 'DEFAULT' ? selectedUser.unitid : ''),
         editUnits
       );
       if (result && result.existing) {
@@ -233,14 +256,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser || !editUsername || !editEmail || !editPassword) {
+    if (!selectedUser || !editEmail) {
       console.warn('[UserManagement] Tentativa de salvar edição com campos obrigatórios vazios.');
       return;
     }
 
-    const username = editUsername.trim();
     const email = editEmail.toLowerCase().trim();
-    const password = editPassword.trim();
+    const username = editUsername.trim() || email.split('@')[0];
+    const password = editPassword.trim() || selectedUser.password;
     const name = editName.trim();
 
     console.log(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
@@ -251,6 +274,22 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return;
     }
 
+    const normalizeValue = (val: string) => {
+      if (!val) return '';
+      const upper = val.toUpperCase();
+      return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+    };
+
+    const normalizeArray = (arr: unknown[]) => {
+      if (!arr) return [];
+      return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+    };
+
+    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com');
+    const normTenantId = normalizeValue(editTenantId);
+    const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
+    const normUnits = normalizeArray(editUnits);
+
     const updatedUser: User = { 
       ...selectedUser, 
       username, 
@@ -258,11 +297,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       email, 
       password, 
       role: editRole, 
-      isAdmin: editRole === UserRole.ADMIN || editRole === UserRole.MASTER, 
-      tenantid: editTenantId,
-      unitid: editUnits[0] || selectedUser.unitid || 'default',
-      units: editUnits,
-      tenants: [editTenantId]
+      is_admin, 
+      isAdmin: is_admin, 
+      tenantid: normTenantId,
+      unitid: normUnitId,
+      units: normUnits,
+      tenants: [normTenantId]
     };
 
     setUsers(prev => {
@@ -285,6 +325,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setSelectedUser(null);
     
     // Feedback de sucesso para o usuário
+    setToast({ message: `Credenciais de ${name || username} atualizadas!`, type: 'success' });
+    setTimeout(() => setToast(null), 3000);
+    
     showModal("Sucesso", `As credenciais de ${name || username} foram atualizadas com sucesso!`, "success");
   };
 
@@ -333,6 +376,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       </div>
 
       <div className="flex-1 overflow-hidden bg-bg-main relative">
+        {/* Toast Notification */}
+        {toast && (
+          <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[1000] px-6 py-3 rounded-2xl shadow-2xl border animate-slideDown flex items-center space-x-3 ${
+            toast.type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' : 'bg-danger text-white border-danger-soft'
+          }`}>
+            {toast.type === 'success' ? <Check size={18} strokeWidth={3} /> : <X size={18} strokeWidth={3} />}
+            <span className="text-xs font-bold uppercase tracking-widest">{toast.message}</span>
+          </div>
+        )}
+
         <Virtuoso
           ref={virtuosoRef}
           style={{ height: '100%' }}
@@ -363,7 +416,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       <span className="font-bold text-base text-ink tracking-tight truncate">{u.name || 'Sem Nome'}</span>
                       <div className="flex items-center space-x-1">
                         <span className="bg-bg-main text-ink-muted text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-border">
-                          {u.tenantid || 'S/ TENANT'}
+                          {u.tenantid || 'S/ GRUPO'}
                         </span>
                         <span className="bg-accent/5 text-accent text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest border border-accent/10">
                           {u.role}
@@ -376,7 +429,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                     </div>
                     <div className="flex flex-wrap gap-2 mt-2">
                       <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
-                      {(u.units && u.units.length > 0 ? u.units : u.tenants && u.tenants.length > 0 ? u.tenants : [u.unitid || 'GLOBAL']).map(t => (
+                      {(u.units && u.units.length > 0 
+                        ? u.units.filter(unit => unit.toUpperCase() !== 'DEFAULT') 
+                        : (Array.isArray(u.tenants) && u.tenants.length > 0)
+                          ? u.tenants 
+                          : [u.unitid && u.unitid.toUpperCase() !== 'DEFAULT' ? u.unitid : 'GLOBAL']
+                      ).filter(Boolean).map((t: string) => (
                         <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
                       ))}
                     </div>
@@ -422,6 +480,53 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Username e Senha de Acesso</p>
             </div>
             <form onSubmit={handleSaveEdit} className="space-y-5">
+              {/* Grupo Empresarial - Agora no Topo e Fixo */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Grupo Empresarial</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={editTenantId} 
+                    className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-border text-slate-500 font-bold text-sm outline-none cursor-not-allowed" 
+                  />
+                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                </div>
+              </div>
+
+              {/* Unidades Operacionais - Filtradas pelo Grupo */}
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
+                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
+                  {Array.from(unitsByTenant.get(editTenantId.toUpperCase()) || new Set<string>())
+                    .map((unit: string) => {
+                      const isSelected = editUnits.includes(unit);
+                      return (
+                        <div 
+                          key={unit} 
+                          onClick={() => {
+                            setEditUnits((prev: string[]) => 
+                              prev.includes(unit) ? prev.filter((t: string) => t !== unit) : [...prev, unit]
+                            );
+                          }}
+                          className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
+                        >
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
+                              {isSelected && <Check size={14} strokeWidth={4} />}
+                            </div>
+                            <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
+                  {(!unitsByTenant.get(editTenantId.toUpperCase()) || unitsByTenant.get(editTenantId.toUpperCase())?.size === 0) && (
+                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada</p>
+                  )}
+                </div>
+              </div>
+
               <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6">
                 <div className="flex items-start">
                   <AlertCircle className="text-amber-600 mr-3 shrink-0 mt-0.5" size={18} />
@@ -437,21 +542,32 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
                 <div className="relative">
-                  <input type="text" required autoComplete="off" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" placeholder="Ex: Glaucio Silva" />
+                  <input 
+                    type="text" 
+                    required 
+                    autoComplete="off" 
+                    value={editName} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditName(val);
+                      // Gerar username automático: primeiro.segundo nome em minúsculo
+                      const parts = val.trim().toLowerCase().split(/\s+/);
+                      if (parts.length >= 2) {
+                        setEditUsername(`${parts[0]}.${parts[1]}`);
+                      } else if (parts.length === 1) {
+                        setEditUsername(parts[0]);
+                      }
+                    }} 
+                    className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                    placeholder="Ex: Glaucio Silva" 
+                  />
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Login</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Senha (Opcional)</label>
                 <div className="relative">
-                  <input type="text" required autoComplete="off" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
-                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Senha</label>
-                <div className="relative">
-                  <input type={showEditPassword ? "text" : "password"} required autoComplete="off" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} className="w-full pl-12 pr-14 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                  <input type={showEditPassword ? "text" : "password"} autoComplete="off" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} className="w-full pl-12 pr-14 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" placeholder="Deixe em branco para manter" />
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                   <button 
                     type="button"
@@ -492,106 +608,19 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   )}
                 </div>
               </div>
-              {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
-                  <div className="relative">
-                    {!isManualEditTenant ? (
-                      <>
-                        <select 
-                          value={editTenantId} 
-                          onChange={(e) => {
-                            if (e.target.value === 'MANUAL') {
-                              setIsManualEditTenant(true);
-                            } else {
-                              setEditTenantId(e.target.value);
-                            }
-                          }} 
-                          className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm appearance-none"
-                        >
-                          <option value="default">DEFAULT</option>
-                          {availableUnits.map(unit => (
-                            <option key={unit} value={unit}>{unit}</option>
-                          ))}
-                          <option value="MANUAL">+ OUTRA (DIGITAR MANUALMENTE)</option>
-                        </select>
-                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30 rotate-90 pointer-events-none" size={18} />
-                      </>
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <input 
-                          type="text" 
-                          autoFocus
-                          value={editTenantId} 
-                          onChange={(e) => setEditTenantId(e.target.value.toUpperCase())} 
-                          className="flex-1 px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
-                          placeholder="DIGITE O TENANT ID..."
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => setIsManualEditTenant(false)}
-                          className="p-4 bg-slate-100 text-slate-400 rounded-2xl hover:text-slate-600"
-                          title="Voltar para lista"
-                        >
-                          <RefreshCw size={18} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
-                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-56 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {Array.from(new Set([editTenantId, ...availableUnits, ...editUnits])).filter(u => u && u !== 'default').map(unit => {
-                    const isSelected = editUnits.includes(unit);
-                    return (
-                      <div 
-                        key={unit} 
-                        onClick={() => {
-                          setEditUnits(prev => 
-                            prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
-                          );
-                        }}
-                        className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
-                      >
-                        <div className="flex items-center space-x-3 min-w-0">
-                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
-                            {isSelected && <Check size={14} strokeWidth={4} />}
-                          </div>
-                          <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
-                        </div>
-                        {unit === editTenantId && (
-                          <span className="text-[8px] font-black bg-accent/10 text-accent px-2 py-0.5 rounded-full uppercase tracking-widest">Sede</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  
-                  <div className="p-2 pt-3 border-t border-border/50 mt-2">
-                    <div className="flex items-center space-x-2">
-                      <input 
-                        type="text" 
-                        placeholder="Adicionar ID Manual..." 
-                        value={editCustomUnit}
-                        onChange={(e) => setEditCustomUnit(e.target.value.toUpperCase())}
-                        className="flex-1 bg-white border border-border rounded-xl px-4 py-3 text-[10px] font-bold outline-none focus:border-accent transition-all"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const trimmedUnit = editCustomUnit.trim();
-                          if (trimmedUnit && !editUnits.includes(trimmedUnit)) {
-                            setEditUnits(prev => [...prev, trimmedUnit]);
-                            setEditCustomUnit('');
-                          }
-                        }}
-                        className="p-3 bg-accent text-white rounded-xl shadow-lg shadow-accent/20 active:scale-90 transition-all"
-                      >
-                        <Plus size={18} />
-                      </button>
-                    </div>
-                  </div>
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Acesso</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    required 
+                    autoComplete="off" 
+                    value={editUsername} 
+                    onChange={(e) => setEditUsername(e.target.value.toLowerCase())} 
+                    className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
+                    placeholder="EX: glaucio.silva" 
+                  />
+                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -654,60 +683,53 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Criação de Username de Acesso</p>
             </div>
             <form onSubmit={handleAddUser} className="space-y-5">
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
-                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-56 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {Array.from(new Set([newTenantId, ...availableUnits, ...newUnits])).filter(u => u && u !== 'default').map(unit => {
-                    const isSelected = newUnits.includes(unit);
-                    return (
-                      <div 
-                        key={unit} 
-                        onClick={() => {
-                          setNewUnits(prev => 
-                            prev.includes(unit) ? prev.filter(t => t !== unit) : [...prev, unit]
-                          );
-                        }}
-                        className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
-                      >
-                        <div className="flex items-center space-x-3 min-w-0">
-                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
-                            {isSelected && <Check size={14} strokeWidth={4} />}
-                          </div>
-                          <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
-                        </div>
-                        {unit === newTenantId && (
-                          <span className="text-[8px] font-black bg-accent/10 text-accent px-2 py-0.5 rounded-full uppercase tracking-widest">Sede</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  
-                  <div className="p-2 pt-3 border-t border-border/50 mt-2">
-                    <div className="flex items-center space-x-2">
-                      <input 
-                        type="text" 
-                        placeholder="Adicionar ID Manual..." 
-                        value={newCustomUnit}
-                        onChange={(e) => setNewCustomUnit(e.target.value.toUpperCase())}
-                        className="flex-1 bg-white border border-border rounded-xl px-4 py-3 text-[10px] font-bold outline-none focus:border-accent transition-all"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const trimmedUnit = newCustomUnit.trim();
-                          if (trimmedUnit && !newUnits.includes(trimmedUnit)) {
-                            setNewUnits(prev => [...prev, trimmedUnit]);
-                            setNewCustomUnit('');
-                          }
-                        }}
-                        className="p-3 bg-accent text-white rounded-xl shadow-lg shadow-accent/20 active:scale-90 transition-all"
-                      >
-                        <Plus size={18} />
-                      </button>
-                    </div>
-                  </div>
+              {/* Grupo Empresarial - Agora no Topo e Fixo */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Grupo Empresarial</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={newTenantId} 
+                    className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-border text-slate-500 font-bold text-sm outline-none cursor-not-allowed" 
+                  />
+                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                 </div>
               </div>
+
+              {/* Unidades Operacionais - Filtradas pelo Grupo */}
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
+                <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
+                  {Array.from(unitsByTenant.get(newTenantId.toUpperCase()) || new Set<string>())
+                    .map((unit: string) => {
+                      const isSelected = newUnits.includes(unit);
+                      return (
+                        <div 
+                          key={unit} 
+                          onClick={() => {
+                            setNewUnits((prev: string[]) => 
+                              prev.includes(unit) ? prev.filter((t: string) => t !== unit) : [...prev, unit]
+                            );
+                          }}
+                          className={`flex items-center justify-between p-3 rounded-2xl transition-all cursor-pointer group ${isSelected ? 'bg-accent/5 border border-accent/20' : 'hover:bg-white border border-transparent'}`}
+                        >
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isSelected ? 'bg-accent border-accent text-white shadow-sm' : 'border-border bg-white'}`}>
+                              {isSelected && <Check size={14} strokeWidth={4} />}
+                            </div>
+                            <span className={`text-xs font-bold uppercase tracking-tight truncate ${isSelected ? 'text-accent' : 'text-ink'}`}>{unit}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
+                  {(!unitsByTenant.get(newTenantId.toUpperCase()) || unitsByTenant.get(newTenantId.toUpperCase())?.size === 0) && (
+                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada</p>
+                  )}
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
                 <input 
@@ -716,19 +738,29 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   autoComplete="off" 
                   placeholder="EX: Glaucio Silva" 
                   value={newName} 
-                  onChange={(e) => setNewName(e.target.value)} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewName(val);
+                    // Gerar username automático: primeiro.segundo nome em minúsculo
+                    const parts = val.trim().toLowerCase().split(/\s+/);
+                    if (parts.length >= 2) {
+                      setNewUsername(`${parts[0]}.${parts[1]}`);
+                    } else if (parts.length === 1) {
+                      setNewUsername(parts[0]);
+                    }
+                  }} 
                   className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Login</label>
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Username de Acesso</label>
                 <input 
                   type="text" 
                   required 
                   autoComplete="off" 
-                  placeholder="EX: pedro.almeida" 
+                  placeholder="EX: glaucio.silva" 
                   value={newUsername} 
-                  onChange={(e) => setNewUsername(e.target.value)} 
+                  onChange={(e) => setNewUsername(e.target.value.toLowerCase())} 
                   className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
                 />
               </div>
@@ -766,54 +798,6 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   )}
                 </div>
               </div>
-              {(currentUser?.role === UserRole.MASTER || currentUser?.email === "semorr@gmail.com") && (
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Tenant ID (Empresa)</label>
-                  <div className="relative">
-                    {!isManualTenant ? (
-                      <>
-                        <select 
-                          value={newTenantId} 
-                          onChange={(e) => {
-                            if (e.target.value === 'MANUAL') {
-                              setIsManualTenant(true);
-                            } else {
-                              setNewTenantId(e.target.value);
-                            }
-                          }} 
-                          className="w-full px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm appearance-none"
-                        >
-                          <option value="default">DEFAULT</option>
-                          {availableUnits.map(unit => (
-                            <option key={unit} value={unit}>{unit}</option>
-                          ))}
-                          <option value="MANUAL">+ OUTRA (DIGITAR MANUALMENTE)</option>
-                        </select>
-                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30 rotate-90 pointer-events-none" size={18} />
-                      </>
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <input 
-                          type="text" 
-                          autoFocus
-                          value={newTenantId} 
-                          onChange={(e) => setNewTenantId(e.target.value.toUpperCase())} 
-                          className="flex-1 px-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
-                          placeholder="DIGITE O TENANT ID..."
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => setIsManualTenant(false)}
-                          className="p-4 bg-slate-100 text-slate-400 rounded-2xl hover:text-slate-600"
-                          title="Voltar para lista"
-                        >
-                          <RefreshCw size={18} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Senha</label>
                 <div className="relative">

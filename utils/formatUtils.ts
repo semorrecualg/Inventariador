@@ -49,3 +49,25 @@ export const formatEtiqueta = (val: string | number | null | undefined): string 
   if (!s || s.toUpperCase() === 'ETIQUETAR') return s.toUpperCase();
   return s.padStart(6, '0');
 };
+
+/**
+ * Remove redundância em strings (ex: "Empresa A Empresa A" -> "Empresa A")
+ * Também limpa valores nulos ou inválidos comuns em planilhas
+ */
+export const deduplicateRedundantString = (s: string | null | undefined): string => {
+  if (s === undefined || s === null) return "";
+  let str = String(s).trim().replace(/\s+/g, ' ');
+  const upper = str.toUpperCase();
+  if (upper === "" || upper === "NULL" || upper === "0" || upper.includes("#N/D") || upper.includes("#REF")) return "";
+  
+  const parts = str.split(' ');
+  if (parts.length > 1 && parts.length % 2 === 0) {
+    const mid = parts.length / 2;
+    const firstHalf = parts.slice(0, mid).join(' ').toUpperCase();
+    const secondHalf = parts.slice(mid).join(' ').toUpperCase();
+    if (firstHalf === secondHalf) {
+      str = parts.slice(0, mid).join(' ');
+    }
+  }
+  return str.toUpperCase();
+};

@@ -46,8 +46,9 @@ import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
 import SyncManager from './components/SyncManager';
 
-import { motion } from 'motion/react';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert } from 'lucide-react';
+import AIAssistant from './components/AIAssistant';
+import { motion } from 'framer-motion';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -124,7 +125,36 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('app_current_user');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.email) {
+        // Normalizar admin para semorr@gmail.com
+        if (parsed.email.toLowerCase() === 'semorr@gmail.com') {
+          parsed.is_admin = true;
+          parsed.isAdmin = true;
+          parsed.role = UserRole.ADMIN;
+        }
+        // Normalizar flags de admin
+        const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
+        parsed.is_admin = is_admin;
+        parsed.isAdmin = is_admin;
+        
+        // Limpar DEFAULT
+        const normalizeValue = (v: unknown) => {
+          if (!v) return '';
+          const s = String(v).toUpperCase();
+          return (s === 'DEFAULT' || s === 'NULL' || s === '0' || s === 'default') ? '' : String(v);
+        };
+        parsed.tenantid = normalizeValue(parsed.tenantid);
+        parsed.unitid = normalizeValue(parsed.unitid);
+        if (Array.isArray(parsed.units)) {
+          parsed.units = parsed.units.filter((u: unknown) => normalizeValue(u) !== '');
+        }
+        if (Array.isArray(parsed.tenants)) {
+          parsed.tenants = parsed.tenants.filter((t: unknown) => normalizeValue(t) !== '');
+        }
+      }
+      return parsed;
     } catch { return null; }
   });
 
@@ -138,6 +168,7 @@ const App: React.FC = () => {
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
@@ -145,6 +176,14 @@ const App: React.FC = () => {
 
   // Monitor de Sincronização Offline
   useEffect(() => {
+    // No modo INTERNO (Mobile Puro), não monitoramos fila de sincronização com a nuvem
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      setSyncQueueLength(0);
+      setPendingPhotosCount(0);
+      setIsSyncLocked(false);
+      return;
+    }
+
     const checkSyncQueue = async () => {
       const { getSyncQueueLength } = await import('./services/syncService');
       const len = await getSyncQueueLength();
@@ -189,6 +228,17 @@ const App: React.FC = () => {
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
+    // Debug environment variables
+    const env = import.meta.env.VITE_ENVIRONMENT || 'development';
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    
+    console.log(`%c[Environment] ${env}`, "color: #3b82f6; font-weight: bold;");
+    if (geminiKey) {
+      console.log(`%c[AI] Chave Gemini detectada: ${geminiKey.substring(0, 8)}...`, "color: #8b5cf6;");
+    } else {
+      console.warn("[AI] Chave Gemini não encontrada no ambiente.");
+    }
+
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
     if (!initialCheck.isSafe) {
@@ -415,22 +465,28 @@ const App: React.FC = () => {
     setIsCloudUpdatePending(false); // Reset pending flag immediately
     try {
       // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
-      await pushLocalChanges(true); 
-      await processSyncQueue();
+      // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
+      // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
+      try {
+        await pushLocalChanges(true); 
+        await processSyncQueue();
+      } catch (pushErr) {
+        console.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
+      }
       
       const pendingItems = await getPendingSyncItems();
       setPendingPhotosCount(pendingItems.length);
 
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
-      // Passamos o tenantid e o unitid selecionado (se houver)
-      const cloudData = await fetchFullInventory(tenantid, explicitUnitId || selectedUnit || undefined);
+      // Passamos o tenantid e o unitid se fornecido
+      const cloudData = await fetchFullInventory(tenantid, explicitUnitId);
       const syncTimestamp = new Date().toISOString();
 
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
-          const extractedCompanies = Array.from(new Set(cloudData.assets.map(a => (a.EMPRESA || '').trim().toUpperCase()))).filter(Boolean);
+          const extractedCompanies = Array.from(new Set(cloudData.assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
@@ -524,7 +580,7 @@ const App: React.FC = () => {
       }
     });
 
-    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantid || 'default', (payload) => {
+    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantid || '', (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
@@ -660,13 +716,15 @@ const App: React.FC = () => {
     }
   });
 
-  // Apply theme class to body based on databaseMode and darkMode
+  // Apply theme class to body based on databaseMode, darkMode and environment
   useEffect(() => {
     const body = document.body;
-    body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark');
+    body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark', 'theme-staging');
     
     if (inventory.darkMode) {
       body.classList.add('theme-dark');
+    } else if (import.meta.env.VITE_ENVIRONMENT === 'staging') {
+      body.classList.add('theme-staging');
     } else {
       if (databaseMode === DatabaseMode.SUPABASE) {
         body.classList.add('theme-supabase');
@@ -843,8 +901,10 @@ const App: React.FC = () => {
               // Se a base local estiver vazia E a nuvem também estiver vazia para este tenant
               else if (isLocalEmpty && (!cloudData.assets || cloudData.assets.length === 0)) {
                 console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
-                if (user?.tenantid === 'default') {
-                  setSyncError(`Unidade 'default' sem dados. Verifique se o Tenant ID do usuário está correto.`);
+                if (!user?.tenantid) {
+                  setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
+                } else {
+                  setSyncError(`Erro ao sincronizar dados da nuvem.`);
                 }
               }
               // Se não estiver vazia, mas a nuvem for mais nova, apenas avisa (comportamento atual)
@@ -946,8 +1006,10 @@ const App: React.FC = () => {
           email: ADMIN_EMAIL, 
           password: "Glaucio@1970", 
           role: UserRole.ADMIN,
+          is_admin: true,
           isAdmin: true, 
-          mustChangePassword: false 
+          mustChangePassword: false,
+          tenantid: 'GBR'
         });
       } else if (userList[adminIndex].password === 'admin') {
         // Atualiza a senha se for a padrão antiga para facilitar o acesso do usuário
@@ -1137,10 +1199,11 @@ const App: React.FC = () => {
 
   const normalizeKey = useCallback((s: unknown) => {
     if (s === null || s === undefined) return '';
+    // Normalização agressiva: remove acentos, espaços, underscores e hífens para comparação
     return String(s).toUpperCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^A-Z0-9]/g, '')
+      .replace(/[^A-Z0-9]/g, '') 
       .trim();
   }, []);
 
@@ -1166,11 +1229,20 @@ const App: React.FC = () => {
         centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
       }
 
-      const assetCompKey = normalizeKey(a.EMPRESA || a._unitid || a._tenantid || '');
-      if (currentCompKey && assetCompKey !== currentCompKey) continue;
+      const assetUnitId = normalizeKey(a._unitid || '');
+      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
+      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
+      
+      // Se houver unidade selecionada, o ativo deve pertencer a ela (por ID ou Nome)
+      if (currentCompKey && 
+          assetUnitId !== currentCompKey && 
+          assetUnitOp !== currentCompKey && 
+          assetTenant !== currentCompKey) {
+        continue;
+      }
 
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const effectiveLoc = a._localMaster || a.ENDERECO || 'SEM LOCAL';
+      const effectiveLoc = a._localMaster || a.ENDERECO || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
       
@@ -1216,7 +1288,7 @@ const App: React.FC = () => {
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     
     // 3. ADOTADO EXTERNO (Empresa diferente)
-    const assetCompKey = normalizeKey(asset.EMPRESA || asset._unitid || asset._tenantid || '');
+    const assetCompKey = normalizeKey(asset.UNIDADE_OPERACIONAL || asset._unitid || asset._tenantid || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeKey(selectedUnit || '');
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
@@ -1309,24 +1381,19 @@ const App: React.FC = () => {
   }, []);
 
   const pushScreen = useCallback((s: AppScreen) => {
-    // Protocolo de Governança GBR v25.00: Identificação de Ambiente
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    // A restrição de carga de dados agora foca no dispositivo físico (Mobile Device) 
-    // e não apenas no tamanho da janela, permitindo que administradores em notebooks/desktops operem livremente.
-    if (s === AppScreen.LOAD_DATABASE && isMobileDevice) {
+    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
       setModalConfig({
         isOpen: true,
-        title: 'Acesso Restrito',
-        message: 'A carga de base de dados (Excel/CSV) é permitida exclusivamente em ambiente DESKTOP para garantir a integridade do processamento e conformidade com o protocolo de auditoria.',
-        type: 'error'
+        title: 'Recurso Indisponível',
+        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
+        type: 'info'
       });
       return;
     }
 
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
     else setHistory(prev => [...prev, s]);
-  }, []);
+  }, [databaseMode]);
 
   // Expose pushScreen to window for components that need it
   useEffect(() => {
@@ -1358,12 +1425,13 @@ const App: React.FC = () => {
           name: permissions.name || session.user.user_metadata?.name || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
           email: session.user.email!,
           role: (permissions.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
-          isAdmin: !!permissions.isAdmin || session.user.user_metadata?.isAdmin === true,
+          is_admin: !!permissions.is_admin || session.user.user_metadata?.isAdmin === true,
+          isAdmin: !!permissions.is_admin || session.user.user_metadata?.isAdmin === true,
           mustChangePassword: false,
-          tenantid: permissions.tenantid || session.user.user_metadata?.tenantid || 'default',
-          unitid: permissions.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.user_metadata?.tenantid || 'default',
-          units: permissions.units || session.user.user_metadata?.units || [permissions.tenantid || session.user.user_metadata?.tenantid || 'default'],
-          tenants: permissions.tenants || [permissions.tenantid || session.user.user_metadata?.tenantid || 'default']
+          tenantid: permissions.tenantid || session.user.user_metadata?.tenantid || '',
+          unitid: permissions.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.user_metadata?.tenantid || '',
+          units: permissions.units || session.user.user_metadata?.units || (permissions.tenantid || session.user.user_metadata?.tenantid ? [permissions.tenantid || session.user.user_metadata?.tenantid] : []),
+          tenants: permissions.tenants || (permissions.tenantid || session.user.user_metadata?.tenantid ? [permissions.tenantid || session.user.user_metadata?.tenantid] : [])
         };
 
         // Atualiza estado global
@@ -1396,8 +1464,8 @@ const App: React.FC = () => {
           role: UserRole.AUDITOR,
           isAdmin: false,
           mustChangePassword: false,
-          tenantid: 'default',
-          tenants: ['default']
+          tenantid: '',
+          tenants: []
         };
         setUser(fallbackUser);
         localStorage.setItem('app_current_user', JSON.stringify(fallbackUser));
@@ -1523,7 +1591,7 @@ const App: React.FC = () => {
 
       // 3. Atualiza o estado local
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
-      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.EMPRESA || '').toUpperCase().trim()));
+      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.UNIDADE_OPERACIONAL || '').toUpperCase().trim()));
       
       setInventory(prev => {
         const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
@@ -1739,8 +1807,8 @@ const App: React.FC = () => {
       updates._origemTransacao = origin; // Aplica o código fixo
       
       // Garantir que tenant e unit estão definidos
-      if (!updates._tenantid) updates._tenantid = user?.tenantid || 'default';
-      if (!updates._unitid) updates._unitid = user?.unitid || 'default';
+      if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+      if (!updates._unitid) updates._unitid = user?.unitid || '';
       
       // Log de Auditoria
       const historyEntry: AuditLogEntry = {
@@ -1748,7 +1816,7 @@ const App: React.FC = () => {
         user: user?.name || user?.username || user?.email || 'SISTEMA',
         action: index === -1 ? 'CREATE' : 'UPDATE',
         details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-        tenantid: user?.tenantid || 'default',
+        tenantid: user?.tenantid || '',
         origin: origin // Aplica o código fixo no log
       };
       updates._history = [...(updates._history || []), historyEntry];
@@ -2017,7 +2085,7 @@ const App: React.FC = () => {
     // 4. Sincronizar se necessário
     if (databaseMode === DatabaseMode.SUPABASE) {
       try {
-        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || 'default');
+        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || '');
       } catch (err) {
         console.error('Erro ao sincronizar unitarização:', err);
       }
@@ -2057,7 +2125,7 @@ const App: React.FC = () => {
     }));
 
     if (databaseMode === DatabaseMode.SUPABASE) {
-      await syncAssetsToCloud([restoredAsset], user?.tenantid || 'default');
+      await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
     }
   }, [inventory.assets, user, databaseMode]);
 
@@ -2209,8 +2277,8 @@ const App: React.FC = () => {
           };
           
           // Garantir que tenant e unit estão definidos
-          if (!updates._tenantid) updates._tenantid = user?.tenantid || 'default';
-          if (!updates._unitid) updates._unitid = user?.unitid || 'default';
+          if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+          if (!updates._unitid) updates._unitid = user?.unitid || '';
           
           // Log de Auditoria para atualização em lote
           const historyEntry: AuditLogEntry = {
@@ -2218,7 +2286,7 @@ const App: React.FC = () => {
             user: user?.name || user?.username || user?.email || 'SISTEMA',
             action: 'BULK_UPDATE',
             details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-            tenantid: user?.tenantid || 'default',
+            tenantid: user?.tenantid || '',
             origin: origin // Aplica o código fixo no log
           };
           updates._history = [...(updates._history || []), historyEntry];
@@ -2232,7 +2300,7 @@ const App: React.FC = () => {
               record_id: String(a.id),
               new_data: updates,
               details: historyEntry.details,
-              tenant_id: user?.tenantid || 'default',
+              tenant_id: user?.tenantid || '',
               origin: origin
             });
 
@@ -2242,7 +2310,7 @@ const App: React.FC = () => {
               action: 'UPDATE',
               old_data: a,
               new_data: updates,
-              tenant_id: user?.tenantid || 'default'
+              tenant_id: user?.tenantid || ''
             });
           }
 
@@ -2586,7 +2654,7 @@ const App: React.FC = () => {
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
       if (selectedUnit) {
         const normalizedSel = selectedUnit.toUpperCase().trim();
-        const remainingAssets = inventory.assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedSel);
+        const remainingAssets = inventory.assets.filter(a => (a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
         
         setInventory(prev => ({
           ...prev,
@@ -2631,7 +2699,7 @@ const App: React.FC = () => {
   };
 
   const isAdmin = useMemo(() => {
-    return user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
+    return user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
   }, [user]);
 
   const filteredAssetsByUnit = useMemo(() => {
@@ -2640,7 +2708,14 @@ const App: React.FC = () => {
     const filtered = [];
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
-      if (normalizeKey(a.EMPRESA || a._unitid || a._tenantid || '') === selKey) {
+      // Verifica _unitid (Prioridade), UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
+      const assetUnitId = normalizeKey(a._unitid || '');
+      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
+      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
+      
+      if (assetUnitId === selKey || 
+          assetUnitOp === selKey || 
+          assetTenant === selKey) {
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         // Registro Ativo: Não pode estar baixado
@@ -2712,9 +2787,9 @@ const App: React.FC = () => {
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
 
   const fullCompaniesWithStatus = useMemo(() => {
-    const userTenant = user?.tenantid || 'default';
+    const userTenant = user?.tenantid || '';
     const userUnits = user?.units || [userTenant];
-    const isAuditor = user?.role === UserRole.AUDITOR;
+    const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
     const assets = inventory.assets;
 
     // 1. Agrupar estatísticas por empresa em um único loop O(N)
@@ -2723,7 +2798,7 @@ const App: React.FC = () => {
     
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
-      const company = (a.EMPRESA || '').trim().toUpperCase();
+      const company = (a.UNIDADE_OPERACIONAL || a._unitid || '').trim().toUpperCase().replace(/_/g, ' ');
       if (!company) continue;
       
       let stats = companyStatsMap.get(company);
@@ -2742,14 +2817,20 @@ const App: React.FC = () => {
     }
 
     // 2. Definir a lista base de empresas
-    const baseCompaniesSet = new Set<string>(inventory.companies);
+    const baseCompaniesSet = new Set<string>();
+    if (inventory.companies) {
+      inventory.companies.forEach(c => baseCompaniesSet.add(c.toUpperCase().replace(/_/g, ' ').trim()));
+    }
     for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
     
     // Se for auditor e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
     // mesmo que ainda não existam ativos locais para elas
     if (isAuditor && inventory.databaseMode !== DatabaseMode.INTERNAL) {
       for (const u of userUnits) {
-        if (u) baseCompaniesSet.add(u);
+        if (u) {
+          const cleanU = u.toUpperCase().replace(/_/g, ' ').trim();
+          baseCompaniesSet.add(cleanU);
+        }
       }
     }
     
@@ -2758,33 +2839,88 @@ const App: React.FC = () => {
     // 3. Normalizar unidades do usuário para busca rápida
     const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
 
-    return baseCompanies
-      .filter(company => {
-        if (!isAuditor || userUnits.length === 0) return true;
-        const normCompany = normalizeKey(company);
-        const stats = companyStatsMap.get(company.trim().toUpperCase());
+    // 4. Agrupar e Mesclar empresas por chave normalizada para evitar duplicatas (ex: "UNIDADE A" vs "UNIDADE_A")
+    const mergedCompanies = new Map<string, { name: string; hasData: boolean; hasActiveAssets: boolean }>();
+
+    baseCompanies.forEach(company => {
+      const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
+      if (!rawName) return;
+      
+      const norm = normalizeKey(rawName);
+      if (!norm) return;
+
+      // Filtragem por permissão (Auditor)
+      const isAllowed = !isAuditor || userUnits.length === 0 || normalizedUserUnits.includes(norm);
+      
+      const stats = companyStatsMap.get(rawName);
+      
+      if (isAllowed) {
+        const existing = mergedCompanies.get(norm);
         
-        // Se a empresa está na lista de unidades permitidas
-        if (normalizedUserUnits.includes(normCompany)) return true;
+        // Critérios para escolher o "melhor" nome de exibição:
+        // 1. Preferir nomes SEM underscores (mais legíveis)
+        // 2. Preferir nomes com espaços
+        // 3. Preferir o nome que está na lista de unidades do usuário
+        const hasUnderscore = rawName.includes('_');
+        const existingHasUnderscore = existing ? existing.name.includes('_') : false;
         
-        // Ou se algum ativo desta empresa pertence a uma unidade permitida
-        if (stats) {
-          for (const u of normalizedUserUnits) {
-            if (stats.unitIds.has(u)) return true;
-          }
+        const isBetterName = !existing || 
+          (existingHasUnderscore && !hasUnderscore) ||
+          (rawName.includes(' ') && !existing.name.includes(' ')) ||
+          (userUnits.includes(rawName) && !userUnits.includes(existing.name));
+
+        if (!existing || isBetterName || stats?.hasData) {
+          mergedCompanies.set(norm, {
+            name: isBetterName ? rawName : existing.name,
+            hasData: (existing?.hasData || !!stats),
+            hasActiveAssets: (existing?.hasActiveAssets || stats?.hasActiveAssets || false)
+          });
         }
-        
-        return false;
-      })
-      .map(company => {
-        const stats = companyStatsMap.get(company.trim().toUpperCase());
-        return {
-          name: company,
-          hasData: !!stats,
-          hasActiveAssets: stats?.hasActiveAssets || false
-        };
-      });
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR]);
+      }
+    });
+
+    return Array.from(mergedCompanies.values());
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR]);
+
+  const unitsByTenant = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    
+    // 1. De Ativos (Fonte mais confiável de relação: UNIDADE_OPERACIONAL real)
+    inventory.assets.forEach(a => {
+      const t = (a.GRUPO_EMPRESARIAL || a._tenantid || '').toUpperCase();
+      const u = a.UNIDADE_OPERACIONAL; // Usar apenas a unidade operacional real da base
+      
+      if (u && u.toUpperCase() !== 'DEFAULT' && u.toUpperCase() !== 'NULL' && u !== '0') {
+        if (!map.has(t)) map.set(t, new Set());
+        map.get(t)!.add(u);
+      }
+    });
+
+    // 2. De Usuários (Apenas para garantir que unidades já atribuídas apareçam, se forem válidas)
+    users.forEach(u => {
+      const t = (u.tenantid || '').toUpperCase();
+      const isValidUnit = (unit: string) => {
+        if (!unit) return false;
+        const upper = unit.toUpperCase();
+        return upper !== 'DEFAULT' && upper !== 'NULL' && upper !== '0' && upper !== t;
+      };
+
+      if (u.unitid && isValidUnit(u.unitid)) {
+        if (!map.has(t)) map.set(t, new Set());
+        map.get(t)!.add(u.unitid);
+      }
+      if (u.units) {
+        u.units.forEach(unit => {
+          if (isValidUnit(unit)) {
+            if (!map.has(t)) map.set(t, new Set());
+            map.get(t)!.add(unit);
+          }
+        });
+      }
+    });
+
+    return map;
+  }, [inventory.assets, users]);
 
   const availableUnits = useMemo(() => {
     const fromAssets = inventory.assets.map(a => a._unitid || a._tenantid).filter(Boolean);
@@ -2846,7 +2982,7 @@ const App: React.FC = () => {
       if (prevScreen === AppScreen.MAIN_MENU) return;
 
       const available = fullCompaniesWithStatus.filter(c => c.hasData);
-      if (available.length === 1 && user?.role === UserRole.AUDITOR) {
+      if (available.length === 1 && (user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR)) {
         const unit = available[0].name;
         setSelectedUnit(unit);
         localStorage.setItem('app_selected_unit', unit);
@@ -2855,7 +2991,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.MAIN_MENU);
       }
     }
-  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, history, pushScreen]);
+  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, history, pushScreen]);
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
@@ -2927,6 +3063,21 @@ const App: React.FC = () => {
                   <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
                     <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
                   </div>
+                  <div 
+                    onClick={() => setIsAIAssistantOpen(true)}
+                    className={`px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 cursor-pointer hover:scale-105 active:scale-95 transition-all ${import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'bg-amber-50 border-amber-100' : 'bg-indigo-50 border-indigo-100'}`}
+                    title="Abrir Assistente de IA"
+                  >
+                    <span className={`text-[7px] font-black uppercase tracking-widest ${import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'text-amber-600' : 'text-indigo-600'}`}>
+                      {import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'STAGING' : 'DEV'}
+                    </span>
+                  </div>
+                  {import.meta.env.VITE_GEMINI_API_KEY && (
+                    <div className="px-1.5 py-0.5 rounded-lg bg-purple-50 border border-purple-100 shadow-sm flex items-center space-x-1">
+                      <Sparkles size={8} className="text-purple-600" />
+                      <span className="text-[7px] font-black text-purple-600 uppercase tracking-widest">AI READY</span>
+                    </div>
+                  )}
                 </div>
             </div>
             <div className="px-3 pb-1.5 pt-0.5 border-t border-slate-50">
@@ -2952,11 +3103,19 @@ const App: React.FC = () => {
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onLogin={async (u) => { 
                 setUser(u); 
-                const isEmpty = inventory.assets.length === 0;
+                localStorage.setItem('app_current_user', JSON.stringify(u));
+                
+                // Se logou via Supabase, garante que o modo está correto
+                if (databaseMode !== DatabaseMode.INTERNAL) {
+                  setDatabaseMode(DatabaseMode.SUPABASE);
+                  localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+                }
 
-                if (isEmpty && databaseMode !== DatabaseMode.INTERNAL) {
-                  // Passa o tenantid e o modo explicitamente para garantir sync imediato no login
-                  syncFromCloud(u.tenants || u.tenantid, databaseMode);
+                // Sempre tenta sincronizar no login para garantir dados frescos e permissões atualizadas
+                // Isso evita conflitos com caches locais ou sessões anteriores incompletas
+                if (databaseMode !== DatabaseMode.INTERNAL) {
+                  console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem...');
+                  syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
                 }
 
                 if (u.mustChangePassword) { 
@@ -3114,7 +3273,7 @@ const App: React.FC = () => {
                   };
                   
                   // Mostra tela de sincronização imediatamente se for admin
-                  const shouldSync = isAdmin && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+                  const shouldSync = isAdmin && databaseMode !== DatabaseMode.INTERNAL && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
                   if (shouldSync) {
                     setIsSyncing(true);
                     setSyncProgress({ current: 0, total: a.length });
@@ -3129,7 +3288,7 @@ const App: React.FC = () => {
                     if (shouldSync) {
                       console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
                       try {
-                        const forcedTenantId = (user?.isAdmin && user?.tenantid === 'default') ? undefined : user?.tenantid;
+                        const forcedTenantId = (user?.isAdmin && !user?.tenantid) ? undefined : user?.tenantid;
                         
                         // Limpa a nuvem antes de subir a nova base para garantir espelhamento
                         // Passamos o tenantId para garantir que só limpamos os dados deste cliente
@@ -3278,9 +3437,10 @@ const App: React.FC = () => {
               readOnly={isReadOnlyDetail}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               protheusApiUrl={inventory.protheusApiUrl || ''}
-              tenantid={user?.tenantid || 'default'}
+              tenantid={user?.tenantid || ''}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
+              databaseMode={databaseMode}
             />
           )}
           {screen === AppScreen.SOFT_DELETE_REPORT && (
@@ -3316,6 +3476,7 @@ const App: React.FC = () => {
               units={fullCompaniesWithStatus
                 .filter(c => {
                   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                  const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
                   
                   // Regra: Mostrar apenas unidades que possuem ativos com status "ATIVO"
                   // Se a base estiver vazia (especialmente no modo nuvem), mostramos todas para permitir o primeiro sync
@@ -3328,12 +3489,21 @@ const App: React.FC = () => {
 
                   if (isAdmin) return shouldShowByStatus;
                   
-                  // Se for auditor, só vê as unidades autorizadas E que tenham ativos ativos
-                  const authorizedUnits = user?.units || (user?.tenantid ? [user.tenantid] : []);
-                  const normCName = normalizeKey(c.name);
-                  const isAuthorized = authorizedUnits.some(au => normalizeKey(au) === normCName);
-                  
-                  return isAuthorized && shouldShowByStatus;
+                  // Se for auditor (ou auxiliar), só vê as unidades autorizadas E que tenham ativos ativos
+                  if (isAuditor) {
+                    const authorizedUnits = user?.units || (user?.unitid ? [user.unitid] : []);
+                    const normCName = normalizeKey(c.name);
+                    const isAuthorized = authorizedUnits.some(au => normalizeKey(au) === normCName);
+                    
+                    // Log para depuração se for felipe.messias
+                    if (user?.email.toLowerCase() === 'felipe.messias@gmail.com') {
+                      console.log(`[UnitFilter] Felipe: ${c.name} (${normCName}) | Authorized: ${JSON.stringify(authorizedUnits)} | isAuthorized: ${isAuthorized}`);
+                    }
+                    
+                    return isAuthorized && shouldShowByStatus;
+                  }
+
+                  return shouldShowByStatus;
                 })
                 .map(c => ({ 
                   name: c.name, 
@@ -3346,9 +3516,9 @@ const App: React.FC = () => {
                 setIsInventorying(false); 
                 setInventoryLocation(null); 
                 
-                // Se for auditor e estiver no modo nuvem, dispara o sync para a unidade selecionada
-                const isAuditor = user?.role === UserRole.AUDITOR;
-                if (isAuditor && databaseMode !== DatabaseMode.INTERNAL) {
+                // Dispara o sync para a unidade selecionada se estiver no modo nuvem
+                // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
+                if (databaseMode !== DatabaseMode.INTERNAL) {
                   // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
                   syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
                 }
@@ -3391,7 +3561,7 @@ const App: React.FC = () => {
               user={user}
             />
           )}
-          {screen === AppScreen.ASSET_MAP && <AssetMap assets={inventory.assets} onBack={popScreen} databaseMode={databaseMode} />}
+          {screen === AppScreen.ASSET_MAP && <AssetMap assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} onBack={popScreen} databaseMode={databaseMode} />}
           {screen === AppScreen.ACTIVE_SEARCH && (
             <ActiveSearch 
               assets={filteredAssetsByUnit} 
@@ -3440,7 +3610,7 @@ const App: React.FC = () => {
           {screen === AppScreen.ASSET_CONTROL_HOME && (
             <AssetControlModule 
               username={user?.username || ''}
-              tenantid={user?.tenantid || 'default'}
+              tenantid={user?.tenantid || ''}
               onBack={() => {
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
@@ -3448,7 +3618,7 @@ const App: React.FC = () => {
               }}
             />
           )}
-          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={popScreen} databaseMode={databaseMode} />}
@@ -3536,6 +3706,18 @@ const App: React.FC = () => {
           </motion.div>
         </div>
       )}
+
+      <AIAssistant 
+        isOpen={isAIAssistantOpen} 
+        onClose={() => setIsAIAssistantOpen(false)} 
+        user={user}
+        onAssetsGenerated={(newAssets) => {
+          setInventory(prev => ({
+            ...prev,
+            assets: [...prev.assets, ...newAssets]
+          }));
+        }}
+      />
 
       <Modal
         isOpen={modalConfig.isOpen}

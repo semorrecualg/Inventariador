@@ -12,12 +12,13 @@ export interface User {
   email: string;
   password?: string;
   role: UserRole;
-  isAdmin?: boolean; // Mantido para compatibilidade
+  is_admin?: boolean; // Novo padrão unificado
+  isAdmin?: boolean; // Deprecated: use is_admin
   mustChangePassword?: boolean;
-  tenantid?: string; // ID da ORGANIZAÇÃO (ex: CICOPAL)
-  unitid?: string;   // Unidade Operacional Padrão
+  tenantid: string;  // ID da Organização (ex: CICOPAL) - Unificado
+  tenants?: string | string[];  // Deprecated: use tenantid
+  unitid?: string;   // Unidade Operacional Padrão - Unificado
   units?: string[];  // Lista de Unidades Operacionais autorizadas
-  tenants?: string[]; // Mantido para compatibilidade (será migrado para units)
 }
 
 export enum TransactionOrigin {
@@ -67,9 +68,11 @@ export interface Asset {
   [key: string]: any; 
   id: string | number;
   
-  // Estrutura Mestre v24
-  EMPRESA?: string;
-  STATUS?: string;
+  // Estrutura Mestre v24 (Nomenclatura de Negócio)
+  _tenantid?: string; // ID da Organização (Campo Unificado)
+  _unitid?: string;   // Unidade Operacional (Campo Unificado)
+  GRUPO_EMPRESARIAL?: string; // Identificador da Empresa/Grupo
+  UNIDADE_OPERACIONAL?: string; // Unidade Operacional
   ETIQUETA?: string;
   QT?: string | number;
   DESCRICAODOATIVO?: string;
@@ -109,8 +112,6 @@ export interface Asset {
   _auditor?: string;
   _history?: AuditLogEntry[];
   _photoUrl?: string;
-  _tenantid?: string; // Organização
-  _unitid?: string;   // Unidade Operacional
   _lat?: number;
   _lng?: number;
   _aprovado?: boolean;

@@ -5,7 +5,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. Tabela de Ativos (Assets)
 CREATE TABLE IF NOT EXISTS assets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    "EMPRESA" TEXT,
+    "GRUPO_EMPRESARIAL" TEXT,
+    "UNIDADE_OPERACIONAL" TEXT,
     "STATUS" TEXT,
     "ETIQUETA" TEXT,
     "QT" DECIMAL(15,2),
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS assets (
     "DE_PARA" TEXT,
     "AUDITOR_STATUS_CONFERENCIA" TEXT,
     _origemTransacao TEXT,
+    _is_deleted BOOLEAN DEFAULT FALSE,
     
     -- Novos Campos Módulo Controle de Ativo (Contábil)
     _valor_aquisicao DECIMAL(15,2),
@@ -74,6 +76,33 @@ CREATE TABLE IF NOT EXISTS assets (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Trigger para Garantir Unificação de Campos (DBA Level Hard)
+CREATE OR REPLACE FUNCTION unify_asset_fields() RETURNS TRIGGER AS $$
+BEGIN
+    -- Unifica Tenant ID
+    IF NEW._tenantid IS NULL OR NEW._tenantid = '' THEN
+        NEW._tenantid := COALESCE(NEW."GRUPO_EMPRESARIAL", '');
+    END IF;
+    
+    -- Unifica Unit ID
+    IF NEW._unitid IS NULL OR NEW._unitid = '' THEN
+        NEW._unitid := COALESCE(NEW."UNIDADE_OPERACIONAL", '');
+    END IF;
+    
+    -- Sincroniza campos legados para compatibilidade reversa
+    IF NEW."UNIDADE_OPERACIONAL" IS NULL OR NEW."UNIDADE_OPERACIONAL" = '' THEN
+        NEW."UNIDADE_OPERACIONAL" := NEW._unitid;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_unify_asset_fields ON assets;
+CREATE TRIGGER trg_unify_asset_fields
+BEFORE INSERT OR UPDATE ON assets
+FOR EACH ROW EXECUTE FUNCTION unify_asset_fields();
 
 -- 2. Tabela de Configuração do Inventário
 CREATE TABLE IF NOT EXISTS inventory_config (
@@ -94,6 +123,7 @@ CREATE TABLE IF NOT EXISTS inventory_config (
     "protheusApiUrl" TEXT,
     "mandatoryPhotoOnDivergence" BOOLEAN,
     "mandatoryPhotoOnNewItem" BOOLEAN,
+    "databaseMode" TEXT DEFAULT 'HYBRID',
     _tenantid TEXT,
     _unitid TEXT, -- Unidade Operacional (opcional para config específica)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -104,11 +134,11 @@ CREATE TABLE IF NOT EXISTS inventory_config (
 CREATE TABLE IF NOT EXISTS user_permissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT NOT NULL UNIQUE,
-    "isAdmin" BOOLEAN DEFAULT FALSE,
+    is_admin BOOLEAN DEFAULT FALSE,
     tenantid TEXT, -- ID da Organização (ex: CICOPAL)
     unitid TEXT,   -- Unidade Operacional Padrão
     units TEXT[],  -- Lista de Unidades Operacionais autorizadas
-    tenants TEXT[], -- Mantido para compatibilidade
+    tenants TEXT[], -- Lista de Organizações autorizadas
     username TEXT,
     name TEXT,     -- Nome Completo
     role TEXT DEFAULT 'AUDITOR',
@@ -335,8 +365,15 @@ WITH CHECK (tenant_id = get_auth_tenant() AND is_admin());
 -- POLÍTICAS DE STORAGE (ASSET PHOTOS)
 -- ==========================================
 
+-- 0. Criar Bucket (Se não existir)
+-- Nota: Buckets geralmente são criados via Console ou API de Admin
+-- Mas incluímos aqui para referência de configuração
+-- INSERT INTO storage.buckets (id, name, public) 
+-- VALUES ('asset-photos', 'asset-photos', true)
+-- ON CONFLICT (id) DO NOTHING;
+
 -- Nota: Estas políticas aplicam-se ao bucket 'asset-photos'
--- O caminho esperado é: photos/{tenantId}/{assetId}/{filename}
+-- O caminho esperado é: photos/{tenantid}/{assetId}/{filename}
 
 -- 1. Permitir Upload (Apenas usuários autenticados no seu próprio tenant)
 -- Supabase Storage usa a tabela storage.objects
@@ -345,7 +382,7 @@ FOR INSERT TO authenticated
 WITH CHECK (
     bucket_id = 'asset-photos' 
     AND (storage.foldername(name))[1] = 'photos'
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
 );
 
 -- 2. Permitir Leitura (Usuários do mesmo tenant)
@@ -353,7 +390,7 @@ CREATE POLICY "Tenant Read: Asset Photos" ON storage.objects
 FOR SELECT TO authenticated 
 USING (
     bucket_id = 'asset-photos' 
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
 );
 
 -- 3. Permitir Deleção (Admins do tenant)
@@ -361,6 +398,6 @@ CREATE POLICY "Admin Delete: Asset Photos" ON storage.objects
 FOR DELETE TO authenticated 
 USING (
     bucket_id = 'asset-photos' 
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantId')
+    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
     AND ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER')
 );

@@ -42,6 +42,8 @@ interface DashboardProps {
     tenantid?: string;
     unitid?: string;
     role?: string;
+    is_admin?: boolean;
+    isAdmin?: boolean;
   } | null;
 }
 
@@ -49,7 +51,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
 
   const isAdmin = useMemo(() => {
-    return user?.role === 'ADMIN' || user?.role === 'MASTER';
+    return user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.is_admin || user?.isAdmin;
   }, [user]);
 
   // Base de cálculo para o dashboard de progresso por unidade
@@ -61,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
     const progress: Record<string, { total: number; conferido: number; percentage: number }> = {};
     
     progressBase.forEach(a => {
-      const unit = a._unitid || a.EMPRESA || 'SEM UNIDADE';
+      const unit = a._unitid || a.UNIDADE_OPERACIONAL || 'SEM UNIDADE';
       if (!progress[unit]) {
         progress[unit] = { total: 0, conferido: 0, percentage: 0 };
       }

@@ -16,6 +16,7 @@ import {
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
 import { generateUUID } from '../services/supabaseService';
+import { deduplicateRedundantString } from '../utils/formatUtils';
 import BackButton from './BackButton';
 import Modal from './Modal';
 
@@ -74,11 +75,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const cleanDisplayValue = (val: unknown): string => {
-    if (val === undefined || val === null) return "";
-    const s = String(val).trim().replace(/\s+/g, ' ');
-    const upper = s.toUpperCase();
-    if (upper === "" || upper === "NULL" || upper === "0" || upper.includes("#N/D") || upper.includes("#REF")) return "";
-    return s.toUpperCase();
+    return deduplicateRedundantString(val as string);
   };
 
   const processFile = async (dataBuffer: ArrayBuffer) => {
@@ -92,17 +89,17 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       let headerIdx = 0;
       for (let i = 0; i < Math.min(rawRows.length, 50); i++) {
         const rowStr = rawRows[i].join('|').toUpperCase();
-        if (['ETIQUETA', 'STATUS', 'EMPRESA', 'ENDERECO', 'DESCRICAO'].some(t => rowStr.includes(t))) {
+        if (['ETIQUETA', 'STATUS', 'UNIDADE_OPERACIONAL', 'GRUPO_EMPRESARIAL', 'ENDERECO', 'DESCRICAO'].some(t => rowStr.includes(t))) {
           headerIdx = i; break;
         }
       }
 
       const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
       
-      // Mapeamento v25.00 - Ordem Estrita: Tenant_ID;EMPRESA;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
+      // Mapeamento v25.00 - Ordem Estrita: GRUPO_EMPRESARIAL;UNIDADE_OPERACIONAL;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
       const m = {
-        TENANT_ID: rawHeaders.indexOf('TENANT_ID'),
-        EMPRESA: rawHeaders.indexOf('EMPRESA'),
+        GRUPO_EMPRESARIAL: rawHeaders.indexOf('GRUPO_EMPRESARIAL'),
+        UNIDADE_OPERACIONAL: rawHeaders.indexOf('UNIDADE_OPERACIONAL'),
         STATUS: rawHeaders.indexOf('STATUS'),
         ETIQUETA: rawHeaders.indexOf('ETIQUETA'),
         QT: rawHeaders.indexOf('QT'),
@@ -124,9 +121,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         RECNO3: rawHeaders.indexOf('SN3_RECNO') !== -1 ? rawHeaders.indexOf('SN3_RECNO') : -1
       };
 
-      // Fallback para mapeamento por índice se os cabeçalhos não forem localizados corretamente
-      if (m.TENANT_ID === -1) m.TENANT_ID = 0;
-      if (m.EMPRESA === -1) m.EMPRESA = 1;
+      // Fallback por índice se os cabeçalhos não forem localizados
+      if (m.GRUPO_EMPRESARIAL === -1) m.GRUPO_EMPRESARIAL = 0;
+      // Se a UNIDADE_OPERACIONAL não foi encontrada pelo nome, mas o GRUPO_EMPRESARIAL foi encontrado em outro lugar que não o índice 1, usamos o índice 1 como fallback
+      if (m.UNIDADE_OPERACIONAL === -1) m.UNIDADE_OPERACIONAL = 1;
+      
+      // Proteção: Se ambos apontarem para o mesmo índice por erro de detecção, tentamos separar
+      if (m.GRUPO_EMPRESARIAL === m.UNIDADE_OPERACIONAL && m.GRUPO_EMPRESARIAL !== -1) {
+        if (m.GRUPO_EMPRESARIAL === 0) m.UNIDADE_OPERACIONAL = 1;
+        else m.GRUPO_EMPRESARIAL = 0;
+      }
       if (m.STATUS === -1) m.STATUS = 2;
       if (m.ETIQUETA === -1) m.ETIQUETA = 3;
       if (m.QT === -1) m.QT = 4;
@@ -178,8 +182,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         if (excludedAccounts?.includes(conta)) return;
 
         const asset: Asset = { id: generateUUID() };
-        asset.TENANT_ID = cleanDisplayValue(row[m.TENANT_ID]);
-        asset.EMPRESA = cleanDisplayValue(row[m.EMPRESA]) || "GERAL";
+        asset.GRUPO_EMPRESARIAL = cleanDisplayValue(row[m.GRUPO_EMPRESARIAL]);
+        asset.UNIDADE_OPERACIONAL = cleanDisplayValue(row[m.UNIDADE_OPERACIONAL]) || "GERAL";
         asset.STATUS = status || "ATIVO";
         asset.ETIQUETA = etiqueta;
         asset.QT = cleanDisplayValue(row[m.QT]) || "1";
@@ -216,11 +220,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         asset._plaquetaMaster = asset.ETIQUETA || "S/ ETQ";
         asset._localMaster = asset.ENDERECO;
         asset._descricaoMaster = asset.DESCRICAODOATIVO || "SEM DESCRICAO";
-        asset._empresaNormalizada = asset.EMPRESA;
+        asset._empresaNormalizada = asset.UNIDADE_OPERACIONAL;
         asset._baseSinteticaLoc = Array.from(baseSinteticaLoc);
 
         finalAssets.push(asset);
-        companyCounts[asset.EMPRESA] = (companyCounts[asset.EMPRESA] || 0) + 1;
+        companyCounts[asset.UNIDADE_OPERACIONAL] = (companyCounts[asset.UNIDADE_OPERACIONAL] || 0) + 1;
       });
 
       rawExtractedAssetsRef.current = finalAssets;
@@ -235,7 +239,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const finalizeLoading = () => {
-    // Contagem de duplicidades por EMPRESA e STATUS ATIVO
+    // Contagem de duplicidades por UNIDADE_OPERACIONAL e STATUS ATIVO
     const companyTagCounts = new Map<string, number>();
     
     rawExtractedAssetsRef.current.forEach(a => {
@@ -244,7 +248,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         if (etqKey !== "ETIQUETAR") {
           const statusUpper = String(a.STATUS || '').toUpperCase();
           if (!statusUpper.includes('BAIXADO')) {
-            const compKey = normalizeKey(a.EMPRESA || "GERAL");
+            const compKey = normalizeKey(a.UNIDADE_OPERACIONAL || "GERAL");
             const compositeKey = `${compKey}_${etqKey}`;
             companyTagCounts.set(compositeKey, (companyTagCounts.get(compositeKey) || 0) + 1);
           }
@@ -252,11 +256,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
     });
 
-    const filteredAssets = rawExtractedAssetsRef.current.filter(a => selectedCompanies.has(a.EMPRESA || "GERAL"));
+    const filteredAssets = rawExtractedAssetsRef.current.filter(a => selectedCompanies.has(a.UNIDADE_OPERACIONAL || "GERAL"));
     
     filteredAssets.forEach(a => {
       const etqKey = a.ETIQUETA ? normalizeKey(a.ETIQUETA) : "";
-      const compKey = normalizeKey(a.EMPRESA || "GERAL");
+      const compKey = normalizeKey(a.UNIDADE_OPERACIONAL || "GERAL");
       const compositeKey = `${compKey}_${etqKey}`;
 
       if (!a.ETIQUETA || etqKey === "ETIQUETAR") {
@@ -270,7 +274,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     const companyStats: Record<string, number> = {};
     const baseSinteticaLoc = new Set<string>();
     filteredAssets.forEach(i => { 
-      companyStats[i.EMPRESA!] = (companyStats[i.EMPRESA!] || 0) + 1; 
+      companyStats[i.UNIDADE_OPERACIONAL!] = (companyStats[i.UNIDADE_OPERACIONAL!] || 0) + 1; 
       if(i.ENDERECO) baseSinteticaLoc.add(i.ENDERECO.toUpperCase().trim());
     });
 
@@ -367,8 +371,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           <div className="space-y-2">
             <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Estrutura de Colunas (Ordem A-U)</h4>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-[9px] text-slate-700 leading-relaxed max-h-40 overflow-y-auto">
-              0: Tenant_ID<br/>
-              1: EMPRESA<br/>
+              0: GRUPO_EMPRESARIAL<br/>
+              1: UNIDADE_OPERACIONAL<br/>
               2: STATUS<br/>
               3: ETIQUETA<br/>
               4: QT<br/>
@@ -393,7 +397,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
           <button 
             onClick={() => {
-              const headers = ['Tenant_ID', 'EMPRESA', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAODOATIVO', 'SERIAL', 'DATAAQUSIC', 'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'REGISTRO', 'SUBREG', 'DATABAIXA', 'CONTACONTABIL', 'PRIMARYKEY', 'CENTRODECUSTO', 'VLRAQUISIC', 'SN1_RECNO', 'SN3_RECNO'];
+              const headers = ['GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAODOATIVO', 'SERIAL', 'DATAAQUSIC', 'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'REGISTRO', 'SUBREG', 'DATABAIXA', 'CONTACONTABIL', 'PRIMARYKEY', 'CENTRODECUSTO', 'VLRAQUISIC', 'SN1_RECNO', 'SN3_RECNO'];
               const ws = XLSX.utils.aoa_to_sheet([headers]);
               const wb = XLSX.utils.book_new();
               XLSX.utils.book_append_sheet(wb, ws, "Template_GBR_v25");

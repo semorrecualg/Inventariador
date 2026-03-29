@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Asset, TagInventario, TransactionOrigin, AuditLogEntry } from '../types';
+import { Asset, TagInventario, TransactionOrigin, AuditLogEntry, DatabaseMode } from '../types';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
@@ -70,6 +70,7 @@ interface AssetDetailProps {
   tenantid?: string;
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
+  databaseMode: DatabaseMode;
 }
 
 const AssetDetail: React.FC<AssetDetailProps> = ({ 
@@ -88,7 +89,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   protheusApiUrl = '',
   tenantid = '',
   mandatoryPhotoOnDivergence = false,
-  mandatoryPhotoOnNewItem = false
+  mandatoryPhotoOnNewItem = false,
+  databaseMode
 }) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
@@ -313,7 +315,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     {
       title: 'LOCALIZAÇÃO E CUSTO',
       fields: [
-        { key: 'EMPRESA', label: 'UNIDADE OPERACIONAL', icon: Building2 },
+        { key: 'GRUPO_EMPRESARIAL', label: 'GRUPO EMPRESARIAL', icon: Building2 },
+        { key: 'UNIDADE_OPERACIONAL', label: 'UNIDADE OPERACIONAL', icon: Building2 },
         { key: 'ENDERECO', label: 'ENDEREÇO FÍSICO', icon: MapPin },
         { key: 'CENTRODECUSTO', label: 'CENTRO DE CUSTO', icon: Briefcase }
       ]
@@ -476,8 +479,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       const localUrl = URL.createObjectURL(compressedBlob);
       
       // Adiciona à fila de sincronização offline (se não for modo INTERNO)
-      // No modo INTERNO, o syncService pode ser ignorado ou usado como backup
-      await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantid || 'default');
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantid || '');
+      }
 
       // Atualiza o estado local imediatamente com a URL do blob
       const updated = { ...workingAsset, _photoUrl: localUrl };
@@ -1004,7 +1008,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {isQrModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.EMPRESA}</p>
+            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.UNIDADE_OPERACIONAL || workingAsset._unitid}</p>
             <div className="bg-white p-6 border-2 border-ink rounded-3xl shadow-inner mb-8">
               <QRCodeSVG 
                 value={qrCodeData} 

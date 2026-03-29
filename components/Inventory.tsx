@@ -108,7 +108,7 @@ const AssetCard = React.memo(({
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
   const companyKey = useMemo(() => normalizeKeyFast(selectedUnit), [selectedUnit]);
-  const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.EMPRESA), [asset.EMPRESA]);
+  const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.UNIDADE_OPERACIONAL || asset._unitid), [asset.UNIDADE_OPERACIONAL, asset._unitid]);
   const isDifferentCompany = selectedUnit && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
   
   const statusUpper = String(asset.STATUS || '').toUpperCase();
@@ -535,13 +535,13 @@ const Inventory: React.FC<InventoryProps> = ({
       if (foundAsset) {
         // Se encontrou, confirma automaticamente na localização atual
         const currentCompKey = normalizeKey(selectedUnitRef.current || '');
-        const assetCompKey = normalizeKey(foundAsset.EMPRESA || '');
+        const assetCompKey = normalizeKey(foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid || '');
         
         if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
           // Caso seja de outra empresa, adota
           onUpdateAssetRef.current({ 
             ...foundAsset, 
-            EMPRESA: selectedUnitRef.current || foundAsset.EMPRESA,
+            UNIDADE_OPERACIONAL: selectedUnitRef.current || foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid,
             _conferido: true,
             TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
             _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
@@ -754,7 +754,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (term.length >= 3) {
       for (let i = 0; i < allAssets.length; i++) {
         const a = allAssets[i];
-        const assetCompKey = normalizeKeyFast(a.EMPRESA || '');
+        const assetCompKey = normalizeKeyFast(a.UNIDADE_OPERACIONAL || a._unitid || '');
         if (assetCompKey === currentCompKey) continue;
 
         const etq = normalizeKeyFast(a.ETIQUETA || '');
@@ -821,10 +821,10 @@ const Inventory: React.FC<InventoryProps> = ({
     const currentCompKey = normalizeKey(selectedUnit || '');
     
     if (isBatch && etq && etq !== "ETIQUETAR") {
-      // Restrito à EMPRESA ATUAL e STATUS ATIVO
+      // Restrito à UNIDADE ATUAL e STATUS ATIVO
       const related = allAssets.filter(a => {
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
+        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
         const sUpper = String(a.STATUS || '').toUpperCase();
         const isNotB = !sUpper.includes('BAIXA') && !a.DATABAIXA;
         return sameEtq && sameComp && isNotB && !a._conferido;
@@ -851,7 +851,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
-    const assetCompKey = normalizeKey(asset.EMPRESA || '');
+    const assetCompKey = normalizeKey(asset.UNIDADE_OPERACIONAL || asset._unitid || '');
     
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
     if (asset._conferido) {
@@ -863,7 +863,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       onUpdateAsset({ 
         ...asset, 
-        EMPRESA: selectedUnit || asset.EMPRESA,
+        UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL || asset._unitid,
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
         _localMaster: selectedLocation || asset.ENDERECO
@@ -874,7 +874,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
       const related = allAssets.filter(a => {
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.EMPRESA || "") === currentCompKey;
+        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isNotBaixado = !statusUpper.includes('BAIXA') && !a.DATABAIXA;
         return sameEtq && sameComp && isNotBaixado && !a._conferido;
@@ -927,7 +927,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleCreateNew = () => {
     setManualAsset({
         ETIQUETA: committedSearch || "",
-        EMPRESA: selectedUnit || "",
+        UNIDADE_OPERACIONAL: selectedUnit || "",
         STATUS: "ATIVO",
         DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -987,8 +987,8 @@ const Inventory: React.FC<InventoryProps> = ({
         _conferido: true,
         _isNew: true,
         _localMaster: selectedLocation || "",
-        _tenantid: user?.tenantid || 'default',
-        _unitid: selectedUnit || user?.unitid || 'default'
+        _tenantid: user?.tenantid || '',
+        _unitid: selectedUnit || user?.unitid || ''
     } as Asset;
     
     onUpdateAsset(newAsset);
@@ -1153,18 +1153,18 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                   <button 
                     onClick={() => {
-                      const currentCompKey = normalizeKey(selectedUnit || '');
-                      const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
-                      
-                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                        onUpdateAsset({ 
-                          ...scannedAsset, 
-                          EMPRESA: selectedUnit || scannedAsset.EMPRESA,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        });
-                      } else {
+                    const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                    const currentCompKey = normalizeKey(selectedUnit || '');
+                    
+                    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                      onUpdateAsset({ 
+                        ...scannedAsset, 
+                        UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                        _conferido: true,
+                        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                        _localMaster: selectedLocation || scannedAsset.ENDERECO
+                      });
+                    } else {
                         onUpdateAsset({
                           ...scannedAsset,
                           _conferido: true,
@@ -1207,7 +1207,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     onClick={() => {
                       setManualAsset({
                         ETIQUETA: scannedResult,
-                        EMPRESA: selectedUnit || "",
+                        UNIDADE_OPERACIONAL: selectedUnit || "",
                         STATUS: "ATIVO",
                         DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
                         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1662,7 +1662,7 @@ const Inventory: React.FC<InventoryProps> = ({
             setIsScannerOpen(false);
             setManualAsset({
               ETIQUETA: "",
-              EMPRESA: selectedUnit || "",
+              UNIDADE_OPERACIONAL: selectedUnit || "",
               STATUS: "ATIVO",
               DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
               AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1778,13 +1778,13 @@ const Inventory: React.FC<InventoryProps> = ({
                 </button>
                 <button 
                   onClick={() => {
+                    const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
                     const currentCompKey = normalizeKey(selectedUnit || '');
-                    const assetCompKey = normalizeKey(scannedAsset.EMPRESA || '');
                     
                     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                       onUpdateAsset({ 
                         ...scannedAsset, 
-                        EMPRESA: selectedUnit || scannedAsset.EMPRESA,
+                        UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
                         _conferido: true,
                         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                         _localMaster: selectedLocation || scannedAsset.ENDERECO
@@ -1837,7 +1837,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   onClick={() => {
                     setManualAsset({
                       ETIQUETA: scannedResult,
-                      EMPRESA: selectedUnit || "",
+                      UNIDADE_OPERACIONAL: selectedUnit || "",
                       STATUS: "ATIVO",
                       DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
                       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1952,8 +1952,8 @@ const Inventory: React.FC<InventoryProps> = ({
                   </div>
                   <div className="p-4 bg-accent-soft border border-accent/10 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Empresa:</span>
-                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.EMPRESA}</span>
+                      <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Unidade Operacional:</span>
+                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.UNIDADE_OPERACIONAL}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local:</span>

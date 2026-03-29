@@ -195,7 +195,7 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
     
     const remainingAssets = assets.filter(a => 
-      !normalizedCompanies.includes((a.EMPRESA || '').toUpperCase().trim())
+      !normalizedCompanies.includes((a.UNIDADE_OPERACIONAL || a._unitid || '').toUpperCase().trim())
     );
     
     const encryptedRemaining = await encryption.encrypt(remainingAssets);
@@ -215,7 +215,7 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
 
       const assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
       const normalizedCompany = companyToClear.toUpperCase().trim();
-      const remainingAssets = assets.filter(a => (a.EMPRESA || '').toUpperCase().trim() !== normalizedCompany);
+      const remainingAssets = assets.filter(a => (a.UNIDADE_OPERACIONAL || a._unitid || '').toUpperCase().trim() !== normalizedCompany);
       
       const encryptedRemaining = await encryption.encrypt(remainingAssets);
       await localforage.setItem(keys.assets, encryptedRemaining);

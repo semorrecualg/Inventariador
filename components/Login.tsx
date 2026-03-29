@@ -114,10 +114,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           username: cloudUser.username,
           email: cloudUser.email,
           role: cloudUser.role as UserRole,
-          isAdmin: cloudUser.isAdmin,
+          is_admin: cloudUser.is_admin || cloudUser.isAdmin || false,
+          isAdmin: cloudUser.is_admin || cloudUser.isAdmin || false,
           mustChangePassword: false,
-          tenantid: cloudUser.tenantid || 'default',
-          tenants: cloudUser.tenants || [cloudUser.tenantid || 'default']
+          tenantid: cloudUser.tenantid || '',
+          tenants: cloudUser.tenants || [cloudUser.tenantid || '']
         };
         localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
         onLogin(loggedUser);
@@ -184,6 +185,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     setIsLoading(true);
     console.log('[Login] Iniciando autenticação...', { databaseMode, username });
     
+    if (databaseMode === DatabaseMode.SUPABASE && !supabase) {
+      setIsLoading(false);
+      setError("O Supabase não está configurado. Verifique as variáveis de ambiente (URL e Anon Key) nas configurações do projeto.");
+      return;
+    }
+    
     // Timeout de segurança para não travar a UI
     const loginTimeout = setTimeout(() => {
       if (isLoading) {
@@ -215,16 +222,26 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         // 1. Autenticação via Supabase Auth (Oficial)
         const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
           email: loginEmail,
-          password: password.trim()
+          password: password // Removido .trim() para evitar falhas se a senha contiver espaços intencionais
         });
 
         if (authError) {
           console.error('[Login] Erro Supabase Auth:', authError);
+          
           // Se falhar no Auth, mostramos a mensagem real do Supabase para diagnóstico
           if (authError.message.includes("Email not confirmed")) {
             throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou use o 'Magic Link' abaixo.");
           }
           if (authError.message.includes("Invalid login credentials")) {
+            // Verifica se o usuário está tentando usar a senha padrão do modo interno no modo nuvem
+            if (password.toLowerCase() === 'admin' || password === 'Glaucio@1970') {
+              throw new Error("A senha digitada parece ser do modo 'Mobile Puro'. No modo 'Cloud Sync', você deve usar sua senha da nuvem ou solicitar um 'Magic Link' abaixo.");
+            }
+            // Verifica se o usuário existe na tabela de permissões para dar uma dica melhor
+            const existsInDb = await getEmailByUsername(username.trim());
+            if (existsInDb) {
+              throw new Error("E-mail ou senha incorretos. O usuário foi encontrado no banco, mas a senha não confere. Tente o 'Magic Link' ou 'Esqueci minha senha' abaixo.");
+            }
             throw new Error("E-mail ou senha incorretos. Se você ainda não tem uma conta, clique em 'Criar Nova Conta' abaixo.");
           }
           throw new Error(`Erro Supabase: ${authError.message}`);
@@ -234,19 +251,38 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
         console.log('[Login] Supabase Auth OK. Garantindo perfil do usuário...');
         // 2. Garante que o usuário tenha um perfil na tabela user_permissions
+        // Buscamos o perfil completo para garantir que temos os dados mais recentes da nuvem
         const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id);
         console.log('[Login] Perfil garantido:', cloudUser);
         
+        // Se o usuário logou com username, garantimos que o objeto User tenha esse username
+        const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
+
+        const normalizeValue = (val: string) => {
+          if (!val) return '';
+          const upper = val.toUpperCase();
+          return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+        };
+
+        const normalizeArray = (arr: unknown[]) => {
+          if (!arr) return [];
+          return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+        };
+
+        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || (cloudUser.email.toLowerCase() === 'semorr@gmail.com');
+
         loggedUser = {
-          username: cloudUser.username,
+          username: finalUsername,
+          name: cloudUser.name || finalUsername,
           email: cloudUser.email,
           role: cloudUser.role as UserRole,
-          isAdmin: cloudUser.isAdmin,
+          is_admin: is_admin,
+          isAdmin: is_admin,
           mustChangePassword: false,
-          tenantid: cloudUser.tenantid || 'default',
-          unitid: cloudUser.unitid || cloudUser.tenantid || 'default',
-          units: cloudUser.units || [cloudUser.tenantid || 'default'],
-          tenants: cloudUser.tenants || [cloudUser.tenantid || 'default']
+          tenantid: normalizeValue(cloudUser.tenantid || ''),
+          unitid: normalizeValue(cloudUser.unitid || ''),
+          units: normalizeArray(cloudUser.units || (cloudUser.unitid ? [cloudUser.unitid] : [])),
+          tenants: normalizeArray(cloudUser.tenants || [cloudUser.tenantid || ''])
         };
       } else {
         console.log('[Login] Autenticando via Banco Interno...');
@@ -257,7 +293,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         );
 
         if (!localUser) {
-          throw new Error("Credenciais internas inválidas.");
+          // Fallback para o admin padrão se a senha for 'admin' e o usuário for o semorr
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com') && password === 'admin';
+          
+          if (isAdminFallback) {
+            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
+            if (adminUser) {
+              localStorage.setItem('app_current_user', JSON.stringify(adminUser));
+              onLogin(adminUser);
+              return;
+            }
+          }
+          
+          throw new Error("Credenciais internas inválidas. Verifique se está no modo correto (Interno vs Supabase) ou consulte o administrador.");
         }
 
         loggedUser = { ...localUser };
@@ -292,8 +340,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     switch (databaseMode) {
       case DatabaseMode.SUPABASE:
         return {
-          userLabel: "E-mail Cloud",
-          userPlaceholder: "SEU-EMAIL@EXEMPLO.COM",
+          userLabel: "Username ou E-mail",
+          userPlaceholder: "SEU USUÁRIO OU E-MAIL",
           passLabel: "Senha Cloud",
           passPlaceholder: "••••••••",
           accentColor: "text-accent",
@@ -316,7 +364,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
   return (
     <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
       {/* Header compactado e movido para cima (X) */}
-      <div className="mb-3 text-center">
+      <div className="mb-3 text-center relative">
+        {/* Indicador de Plataforma */}
+        <div className="absolute -top-1 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
+          <span className="text-[6px] font-black text-accent uppercase tracking-widest">
+            {databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'MOBILE' : 'DESKTOP')}
+          </span>
+        </div>
+        
         <div className="relative w-24 h-24 mx-auto mb-2">
           {/* Logo AI AUDITPRO */}
           <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
@@ -354,14 +409,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
           >
             <Server size={12} />
-            <span>Interno</span>
+            <span>Mobile Puro</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
             className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
           >
             <Cloud size={12} />
-            <span>Supabase</span>
+            <span>Cloud Sync</span>
           </button>
         </div>
       </div>

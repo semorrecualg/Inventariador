@@ -6,7 +6,8 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "EMPRESA": { "type": "string" },
+        "GRUPO_EMPRESARIAL": { "type": "string" },
+        "UNIDADE_OPERACIONAL": { "type": "string" },
         "ETIQUETA": { "type": "string" },
         "DESCRICAO": { "type": "string" },
         "ENDERECO": { "type": "string" },

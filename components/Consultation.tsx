@@ -539,7 +539,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       {isQrModalOpen && selectedAssetForQr && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/40 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[3rem] border border-accent/20 shadow-2xl p-10 flex flex-col items-center text-center" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{selectedAssetForQr.EMPRESA}</p>
+            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{selectedAssetForQr.UNIDADE_OPERACIONAL || selectedAssetForQr._unitid}</p>
             <div className="bg-white p-6 border-2 border-accent rounded-3xl shadow-inner mb-8">
               <QRCodeSVG 
                 value={qrCodeData} 

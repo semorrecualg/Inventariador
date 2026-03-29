@@ -4,8 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "vite --mode development",
+    "dev:staging": "vite --mode staging",
+    "build": "tsc && vite build --mode staging",
+    "build:dev": "tsc && vite build --mode development",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
@@ -14,6 +16,7 @@
     "@deck.gl/core": "^9.2.11",
     "@deck.gl/google-maps": "^9.2.11",
     "@deck.gl/layers": "^9.2.11",
+    "@google/genai": "^1.47.0",
     "@supabase/supabase-js": "^2.48.1",
     "@tailwindcss/vite": "^4.2.1",
     "@types/react-window": "^1.8.8",

@@ -153,7 +153,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
-  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const handleSecureAction = (action: () => void) => {
@@ -162,7 +162,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   };
 
   // Protocolo de Governança GBR v25.00: Identificação de Ambiente
-  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && window.innerWidth < 1024;
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
@@ -182,7 +182,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AUDITORIA</span>
         </div>
         <div className="flex items-center space-x-2">
-          {hasSupabase && (
+          {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
             <div className={`px-2 py-0.5 rounded-md flex items-center space-x-1 border ${
               isSyncing 
                 ? 'bg-blue-50 border-blue-100 text-blue-500 animate-pulse' 
@@ -206,7 +206,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </span>
             </div>
           )}
-          {hasSupabase && (
+          {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
             <button 
               onClick={onSyncCloud}
               disabled={isSyncing}
@@ -221,8 +221,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
               {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <div className="px-2 py-0.5 bg-accent-soft border border-accent/10 rounded-md">
-            <span className="text-[8px] font-black text-accent uppercase tracking-tighter">v24.50 PRO</span>
+          <div className="flex items-center space-x-1">
+            <div className="px-2 py-0.5 bg-accent-soft border border-accent/10 rounded-md">
+              <span className="text-[8px] font-black text-accent uppercase tracking-tighter">v24.50 PRO</span>
+            </div>
+            <div className={`px-2 py-0.5 rounded-md border ${isMobileDevice ? 'bg-amber-50 border-amber-100 text-amber-600' : 'bg-blue-50 border-blue-100 text-blue-600'}`}>
+              <span className="text-[8px] font-black uppercase tracking-tighter">{databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (isMobileDevice ? 'MOBILE' : 'DESKTOP')}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -255,7 +260,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </h1>
             <div className="flex items-center space-x-1 mt-0.5">
               <span className="text-[7px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-1 rounded border border-blue-100">
-                UNIDADE: {user?.tenantid || 'default'}
+                GRUPO: {user?.tenantid || ''}
               </span>
               {user?.role === UserRole.ADMIN && (
                 <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-1 rounded border border-emerald-100">
@@ -330,7 +335,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <Settings size={20} />
             </button>
           )}
-          {pendingPhotosCount > 0 && (
+          {pendingPhotosCount > 0 && databaseMode !== DatabaseMode.INTERNAL && (
             <button 
               onClick={() => onNavigate(AppScreen.SYNC_MANAGER)}
               className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600 active:scale-90 transition-all shadow-sm hover:bg-amber-100 flex items-center space-x-2 animate-pulse"
@@ -382,7 +387,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Unidade Ativa</p>
-                <p className="text-[9px] font-black text-slate-900 truncate">{selectedUnit || user?.tenantid || 'default'}</p>
+                <p className="text-[9px] font-black text-slate-900 truncate">{selectedUnit || user?.unitid || ''}</p>
               </div>
               <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
                 <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Ativos na Nuvem</p>
@@ -521,13 +526,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Cloud size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Sincronização</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Fila Offline</p>
-                </div>
-              </button>
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Cloud size={16} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Sincronização</h4>
+                    <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Fila Offline</p>
+                  </div>
+                </button>
+              )}
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
@@ -909,7 +916,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   >
                     <div className="flex items-center">
                       <Server size={14} className="mr-3" />
-                      <span>1) Banco Interno Independente</span>
+                      <span>1) Mobile Puro (Local)</span>
                     </div>
                     {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />}
                   </button>
@@ -925,7 +932,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     >
                       <div className="flex items-center">
                         <Cloud size={14} className="mr-3" />
-                        <span>2) Banco Externo - Supabase</span>
+                        <span>2) Cloud Sync (Nuvem)</span>
                       </div>
                       {databaseMode === DatabaseMode.SUPABASE ? (
                         <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
@@ -972,13 +979,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              <button onClick={() => { onDownloadCloudData(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
-                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><Cloud size={20} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar Dados da Nuvem</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Download Direto do Supabase</p>
-                </div>
-              </button>
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <button onClick={() => { onDownloadCloudData(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">
+                  <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mr-4 border border-blue-500/30"><Cloud size={20} /></div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar Dados da Nuvem</h4>
+                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Download Direto do Supabase</p>
+                  </div>
+                </button>
+              )}
 
               <div className="relative">
                 <input 
@@ -1000,30 +1009,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
 
               <button 
-                disabled={isMobileDevice}
                 onClick={() => { 
                   setIsDataMenuOpen(false); 
                   setIsAdminMenuOpen(false);
                   onNavigate(AppScreen.LOAD_DATABASE); 
                 }} 
-                className={`w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20 ${isMobileDevice ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
+                className="w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20"
               >
                 <div className="w-10 h-10 bg-white/20 text-white rounded-lg flex items-center justify-center mr-4"><DatabaseZap size={20} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold uppercase tracking-tight">Carga Expert</h4>
                   <p className="text-[8px] font-bold text-white/70 uppercase tracking-widest mt-0.5">
-                    {isMobileDevice ? 'BLOQUEADO EM MOBILE' : 'Importar Base Master'}
+                    Importar Base Master
                   </p>
                 </div>
               </button>
-
-              {isMobileDevice && (
-                <div className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
-                  <p className="text-[7px] font-bold text-red-400 uppercase leading-relaxed tracking-wide text-center">
-                    Protocolo GBR: Carga de dados permitida apenas via Desktop.
-                  </p>
-                </div>
-              )}
 
               <button onClick={() => { 
                 setIsSelectiveClearOpen(true);

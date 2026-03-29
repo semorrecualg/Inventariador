@@ -21,7 +21,8 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
   const [selectedFields, setSelectedFields] = useState<string[]>(currentEditable);
 
   const fieldLabels: Record<string, string> = {
-    EMPRESA: 'Empresa',
+    UNIDADE_OPERACIONAL: 'Unidade Operacional',
+    GRUPO_EMPRESARIAL: 'Grupo Empresarial',
     STATUS: 'Status Vital',
     ETIQUETA: 'Etiqueta de Patrimônio',
     CENTRODECUSTO: 'Centro de Custo',

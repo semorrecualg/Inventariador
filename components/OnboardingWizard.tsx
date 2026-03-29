@@ -69,7 +69,7 @@ const steps = [
   {
     title: "Carga Expert de Dados",
     subtitle: "Sua base de dados em segundos.",
-    description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Tenant ID (ID do locatário) será gerado automaticamente para sua empresa.",
+    description: "Para começar, você precisará de uma planilha Excel seguindo nosso modelo padrão. O Grupo Empresarial será identificado automaticamente para sua empresa.",
     icon: <FileSpreadsheet size={48} className="text-phase-data" />,
     color: "bg-phase-data"
   },
