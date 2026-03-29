@@ -22,9 +22,9 @@ export const startAutonomousTracking = () => {
   console.log('Iniciando Rastreamento Autônomo GBR v24.50...');
   
   const options: PositionOptions = {
-    enableHighAccuracy: true,
+    enableHighAccuracy: false,
     timeout: 15000,
-    maximumAge: 0
+    maximumAge: 60000
   };
 
   watchId = navigator.geolocation.watchPosition(
@@ -77,8 +77,8 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
     }
 
     const options: PositionOptions = {
-      enableHighAccuracy: true,
-      timeout: 10000, // 10s para alta precisão
+      enableHighAccuracy: false,
+      timeout: 15000,
       maximumAge: 60000
     };
 

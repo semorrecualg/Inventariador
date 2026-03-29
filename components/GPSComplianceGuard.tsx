@@ -40,13 +40,16 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ children, onGps
         } else if (err.code === err.POSITION_UNAVAILABLE) {
           setStatus('unavailable');
           setError('Sinal de GPS indisponível ou desativado nas configurações do dispositivo.');
+        } else if (err.code === err.TIMEOUT) {
+          setStatus('unavailable');
+          setError('Tempo esgotado ao tentar obter localização. Verifique se o sinal está estável.');
         } else {
           setStatus('unavailable');
           setError('Erro ao acessar o GPS: ' + err.message);
         }
         onGpsStatusChange?.(false);
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
     );
   };
 
