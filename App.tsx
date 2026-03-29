@@ -157,6 +157,10 @@ const App: React.FC = () => {
       return parsed;
     } catch { return null; }
   });
+  const userRef = useRef<User | null>(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState<boolean>(() => {
     return localStorage.getItem('app_accepted_terms') === 'true';
@@ -1411,8 +1415,10 @@ const App: React.FC = () => {
     const processSession = async (session: Session) => {
       if (!session?.user) return;
       
+      const currentUser = userRef.current;
+      
       // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido (não GBR), não fazemos nada para evitar loop
-      if (user && user.email === session.user.email && user.tenantid && user.tenantid !== 'GBR') return;
+      if (currentUser && currentUser.email === session.user.email && currentUser.tenantid && currentUser.tenantid !== 'GBR') return;
 
       setIsLoading(true);
       try {
@@ -1434,9 +1440,16 @@ const App: React.FC = () => {
           tenants: permissions.tenants || (permissions.tenantid || session.user.user_metadata?.tenantid ? [permissions.tenantid || session.user.user_metadata?.tenantid] : [])
         };
 
-        // Atualiza estado global
-        setUser(loggedUser);
-        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        // Só atualizamos se houver mudança real para evitar loops de renderização
+        const hasChanged = !currentUser || 
+                          currentUser.email !== loggedUser.email || 
+                          currentUser.tenantid !== loggedUser.tenantid || 
+                          currentUser.role !== loggedUser.role;
+
+        if (hasChanged) {
+          setUser(loggedUser);
+          localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        }
         
         // Log de Auditoria na Nuvem
         logAuditEvent({
@@ -1446,15 +1459,19 @@ const App: React.FC = () => {
           tenant_id: loggedUser.tenantid
         });
         
-    // Se logou via Supabase, garante que o modo está correto
-    setDatabaseMode(DatabaseMode.SUPABASE);
-    localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
-    
-    // Navega para a seleção de módulos
-    pushScreen(AppScreen.MODULE_SELECTION);
-    
-    // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-    syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
+        // Se logou via Supabase, garante que o modo está correto
+        if (databaseMode !== DatabaseMode.SUPABASE) {
+          setDatabaseMode(DatabaseMode.SUPABASE);
+          localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+        }
+        
+        // Navega para a seleção de módulos se estiver na tela de login
+        if (screen === AppScreen.LOGIN) {
+          pushScreen(AppScreen.MODULE_SELECTION);
+        }
+        
+        // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
+        syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
   } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
@@ -1496,7 +1513,7 @@ const App: React.FC = () => {
       
       if (errorCode) {
         // Se o usuário já estiver logado, ignoramos erros de OTP expirado (clique redundante)
-        if (user && (errorCode === 'otp_expired' || errorDescription?.includes('expired'))) {
+        if (userRef.current && (errorCode === 'otp_expired' || errorDescription?.includes('expired'))) {
           window.history.replaceState(null, '', window.location.pathname);
           return;
         }
@@ -1553,7 +1570,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, databaseMode, user]); // Reduzido para evitar re-execuções desnecessárias
+  }, [supabase, databaseMode]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
