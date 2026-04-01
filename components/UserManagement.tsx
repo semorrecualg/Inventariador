@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
-import { User, UserRole } from '../types';
+import { User, UserRole, DatabaseMode } from '../types';
+import { safeStringify } from '../services/utils';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -36,9 +37,10 @@ interface UserManagementProps {
   setUser?: React.Dispatch<React.SetStateAction<User | null>>;
   availableUnits: string[];
   unitsByTenant: Map<string, Set<string>>;
+  databaseMode: DatabaseMode;
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant, databaseMode }) => {
   console.log('>>> [UserManagement] Rendered with:', { 
     currentUserEmail: currentUser?.email, 
     currentUserTenant: currentUser?.tenantid,
@@ -188,8 +190,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       email,
       password,
       role: newRole,
-      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
-      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
+      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
+      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
       mustChangePassword: true,
       tenantid: normTenantId,
       unitid: normUnitId,
@@ -199,7 +201,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     setUsers(prev => {
       const updated = [...prev, newUser];
-      localStorage.setItem('app_users', JSON.stringify(updated));
+      localStorage.setItem('app_users', safeStringify(updated));
       return updated;
     });
     
@@ -310,7 +312,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
     };
 
-    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com');
+    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br');
     const normTenantId = normalizeValue(editTenantId);
     const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
     const normUnits = normalizeArray(editUnits);
@@ -333,7 +335,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setUsers(prev => {
       const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
       console.log('[UserManagement] Lista de usuários atualizada localmente.');
-      localStorage.setItem('app_users', JSON.stringify(updated));
+      localStorage.setItem('app_users', safeStringify(updated));
       return updated;
     });
 
@@ -343,7 +345,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       if (setUser) {
         setUser(updatedUser);
       }
-      localStorage.setItem('app_current_user', JSON.stringify(updatedUser));
+      localStorage.setItem('app_current_user', safeStringify(updatedUser));
     }
 
     setIsEditModalOpen(false);
@@ -357,7 +359,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   };
 
   const removeUser = (email: string) => {
-    if (email.toLowerCase() === "semorr@gmail.com") {
+    if (email.toLowerCase() === "semorr@gmail.com" || email.toLowerCase() === "semorr@gmail.com.br") {
       showModal("Operação Negada", "O administrador mestre não pode ser excluído.", "warning");
       return;
     }
@@ -374,7 +376,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           // 2. Remove Localmente
           setUsers(prev => {
             const updated = prev.filter(u => u.email !== email);
-            localStorage.setItem('app_users', JSON.stringify(updated));
+            localStorage.setItem('app_users', safeStringify(updated));
             return updated;
           });
         } catch (err) {
@@ -417,7 +419,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
           data={users.filter(u => {
             // Admin global vê tudo
-            if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
+            if (currentUser?.email === "semorr@gmail.com" || currentUser?.email === "semorr@gmail.com.br" || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
             if (currentUser?.role === UserRole.MASTER) {
               return u.tenantid === currentUser.tenantid || (u.tenants && u.tenants.includes(currentUser.tenantid || ''));
@@ -552,18 +554,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
 
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6">
-                <div className="flex items-start">
-                  <AlertCircle className="text-amber-600 mr-3 shrink-0 mt-0.5" size={18} />
-                  <div>
-                    <h4 className="text-[10px] font-bold text-amber-800 uppercase tracking-tight">Aviso sobre Senhas</h4>
-                    <p className="text-[9px] text-amber-700 mt-1 leading-relaxed">
-                      Alterar a senha aqui <strong>NÃO</strong> altera a senha do usuário no Supabase Cloud se ele já estiver ativado. 
-                      Para usuários já existentes, utilize o botão <strong>&quot;Enviar Link de Redefinição&quot;</strong> abaixo para que o próprio usuário defina sua nova senha.
-                    </p>
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6">
+                  <div className="flex items-start">
+                    <AlertCircle className="text-amber-600 mr-3 shrink-0 mt-0.5" size={18} />
+                    <div>
+                      <h4 className="text-[10px] font-bold text-amber-800 uppercase tracking-tight">Aviso sobre Senhas</h4>
+                      <p className="text-[9px] text-amber-700 mt-1 leading-relaxed">
+                        Alterar a senha aqui <strong>NÃO</strong> altera a senha do usuário no Supabase Cloud se ele já estiver ativado. 
+                        Para usuários já existentes, utilize o botão <strong>&quot;Enviar Link de Redefinição&quot;</strong> abaixo para que o próprio usuário defina sua nova senha.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Nome Completo</label>
                 <div className="relative">
@@ -660,39 +664,41 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <span className="text-sm">Atualizar Acesso</span>
               </button>
 
-              <div className="pt-4 border-t border-border/50">
-                <button 
-                  type="button"
-                  onClick={handleProvision}
-                  disabled={isProvisioning}
-                  className="w-full py-4 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-[2rem] font-bold uppercase tracking-[0.2em] active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
-                >
-                  {isProvisioning ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Cloud size={18} />
-                  )}
-                  <span>{isProvisioning ? 'Ativando...' : 'Ativar Acesso Cloud'}</span>
-                </button>
-                <p className="text-[9px] font-bold text-slate-400 text-center mt-3 uppercase tracking-widest leading-relaxed">
-                  Cria o login oficial no Supabase Auth usando o e-mail e senha acima. <br/>
-                  <span className="text-amber-600">Nota: Se o e-mail já possuir acesso, a senha não será alterada.</span>
-                </p>
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <div className="pt-4 border-t border-border/50">
+                  <button 
+                    type="button"
+                    onClick={handleProvision}
+                    disabled={isProvisioning}
+                    className="w-full py-4 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-[2rem] font-bold uppercase tracking-[0.2em] active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
+                  >
+                    {isProvisioning ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Cloud size={18} />
+                    )}
+                    <span>{isProvisioning ? 'Ativando...' : 'Ativar Acesso Cloud'}</span>
+                  </button>
+                  <p className="text-[9px] font-bold text-slate-400 text-center mt-3 uppercase tracking-widest leading-relaxed">
+                    Cria o login oficial no Supabase Auth usando o e-mail e senha acima. <br/>
+                    <span className="text-amber-600">Nota: Se o e-mail já possuir acesso, a senha não será alterada.</span>
+                  </p>
 
-                <button 
-                  type="button"
-                  onClick={handleResetPassword}
-                  disabled={isResetting}
-                  className="w-full py-3 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50 mt-4"
-                >
-                  {isResetting ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={16} />
-                  )}
-                  <span className="text-[10px]">Enviar Link de Redefinição</span>
-                </button>
-              </div>
+                  <button 
+                    type="button"
+                    onClick={handleResetPassword}
+                    disabled={isResetting}
+                    className="w-full py-3 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-3 disabled:opacity-50 mt-4"
+                  >
+                    {isResetting ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
+                    <span className="text-[10px]">Enviar Link de Redefinição</span>
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         </div>
@@ -849,18 +855,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
 
-              <div 
-                className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
-                onClick={() => setProvisionOnCreate(!provisionOnCreate)}
-              >
-                <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${provisionOnCreate ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-emerald-200 bg-white'}`}>
-                  {provisionOnCreate && <Check size={12} strokeWidth={4} />}
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <div 
+                  className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
+                  onClick={() => setProvisionOnCreate(!provisionOnCreate)}
+                >
+                  <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${provisionOnCreate ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-emerald-200 bg-white'}`}>
+                    {provisionOnCreate && <Check size={12} strokeWidth={4} />}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-tight">Ativar Acesso Cloud Imediato</span>
+                    <span className="text-[8px] font-medium text-emerald-600/70 uppercase tracking-widest">Cria login no Supabase Auth agora</span>
+                  </div>
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-tight">Ativar Acesso Cloud Imediato</span>
-                  <span className="text-[8px] font-medium text-emerald-600/70 uppercase tracking-widest">Cria login no Supabase Auth agora</span>
-                </div>
-              </div>
+              )}
 
               <button 
                 type="submit" 

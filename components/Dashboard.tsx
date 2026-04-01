@@ -1,8 +1,12 @@
-
 import React, { useMemo, useState } from 'react';
 import { Asset, TagInventario, AuditLogEntry } from '../types';
+import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';
 import BackButton from './BackButton';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend
+} from 'recharts';
 import { 
   BarChart3, 
   CheckCircle2, 
@@ -13,13 +17,17 @@ import {
   Download,
   Info,
   X,
-  Palette,
   MapPin,
   History,
   User,
-  PackageSearch,
-  Building2
+  Building2,
+  DollarSign,
+  PieChart as PieChartIcon,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
+
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899'];
 
 const DASHBOARD_HINTS: Record<string, string> = {
   'Falta Etiquetar': 'Ativos marcados com "ETIQUETAR" na planilha original. Necessário aplicar plaqueta física em campo.',
@@ -47,51 +55,10 @@ interface DashboardProps {
   } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpenActiveSearch, currentCampaignId, user }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
-
-  const isAdmin = useMemo(() => {
-    return user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.is_admin || user?.isAdmin;
-  }, [user]);
-
-  // Base de cálculo para o dashboard de progresso por unidade
-  const progressBase = useMemo(() => {
-    return isAdmin && allAssets ? allAssets : assets;
-  }, [isAdmin, allAssets, assets]);
-
-  const unitProgress = useMemo(() => {
-    const progress: Record<string, { total: number; conferido: number; percentage: number }> = {};
-    
-    progressBase.forEach(a => {
-      const unit = a._unitid || a.UNIDADE_OPERACIONAL || 'SEM UNIDADE';
-      if (!progress[unit]) {
-        progress[unit] = { total: 0, conferido: 0, percentage: 0 };
-      }
-      
-      const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXADO');
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      
-      // Se houver uma campanha ativa, consideramos conferido apenas se pertencer à campanha
-      const isConferidoInCampaign = currentCampaignId 
-        ? (isConferido && a._campaignId === currentCampaignId)
-        : isConferido;
-      
-      if (!isBaixado) {
-        progress[unit].total++;
-        if (isConferidoInCampaign) {
-          progress[unit].conferido++;
-        }
-      }
-    });
-    
-    Object.keys(progress).forEach(unit => {
-      const p = progress[unit];
-      p.percentage = p.total > 0 ? Math.round((p.conferido / p.total) * 100) : 0;
-    });
-    
-    return Object.entries(progress).sort((a, b) => b[1].percentage - a[1].percentage);
-  }, [progressBase]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
+  const [filterByCampaign, setFilterByCampaign] = useState(false);
 
   const stats = useMemo(() => {
     const s = {
@@ -116,24 +83,47 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
       countAtivos: 0,
       countBaixados: 0,
       criticalDivergence: 0,
+      totalValue: 0,
+      depreciatedValue: 0,
+      residualValue: 0,
+      statusDistribution: [] as { name: string; value: number }[],
+      unitData: [] as { name: string; total: number; conferido: number }[]
     };
 
-    for (let i = 0; i < assets.length; i++) {
-      const a = assets[i];
+    const statusMap: Record<string, number> = {};
+    const unitMap: Record<string, { total: number; conferido: number }> = {};
+
+    const filteredAssets = filterByCampaign && currentCampaignId 
+      ? assets.filter(a => a._campaignId === currentCampaignId)
+      : assets;
+
+    for (let i = 0; i < filteredAssets.length; i++) {
+      const a = filteredAssets[i];
       const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const tag = a.TAG_INVENTARIO;
+      const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
       const etq = String(a.ETIQUETA || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
+      const unit = a._unitid || a.UNIDADE_OPERACIONAL || 'SEM UNIDADE';
 
-      // Valor de aquisição para divergência crítica
-      const valorStr = String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.');
-      const valor = parseFloat(valorStr) || 0;
+      // Financials
+      const valorAquisicao = typeof a._valor_aquisicao === 'number' ? a._valor_aquisicao : parseFloat(String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+      const depreciacao = typeof a._depreciacao_acumulada === 'number' ? a._depreciacao_acumulada : 0;
+      const residual = typeof a._valor_residual === 'number' ? a._valor_residual : (valorAquisicao - depreciacao);
+
+      s.totalValue += valorAquisicao;
+      s.depreciatedValue += depreciacao;
+      s.residualValue += residual;
 
       if (!isBaixado) {
         s.totalAtivos++;
         if (isConferido) s.conferidoAtivos++;
+        
+        // Unit Progress
+        if (!unitMap[unit]) unitMap[unit] = { total: 0, conferido: 0 };
+        unitMap[unit].total++;
+        if (isConferido) unitMap[unit].conferido++;
       } else if (isConferido) {
         s.baixadosLocalizados++;
       }
@@ -152,7 +142,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
 
       if (tag === TagInventario.DIVERGENCIA) {
         s.divergencia++;
-        if (valor >= 5000) s.criticalDivergence++;
+        if (valorAquisicao >= 5000) s.criticalDivergence++;
       }
       if (tag === TagInventario.NOVO_ITEM || a._isNew) s.novoItem++;
       if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO) s.adotado++;
@@ -167,10 +157,19 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
       if (a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && etq !== 'ETIQUETAR' && !etq) {
         s.semId++;
       }
+
+      // Status Distribution
+      statusMap[tag] = (statusMap[tag] || 0) + 1;
     }
 
     s.totalConferidoGeral = s.conferidoAtivos + s.baixadosLocalizados;
     s.percConferido = s.totalAtivos > 0 ? Math.round((s.conferidoAtivos / s.totalAtivos) * 100) : 0;
+
+    s.statusDistribution = Object.entries(statusMap).map(([name, value]) => ({ name, value }));
+    s.unitData = Object.entries(unitMap)
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
 
     return s;
   }, [assets]);
@@ -205,35 +204,31 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
         'UNIDADE': a._unitid || user?.unitid || '',
       };
       
-      // Mapeia campos normais (PARA)
       Object.keys(a).forEach(k => { 
         if (!k.startsWith('_') && k !== 'id') {
           const val = a[k];
           const colName = `PARA_${k}`;
           if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = JSON.stringify(val);
+            res[colName] = safeStringify(val);
           } else {
             res[colName] = val as string | number | boolean | null | undefined;
           }
-          // Mantém também o nome original para compatibilidade
           res[k] = res[colName];
         }
       });
       
-      // Mapeia campos originais (DE)
       const originalValues = a._valoresOriginais;
       if (originalValues) {
         Object.keys(originalValues).forEach(key => {
           const val = originalValues[key];
           const colName = `DE_${key}`;
           if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = JSON.stringify(val);
+            res[colName] = safeStringify(val);
           } else {
             res[colName] = val as string | number | boolean | null | undefined;
           }
         });
       } else {
-        // Se não foi alterado, o DE é igual ao PARA
         Object.keys(a).forEach(k => {
           if (!k.startsWith('_') && k !== 'id') {
             res[`DE_${k}`] = a[k] as string | number | boolean | null | undefined;
@@ -254,6 +249,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
     XLSX.writeFile(wb, `GBR_${fileName}_${new Date().getTime()}.xlsx`);
+  };
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
   const StatCard = ({ label, value, total, colorClass, icon: Icon, onClick }: { label: string; value: number; total: number; colorClass: string; icon: React.ElementType; onClick: () => void }) => {
@@ -300,327 +299,312 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+      {/* Header */}
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Voltar" subLabel={`${user?.tenantid || 'S/ TENANT'} | ${user?.unitid || 'S/ UNIDADE'}`} />
+          <BackButton onClick={onBack} label="Dashboard" subLabel={`${user?.tenantid || 'S/ TENANT'}`} />
+          {currentCampaignId && (
+            <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">
+              <Activity size={10} className="text-accent animate-pulse" />
+              <span className="text-[8px] font-black text-accent uppercase tracking-widest">Evento Ativo</span>
+            </div>
+          )}
         </div>
-        <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
-          <BarChart3 size={20} />
+        <div className="flex items-center space-x-2">
+          <button 
+            onClick={() => exportFilteredData(() => true, 'CONSOLIDADO_GERAL')}
+            className="p-2 bg-bg-main border border-border rounded-xl text-ink-muted hover:text-accent transition-colors"
+          >
+            <Download size={18} />
+          </button>
+          <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
+            <BarChart3 size={20} />
+          </div>
         </div>
       </div>
 
-      {localStorage.getItem('gbr_gps_bypass') === 'true' && (
-        <div className="mx-4 mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <ShieldAlert size={14} className="text-amber-600" />
-            <span className="text-[9px] font-bold text-amber-900 uppercase tracking-widest">Modo Desenvolvedor Ativo</span>
-          </div>
-          <button 
-            onClick={() => {
-              localStorage.removeItem('gbr_gps_bypass');
-              window.location.reload();
-            }}
-            className="px-3 py-1 bg-amber-600 text-white rounded-lg text-[8px] font-bold uppercase tracking-widest active:scale-95 transition-all"
+      {/* Tabs */}
+      <div className="flex items-center px-4 py-2 bg-white border-b border-border space-x-4 overflow-x-auto no-scrollbar">
+        {[
+          { id: 'overview', label: 'Visão Geral', icon: Activity },
+          { id: 'financial', label: 'Financeiro', icon: DollarSign },
+          { id: 'units', label: 'Unidades', icon: Building2 }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as 'overview' | 'financial' | 'units')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${
+              activeTab === tab.id 
+                ? 'bg-accent text-white shadow-lg shadow-accent/20' 
+                : 'bg-bg-main text-ink-muted hover:bg-border'
+            }`}
           >
-            Resetar GPS
+            <tab.icon size={14} />
+            <span>{tab.label}</span>
           </button>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-24">
+        ))}
         
-        {/* BENTO GRID - KPI PRINCIPAIS */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2 bg-accent rounded-[2rem] p-6 text-white relative overflow-hidden shadow-xl shadow-accent/20">
-            <div className="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full -mr-16 -mt-16 blur-3xl" />
-            <div className="relative z-10">
+        {currentCampaignId && (
+          <button
+            onClick={() => setFilterByCampaign(!filterByCampaign)}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap border ${
+              filterByCampaign 
+                ? 'bg-amber-500 text-white border-amber-600 shadow-lg shadow-amber-200' 
+                : 'bg-white text-amber-600 border-amber-200 hover:bg-amber-50'
+            }`}
+          >
+            <Activity size={14} />
+            <span>{filterByCampaign ? 'Filtrado por Evento' : 'Filtrar por Evento'}</span>
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar pb-24">
+        
+        {activeTab === 'overview' && (
+          <>
+            {/* Main KPI Card */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-[10px] font-bold text-ink uppercase tracking-[0.2em] mb-1">Eficiência de Inventário</h3>
+                  <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Progresso da Base Ativa</p>
+                </div>
+                <div className="w-12 h-12 bg-accent-soft rounded-2xl flex items-center justify-center text-accent">
+                  <TrendingUp size={24} />
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-8">
+                <div className="relative w-32 h-32">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Conferido', value: stats.conferidoAtivos },
+                          { name: 'Pendente', value: stats.totalAtivos - stats.conferidoAtivos }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={60}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        <Cell fill="#3b82f6" />
+                        <Cell fill="#f1f5f9" />
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xl font-bold text-ink">{stats.percConferido}%</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 grid grid-cols-1 gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-accent" />
+                      <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Conferidos</span>
+                    </div>
+                    <span className="text-xs font-bold text-ink">{stats.conferidoAtivos}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-slate-200" />
+                      <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Pendentes</span>
+                    </div>
+                    <span className="text-xs font-bold text-ink">{stats.totalAtivos - stats.conferidoAtivos}</span>
+                  </div>
+                  <div className="h-1 w-full bg-bg-main rounded-full overflow-hidden mt-2">
+                    <div className="h-full bg-accent" style={{ width: `${stats.percConferido}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Status Distribution Chart */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-2">
-                  <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center backdrop-blur-md">
-                    <TrendingUp size={16} className="text-white" />
+                  <PieChartIcon size={18} className="text-accent" />
+                  <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Distribuição por Status</h3>
+                </div>
+              </div>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={stats.statusDistribution}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
+                    >
+                      {stats.statusDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard 
+                label="Divergência" 
+                value={stats.divergencia} 
+                total={stats.totalAtivos} 
+                colorClass="bg-rose-400" 
+                icon={ShieldAlert} 
+                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS')}
+              />
+              <StatCard 
+                label="Novo Item" 
+                value={stats.novoItem} 
+                total={stats.totalAtivos} 
+                colorClass="bg-emerald-400" 
+                icon={CheckCircle2} 
+                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM, 'NOVOS_ITENS')}
+              />
+              <StatCard 
+                label="Falta Etiquetar" 
+                value={stats.faltaEtiquetar} 
+                total={stats.totalAtivos} 
+                colorClass="bg-amber-400" 
+                icon={AlertTriangle} 
+                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR, 'FALTA_ETIQUETAR')}
+              />
+              <StatCard 
+                label="Adotado" 
+                value={stats.adotado} 
+                total={stats.totalAtivos} 
+                colorClass="bg-sky-400" 
+                icon={MapPin} 
+                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ADOTADO, 'ADOTADOS')}
+              />
+            </div>
+          </>
+        )}
+
+        {activeTab === 'financial' && (
+          <div className="space-y-6 animate-slideUp">
+            {/* Financial Summary Cards */}
+            <div className="grid grid-cols-1 gap-4">
+              <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                    <DollarSign size={20} />
                   </div>
-                  <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/70">Eficiência Global</span>
-                </div>
-                <div className="bg-white/20 px-2 py-0.5 rounded-full border border-white/30">
-                  <span className="text-[8px] font-bold text-white uppercase tracking-widest">v24.50 PRO</span>
-                </div>
-              </div>
-              
-              <div className="flex items-end justify-between">
-                <div>
-                  <h3 className="text-4xl font-bold tracking-tighter mb-1">{stats.percConferido}%</h3>
-                  <p className="text-[9px] font-bold text-white/60 uppercase tracking-widest">Progresso da Base Ativa</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-2xl font-bold text-white/90">{stats.conferidoAtivos}</span>
-                  <span className="text-sm font-bold text-white/40 ml-1">/ {stats.totalAtivos}</span>
-                </div>
-              </div>
-              
-              <div className="mt-6 h-2 w-full bg-white/20 rounded-full overflow-hidden">
-                <div className="h-full bg-white transition-all duration-1000 ease-out" style={{ width: `${stats.percConferido}%` }} />
-              </div>
-            </div>
-          </div>
-
-          <div 
-            onClick={() => {
-              exportFilteredData(a => {
-                const valorStr = String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.');
-                const valor = parseFloat(valorStr) || 0;
-                return a.TAG_INVENTARIO === TagInventario.DIVERGENCIA && valor >= 5000;
-              }, 'DIVERGENCIAS_CRITICAS');
-            }}
-            className="bg-rose-50 border border-rose-200 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
-          >
-            <div className="w-8 h-8 bg-rose-600 rounded-lg flex items-center justify-center text-white mb-3 shadow-lg shadow-rose-900/20">
-              <ShieldAlert size={16} />
-            </div>
-            <span className="text-[8px] font-bold text-rose-900 uppercase tracking-widest block mb-0.5">Divergências Críticas</span>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-xl font-bold text-rose-950">{stats.criticalDivergence}</span>
-              <span className="text-[8px] font-bold text-rose-600 uppercase tracking-widest">Valor &gt; R$ 5k</span>
-              <Download size={10} className="text-rose-900/30 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
-            </div>
-          </div>
-
-          <div 
-            onClick={() => exportFilteredData(a => String(a.STATUS || '').toUpperCase().includes('BAIXADO') && !!a._conferido, 'BAIXADOS_LOCALIZADOS')}
-            className="bg-white border border-border rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
-          >
-            <div className="w-8 h-8 bg-danger/10 rounded-lg flex items-center justify-center text-danger mb-3 group-hover:bg-danger group-hover:text-white transition-colors">
-              <AlertTriangle size={16} />
-            </div>
-            <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-0.5">Baixados Localizados</span>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-xl font-bold text-ink">{stats.baixadosLocalizados}</span>
-              <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-          </div>
-
-          <div 
-            onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM, 'NOVOS_ITENS')}
-            className="bg-white border border-border rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group"
-          >
-            <div className="w-8 h-8 bg-warning/10 rounded-lg flex items-center justify-center text-warning mb-3 group-hover:bg-warning group-hover:text-white transition-colors">
-              <CheckCircle2 size={16} />
-            </div>
-            <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-0.5">Novos Itens (Campo)</span>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-xl font-bold text-ink">{stats.novoItem}</span>
-              <Download size={10} className="text-ink-muted/30 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-          </div>
-
-          <div 
-            onClick={() => onOpenActiveSearch && onOpenActiveSearch()}
-            className="col-span-2 bg-amber-500 border border-amber-400 rounded-[1.5rem] p-4 shadow-sm active:scale-95 transition-all cursor-pointer group relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full -mr-16 -mt-16 blur-2xl" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-lg shadow-amber-900/10">
-                  <PackageSearch size={20} />
-                </div>
-                <div>
-                  <span className="text-[8px] font-bold text-amber-900 uppercase tracking-widest block mb-0.5">Busca Ativa</span>
-                  <h4 className="text-sm font-bold text-amber-950 uppercase tracking-tight">Itens Não Localizados</h4>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="text-lg font-bold text-amber-950">{assets.filter(a => !a._conferido).length}</span>
-                <p className="text-[7px] font-bold text-amber-900 uppercase tracking-widest">Faltantes</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* PROGRESSO POR UNIDADE OPERACIONAL */}
-        <section className="bg-white border border-border rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600">
-                <Building2 size={16} />
-              </div>
-              <div>
-                <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Progresso por Unidade</h3>
-                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Conclusão do Inventário Físico</p>
-              </div>
-              {currentCampaignId && (
-                <div className="flex items-center space-x-1 bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-100">
-                  <Activity size={8} />
-                  <span className="text-[7px] font-bold uppercase tracking-widest">Filtro de Campanha Ativo</span>
-                </div>
-              )}
-            </div>
-            <div className="bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-              <span className="text-[8px] font-bold text-indigo-600 uppercase tracking-widest">{unitProgress.length} Unidades</span>
-            </div>
-          </div>
-
-          <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
-            {unitProgress.map(([unit, data]) => (
-              <div key={unit} className="space-y-1.5 group">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[9px] font-bold text-ink uppercase tracking-tight truncate max-w-[150px]">{unit}</span>
-                    {unit === 'SEDE' && <span className="text-[7px] bg-accent/10 text-accent px-1 rounded font-bold">HQ</span>}
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] font-bold text-ink">{data.percentage}%</span>
-                    <span className="text-[7px] text-ink-muted ml-1 uppercase tracking-tighter">({data.conferido}/{data.total})</span>
+                  <div className="flex items-center space-x-1 text-emerald-600">
+                    <ArrowUpRight size={14} />
+                    <span className="text-[8px] font-bold uppercase tracking-widest">Valor Total</span>
                   </div>
                 </div>
-                <div className="h-1.5 w-full bg-bg-main rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-1000 ${
-                      data.percentage === 100 ? 'bg-emerald-500' : 
-                      data.percentage > 50 ? 'bg-indigo-500' : 
-                      'bg-amber-500'
-                    }`} 
-                    style={{ width: `${data.percentage}%` }} 
-                  />
+                <h4 className="text-3xl font-bold text-ink tracking-tight mb-1">{formatCurrency(stats.totalValue)}</h4>
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Base de Aquisição Consolidada</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600">
+                      <ArrowDownRight size={16} />
+                    </div>
+                  </div>
+                  <h4 className="text-lg font-bold text-ink mb-1">{formatCurrency(stats.depreciatedValue)}</h4>
+                  <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Depreciação Acumulada</p>
+                </div>
+                <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600">
+                      <TrendingUp size={16} />
+                    </div>
+                  </div>
+                  <h4 className="text-lg font-bold text-ink mb-1">{formatCurrency(stats.residualValue)}</h4>
+                  <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Valor Residual Líquido</p>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* DISTRIBUIÇÃO POR TAGS - GRID */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center space-x-2">
-              <div className="w-1 h-3 bg-accent rounded-full" />
-              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Distribuição por Tags</h3>
-            </div>
-            <button onClick={() => exportFilteredData(() => true, 'BASE_COMPLETA')} className="text-[8px] font-bold text-accent uppercase tracking-widest flex items-center space-x-1">
-              <Download size={10} />
-              <span>Exportar Tudo</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2">
-            <StatCard 
-              label="Falta Etiquetar" 
-              value={stats.faltaEtiquetar} 
-              total={stats.totalAtivos} 
-              colorClass="bg-amber-400" 
-              icon={AlertTriangle} 
-              onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR || (String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' && !a._conferido), 'FALTA_ETIQUETAR')}
-            />
-            <StatCard 
-              label="Etiquetado" 
-              value={stats.jaEtiquetado} 
-              total={stats.totalAtivos} 
-              colorClass="bg-violet-400" 
-              icon={Palette} 
-              onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ETIQUETADO, 'ETIQUETADOS_EM_CAMPO')}
-            />
-            <StatCard 
-              label="Divergência" 
-              value={stats.divergencia} 
-              total={stats.totalAtivos} 
-              colorClass="bg-rose-400" 
-              icon={ShieldAlert} 
-              onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS')}
-            />
-            <StatCard 
-              label="Adotado / Transferido" 
-              value={stats.adotado} 
-              total={stats.totalAtivos} 
-              colorClass="bg-sky-400" 
-              icon={MapPin} 
-              onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ADOTADO || a.TAG_INVENTARIO === TagInventario.ADOTADO_EXTERNO, 'ADOTADOS')}
-            />
-            <StatCard 
-              label="Conferido OK" 
-              value={stats.conferidoOk} 
-              total={stats.totalAtivos} 
-              colorClass="bg-emerald-400" 
-              icon={CheckCircle2} 
-              onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.CONFERIDO, 'CONFERIDOS_OK')}
-            />
-            <StatCard 
-              label="Alterações de Local (DE/PARA)" 
-              value={stats.locChanges} 
-              total={stats.totalConferidoGeral} 
-              colorClass="bg-indigo-400" 
-              icon={TrendingUp} 
-              onClick={() => exportFilteredData(a => a.DE_PARA === 'COM ALTERAÇÃO', 'ALTERACOES_LOCAL')}
-            />
-          </div>
-        </section>
-
-        {/* INTEGRIDADE DA BASE */}
-        <section className="bg-white border border-border rounded-[2rem] p-6 shadow-sm space-y-4 modern-card">
-          <div className="flex items-center space-x-2 mb-1">
-            <div className="w-8 h-8 bg-accent-soft rounded-lg flex items-center justify-center text-accent">
-              <ShieldAlert size={16} />
-            </div>
-            <div>
-              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Integridade da Base</h3>
-              <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Análise de Duplicidade v24</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ÚNICO', 'PLAQUETAS_UNICAS')}>
-              <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Plaquetas Únicas</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-ink">{stats.unico}</span>
-                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
             </div>
 
-            <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => a.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO', 'DUPLICIDADES_INTERNAS')}>
-              <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-warning" />
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Etiqueta +1 Registro</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-ink">{stats.dupInterna}</span>
-                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between group cursor-pointer" onClick={() => exportFilteredData(a => (a.TAG_DUPLICIDADE === 'SEM IDENTIFICAÇÃO' && String(a.ETIQUETA || '').toUpperCase() !== 'ETIQUETAR') || !a.ETIQUETA, 'SEM_IDENTIFICACAO')}>
-              <div className="flex items-center space-x-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Sem Identificação</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-ink">{stats.semId}</span>
-                <Download size={10} className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+            {/* Value Composition Chart */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest mb-6">Composição de Valor</h3>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={[
+                    { name: 'Aquisição', value: stats.totalValue },
+                    { name: 'Depreciação', value: stats.depreciatedValue },
+                    { name: 'Residual', value: stats.residualValue }
+                  ]}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                    <YAxis hide />
+                    <Tooltip formatter={(value: any) => formatCurrency(Number(value || 0))} /* eslint-disable-line @typescript-eslint/no-explicit-any */ />
+                    <Bar dataKey="value" radius={[10, 10, 0, 0]}>
+                      { [0, 1, 2].map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={index === 0 ? '#3b82f6' : index === 1 ? '#f59e0b' : '#10b981'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>
-        </section>
+        )}
 
-        {/* RESUMO CONTÁBIL */}
-        <section className="bg-accent-soft border border-accent/10 rounded-[2rem] p-6 shadow-inner space-y-4">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-accent border border-accent/10 shadow-sm">
-              <Activity size={16} />
+        {activeTab === 'units' && (
+          <div className="space-y-6 animate-slideUp">
+            {/* Unit Progress Chart */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest mb-6">Progresso por Unidade (Top 10)</h3>
+              <div className="h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stats.unitData} layout="vertical" margin={{ left: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 8 }} width={80} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="conferido" name="Conferido" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="total" name="Total" stackId="a" fill="#f1f5f9" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-            <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Resumo Contábil</h3>
+
+            {/* Detailed Unit List */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm space-y-4">
+              <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest mb-2">Ranking de Performance</h3>
+              {stats.unitData.map((unit, idx) => {
+                const perc = Math.round((unit.conferido / unit.total) * 100);
+                return (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-bg-main rounded-2xl border border-border/50">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-white border border-border rounded-lg flex items-center justify-center text-[10px] font-bold text-ink">
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-ink uppercase truncate max-w-[120px]">{unit.name}</p>
+                        <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">{unit.conferido} de {unit.total} itens</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-xs font-bold ${perc === 100 ? 'text-emerald-600' : 'text-ink'}`}>{perc}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col">
-              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Registros Ativos</span>
-              <span className="text-xl font-bold text-ink">{stats.countAtivos}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Registros Baixados</span>
-              <span className="text-xl font-bold text-ink">{stats.countBaixados}</span>
-            </div>
-          </div>
-        </section>
-
-        {/* RECENT ACTIVITY FEED */}
+        {/* Recent Activity (Always visible at bottom) */}
         <section className="bg-white border border-border rounded-[2.5rem] p-8 shadow-sm modern-card space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -629,7 +613,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
               </div>
               <div>
                 <h3 className="text-[11px] font-black text-ink uppercase tracking-[0.2em]">Atividade Recente</h3>
-                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Últimas 5 alterações de ativos</p>
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Últimas 5 alterações</p>
               </div>
             </div>
           </div>
@@ -662,7 +646,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, allAssets, onBack, onOpen
         </section>
       </div>
 
-      {/* OVERLAY EXPLICATIVO (HINT) */}
+      {/* Hint Overlay */}
       {hintOverlay && (
         <div 
           className="fixed inset-0 z-[500] bg-slate-950/40 backdrop-blur-md flex items-center justify-center p-8 animate-fadeIn"

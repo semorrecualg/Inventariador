@@ -11,11 +11,12 @@ import {
   ChevronRight,
   AlertTriangle,
   Loader2,
-  Activity
+  Activity,
+  Trash2
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
-import { fetchCampaigns, createCampaign, updateCampaignStatus, fetchCampaignStats } from '../services/supabaseService';
+import { fetchCampaigns, createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign } from '../services/supabaseService';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -65,6 +66,22 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
       setIsCreating(false);
       setNewCampaignName('');
       setNewCampaignDesc('');
+      alert('Campanha criada com sucesso!');
+    } else {
+      alert('Erro ao criar campanha. Verifique sua conexão ou permissões.');
+    }
+  };
+
+  const handleDeleteCampaign = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta campanha? Esta ação não pode ser desfeita.')) return;
+    
+    const success = await deleteCampaign(id);
+    if (success) {
+      alert('Campanha excluída com sucesso!');
+      setSelectedCampaign(null);
+      loadCampaigns();
+    } else {
+      alert('Erro ao excluir campanha.');
     }
   };
 
@@ -111,9 +128,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
         {!isCreating && (
           <button 
             onClick={() => setIsCreating(true)}
-            className="bg-accent hover:bg-accent/90 text-white p-2 rounded-lg transition-all shadow-lg shadow-accent/20"
+            className="bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-accent/20 flex items-center gap-2"
           >
-            <Plus className="w-6 h-6" />
+            <Plus className="w-5 h-5" />
+            <span className="text-[10px] font-black uppercase tracking-widest">Nova Campanha</span>
           </button>
         )}
       </header>
@@ -203,15 +221,15 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
                   {selectedCampaign.status === CampaignStatus.ACTIVE && (
                     <>
                       {currentCampaignId === selectedCampaign.id ? (
-                        <div className="col-span-2 flex items-center justify-center gap-2 py-3 bg-accent/10 text-accent border border-accent/20 rounded-xl text-[10px] font-black uppercase tracking-widest">
-                          <CheckCircle2 className="w-4 h-4" /> Campanha Ativa no Coletor
+                        <div className="col-span-2 flex items-center justify-center gap-2 py-4 bg-accent/10 text-accent border border-accent/20 rounded-xl text-xs font-black uppercase tracking-widest">
+                          <CheckCircle2 className="w-5 h-5" /> Campanha Ativa no Coletor
                         </div>
                       ) : (
                         <button 
                           onClick={() => onActivate(selectedCampaign.id)}
-                          className="col-span-2 flex items-center justify-center gap-2 py-3 bg-accent text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent/90 shadow-lg shadow-accent/20 transition-all active:scale-95"
+                          className="col-span-2 flex items-center justify-center gap-3 py-4 bg-accent text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-accent/90 shadow-xl shadow-accent/30 transition-all active:scale-95 border-2 border-white/20"
                         >
-                          <Activity className="w-4 h-4" /> Ativar para Inventário
+                          <Activity className="w-5 h-5" /> Ativar para Inventário
                         </button>
                       )}
                       <button 
@@ -236,6 +254,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
                   >
                     <Archive className="w-4 h-4" /> Arquivar
                   </button>
+                  {user?.is_admin && (
+                    <button 
+                      onClick={() => handleDeleteCampaign(selectedCampaign.id)}
+                      className="flex items-center justify-center gap-2 py-3 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-rose-100 transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" /> Excluir
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

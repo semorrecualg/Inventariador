@@ -26,7 +26,7 @@ export const generateTestAssets = async (theme: string, count: number = 5): Prom
     "CONTACONTABIL": "string (ex: 1.02.03.001)",
     "CENTRODECUSTO": "string (ex: 100.01)",
     "VLRAQUISIC": number,
-    "DATAAQUSIC": "string (formato YYYY-MM-DD)",
+    "DATAAQUISIC": "string (formato YYYY-MM-DD)",
     "ESTADO_CONSERVACAO": "NOVO" | "BOM" | "RECUPERAVEL" | "INSERVIVEL",
     "TAG_INVENTARIO": "PENDENTE"
   }

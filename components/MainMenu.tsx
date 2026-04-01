@@ -153,7 +153,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
-  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com";
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com" || user?.email.toLowerCase() === "semorr@gmail.com.br";
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const handleSecureAction = (action: () => void) => {
@@ -161,7 +161,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     setIsSecurityPinOpen(true);
   };
 
-  // Protocolo de Governança GBR v25.00: Identificação de Ambiente
+  // Protocolo de Governança v25.00: Identificação de Ambiente
   const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && window.innerWidth < 1024;
 
   return (
@@ -254,7 +254,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
           </div>
           <div className="ml-3 pr-4">
-            <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">GBR Mobile</p>
+            <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">Mobile Audit</p>
             <h1 className="text-base font-black text-ink truncate max-w-[140px] tracking-tight uppercase leading-tight">
               {user?.username || 'Operador'}
             </h1>
@@ -468,7 +468,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
       <div className="p-3 bg-white border-t border-slate-100 flex items-center justify-center">
-        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">GBR Intelligent Systems</span>
+        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">AUDITORIA INTELIGENTE</span>
       </div>
 
       {isAdminMenuOpen && (
@@ -482,7 +482,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Administrativo</h2>
-                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Protocolo de Segurança GBR</p>
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Protocolo de Segurança</p>
               </div>
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
@@ -608,7 +608,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </div>
             </div>
-            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Security Protocol</div>
+            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">Security Protocol</div>
           </div>
         </div>
       )}
@@ -1293,7 +1293,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
-                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">GBR v24.50 KARDEK</p>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">v24.50 KARDEK</p>
               </div>
             </div>
           </div>
@@ -1302,17 +1302,17 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
               <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
                 <ReactMarkdown>
-                  {`# Documentação Técnica e Operacional - GBR v24.50 KARDEK
+                  {`# Documentação Técnica e Operacional - v24.50 KARDEK
 
-Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado (GBR v24.50).
+Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado.
 
 ---
 
 ## 1. Visão Geral do Sistema
-O **GBR v24.50 KARDEK** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
+O **v24.50 KARDEK** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
 
 ### 1.1. Pilares do Sistema
-- **Protocolo GBR v24**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).
+- **Protocolo de Auditoria**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).
 - **Integração Protheus**: Sincronização direta via \`Sn1_recno\`.
 - **Mobilidade**: Interface otimizada para dispositivos móveis com suporte a QR Code e Scanner.
 - **Segurança**: Controle de acesso por perfis (ADMIN e AUDITOR).
@@ -1321,7 +1321,7 @@ O **GBR v24.50 KARDEK** é uma solução avançada para gestão de inventário f
 
 ## 2. Arquitetura e Tech Stack
 - **Frontend**: React 18+ com TypeScript.
-- **Estilização**: Tailwind CSS (Design System GBR).
+- **Estilização**: Tailwind CSS (Design System Profissional).
 - **Ícones**: Lucide React.
 - **Processamento de Dados**: XLSX (SheetJS) para carga de planilhas.
 - **QR Code**: QRCode.react para geração dinâmica.
@@ -1344,7 +1344,7 @@ O **GBR v24.50 KARDEK** é uma solução avançada para gestão de inventário f
 - **Protocolo de Importação**: Suporta arquivos \`.xlsx\` e \`.csv\`.
 - **Mapeamento v24**: Identifica automaticamente 18 colunas críticas (Empresa, Status, Etiqueta, etc.).
 - **Sn1_recno**: Captura obrigatória do identificador do Protheus para integração.
-- **Regras de Eliminação (GBR v24)**:
+- **Regras de Eliminação**:
   - Itens baixados com contas contábeis específicas (131105001/002) são eliminados.
   - Itens baixados sem etiqueta são eliminados.
   - Itens baixados cuja etiqueta já existe em um registro ativo são eliminados para evitar duplicidade.

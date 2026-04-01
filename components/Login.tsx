@@ -5,6 +5,7 @@ import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUs
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
+import { safeStringify } from '../services/utils';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -69,7 +70,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         );
 
         if (localUser) {
-          localStorage.setItem('app_current_user', JSON.stringify(localUser));
+          localStorage.setItem('app_current_user', safeStringify(localUser));
           onLogin(localUser);
         } else {
           setError("Usuário biométrico não encontrado no banco local.");
@@ -120,7 +121,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           tenantid: cloudUser.tenantid || '',
           tenants: cloudUser.tenants || [cloudUser.tenantid || '']
         };
-        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        localStorage.setItem('app_current_user', safeStringify(loggedUser));
         onLogin(loggedUser);
       }
     } catch (err: unknown) {
@@ -269,7 +270,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
         };
 
-        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || (cloudUser.email.toLowerCase() === 'semorr@gmail.com');
+        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
 
         loggedUser = {
           username: finalUsername,
@@ -294,12 +295,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
         if (!localUser) {
           // Fallback para o admin padrão se a senha for 'admin' e o usuário for o semorr
-          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com') && password === 'admin';
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com' || username.trim().toLowerCase() === 'semorr@gmail.com.br') && password === 'admin';
           
           if (isAdminFallback) {
-            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
+            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com' || u.email.toLowerCase() === 'semorr@gmail.com.br');
             if (adminUser) {
-              localStorage.setItem('app_current_user', JSON.stringify(adminUser));
+              localStorage.setItem('app_current_user', safeStringify(adminUser));
               onLogin(adminUser);
               return;
             }
@@ -314,7 +315,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
       if (loggedUser) {
         console.log('[Login] Sucesso! Logando usuário:', loggedUser.email);
         // Salva no localStorage para persistência
-        localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+        localStorage.setItem('app_current_user', safeStringify(loggedUser));
         
         // Log de Auditoria
         logAuditEvent({
@@ -394,7 +395,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           <div className="absolute -bottom-1 -right-1 bg-accent w-4 h-4 rounded-full border-2 border-white shadow-sm"></div>
         </div>
         <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
-          GBR <span className="text-accent">AUDITORIA</span>
+          SISTEMA <span className="text-accent">AUDITORIA</span>
         </h1>
         <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
           INVENTÁRIO DE ATIVO IMOBILIZADO
@@ -565,7 +566,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
               <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
                 Acesso restrito a auditores autorizados. <br/>
-                <span className="text-accent">Consulte seu Administrador GBR.</span>
+                <span className="text-accent">Consulte seu Administrador.</span>
               </p>
             </div>
           )}
@@ -619,7 +620,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         
         <div className="pt-3 border-t border-accent/10">
           <p className="text-[8px] font-bold text-accent uppercase tracking-[0.3em]">
-            GBR Intelligent Systems
+            AUDITORIA INTELIGENTE
           </p>
           <button 
             onClick={onOpenPrivacyCenter}

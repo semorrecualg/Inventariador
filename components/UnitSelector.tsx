@@ -1,25 +1,39 @@
 
 import React, { useState } from 'react';
-import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building, RefreshCw, Cloud } from 'lucide-react';
+import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building, RefreshCw, Cloud, Download, CheckCircle, Navigation } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
 
 interface UnitSelectorProps {
-  units: Array<{ name: string; hasData: boolean }>;
+  units: Array<{ name: string; hasData: boolean; isDownloaded?: boolean }>;
   onSelect: (unit: string) => void;
   onBack: () => void;
   onSync?: () => void;
+  onDownload?: (unit: string) => void;
+  onConfigGPS?: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   isAdmin?: boolean;
 }
 
-const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, isSyncing, isAdmin }) => {
+const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, isSyncing, isAdmin }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
   const filteredUnits = units.filter(u => 
     u.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleDownload = async (e: React.MouseEvent, unitName: string) => {
+    e.stopPropagation();
+    if (!onDownload || downloadingUnit) return;
+    setDownloadingUnit(unitName);
+    try {
+      await onDownload(unitName);
+    } finally {
+      setDownloadingUnit(null);
+    }
+  };
 
   // Helper para gerar ícone e cor consistente baseada no nome
   const getUnitIdentity = (name: string, hasData: boolean) => {
@@ -60,6 +74,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
           <div className="flex items-center space-x-2">
+            {isAdmin && onConfigGPS && (
+              <button 
+                onClick={onConfigGPS}
+                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft"
+                title="Configurar GPS das Unidades"
+              >
+                <Navigation size={20} />
+              </button>
+            )}
             {onSync && (
               <button 
                 onClick={onSync}
@@ -97,15 +120,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             data={filteredUnits}
             itemContent={(index, unit) => {
               const { style, Icon } = getUnitIdentity(unit.name, unit.hasData);
+              const isDownloading = downloadingUnit === unit.name;
               return (
                 <div className="px-5 py-1.5">
-                  <button
+                  <div
                     key={unit.name}
                     onClick={() => unit.hasData && onSelect(unit.name)}
-                    disabled={!unit.hasData}
                     className={`w-full bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border transition-all group overflow-hidden relative modern-card ${
                       unit.hasData 
-                        ? 'hover:border-accent active:scale-[0.99] border-border' 
+                        ? 'hover:border-accent active:scale-[0.99] border-border cursor-pointer' 
                         : 'opacity-60 cursor-not-allowed border-slate-100'
                     }`}
                   >
@@ -125,12 +148,35 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                         </div>
                       </div>
                     </div>
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors relative z-10 ${
-                      unit.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
-                    }`}>
-                      <CheckCircle2 size={24} />
+                    
+                    <div className="flex items-center space-x-2 relative z-10">
+                      {unit.hasData && onDownload && (
+                        <button
+                          onClick={(e) => handleDownload(e, unit.name)}
+                          disabled={isDownloading || unit.isDownloaded}
+                          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                            unit.isDownloaded 
+                              ? 'text-emerald-500 bg-emerald-50' 
+                              : 'text-ink-muted hover:bg-bg-main active:scale-90'
+                          }`}
+                          title="Baixar para uso Offline"
+                        >
+                          {isDownloading ? (
+                            <RefreshCw size={18} className="animate-spin" />
+                          ) : unit.isDownloaded ? (
+                            <CheckCircle size={18} />
+                          ) : (
+                            <Download size={18} />
+                          )}
+                        </button>
+                      )}
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
+                        unit.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
+                      }`}>
+                        <CheckCircle2 size={24} />
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 </div>
               );
             }}

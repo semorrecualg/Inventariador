@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, Lock, Database, CheckCircle2, ChevronRight, Info, Eye, ShieldAlert } from 'lucide-react';
+import { ShieldCheck, Lock, Database, CheckCircle2, ChevronRight, Info, Eye, ShieldAlert, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface TrustOnboardingProps {
   onAccept: () => void;
@@ -12,16 +13,56 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
   const [step, setStep] = useState(1);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
+  const downloadTemplate = () => {
+    const headers = [
+      'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 
+      'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 
+      'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 
+      'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'
+    ];
+    
+    const exampleData = [
+      {
+        GRUPO_EMPRESARIAL: 'EXEMPLO_SA',
+        UNIDADE_OPERACIONAL: 'MATRIZ',
+        STATUS: 'ATIVO',
+        ETIQUETA: 'PAT-0001',
+        QT: 1,
+        DESCRICAO: 'NOTEBOOK DELL LATITUDE',
+        SERIAL: 'ABC123XYZ',
+        DATA_AQ: '2023-01-15',
+        CNPJ: '00.000.000/0001-00',
+        FORNECEDOR: 'DELL BRASIL',
+        NF: '12345',
+        ENDERECO: 'SALA 101 - TI',
+        REGISTRO: 'REG-001',
+        SUBREG: '00',
+        DATA_BAIXA: '',
+        CONTA: '1.02.01.01.01',
+        PK: 'ERP-001',
+        CUSTO: '10101',
+        VALOR: 5500.00,
+        SN1_RECNO: 1,
+        SN3_RECNO: 1
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "CargaExpert");
+    XLSX.writeFile(wb, "Matriz_Carga_Expert_v25.xls");
+  };
+
   const steps = [
     {
       id: 1,
-      title: "Bem-vindo à GBR Auditoria",
+      title: "Bem-vindo à Auditoria Patrimonial",
       subtitle: "Sua plataforma de governança e controle de ativos imobilizados.",
       icon: <ShieldCheck className="w-16 h-16 text-accent" />,
       content: (
         <div className="space-y-4">
           <p className="text-sm text-ink-muted leading-relaxed">
-            O GBR v24.50 foi projetado com foco em <strong>segurança máxima</strong> e 
+            O sistema foi projetado com foco em <strong>segurança máxima</strong> e 
             <strong>transparência de dados</strong>. Antes de começar, queremos que você saiba 
             como protegemos sua operação.
           </p>
@@ -100,7 +141,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
               </div>
               <div className="flex-1">
                 <p className="text-xs font-bold text-ink leading-tight">
-                  Eu li e concordo com os Termos de Uso e Política de Privacidade da GBR.
+                  Eu li e concordo com os Termos de Uso e Política de Privacidade.
                 </p>
                 <p className="text-[10px] text-ink-muted mt-1">
                   Estou ciente de que o app utiliza geolocalização e câmera para fins de auditoria técnica.
@@ -123,7 +164,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
     {
       id: 4,
       title: "Carga de Dados Expert",
-      subtitle: "Prepare sua base de dados para o Protocolo v24.50.",
+      subtitle: "Prepare sua base de dados para o Protocolo v25.00.",
       icon: <Database className="w-16 h-16 text-accent" />,
       content: (
         <div className="space-y-4">
@@ -141,6 +182,13 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
                 GRUPO_EMPRESARIAL; UNIDADE_OPERACIONAL; STATUS; ETIQUETA; QT; DESCRICAO; SERIAL; DATA_AQ; CNPJ; FORNECEDOR; NF; ENDERECO; REGISTRO; SUBREG; DATA_BAIXA; CONTA; PK; CUSTO; VALOR; SN1_RECNO; SN3_RECNO
               </p>
             </div>
+            <button 
+              onClick={downloadTemplate}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center justify-center space-x-2 transition-all shadow-md group"
+            >
+              <Download size={14} className="group-hover:scale-110 transition-transform" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Baixar Planilha Matriz</span>
+            </button>
           </div>
           <p className="text-[9px] text-ink-muted italic text-center">
             &quot;A ordem das colunas é vital para o fallback automático do sistema.&quot;

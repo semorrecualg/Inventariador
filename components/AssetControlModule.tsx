@@ -430,7 +430,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                     <div className="text-xs text-slate-400">{asset._centro_custo || asset.CENTRODECUSTO || '-'}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.DATAAQUSIC || '-'}</div>
+                    <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.DATAAQUISIC || '-'}</div>
                   </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-800">
                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}

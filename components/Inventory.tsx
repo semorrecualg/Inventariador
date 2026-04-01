@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
@@ -205,7 +205,7 @@ const AssetCard = React.memo(({
     asset.QT || '1',
     asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
     asset.SERIAL || 'S/N',
-    formatMonthYearBR(asset.DATAAQUSIC),
+    formatMonthYearBR(asset.DATAAQUISIC),
     asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'
   ].join('; ');
 
@@ -383,6 +383,7 @@ interface InventoryProps {
   onSyncFromCloud: () => Promise<void>;
   user: User | null;
   currentCampaignId?: string;
+  unitConfig?: UnitConfig | null;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -415,7 +416,9 @@ const Inventory: React.FC<InventoryProps> = ({
   isGpsAvailable,
   databaseMode,
   onSyncFromCloud,
-  user
+  user,
+  currentCampaignId,
+  unitConfig
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -536,6 +539,8 @@ const Inventory: React.FC<InventoryProps> = ({
         // Se encontrou, confirma automaticamente na localização atual
         const currentCompKey = normalizeKey(selectedUnitRef.current || '');
         const assetCompKey = normalizeKey(foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid || '');
+        const currentLocKey = normalizeKey(selectedLocationRef.current || '');
+        const assetLocKey = normalizeKey(foundAsset._localMaster || foundAsset.ENDERECO || '');
         
         if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
           // Caso seja de outra empresa, adota
@@ -546,8 +551,16 @@ const Inventory: React.FC<InventoryProps> = ({
             TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
             _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
           });
+        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
+          // Caso seja da mesma empresa mas outro endereço, adota como sobra física
+          onUpdateAssetRef.current({
+            ...foundAsset,
+            _conferido: true,
+            TAG_INVENTARIO: TagInventario.ADOTADO,
+            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
+          });
         } else {
-          // Caso seja da mesma empresa
+          // Caso seja da mesma empresa e mesmo endereço
           onUpdateAssetRef.current({
             ...foundAsset,
             _conferido: true,
@@ -702,7 +715,6 @@ const Inventory: React.FC<InventoryProps> = ({
     if (!selectedLocation) return [];
     const term = normalizeKeyFast(committedSearch);
     const currentLocKey = normalizeKeyFast(selectedLocation);
-    const currentCompKey = normalizeKeyFast(selectedUnit || '');
 
     if (!term) {
       const result = [];
@@ -754,8 +766,10 @@ const Inventory: React.FC<InventoryProps> = ({
     if (term.length >= 3) {
       for (let i = 0; i < allAssets.length; i++) {
         const a = allAssets[i];
-        const assetCompKey = normalizeKeyFast(a.UNIDADE_OPERACIONAL || a._unitid || '');
-        if (assetCompKey === currentCompKey) continue;
+        
+        // Se o item já estiver no local atual, ele já foi processado no companyMatches
+        const assetLocKey = normalizeKeyFast(a._localMaster || a.ENDERECO || "");
+        if (assetLocKey === currentLocKey) continue;
 
         const etq = normalizeKeyFast(a.ETIQUETA || '');
         if (etq === term) {
@@ -986,6 +1000,7 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
+        _campaignId: currentCampaignId,
         _localMaster: selectedLocation || "",
         _tenantid: user?.tenantid || '',
         _unitid: selectedUnit || user?.unitid || ''
@@ -1153,18 +1168,30 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                   <button 
                     onClick={() => {
-                    const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
-                    const currentCompKey = normalizeKey(selectedUnit || '');
-                    
-                    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                      onUpdateAsset({ 
-                        ...scannedAsset, 
-                        UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
-                        _conferido: true,
-                        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                        _localMaster: selectedLocation || scannedAsset.ENDERECO
-                      });
-                    } else {
+                      const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                      const currentCompKey = normalizeKey(selectedUnit || '');
+                      const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                      const currentLocKey = normalizeKey(selectedLocation || '');
+                      
+                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                        // Caso seja de outra empresa, adota como externo
+                        onUpdateAsset({ 
+                          ...scannedAsset, 
+                          UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                          _conferido: true,
+                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        });
+                      } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
+                        // Caso seja da mesma empresa mas outro endereço, adota como sobra física
+                        onUpdateAsset({
+                          ...scannedAsset,
+                          _conferido: true,
+                          TAG_INVENTARIO: TagInventario.ADOTADO,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        });
+                      } else {
+                        // Caso seja do mesmo endereço
                         onUpdateAsset({
                           ...scannedAsset,
                           _conferido: true,
@@ -1209,7 +1236,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         ETIQUETA: scannedResult,
                         UNIDADE_OPERACIONAL: selectedUnit || "",
                         STATUS: "ATIVO",
-                        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+                        DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
                         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
                         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
                         QT: 1,
@@ -1301,7 +1328,23 @@ const Inventory: React.FC<InventoryProps> = ({
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32 no-scrollbar">
-            <button onClick={() => setIsNewLocationModalOpen(true)} className="w-full bg-sky-600 text-white p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md">
+            {!unitConfig && (
+              <div className="bg-danger/10 border border-danger/20 p-4 rounded-2xl flex items-start space-x-3 mb-2 animate-pulse">
+                <ShieldAlert className="w-5 h-5 text-danger shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-black text-danger uppercase tracking-widest">GPS Âncora Pendente</p>
+                  <p className="text-[9px] text-danger/80 font-bold uppercase leading-tight mt-1">
+                    A unidade operacional selecionada não possui coordenadas GPS configuradas. 
+                    Isso é obrigatório para liberar o inventário e garantir o rastreio.
+                  </p>
+                </div>
+              </div>
+            )}
+            <button 
+              disabled={!unitConfig}
+              onClick={() => setIsNewLocationModalOpen(true)} 
+              className={`w-full p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md ${!unitConfig ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-sky-600 text-white'}`}
+            >
               <Plus size={20} />
               <span>Criar Nova Localidade</span>
             </button>
@@ -1315,13 +1358,13 @@ const Inventory: React.FC<InventoryProps> = ({
                 const isStarted = stats.checked > 0;
                 const isCompleted = progress === 100;
               
-              return (
-                <button 
-                  key={locKey} 
-                  disabled={isCompleted}
-                  onClick={() => { 
-                    setSelectedLocation(loc); 
-                    setIsInventorying(true); 
+                return (
+                  <button 
+                    key={locKey} 
+                    disabled={isCompleted || !unitConfig}
+                    onClick={() => { 
+                      setSelectedLocation(loc); 
+                      setIsInventorying(true); 
                     if (immersiveMode && !document.fullscreenElement) {
                       onToggleFullscreen();
                     }
@@ -1371,6 +1414,12 @@ const Inventory: React.FC<InventoryProps> = ({
                 />
                 
                 <div className="flex items-center space-x-2">
+                  {currentCampaignId && (
+                    <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">
+                      <Activity size={10} className="text-accent animate-pulse" />
+                      <span className="text-[8px] font-black text-accent uppercase tracking-widest">Evento Ativo</span>
+                    </div>
+                  )}
                   {isGpsAvailable !== undefined && (
                     <div className={`flex items-center space-x-1 px-2 py-1 rounded-lg border shadow-sm transition-all ${isGpsAvailable ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : isGpsAvailable === false ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
                       <MapPin size={12} className={isGpsAvailable ? 'animate-pulse' : ''} />

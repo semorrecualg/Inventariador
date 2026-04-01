@@ -3,6 +3,20 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
+import { registerSW } from 'virtual:pwa-register';
+
+// Register PWA Service Worker
+const updateSW = registerSW({
+  onNeedRefresh() {
+    if (confirm('Nova versão disponível. Atualizar agora?')) {
+      updateSW(true);
+    }
+  },
+  onOfflineReady() {
+    console.log('App pronto para uso offline.');
+  },
+});
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -18,6 +32,8 @@ if (typeof window !== 'undefined') {
 }
 
 root.render(
-  <App />
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
 );
 console.log("App render triggered.");

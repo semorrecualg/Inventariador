@@ -45,6 +45,7 @@ import OnboardingWizard from './components/OnboardingWizard';
 import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
 import SyncManager from './components/SyncManager';
+import UnitConfigurator from './components/UnitConfigurator';
 
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
@@ -52,12 +53,25 @@ import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Spar
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange, fetchUnitConfigs } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
+import { safeStringify } from './services/utils';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
+const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
 const MAX_SYNC_QUEUE_SIZE = 100; // Limite de segurança para fila de sincronização
+
+// Helper para verificar se um usuário é admin
+const checkIsAdmin = (u: User | null | undefined) => {
+  if (!u) return false;
+  const email = u.email?.toLowerCase() || '';
+  return u.role === UserRole.ADMIN || 
+         u.role === UserRole.MASTER || 
+         u.isAdmin || 
+         email === ADMIN_EMAIL.toLowerCase() || 
+         email === ADMIN_EMAIL_ALT.toLowerCase();
+};
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -121,9 +135,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+// App Component
 const App: React.FC = () => {
-  const isStaging = window.location.hostname.includes('ais-pre') || window.location.hostname.includes('ais-dev') || import.meta.env.VITE_ENVIRONMENT === 'staging';
-
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('app_current_user');
@@ -131,7 +144,8 @@ const App: React.FC = () => {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.email) {
         // Normalizar admin para semorr@gmail.com
-        if (parsed.email.toLowerCase() === 'semorr@gmail.com') {
+        const lowerEmail = parsed.email.toLowerCase();
+        if (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') {
           parsed.is_admin = true;
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
@@ -179,6 +193,9 @@ const App: React.FC = () => {
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
+  const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
+    return localStorage.getItem('app_field_mode') === 'true';
+  });
 
   // Monitor de Sincronização Offline
   useEffect(() => {
@@ -221,11 +238,15 @@ const App: React.FC = () => {
     };
   }, [isSyncLocked]);
 
-  // Rastreamento Autônomo GBR v24.50
+  // Rastreamento Autônomo v24.50
   useEffect(() => {
-    startAutonomousTracking();
+    if (!isFieldMode) {
+      startAutonomousTracking();
+    } else {
+      stopAutonomousTracking();
+    }
     return () => stopAutonomousTracking();
-  }, []);
+  }, [isFieldMode]);
 
   const [, setCurrentModule] = useState<AppModule | null>(() => {
     const saved = localStorage.getItem('app_current_module');
@@ -370,6 +391,12 @@ const App: React.FC = () => {
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_downloaded_units');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -384,6 +411,19 @@ const App: React.FC = () => {
     inventoryRef.current = inventory;
   }, [inventory]);
 
+  useEffect(() => {
+    if (user?.tenantid) {
+      fetchUnitConfigs(user.tenantid).then(configs => {
+        setInventory(prev => ({ ...prev, unitConfigs: configs }));
+      });
+    }
+  }, [user?.tenantid]);
+
+  const currentUnitConfig = useMemo(() => {
+    if (!selectedUnit || !inventory.unitConfigs) return null;
+    return inventory.unitConfigs.find(c => c.unit_id === selectedUnit) || null;
+  }, [inventory.unitConfigs, selectedUnit]);
+
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (!skipLoadingState && isSyncing) return;
     if (databaseMode === DatabaseMode.INTERNAL) return;
@@ -397,8 +437,7 @@ const App: React.FC = () => {
     const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (!hasSupabase) return;
 
-    const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-    const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+    const effectiveTenantId = user?.tenantid;
 
     const dirtyIds = Array.from(dirtyAssetsRef.current);
     if (dirtyIds.length === 0) return;
@@ -440,6 +479,65 @@ const App: React.FC = () => {
     }
   }, [databaseMode, user?.tenantid, isSyncing]);
 
+  const handleDownloadUnit = useCallback(async (unitName: string) => {
+    if (isSyncing) return;
+    if (!navigator.onLine) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Sem Conexão',
+        message: 'Você precisa estar online para baixar os dados da unidade para uso offline.',
+        type: 'error'
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      // Sincroniza a unidade específica da nuvem
+      await syncFromCloud(user?.tenants || user?.tenantid, databaseMode, unitName);
+      
+      // Marca como baixada
+      setDownloadedUnits(prev => {
+        if (prev.includes(unitName)) return prev;
+        const next = [...prev, unitName];
+        localStorage.setItem('app_downloaded_units', safeStringify(next));
+        return next;
+      });
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Download Concluído',
+        message: `Os dados da unidade ${unitName} foram baixados com sucesso e estão disponíveis para uso offline.`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Erro ao baixar unidade:', error);
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro no Download',
+        message: 'Ocorreu um erro ao tentar baixar os dados da unidade. Verifique sua conexão.',
+        type: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [databaseMode, isSyncing, user]);
+
+  const toggleFieldMode = useCallback(() => {
+    const next = !isFieldMode;
+    setIsFieldMode(next);
+    localStorage.setItem('app_field_mode', String(next));
+    
+    setModalConfig({
+      isOpen: true,
+      title: next ? 'Modo de Campo Ativado' : 'Modo de Campo Desativado',
+      message: next 
+        ? 'O Modo de Campo (Offline) foi ativado. O sistema priorizará o uso local e suspenderá tentativas automáticas de sincronização até que você retorne.' 
+        : 'O Modo de Campo foi desativado. O sistema retomará a sincronização automática com a nuvem.',
+      type: 'info'
+    });
+  }, [isFieldMode]);
+
   const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
     if (isSyncing) return;
     
@@ -467,10 +565,8 @@ const App: React.FC = () => {
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const rawTenantId = explicitTenantId || user?.tenantid;
     
-    // Se for admin global, não filtramos por tenantid para que ele veja tudo
-    const tenantid = isGlobalAdmin && (!explicitTenantId || explicitTenantId === '') 
-      ? undefined 
-      : (Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined));
+    // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
+    const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
     
     console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
     
@@ -502,15 +598,24 @@ const App: React.FC = () => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
           const assets = cloudData.assets || [];
+          
+          // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais, 
+          // e não foi um erro de rede, pode ser um problema de tenantid.
+          // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
+          if (assets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
+            console.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
+            return prev;
+          }
+
           const extractedCompanies = Array.from(new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
             ...prev,
             ...cloudData.config,
-            assets: assets,
-            companies: finalCompanies,
-            status: assets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
+            assets: assets.length > 0 ? assets : prev.assets, // Mantém local se nuvem estiver vazia
+            companies: finalCompanies.length > 0 ? finalCompanies : prev.companies,
+            status: (assets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
@@ -702,8 +807,8 @@ const App: React.FC = () => {
         ENDERECO: '',
         CONTACONTABIL: '',
         CENTRODECUSTO: '',
-        DATAAQUSIC_START: '',
-        DATAAQUSIC_END: '',
+        DATAAQUISIC_START: '',
+        DATAAQUISIC_END: '',
         Sn1_recno: '',
         Sn3_recno: ''
       };
@@ -718,8 +823,8 @@ const App: React.FC = () => {
         ENDERECO: '',
         CONTACONTABIL: '',
         CENTRODECUSTO: '',
-        DATAAQUSIC_START: '',
-        DATAAQUSIC_END: '',
+        DATAAQUISIC_START: '',
+        DATAAQUISIC_END: '',
         Sn1_recno: '',
         Sn3_recno: ''
       };
@@ -1373,14 +1478,14 @@ const App: React.FC = () => {
           
           dirtyAssetsRef.current.clear();
         }
-        localStorage.setItem('app_screen_history', JSON.stringify(history));
-        localStorage.setItem('app_current_user', JSON.stringify(user));
-        localStorage.setItem('app_users', JSON.stringify(users));
+        localStorage.setItem('app_screen_history', safeStringify(history));
+        localStorage.setItem('app_current_user', safeStringify(user));
+        localStorage.setItem('app_users', safeStringify(users));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
-        localStorage.setItem('app_consultation_filters', JSON.stringify(consultationFilters));
-        localStorage.setItem('app_committed_consultation_filters', JSON.stringify(committedConsultationFilters));
+        localStorage.setItem('app_consultation_filters', safeStringify(consultationFilters));
+        localStorage.setItem('app_committed_consultation_filters', safeStringify(committedConsultationFilters));
         localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
         localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
@@ -1467,7 +1572,7 @@ const App: React.FC = () => {
 
         if (hasChanged) {
           setUser(loggedUser);
-          localStorage.setItem('app_current_user', JSON.stringify(loggedUser));
+          localStorage.setItem('app_current_user', safeStringify(loggedUser));
         }
         
         // Log de Auditoria na Nuvem
@@ -1490,8 +1595,7 @@ const App: React.FC = () => {
         }
         
         // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-        const isGlobalAdmin = loggedUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        syncFromCloud(isGlobalAdmin ? undefined : loggedUser.tenantid, DatabaseMode.SUPABASE);
+        syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
   } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
@@ -1505,7 +1609,7 @@ const App: React.FC = () => {
           tenants: []
         };
         setUser(fallbackUser);
-        localStorage.setItem('app_current_user', JSON.stringify(fallbackUser));
+        localStorage.setItem('app_current_user', safeStringify(fallbackUser));
         setDatabaseMode(DatabaseMode.SUPABASE);
         pushScreen(AppScreen.MODULE_SELECTION);
       } finally {
@@ -1659,7 +1763,7 @@ const App: React.FC = () => {
         errorMessage = error.message;
       } else if (error && typeof error === 'object') {
         const errObj = error as Record<string, unknown>;
-        errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+        errorMessage = String(errObj.message || errObj.details || errObj.hint || safeStringify(error));
       } else if (typeof error === 'string') {
         errorMessage = error;
       }
@@ -1966,6 +2070,7 @@ const App: React.FC = () => {
     
     const assetWithHistory = {
       ...assetWithGps,
+      _campaignId: inventory.currentCampaignId || assetWithGps._campaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
       _auditor: user?.email || assetWithGps._auditor,
@@ -2192,7 +2297,7 @@ const App: React.FC = () => {
     if (upperCaseLocation && !allLocations.includes(upperCaseLocation)) {
       setManualLocations(prev => {
         const next = [...prev, upperCaseLocation];
-        localStorage.setItem('app_manual_locations', JSON.stringify(next));
+        localStorage.setItem('app_manual_locations', safeStringify(next));
         return next;
       });
     }
@@ -2459,7 +2564,7 @@ const App: React.FC = () => {
           const val = a[k];
           const colName = `PARA_${k}`;
           if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = JSON.stringify(val);
+            res[colName] = safeStringify(val);
           } else {
             res[colName] = val as string | number | boolean | null | undefined;
           }
@@ -2475,7 +2580,7 @@ const App: React.FC = () => {
           const val = originalValues[key];
           const colName = `DE_${key}`;
           if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = JSON.stringify(val);
+            res[colName] = safeStringify(val);
           } else {
             res[colName] = val as string | number | boolean | null | undefined;
           }
@@ -2686,7 +2791,7 @@ const App: React.FC = () => {
             errorMessage = error.message;
           } else if (error && typeof error === 'object') {
             const errObj = error as Record<string, unknown>;
-            errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+            errorMessage = String(errObj.message || errObj.details || errObj.hint || safeStringify(error));
           }
           throw new Error(`Erro na nuvem: ${errorMessage}`);
         }
@@ -2727,7 +2832,7 @@ const App: React.FC = () => {
         errorMessage = error.message;
       } else if (error && typeof error === 'object') {
         const errObj = error as Record<string, unknown>;
-        errorMessage = String(errObj.message || errObj.details || errObj.hint || JSON.stringify(error));
+        errorMessage = String(errObj.message || errObj.details || errObj.hint || safeStringify(error));
       }
 
       setModalConfig({
@@ -2739,9 +2844,7 @@ const App: React.FC = () => {
     }
   };
 
-  const isAdmin = useMemo(() => {
-    return user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
-  }, [user]);
+  const isAdmin = useMemo(() => checkIsAdmin(user), [user]);
 
   const filteredAssetsByUnit = useMemo(() => {
     if (!selectedUnit) return inventory.assets; 
@@ -2832,6 +2935,12 @@ const App: React.FC = () => {
     const userUnits = user?.units || [userTenant];
     const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
     const assets = inventory.assets;
+    
+    if (assets.length === 0) {
+      console.log('>>> [fullCompaniesWithStatus] Inventory assets is empty.');
+    } else {
+      console.log(`>>> [fullCompaniesWithStatus] Processing ${assets.length} assets.`);
+    }
 
     // 1. Agrupar estatísticas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
@@ -2922,7 +3031,12 @@ const App: React.FC = () => {
       }
     });
 
-    return Array.from(mergedCompanies.values());
+    const result = Array.from(mergedCompanies.values());
+    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
+    if (result.length === 0 && assets.length > 0) {
+      console.warn('>>> [fullCompaniesWithStatus] WARNING: Assets exist but no units were extracted!');
+    }
+    return result;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR]);
 
   const unitsByTenant = useMemo(() => {
@@ -2998,14 +3112,25 @@ const App: React.FC = () => {
       // Evita loops infinitos se o sync falhar ou retornar vazio
       const lastSyncAttempt = sessionStorage.getItem('last_auto_sync_attempt');
       const now = Date.now();
+      
+      // Se acabamos de carregar dados (onDataLoaded), não devemos sincronizar imediatamente
+      // pois os dados podem ainda estar sendo processados ou o tenantid pode não bater
+      const justLoaded = sessionStorage.getItem('app_just_loaded_data') === 'true';
+      if (justLoaded) {
+        console.log('Auto-sync ignorado: Dados acabaram de ser carregados localmente.');
+        sessionStorage.removeItem('app_just_loaded_data');
+        return;
+      }
+
       if (lastSyncAttempt && now - parseInt(lastSyncAttempt) < 30000) {
         console.log('Auto-sync ignorado: tentativa recente detectada.');
         return;
       }
       sessionStorage.setItem('last_auto_sync_attempt', now.toString());
 
+      console.log(`>>> [AutoSync] Iniciando sincronização automática para tenants: ${JSON.stringify(tenants)}`);
       syncFromCloud(tenants, databaseMode).then(() => {
-        // Se após o sync continuar vazio e for admin, manda para a carga
+        console.log('>>> [AutoSync] Sincronização automática concluída.');
       });
     } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
@@ -3146,7 +3271,7 @@ const App: React.FC = () => {
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onLogin={async (u) => { 
                 setUser(u); 
-                localStorage.setItem('app_current_user', JSON.stringify(u));
+                localStorage.setItem('app_current_user', safeStringify(u));
                 
                 // Se logou via Supabase, garante que o modo está correto
                 if (databaseMode !== DatabaseMode.INTERNAL) {
@@ -3278,7 +3403,7 @@ const App: React.FC = () => {
               impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
               excludedAccounts={inventory.excludedAccounts}
               onUpdateExcludedAccounts={(accounts) => {
-                localStorage.setItem('app_excluded_accounts', JSON.stringify(accounts));
+                localStorage.setItem('app_excluded_accounts', safeStringify(accounts));
                 updateConfig({ excludedAccounts: accounts });
               }}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
@@ -3355,6 +3480,9 @@ const App: React.FC = () => {
                         setLastSyncTime(new Date().toISOString());
                         setSyncError(null);
                         console.log('>>> [DatabaseLoader] Sincronização concluída com sucesso.');
+                        
+                        // Marcamos que acabamos de carregar dados para evitar auto-sync imediato que poderia limpar a base
+                        sessionStorage.setItem('app_just_loaded_data', 'true');
                       } catch (err) {
                         console.error('>>> [DatabaseLoader] Erro ao sincronizar com a nuvem:', err);
                         setSyncError('Erro no upload total');
@@ -3389,7 +3517,12 @@ const App: React.FC = () => {
             )
           )}
           {screen === AppScreen.INVENTORY && (
-            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
+            <GPSComplianceGuard 
+              onGpsStatusChange={setIsGpsAvailable} 
+              userRole={user?.role} 
+              unitConfig={currentUnitConfig}
+              isFieldMode={isFieldMode}
+            >
               {isSyncLocked ? (
                 <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center animate-fadeIn">
                   <div className="w-20 h-20 bg-red-50 border border-red-100 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
@@ -3440,12 +3573,17 @@ const App: React.FC = () => {
                   onSyncFromCloud={syncFromCloud}
                   user={user}
                   currentCampaignId={inventory.currentCampaignId}
+                  unitConfig={currentUnitConfig}
                 />
               )}
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.LABELING && (
-            <GPSComplianceGuard onGpsStatusChange={setIsGpsAvailable} userRole={user?.role}>
+            <GPSComplianceGuard 
+              onGpsStatusChange={setIsGpsAvailable} 
+              userRole={user?.role}
+              isFieldMode={isFieldMode}
+            >
               <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
             </GPSComplianceGuard>
           )}
@@ -3552,7 +3690,8 @@ const App: React.FC = () => {
                 .map(c => ({ 
                   name: c.name, 
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
-                  hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets 
+                  hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
+                  isDownloaded: downloadedUnits.includes(c.name)
                 }))
               } 
               onSelect={(u) => { 
@@ -3562,13 +3701,14 @@ const App: React.FC = () => {
                 
                 // Dispara o sync para a unidade selecionada se estiver no modo nuvem
                 // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
-                if (databaseMode !== DatabaseMode.INTERNAL) {
+                if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
                   // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
                   syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
                 }
                 
                 pushScreen(AppScreen.MAIN_MENU); 
               }} 
+              onDownload={handleDownloadUnit}
               onBack={async () => { 
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
                 if (isAdmin) {
@@ -3593,6 +3733,15 @@ const App: React.FC = () => {
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
+              onConfigGPS={() => pushScreen(AppScreen.UNIT_CONFIGURATOR)}
+            />
+          )}
+          {screen === AppScreen.UNIT_CONFIGURATOR && user && (
+            <UnitConfigurator 
+              user={user}
+              units={fullCompaniesWithStatus.map(c => c.name)}
+              onBack={popScreen}
+              onUpdateConfigs={(configs) => setInventory(prev => ({ ...prev, unitConfigs: configs }))}
             />
           )}
           {screen === AppScreen.DASHBOARD && (
@@ -3605,7 +3754,17 @@ const App: React.FC = () => {
               user={user}
             />
           )}
-          {screen === AppScreen.ASSET_MAP && <AssetMap assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} onBack={popScreen} databaseMode={databaseMode} />}
+          {screen === AppScreen.ASSET_MAP && (
+            <AssetMap 
+              assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} 
+              onBack={popScreen} 
+              databaseMode={databaseMode} 
+              onSelectLocation={(loc) => {
+                setInventoryLocation(loc);
+                pushScreen(AppScreen.INVENTORY);
+              }}
+            />
+          )}
           {screen === AppScreen.ACTIVE_SEARCH && (
             <ActiveSearch 
               assets={filteredAssetsByUnit} 
@@ -3662,7 +3821,7 @@ const App: React.FC = () => {
               }}
             />
           )}
-          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={popScreen} databaseMode={databaseMode} />}
@@ -3670,7 +3829,10 @@ const App: React.FC = () => {
             <CampaignManager 
               user={user} 
               onBack={popScreen} 
-              onActivate={(id) => setInventory(prev => ({ ...prev, currentCampaignId: id }))}
+              onActivate={(id) => {
+                setInventory(prev => ({ ...prev, currentCampaignId: id }));
+                pushScreen(AppScreen.INVENTORY);
+              }}
               currentCampaignId={inventory.currentCampaignId}
             />
           )}
@@ -3684,6 +3846,8 @@ const App: React.FC = () => {
                 setPendingPhotosCount(items.length);
                 setSyncQueueLength(items.length);
               }}
+              isFieldMode={isFieldMode}
+              onToggleFieldMode={toggleFieldMode}
             />
           )}
           {screen === AppScreen.ONBOARDING && (

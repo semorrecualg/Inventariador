@@ -121,21 +121,21 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose }) => {
             </div>
           )}
 
-          {asset.DATAAQUSIC && (
+          {asset.DATAAQUISIC && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shrink-0 border border-slate-100">
                 <Calendar size={18} />
               </div>
               <div>
                 <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">DATA AQUISIÇÃO</p>
-                <p className="text-xs font-bold text-slate-800 uppercase leading-tight">{formatDateBR(asset.DATAAQUSIC)}</p>
+                <p className="text-xs font-bold text-slate-800 uppercase leading-tight">{formatDateBR(asset.DATAAQUISIC)}</p>
               </div>
             </div>
           )}
 
           {/* Mostrar outros campos que possam ter sido incluídos no QR Code mas não têm ícone específico */}
           {Object.entries(asset).map(([key, value]) => {
-            const skipKeys = ['id', 'ETIQUETA', 'DESCRICAODOATIVO', 'UNIDADE_OPERACIONAL', 'GRUPO_EMPRESARIAL', 'STATUS', 'DATABAIXA', 'ENDERECO', 'CENTRODECUSTO', 'SERIAL', 'REGISTRO', 'DATAAQUSIC', '_conferido', '_dataLeitura', 'AUDITOR_STATUS_CONFERENCIA'];
+            const skipKeys = ['id', 'ETIQUETA', 'DESCRICAODOATIVO', 'UNIDADE_OPERACIONAL', 'GRUPO_EMPRESARIAL', 'STATUS', 'DATABAIXA', 'ENDERECO', 'CENTRODECUSTO', 'SERIAL', 'REGISTRO', 'DATAAQUISIC', '_conferido', '_dataLeitura', 'AUDITOR_STATUS_CONFERENCIA'];
             if (skipKeys.includes(key) || !value || typeof value === 'object') return null;
             
             return (

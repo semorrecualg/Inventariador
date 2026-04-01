@@ -29,7 +29,7 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
     VLRAQUISIC: 'Valor de Aquisição',
     DESCRICAODOATIVO: 'Descrição do Ativo',
     SERIAL: 'Número de Série',
-    DATAAQUSIC: 'Data de Aquisição',
+    DATAAQUISIC: 'Data de Aquisição',
     DATABAIXA: 'Data de Baixa',
     CNPJ: 'CNPJ Fornecedor',
     NOMEFORNECEDOR: 'Fornecedor',

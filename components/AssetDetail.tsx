@@ -290,7 +290,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       let value = String(workingAsset[field]);
       
       // Formatações básicas
-      if (field === 'DATAAQUSIC' || field === 'DATABAIXA') value = formatDateBR(value);
+      if (field === 'DATAAQUISIC' || field === 'DATABAIXA') value = formatDateBR(value);
       if (field === 'VLRAQUISIC') value = formatCurrency(value);
       
       lines.push(value);
@@ -325,7 +325,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       title: 'DADOS DE AQUISIÇÃO',
       fields: [
         { key: 'VLRAQUISIC', label: 'VALOR DE AQUISIÇÃO', icon: Wallet },
-        { key: 'DATAAQUSIC', label: 'DATA DE AQUISIÇÃO', icon: Calendar },
+        { key: 'DATAAQUISIC', label: 'DATA DE AQUISIÇÃO', icon: Calendar },
         { key: 'NOTAFISCAL', label: 'NOTA FISCAL (NF)', icon: FileText },
         { key: 'NOMEFORNECEDOR', label: 'FORNECEDOR', icon: User },
         { key: 'CNPJ', label: 'CNPJ FORNECEDOR', icon: Building2 }
@@ -761,7 +761,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               
               <div className="divide-y divide-border">
                 {group.fields.map(({ key, label, icon: Icon }) => {
-                  const isDateField = key === 'DATAAQUSIC' || key === 'DATABAIXA';
+                  const isDateField = key === 'DATAAQUISIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
                   const isCurrency = key === 'VLRAQUISIC' || key.startsWith('_valor') || key.includes('perda');
                   const rawVal = workingAsset[key];

@@ -96,7 +96,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
       const start = advDateStart ? new Date(advDateStart) : null;
       const end = advDateEnd ? new Date(advDateEnd) : null;
       base = base.filter(a => {
-        const ad = parseAssetDate(a.DATAAQUSIC);
+        const ad = parseAssetDate(a.DATAAQUISIC);
         if (!ad) return false;
         if (start && ad < start) return false;
         if (end && ad > end) return false;
@@ -260,7 +260,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
           totalCount={filteredAssets.length}
           itemContent={(index, asset) => {
             const isSelected = selectedIds.has(String(asset.id));
-            const fullDescription = [asset.QT || '1', asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO', asset.SERIAL || 'S/N', formatMonthYearBR(asset.DATAAQUSIC), asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'].join('; ');
+            const fullDescription = [asset.QT || '1', asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO', asset.SERIAL || 'S/N', formatMonthYearBR(asset.DATAAQUISIC), asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'].join('; ');
 
             const isConferido = !!asset._conferido;
             const tagDisplay = asset.TAG_INVENTARIO || (isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR);

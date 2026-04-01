@@ -28,7 +28,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
             <ShieldCheck size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-ink tracking-tight uppercase">GBR Audit <span className="text-accent">v24</span></h1>
+            <h1 className="text-xl font-bold text-ink tracking-tight uppercase">SISTEMA Audit <span className="text-accent">v24</span></h1>
             <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Enterprise Asset Management</p>
           </div>
         </div>
@@ -117,7 +117,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
       {/* Footer Info */}
       <div className="mt-auto pt-8 text-center border-t border-border/50">
         <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em]">
-          GBR Audit System • Gestão de Ativos Imobilizados • 2026
+          AUDITORIA INTELIGENTE • Gestão de Ativos Imobilizados • 2026
         </p>
       </div>
     </div>

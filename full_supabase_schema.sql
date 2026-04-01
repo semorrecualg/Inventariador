@@ -5,27 +5,27 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. Tabela de Ativos (Assets)
 CREATE TABLE IF NOT EXISTS assets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    "GRUPO_EMPRESARIAL" TEXT,
-    "UNIDADE_OPERACIONAL" TEXT,
-    "STATUS" TEXT,
-    "ETIQUETA" TEXT,
-    "QT" DECIMAL(15,2),
-    "DESCRICAODOATIVO" TEXT,
-    "SERIAL" TEXT,
-    "DATAAQUSIC" DATE,
-    "CNPJ" TEXT,
-    "NOMEFORNECEDOR" TEXT,
-    "NOTAFISCAL" TEXT,
-    "ENDERECO" TEXT,
-    "REGISTRO" TEXT,
-    "SUBREG" TEXT,
-    "DATABAIXA" DATE,
-    "CONTACONTABIL" TEXT,
-    "PRIMARYKEY" TEXT,
-    "CENTRODECUSTO" TEXT,
-    "VLRAQUISIC" DECIMAL(15,2),
-    "Sn1_recno" INTEGER,
-    "Sn3_recno" INTEGER,
+    GRUPO_EMPRESARIAL TEXT,
+    UNIDADE_OPERACIONAL TEXT,
+    STATUS TEXT,
+    ETIQUETA TEXT,
+    QT DECIMAL(15,2),
+    DESCRICAODOATIVO TEXT,
+    SERIAL TEXT,
+    DATAAQUISIC DATE,
+    CNPJ TEXT,
+    NOMEFORNECEDOR TEXT,
+    NOTAFISCAL TEXT,
+    ENDERECO TEXT,
+    REGISTRO TEXT,
+    SUBREG TEXT,
+    DATABAIXA DATE,
+    CONTACONTABIL TEXT,
+    PRIMARY KEY_TEXT TEXT, -- PRIMARYKEY is a reserved word in some contexts
+    CENTRODECUSTO TEXT,
+    VLRAQUISIC DECIMAL(15,2),
+    Sn1_recno INTEGER,
+    Sn3_recno INTEGER,
     
     -- Campos de Controle Interno
     _conferido BOOLEAN DEFAULT FALSE,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _auditor TEXT,
     _history JSONB,
     _photoUrl TEXT,
-    _tenantid TEXT NOT NULL,
+    _tenantid TEXT NOT NULL CHECK (_tenantid <> ''),
     _unitid TEXT, -- Unidade Operacional
     _lat DECIMAL(10,8),
     _lng DECIMAL(11,8),
@@ -82,17 +82,17 @@ CREATE OR REPLACE FUNCTION unify_asset_fields() RETURNS TRIGGER AS $$
 BEGIN
     -- Unifica Tenant ID
     IF NEW._tenantid IS NULL OR NEW._tenantid = '' THEN
-        NEW._tenantid := COALESCE(NEW."GRUPO_EMPRESARIAL", '');
+        NEW._tenantid := COALESCE(NEW.GRUPO_EMPRESARIAL, '');
     END IF;
     
     -- Unifica Unit ID
     IF NEW._unitid IS NULL OR NEW._unitid = '' THEN
-        NEW._unitid := COALESCE(NEW."UNIDADE_OPERACIONAL", '');
+        NEW._unitid := COALESCE(NEW.UNIDADE_OPERACIONAL, '');
     END IF;
     
     -- Sincroniza campos legados para compatibilidade reversa
-    IF NEW."UNIDADE_OPERACIONAL" IS NULL OR NEW."UNIDADE_OPERACIONAL" = '' THEN
-        NEW."UNIDADE_OPERACIONAL" := NEW._unitid;
+    IF NEW.UNIDADE_OPERACIONAL IS NULL OR NEW.UNIDADE_OPERACIONAL = '' THEN
+        NEW.UNIDADE_OPERACIONAL := NEW._unitid;
     END IF;
 
     RETURN NEW;
@@ -128,6 +128,20 @@ CREATE TABLE IF NOT EXISTS inventory_config (
     _unitid TEXT, -- Unidade Operacional (opcional para config específica)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. Tabela de Configurações de Unidades (Geofencing)
+CREATE TABLE IF NOT EXISTS unit_configs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL,
+    unit_id TEXT NOT NULL,
+    lat DECIMAL(10,8),
+    lng DECIMAL(11,8),
+    radius_meters INTEGER DEFAULT 500,
+    is_active BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_by TEXT,
+    UNIQUE(tenant_id, unit_id)
 );
 
 -- 3. Tabela de Permissões de Usuário
@@ -178,7 +192,19 @@ CREATE TABLE IF NOT EXISTS asset_groups (
     UNIQUE(group_code, _tenantid)
 );
 
--- 6. Tabela de Classificador NCM
+-- 6. Tabela de Localidades (Legendas e Metadados)
+CREATE TABLE IF NOT EXISTS locations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL, -- O nome do endereço/localidade (ex: MATRIZ)
+    description TEXT,   -- A legenda/descrição (ex: Prédio Administrativo)
+    latitude DECIMAL(10,8),
+    longitude DECIMAL(11,8),
+    _tenantid TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(name, _tenantid)
+);
+
+-- 7. Tabela de Classificador NCM
 CREATE TABLE IF NOT EXISTS ncm_classifiers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ncm_code TEXT NOT NULL,
@@ -285,26 +311,36 @@ ALTER TABLE inventory_campaigns ENABLE ROW LEVEL SECURITY;
 
 -- Funções Auxiliares para RLS
 CREATE OR REPLACE FUNCTION get_auth_tenant() RETURNS TEXT AS $$
-  SELECT (auth.jwt() -> 'user_metadata' ->> 'tenantid')::TEXT;
+  SELECT COALESCE(
+    (auth.jwt() -> 'user_metadata' ->> 'tenantid')::TEXT,
+    (SELECT tenantid FROM user_permissions WHERE id = auth.uid() LIMIT 1)
+  );
 $$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION is_admin() RETURNS BOOLEAN AS $$
-  SELECT (auth.jwt() -> 'user_metadata' ->> 'role')::TEXT IN ('ADMIN', 'MASTER');
+  SELECT 
+    (auth.jwt() -> 'user_metadata' ->> 'role')::TEXT IN ('ADMIN', 'MASTER') OR
+    (auth.jwt() ->> 'email')::TEXT = 'semorr@gmail.com' OR
+    EXISTS (SELECT 1 FROM user_permissions WHERE id = auth.uid() AND (role IN ('ADMIN', 'MASTER') OR is_admin = true));
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION is_master() RETURNS BOOLEAN AS $$
+  SELECT (auth.jwt() -> 'user_metadata' ->> 'role')::TEXT = 'MASTER';
 $$ LANGUAGE sql STABLE;
 
 -- Políticas para ASSETS
 DROP POLICY IF EXISTS "Permitir acesso total" ON assets;
 CREATE POLICY "Tenant Isolation: Assets" ON assets 
 FOR ALL TO authenticated 
-USING (_tenantid = get_auth_tenant())
-WITH CHECK (_tenantid = get_auth_tenant());
+USING (is_master() OR _tenantid = get_auth_tenant())
+WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 -- Políticas para INVENTORY_CONFIG
 DROP POLICY IF EXISTS "Permitir acesso total" ON inventory_config;
 CREATE POLICY "Tenant Isolation: Config" ON inventory_config 
 FOR ALL TO authenticated 
-USING (_tenantid = get_auth_tenant() OR id = 'global_config')
-WITH CHECK (_tenantid = get_auth_tenant());
+USING (is_master() OR _tenantid = get_auth_tenant() OR id = 'global_config')
+WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 -- Políticas para USER_PERMISSIONS
 DROP POLICY IF EXISTS "Permitir acesso total" ON user_permissions;
@@ -319,47 +355,61 @@ WITH CHECK (tenantid = get_auth_tenant() AND is_admin());
 
 -- Políticas para Tabelas Contábeis (Tenant Isolation)
 DROP POLICY IF EXISTS "Permitir acesso total" ON chart_of_accounts;
-CREATE POLICY "Tenant Isolation: Accounts" ON chart_of_accounts FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Accounts" ON chart_of_accounts FOR ALL TO authenticated USING (is_master() OR _tenantid = get_auth_tenant()) WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_groups;
-CREATE POLICY "Tenant Isolation: Groups" ON asset_groups FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Groups" ON asset_groups FOR ALL TO authenticated USING (is_master() OR _tenantid = get_auth_tenant()) WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON ncm_classifiers;
-CREATE POLICY "Tenant Isolation: NCM" ON ncm_classifiers FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: NCM" ON ncm_classifiers FOR ALL TO authenticated USING (is_master() OR _tenantid = get_auth_tenant()) WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_movements;
-CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Movements" ON asset_movements FOR ALL TO authenticated USING (is_master() OR _tenantid = get_auth_tenant()) WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 DROP POLICY IF EXISTS "Permitir acesso total" ON asset_depreciation_history;
-CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (_tenantid = get_auth_tenant()) WITH CHECK (_tenantid = get_auth_tenant());
+CREATE POLICY "Tenant Isolation: Depreciation" ON asset_depreciation_history FOR ALL TO authenticated USING (is_master() OR _tenantid = get_auth_tenant()) WITH CHECK (is_master() OR _tenantid = get_auth_tenant());
 
 -- Políticas para AUDIT_LOGS
 CREATE POLICY "Tenant Isolation: Audit Logs" ON audit_logs 
 FOR SELECT TO authenticated 
-USING (tenant_id = get_auth_tenant() OR (user_email = auth.jwt() ->> 'email'));
+USING (is_master() OR tenant_id = get_auth_tenant() OR (user_email = auth.jwt() ->> 'email'));
 
 CREATE POLICY "System Insert: Audit Logs" ON audit_logs 
 FOR INSERT TO authenticated 
-WITH CHECK (tenant_id = get_auth_tenant() OR tenant_id IS NULL);
+WITH CHECK (is_master() OR tenant_id = get_auth_tenant() OR tenant_id IS NULL);
 
 -- Políticas para ASSET_LOGS
 CREATE POLICY "Tenant Isolation: Asset Logs" ON asset_logs 
 FOR SELECT TO authenticated 
-USING (tenant_id = get_auth_tenant());
+USING (is_master() OR tenant_id = get_auth_tenant());
 
 CREATE POLICY "System Insert: Asset Logs" ON asset_logs 
 FOR INSERT TO authenticated 
-WITH CHECK (tenant_id = get_auth_tenant());
+WITH CHECK (is_master() OR tenant_id = get_auth_tenant());
 
 -- Políticas para INVENTORY_CAMPAIGNS
 CREATE POLICY "Tenant Isolation: Campaigns" ON inventory_campaigns 
 FOR SELECT TO authenticated 
-USING (tenant_id = get_auth_tenant());
+USING (is_master() OR tenant_id = get_auth_tenant());
 
 CREATE POLICY "Admin Manage: Campaigns" ON inventory_campaigns 
 FOR ALL TO authenticated 
-USING (tenant_id = get_auth_tenant() AND is_admin())
-WITH CHECK (tenant_id = get_auth_tenant() AND is_admin());
+USING (is_master() OR (tenant_id = get_auth_tenant() AND is_admin()))
+WITH CHECK (is_master() OR (tenant_id = get_auth_tenant() AND is_admin()));
+
+-- Políticas para UNIT_CONFIGS
+ALTER TABLE unit_configs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Tenant Isolation: Unit Configs" ON unit_configs;
+CREATE POLICY "Tenant Isolation: Unit Configs" ON unit_configs 
+FOR ALL TO authenticated 
+USING (is_master() OR (tenant_id = get_auth_tenant() AND is_admin()))
+WITH CHECK (is_master() OR (tenant_id = get_auth_tenant() AND is_admin()));
+
+DROP POLICY IF EXISTS "Auditor Read: Unit Configs" ON unit_configs;
+CREATE POLICY "Auditor Read: Unit Configs" ON unit_configs 
+FOR SELECT TO authenticated 
+USING (is_master() OR tenant_id = get_auth_tenant());
 
 -- ==========================================
 -- POLÍTICAS DE STORAGE (ASSET PHOTOS)
@@ -375,29 +425,34 @@ WITH CHECK (tenant_id = get_auth_tenant() AND is_admin());
 -- Nota: Estas políticas aplicam-se ao bucket 'asset-photos'
 -- O caminho esperado é: photos/{tenantid}/{assetId}/{filename}
 
--- 1. Permitir Upload (Apenas usuários autenticados no seu próprio tenant)
+-- 1. Permitir Upload (Apenas usuários autenticados no seu próprio tenant ou MASTER)
 -- Supabase Storage usa a tabela storage.objects
 CREATE POLICY "Authenticated Upload: Asset Photos" ON storage.objects 
 FOR INSERT TO authenticated 
 WITH CHECK (
     bucket_id = 'asset-photos' 
     AND (storage.foldername(name))[1] = 'photos'
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
+    AND (is_master() OR (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid'))
 );
 
--- 2. Permitir Leitura (Usuários do mesmo tenant)
+-- 2. Permitir Leitura (Usuários do mesmo tenant ou MASTER)
 CREATE POLICY "Tenant Read: Asset Photos" ON storage.objects 
 FOR SELECT TO authenticated 
 USING (
     bucket_id = 'asset-photos' 
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
+    AND (is_master() OR (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid'))
 );
 
--- 3. Permitir Deleção (Admins do tenant)
+-- 3. Permitir Deleção (Admins do tenant ou MASTER)
 CREATE POLICY "Admin Delete: Asset Photos" ON storage.objects 
 FOR DELETE TO authenticated 
 USING (
     bucket_id = 'asset-photos' 
-    AND (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
-    AND ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER')
+    AND (
+        is_master() 
+        OR (
+            (storage.foldername(name))[2] = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
+            AND ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER')
+        )
+    )
 );

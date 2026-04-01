@@ -15,6 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
+import { safeStringify } from '../services/utils';
 
 interface AuditLogsProps {
   user: User | null;
@@ -98,7 +99,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
   };
 
   const exportLogs = () => {
-    const dataStr = JSON.stringify(filteredLogs, null, 2);
+    const dataStr = safeStringify(filteredLogs, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     const exportFileDefaultName = `audit_logs_${new Date().getTime()}.json`;
     const linkElement = document.createElement('a');
@@ -258,7 +259,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                               <div className="bg-red-50 p-2 rounded border border-red-100">
                                 <p className="text-[8px] font-bold text-red-600 uppercase mb-1">Dados Anteriores</p>
                                 <pre className="text-[10px] font-mono overflow-x-auto">
-                                  {JSON.stringify(log.old_data, null, 2)}
+                                  {safeStringify(log.old_data, 2)}
                                 </pre>
                               </div>
                             )}
@@ -266,7 +267,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                               <div className="bg-green-50 p-2 rounded border border-green-100">
                                 <p className="text-[8px] font-bold text-green-600 uppercase mb-1">Novos Dados</p>
                                 <pre className="text-[10px] font-mono overflow-x-auto">
-                                  {JSON.stringify(log.new_data, null, 2)}
+                                  {safeStringify(log.new_data, 2)}
                                 </pre>
                               </div>
                             )}

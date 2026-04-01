@@ -1,5 +1,5 @@
 {
-  "name": "Inventariado Ativo Imobilizado by GBR",
-  "description": "Solução profissional GBR v24.50 KARDEK para Inventário de Ativo Imobilizado. Inclui Protocolo GBR v24 de eliminação, integração nativa com Protheus (SIGAATF), leitura de QR Code, gestão de usuários, manual de procedimentos operacionais e dashboard de performance global.",
+  "name": "Inventário de Ativo Imobilizado",
+  "description": "Solução profissional v24.50 KARDEK para Inventário de Ativo Imobilizado. Inclui Protocolo de Auditoria, integração nativa com Protheus (SIGAATF), leitura de QR Code, gestão de usuários, manual de procedimentos operacionais e dashboard de performance global.",
   "requestFramePermissions": ["camera", "fullscreen", "geolocation"]
 }

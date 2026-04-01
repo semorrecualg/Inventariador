@@ -21,9 +21,16 @@ import Modal from './Modal';
 interface SyncManagerProps {
   onBack: () => void;
   onSyncSuccess?: () => void;
+  isFieldMode?: boolean;
+  onToggleFieldMode?: () => void;
 }
 
-const SyncManager: React.FC<SyncManagerProps> = ({ onBack, onSyncSuccess }) => {
+const SyncManager: React.FC<SyncManagerProps> = ({ 
+  onBack, 
+  onSyncSuccess, 
+  isFieldMode = false, 
+  onToggleFieldMode 
+}) => {
   const [items, setItems] = useState<SyncQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -122,6 +129,29 @@ const SyncManager: React.FC<SyncManagerProps> = ({ onBack, onSyncSuccess }) => {
 
       {/* Stats & Actions */}
       <div className="p-4 bg-white border-b border-border space-y-4">
+        {/* Field Mode Toggle */}
+        <div className="bg-bg-main p-4 rounded-2xl border border-border flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isFieldMode ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-emerald-50 border-emerald-100 text-emerald-600'}`}>
+              {isFieldMode ? <WifiOff size={20} /> : <Wifi size={20} />}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-ink uppercase tracking-tight">Modo de Campo (Offline)</p>
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">
+                {isFieldMode ? 'Suspensão de Sincronismo Ativa' : 'Sincronismo Automático Ativo'}
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={onToggleFieldMode}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${isFieldMode ? 'bg-rose-500' : 'bg-emerald-500'}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isFieldMode ? 'translate-x-6' : 'translate-x-1'}`}
+            />
+          </button>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-bg-main p-4 rounded-2xl border border-border">
             <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Itens na Fila</p>

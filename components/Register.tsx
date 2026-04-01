@@ -151,7 +151,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
           </div>
         </div>
         <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
-          GBR <span className="text-accent">AUDITORIA</span>
+          SISTEMA <span className="text-accent">AUDITORIA</span>
         </h1>
         <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
           INVENTÁRIO DE ATIVO IMOBILIZADO

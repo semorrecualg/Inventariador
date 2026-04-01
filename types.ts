@@ -77,7 +77,7 @@ export interface Asset {
   QT?: string | number;
   DESCRICAODOATIVO?: string;
   SERIAL?: string;
-  DATAAQUSIC?: string;
+  DATAAQUISIC?: string;
   CNPJ?: string;
   NOMEFORNECEDOR?: string;
   NOTAFISCAL?: string;
@@ -265,7 +265,8 @@ export enum AppScreen {
   BIOMETRIC_REGISTRATION = 'BIOMETRIC_REGISTRATION',
   SYNC_MANAGER = 'SYNC_MANAGER',
   SOFT_DELETE_REPORT = 'SOFT_DELETE_REPORT',
-  IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT'
+  IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT',
+  UNIT_CONFIGURATOR = 'UNIT_CONFIGURATOR'
 }
 
 export enum AppModule {
@@ -306,8 +307,8 @@ export interface SearchFilters {
   ENDERECO: string;
   CONTACONTABIL: string;
   CENTRODECUSTO: string;
-  DATAAQUSIC_START: string;
-  DATAAQUSIC_END: string;
+  DATAAQUISIC_START: string;
+  DATAAQUISIC_END: string;
   Sn1_recno?: string;
   Sn3_recno?: string;
 }
@@ -334,6 +335,9 @@ export interface InventoryState {
   databaseMode: DatabaseMode;
   currentCampaignId?: string;
   hasCompletedOnboarding?: boolean;
+  isFieldMode?: boolean; // Modo de Campo (Offline Forçado)
+  downloadedUnits?: string[]; // Lista de unidades baixadas para uso offline
+  unitConfigs?: UnitConfig[]; // Configurações de geofencing por unidade
 }
 
 export interface SyncQueueItem {
@@ -366,4 +370,16 @@ export interface InventoryCampaign {
   total_assets?: number;
   inventoried_assets?: number;
   divergence_count?: number;
+}
+
+export interface UnitConfig {
+  id?: string;
+  tenant_id: string;
+  unit_id: string; // Nome da unidade (ex: "MATRIZ")
+  lat: number;
+  lng: number;
+  radius_meters: number;
+  is_active: boolean;
+  updated_at?: string;
+  updated_by?: string;
 }

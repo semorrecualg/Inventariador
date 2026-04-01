@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Popup, Polygon, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
@@ -32,7 +32,7 @@ const pendenteIcon = L.icon({
 
 L.Marker.prototype.options.icon = defaultIcon;
 import BackButton from './BackButton';
-import { Layers, Info, X, Filter, Activity, WifiOff, Database } from 'lucide-react';
+import { Layers, Info, X, Filter, Activity, WifiOff, Database, Map as MapIcon, Box, Cloud } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -43,6 +43,7 @@ interface AssetMapProps {
   assets: Asset[];
   onBack: () => void;
   databaseMode: DatabaseMode;
+  onSelectLocation?: (location: string) => void;
 }
 
 // Componente para gerenciar a camada de calor (Heatmap)
@@ -52,16 +53,13 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
   useEffect(() => {
     if (!map) return;
     if (points.length === 0) {
-      // Se não houver pontos, não faz nada ou remove camadas anteriores se necessário
       return;
     }
 
-    // Cria a camada de calor com gradiente técnico de alto contraste
     const heatLayer = L.heatLayer(points as L.LatLngExpression[], {
       radius: 30,
       blur: 20,
       maxZoom: 18,
-      // Gradiente: Azul (Frio/Baixo) -> Ciano -> Verde -> Amarelo -> Laranja -> Vermelho (Quente/Alto)
       gradient: {
         0.2: '#3b82f6', // blue-500
         0.4: '#06b6d4', // cyan-500
@@ -73,7 +71,6 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
 
     heatLayer.addTo(map);
 
-    // Ajusta o zoom para os pontos se houver
     if (points.length > 0) {
       try {
         const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]));
@@ -99,10 +96,10 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
   return null;
 };
 
-const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
+const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSelectLocation }) => {
   const [showInfo, setShowInfo] = useState(true);
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
-  const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE'>('DENSITY');
+  const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA'>('AREA');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [zoomLevel, setZoomLevel] = useState(13);
 
@@ -116,7 +113,6 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
     };
   }, []);
 
-  // Componente para capturar eventos de zoom
   const ZoomHandler = () => {
     const map = useMap();
     useEffect(() => {
@@ -130,7 +126,6 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
     return null;
   };
 
-  // Opções de filtro de origem
   const originOptions = [
     { label: 'TODAS AS ORIGENS', value: 'ALL' },
     { label: 'INVENTÁRIO (1000)', value: TransactionOrigin.INVENTORY },
@@ -138,36 +133,53 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
     { label: 'CONCILIAÇÃO (3000)', value: TransactionOrigin.ACCOUNT_RECONCILIATION },
   ];
 
-  // Filtra os ativos pela origem selecionada
   const filteredAssets = useMemo(() => {
     if (selectedOrigin === 'ALL') return assets;
     return assets.filter(a => a._origemTransacao === selectedOrigin);
   }, [assets, selectedOrigin]);
 
-  // Prepara os pontos para o mapa de calor [lat, lng, intensidade]
+  // Agrupamento por Localidade para cálculo de Área Ocupada
+  const locationGroups = useMemo(() => {
+    const groups: Record<string, { points: [number, number][], totalValue: number, assets: Asset[] }> = {};
+    
+    filteredAssets.forEach(a => {
+      if (a._lat && a._lng) {
+        const loc = a.ENDERECO || 'SEM LOCALIZAÇÃO';
+        if (!groups[loc]) {
+          groups[loc] = { points: [], totalValue: 0, assets: [] };
+        }
+        groups[loc].points.push([a._lat, a._lng]);
+        groups[loc].assets.push(a);
+        
+        const val = typeof a.VLRAQUISIC === 'string' 
+          ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
+          : (Number(a.VLRAQUISIC) || 0);
+        groups[loc].totalValue += (val || 0);
+      }
+    });
+
+    return groups;
+  }, [filteredAssets]);
+
   const heatPoints = useMemo(() => {
     const validAssets = filteredAssets.filter(a => a._lat && a._lng);
     
     if (heatmapMode === 'DENSITY') {
-      // Modo Densidade: Cada item vale 1
       return validAssets.map(a => [a._lat!, a._lng!, 1] as [number, number, number]);
-    } else {
-      // Modo Valor: Intensidade baseada no Valor de Aquisição (Logarítmico)
-      // Usamos Log10 para normalizar a escala entre ativos de R$ 100 e R$ 1.000.000
+    } else if (heatmapMode === 'VALUE') {
       return validAssets.map(a => {
         const rawVal = typeof a.VLRAQUISIC === 'string' 
           ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
           : (Number(a.VLRAQUISIC) || 0);
         
         const val = Math.max(1, rawVal);
-        // Fórmula: log10(valor) -> R$ 100 = 2, R$ 1000 = 3, R$ 1M = 6
         const intensity = Math.log10(val);
         return [a._lat!, a._lng!, intensity] as [number, number, number];
       });
     }
+    return [];
   }, [filteredAssets, heatmapMode]);
 
-  // Calcula o valor total dos ativos filtrados
   const totalValue = useMemo(() => {
     return filteredAssets.reduce((acc, a) => {
       const val = typeof a.VLRAQUISIC === 'string' 
@@ -177,13 +189,13 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
     }, 0);
   }, [filteredAssets]);
 
-  // Calcula o centro do mapa
   const initialCenter = useMemo(() => {
-    if (heatPoints.length === 0) return [-23.5505, -46.6333] as [number, number];
-    const sumLat = heatPoints.reduce((acc, p) => acc + p[0], 0);
-    const sumLng = heatPoints.reduce((acc, p) => acc + p[1], 0);
-    return [sumLat / heatPoints.length, sumLng / heatPoints.length] as [number, number];
-  }, [heatPoints]);
+    const validPoints = filteredAssets.filter(a => a._lat && a._lng);
+    if (validPoints.length === 0) return [-23.5505, -46.6333] as [number, number];
+    const sumLat = validPoints.reduce((acc, p) => acc + p._lat!, 0);
+    const sumLng = validPoints.reduce((acc, p) => acc + p._lng!, 0);
+    return [sumLat / validPoints.length, sumLng / validPoints.length] as [number, number];
+  }, [filteredAssets]);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main overflow-hidden relative">
@@ -191,10 +203,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
       <div className="absolute top-12 left-4 right-4 z-[1000] flex flex-col space-y-3 pointer-events-none">
         <div className="flex items-center justify-between">
           <div className="pointer-events-auto">
-            <BackButton onClick={onBack} label="Voltar" subLabel="Mapa de Calor" />
+            <BackButton onClick={onBack} label="Voltar" subLabel="Mapeamento Geográfico" />
           </div>
 
-          {/* Indicador de Dados Locais (Offline) */}
           {isOffline && (
             <div className="pointer-events-auto bg-amber-500/90 backdrop-blur-md border border-amber-400/50 px-4 py-2 rounded-2xl shadow-xl flex items-center space-x-2 animate-pulse">
               <WifiOff size={14} className="text-white" />
@@ -205,30 +216,38 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
             </div>
           )}
 
-          {/* Seletor de Métrica (Densidade vs Valor) */}
+          {/* Seletor de Métrica */}
           <div className="pointer-events-auto bg-slate-900 border border-white/10 p-1 rounded-2xl shadow-2xl flex items-center">
             <button
+              onClick={() => setHeatmapMode('AREA')}
+              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+                heatmapMode === 'AREA' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <Box size={12} />
+              <span>Área</span>
+            </button>
+            <button
               onClick={() => setHeatmapMode('DENSITY')}
-              className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
                 heatmapMode === 'DENSITY' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
               }`}
             >
               <Layers size={12} />
-              <span>Densidade</span>
+              <span>Calor</span>
             </button>
             <button
               onClick={() => setHeatmapMode('VALUE')}
-              className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
                 heatmapMode === 'VALUE' ? 'bg-accent text-white shadow-lg' : 'text-white/60 hover:text-white'
               }`}
             >
               <Activity size={12} />
-              <span>Valor R$</span>
+              <span>Valor</span>
             </button>
           </div>
         </div>
 
-        {/* Filtro de Origem */}
         <div className="pointer-events-auto self-end bg-white/90 backdrop-blur-md border border-border p-1 rounded-2xl shadow-xl flex items-center space-x-1">
           <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
             <Filter size={14} className="text-accent" />
@@ -264,10 +283,78 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
-          <HeatmapLayer points={heatPoints} />
+          {heatmapMode !== 'AREA' && <HeatmapLayer points={heatPoints} />}
           <ZoomHandler />
           
-          {/* Mostra marcadores individuais apenas em zoom alto (>= 16) */}
+          {/* Visualização de Área Ocupada (Polígonos) */}
+          {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
+            if (data.points.length < 3) {
+              // Se tiver menos de 3 pontos, desenha um círculo ou apenas marcadores
+              return data.points.map((p, i) => (
+                <Marker key={`${loc}-${i}`} position={p} icon={pendenteIcon}>
+                  <Tooltip permanent direction="top" offset={[0, -20]} className="bg-white/90 border-none shadow-lg rounded-lg px-2 py-1">
+                    <span className="text-[8px] font-black text-slate-900 uppercase">{loc}</span>
+                  </Tooltip>
+                  <Popup className="custom-popup">
+                    <div className="p-2 flex flex-col space-y-2">
+                      <span className="text-[10px] font-bold uppercase text-slate-900">{loc}</span>
+                      <button 
+                        onClick={() => onSelectLocation?.(loc)}
+                        className="bg-accent text-white px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest hover:bg-accent/80 transition-all"
+                      >
+                        Iniciar Inventário
+                      </button>
+                    </div>
+                  </Popup>
+                </Marker>
+              ));
+            }
+
+            // Para simplificar sem Turf.js, usamos um polígono que conecta os pontos
+            // Em uma versão real, usaríamos Convex Hull
+            return (
+              <Polygon 
+                key={loc}
+                positions={data.points}
+                pathOptions={{ 
+                  color: '#f27d26', 
+                  fillColor: '#f27d26', 
+                  fillOpacity: 0.2,
+                  weight: 2,
+                  dashArray: '5, 5'
+                }}
+              >
+                <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase tracking-widest mb-1">{loc}</span>
+                    <div className="flex items-center justify-between space-x-4">
+                      <span className="text-[8px] font-bold text-white/60 uppercase">Ativos: {data.assets.length}</span>
+                      <span className="text-[8px] font-bold text-accent uppercase">
+                        {data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                    </div>
+                  </div>
+                </Tooltip>
+                <Popup className="custom-popup">
+                  <div className="p-2 flex flex-col space-y-2">
+                    <span className="text-[10px] font-bold uppercase text-slate-900">{loc}</span>
+                    <div className="flex items-center justify-between text-[8px] font-bold text-slate-500 uppercase mb-1">
+                      <span>Ativos: {data.assets.length}</span>
+                      <span className="text-accent">{data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    </div>
+                    <button 
+                      onClick={() => onSelectLocation?.(loc)}
+                      className="bg-accent text-white px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest hover:bg-accent/80 transition-all"
+                    >
+                      Iniciar Inventário
+                    </button>
+                  </div>
+                </Popup>
+              </Polygon>
+            );
+          })}
+
+          {/* Marcadores Individuais */}
           {zoomLevel >= 16 && filteredAssets.filter(a => a._lat && a._lng).map(a => {
             const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
             const icon = isConferido ? conferidoIcon : pendenteIcon;
@@ -302,7 +389,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
         {showInfo && (
           <div className="absolute bottom-8 left-4 right-4 z-[1000] animate-slideUp">
             <div className="bg-white/90 backdrop-blur-md border border-white/20 rounded-[2rem] p-6 shadow-2xl relative overflow-hidden">
-              <div className={`absolute top-0 left-0 w-full h-1.5 ${heatmapMode === 'VALUE' ? 'bg-accent' : 'bg-blue-500'}`} />
+              <div className={`absolute top-0 left-0 w-full h-1.5 ${
+                heatmapMode === 'VALUE' ? 'bg-accent' : heatmapMode === 'AREA' ? 'bg-emerald-500' : 'bg-blue-500'
+              }`} />
               <button 
                 onClick={() => setShowInfo(false)}
                 className="absolute top-4 right-4 p-2 text-ink-muted hover:text-accent transition-colors"
@@ -311,12 +400,20 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
               </button>
               
               <div className="flex items-center space-x-3 mb-3">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${heatmapMode === 'VALUE' ? 'bg-accent-soft text-accent' : 'bg-blue-100 text-blue-600'}`}>
-                  {heatmapMode === 'VALUE' ? <Activity size={16} /> : <Layers size={16} />}
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                  heatmapMode === 'VALUE' ? 'bg-accent-soft text-accent' : 
+                  heatmapMode === 'AREA' ? 'bg-emerald-100 text-emerald-600' :
+                  'bg-blue-100 text-blue-600'
+                }`}>
+                  {heatmapMode === 'VALUE' ? <Activity size={16} /> : 
+                   heatmapMode === 'AREA' ? <MapIcon size={16} /> :
+                   <Layers size={16} />}
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-ink uppercase tracking-widest">
-                    {heatmapMode === 'VALUE' ? 'Concentração Financeira' : 'Densidade de Ativos'}
+                    {heatmapMode === 'VALUE' ? 'Concentração Financeira' : 
+                     heatmapMode === 'AREA' ? 'Área Ocupada por Localidade' :
+                     'Densidade de Ativos'}
                   </h3>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">
                     {selectedOrigin === 'ALL' ? 'Visão Global' : `Origem: ${selectedOrigin}`}
@@ -327,19 +424,26 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
               <p className="text-[10px] text-ink-muted leading-relaxed mb-4">
                 {heatmapMode === 'VALUE' 
                   ? 'O calor representa o valor acumulado dos ativos. Áreas vermelhas indicam maior concentração de capital imobilizado.'
+                  : heatmapMode === 'AREA'
+                  ? 'Visualização dos polígonos de ocupação baseados na dispersão física dos ativos inventariados por endereço.'
                   : 'O calor representa a quantidade de ativos por m². Áreas vermelhas indicam maior volume de itens físicos.'}
               </p>
               
               <div className="flex items-center justify-between pt-4 border-t border-border/50">
                 <div className="flex flex-col">
                   <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Ativos no Mapa</span>
-                  <span className="text-lg font-bold text-ink tracking-tighter">{heatPoints.length}</span>
+                  <span className="text-lg font-bold text-ink tracking-tighter">{filteredAssets.filter(a => a._lat && a._lng).length}</span>
                 </div>
                 
-                {isOffline && (
+                {databaseMode === DatabaseMode.INTERNAL ? (
                   <div className="flex items-center space-x-1 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
                     <Database size={10} className="text-amber-600" />
                     <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Banco Local</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-1 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                    <Cloud size={10} className="text-emerald-600" />
+                    <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest">Nuvem Real-time</span>
                   </div>
                 )}
 
@@ -351,9 +455,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack }) => {
                 </div>
 
                 <div className="flex flex-col text-right">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Conferidos</span>
+                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Localidades</span>
                   <span className="text-lg font-bold text-emerald-600 tracking-tighter">
-                    {filteredAssets.filter(a => a._conferido).length}
+                    {Object.keys(locationGroups).length}
                   </span>
                 </div>
               </div>

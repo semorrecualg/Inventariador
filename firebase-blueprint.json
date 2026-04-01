@@ -12,7 +12,7 @@
         "DESCRICAO": { "type": "string" },
         "ENDERECO": { "type": "string" },
         "VLRAQUISIC": { "type": "number" },
-        "DATAAQUSIC": { "type": "string" },
+        "DATAAQUISIC": { "type": "string" },
         "_valor_recuperavel": { "type": "number" },
         "_valor_justo": { "type": "number" },
         "_valor_em_uso": { "type": "number" },

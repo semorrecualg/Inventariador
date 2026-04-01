@@ -21,7 +21,7 @@ interface OnboardingWizardProps {
 
 const steps = [
   {
-    title: "Bem-vindo ao GBR v25",
+    title: "Bem-vindo ao Sistema",
     subtitle: "A solução definitiva para o controle de Ativo Imobilizado.",
     description: "Estamos prontos para transformar a forma como sua empresa gerencia o patrimônio. Vamos configurar seu primeiro acesso.",
     icon: <ShieldCheck size={48} className="text-phase-welcome" />,
@@ -56,7 +56,7 @@ const steps = [
   {
     title: "Planos e Investimento",
     subtitle: "Escolha a escala do seu projeto.",
-    description: "O GBR v25 oferece flexibilidade para pequenos inventários ou grandes operações corporativas. Escolha o modelo que melhor se adapta à sua necessidade.",
+    description: "O sistema oferece flexibilidade para pequenos inventários ou grandes operações corporativas. Escolha o modelo que melhor se adapta à sua necessidade.",
     features: [
       "Interno: Gratuito (Teste/Solo)",
       "Plus: Assinatura Mensal (Equipes)",
@@ -74,7 +74,7 @@ const steps = [
     color: "bg-phase-data"
   },
   {
-    title: "Linguagem Visual GBR",
+    title: "Linguagem Visual Profissional",
     subtitle: "Cores que comunicam status.",
     description: "Nosso sistema utiliza uma paleta inteligente para facilitar sua vida no campo. Cada cor tem um significado específico para status e conservação.",
     features: [
@@ -208,7 +208,7 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onCance
       <div className="mt-12 flex items-center space-x-2">
         <Zap size={12} className="text-amber-500" />
         <p className="text-[8px] font-bold text-ink-muted uppercase tracking-[0.3em]">
-          GBR v25 • Enterprise Asset Intelligence
+          AUDITORIA INTELIGENTE • Enterprise Asset Intelligence
         </p>
       </div>
     </div>

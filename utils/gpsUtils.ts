@@ -64,7 +64,7 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
   }
 
   return new Promise((resolve, reject) => {
-    const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+    const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true' || localStorage.getItem('gbr_field_mode') === 'true';
 
     if (!navigator.geolocation) {
       if (isBypassed) {
@@ -119,9 +119,9 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
           break;
       }
       
-      const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+      const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true' || localStorage.getItem('gbr_field_mode') === 'true';
       if (isBypassed) {
-        console.warn('GPS Bypassed: Fornecendo coordenadas de teste (Brasília).');
+        console.warn('GPS Bypassed (Field Mode or Dev Mode): Fornecendo coordenadas de teste (Brasília).');
         const fallbackLoc = { lat: -15.7942, lng: -47.8822, accuracy: 100 };
         lastLocation = fallbackLoc;
         resolve(fallbackLoc);
@@ -138,4 +138,22 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
 
     navigator.geolocation.getCurrentPosition(success, error, options);
   });
+};
+
+/**
+ * Calcula a distância entre dois pontos em metros usando a fórmula de Haversine
+ */
+export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371e3; // Raio da Terra em metros
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
 };

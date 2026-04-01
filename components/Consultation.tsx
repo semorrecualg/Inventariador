@@ -145,7 +145,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     activeFields.forEach(field => {
       let value = String(selectedAssetForQr[field as keyof Asset]);
       
-      if (field === 'DATAAQUSIC' || field === 'DATABAIXA') value = formatDateBR(value);
+      if (field === 'DATAAQUISIC' || field === 'DATABAIXA') value = formatDateBR(value);
       if (field === 'VLRAQUISIC') value = formatCurrency(value);
       
       lines.push(value);
@@ -188,7 +188,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     return assets.filter(asset => {
       // Standard text filters
       const textMatch = Object.entries(committedFilters).every(([key, value]) => {
-        if (!value || key.startsWith('DATAAQUSIC_')) return true;
+        if (!value || key.startsWith('DATAAQUISIC_')) return true;
         const assetValue = String(asset[key as keyof Asset] || '').toUpperCase();
         return assetValue.includes(value.toUpperCase().trim());
       });
@@ -196,19 +196,19 @@ const Consultation: React.FC<ConsultationProps> = ({
       if (!textMatch) return false;
 
       // Date range filter
-      const assetDate = parseAssetDate(asset.DATAAQUSIC);
+      const assetDate = parseAssetDate(asset.DATAAQUISIC);
       if (!assetDate) {
         // If asset has no date but user is filtering by date, it's a mismatch
-        return !committedFilters.DATAAQUSIC_START && !committedFilters.DATAAQUSIC_END;
+        return !committedFilters.DATAAQUISIC_START && !committedFilters.DATAAQUISIC_END;
       }
 
-      if (committedFilters.DATAAQUSIC_START) {
-        const start = new Date(committedFilters.DATAAQUSIC_START);
+      if (committedFilters.DATAAQUISIC_START) {
+        const start = new Date(committedFilters.DATAAQUISIC_START);
         if (!isNaN(start.getTime()) && assetDate < start) return false;
       }
 
-      if (committedFilters.DATAAQUSIC_END) {
-        const end = new Date(committedFilters.DATAAQUSIC_END);
+      if (committedFilters.DATAAQUISIC_END) {
+        const end = new Date(committedFilters.DATAAQUISIC_END);
         if (!isNaN(end.getTime()) && assetDate > end) return false;
       }
 
@@ -242,8 +242,8 @@ const Consultation: React.FC<ConsultationProps> = ({
       ENDERECO: '',
       CONTACONTABIL: '',
       CENTRODECUSTO: '',
-      DATAAQUSIC_START: '',
-      DATAAQUSIC_END: '',
+      DATAAQUISIC_START: '',
+      DATAAQUISIC_END: '',
       Sn1_recno: '',
       Sn3_recno: ''
     });
@@ -384,8 +384,8 @@ const Consultation: React.FC<ConsultationProps> = ({
                   </div>
                   <input 
                     type="date"
-                    value={filters.DATAAQUSIC_START}
-                    onChange={(e) => handleInputChange('DATAAQUSIC_START', e.target.value)}
+                    value={filters.DATAAQUISIC_START}
+                    onChange={(e) => handleInputChange('DATAAQUISIC_START', e.target.value)}
                     className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
                   />
                 </div>
@@ -399,8 +399,8 @@ const Consultation: React.FC<ConsultationProps> = ({
                   </div>
                   <input 
                     type="date"
-                    value={filters.DATAAQUSIC_END}
-                    onChange={(e) => handleInputChange('DATAAQUSIC_END', e.target.value)}
+                    value={filters.DATAAQUISIC_END}
+                    onChange={(e) => handleInputChange('DATAAQUISIC_END', e.target.value)}
                     className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
                   />
                 </div>

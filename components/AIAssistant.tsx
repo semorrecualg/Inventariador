@@ -97,7 +97,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose, user, onAsse
                   <Sparkles size={24} />
                 </div>
                 <div>
-                  <h2 className="text-lg font-black uppercase tracking-widest">GBR AI Concierge</h2>
+                  <h2 className="text-lg font-black uppercase tracking-widest">AI Concierge</h2>
                   <p className="text-[10px] font-bold text-white/70 uppercase tracking-tighter">Assistente Inteligente de Ambiente</p>
                 </div>
               </div>

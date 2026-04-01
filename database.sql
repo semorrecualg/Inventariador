@@ -22,13 +22,14 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- 3. Políticas de Segurança (RLS)
--- Admins podem ver tudo do seu tenant
+-- Admins podem ver tudo do seu tenant ou MASTER pode ver tudo
 CREATE POLICY "Admins can view audit logs of their tenant" 
 ON public.audit_logs 
 FOR SELECT 
 USING (
-    ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
-    AND (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') OR tenant_id IS NULL)
+    ((auth.jwt() -> 'user_metadata') ->> 'role') = 'MASTER'
+    OR (((auth.jwt() -> 'user_metadata') ->> 'role') = 'ADMIN' 
+        AND (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') OR tenant_id IS NULL))
 );
 
 -- Usuários podem ver seus próprios logs
@@ -42,7 +43,8 @@ CREATE POLICY "System can insert audit logs"
 ON public.audit_logs 
 FOR INSERT 
 WITH CHECK (
-    tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') 
+    ((auth.jwt() -> 'user_metadata') ->> 'role') = 'MASTER'
+    OR tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid') 
     OR tenant_id IS NULL -- Permite logs de sistema ou pré-autenticação
 );
 
@@ -149,14 +151,18 @@ ALTER TABLE public.inventory_campaigns ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can view campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR SELECT 
-USING (tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid'));
+USING (
+    ((auth.jwt() -> 'user_metadata') ->> 'role') = 'MASTER'
+    OR tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
+);
 
 CREATE POLICY "Admins can manage campaigns of their tenant" 
 ON public.inventory_campaigns 
 FOR ALL 
 USING (
-    ((auth.jwt() -> 'user_metadata') ->> 'role') IN ('ADMIN', 'MASTER') 
-    AND tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid')
+    ((auth.jwt() -> 'user_metadata') ->> 'role') = 'MASTER'
+    OR (((auth.jwt() -> 'user_metadata') ->> 'role') = 'ADMIN' 
+        AND tenant_id = ((auth.jwt() -> 'user_metadata') ->> 'tenantid'))
 );
 
 -- 4. Adicionar coluna de campanha à tabela de ativos

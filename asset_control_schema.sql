@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS asset_categories (
     account_code TEXT NOT NULL,
     annual_depreciation_rate DECIMAL(5,2) NOT NULL, -- Ex: 10.00 para 10% ao ano
     useful_life_months INTEGER NOT NULL, -- Ex: 120 para 10 anos
-    _tenantid TEXT NOT NULL,
+    _tenantid TEXT NOT NULL CHECK (_tenantid <> ''),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(account_code, _tenantid)
 );
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS asset_movements (
     value DECIMAL(15,2), -- Valor da movimentação
     description TEXT,
     user_email TEXT,
-    _tenantid TEXT NOT NULL,
+    _tenantid TEXT NOT NULL CHECK (_tenantid <> ''),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS asset_depreciation_history (
     depreciation_value DECIMAL(15,2) NOT NULL,
     accumulated_depreciation DECIMAL(15,2) NOT NULL,
     residual_value DECIMAL(15,2) NOT NULL,
-    _tenantid TEXT NOT NULL,
+    _tenantid TEXT NOT NULL CHECK (_tenantid <> ''),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(asset_id, period_month, period_year, _tenantid)
 );

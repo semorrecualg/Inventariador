@@ -1,9 +1,10 @@
 
 import { createClient } from '@supabase/supabase-js';
 import imageCompression from 'browser-image-compression';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
+import { sanitizeForSupabase } from './utils';
 
 export interface ProvisionResult {
   user?: unknown;
@@ -54,9 +55,16 @@ export const logAuditEvent = async (entry: {
   if (!supabase) return;
 
   try {
+    // Sanitiza dados para evitar erros de estrutura circular (HTMLButtonElement, FiberNode, etc)
+    const sanitizedEntry = {
+      ...entry,
+      new_data: entry.new_data ? sanitizeForSupabase(entry.new_data) : undefined,
+      old_data: entry.old_data ? sanitizeForSupabase(entry.old_data) : undefined
+    };
+
     const { error } = await supabase
       .from('audit_logs')
-      .insert([entry]);
+      .insert([sanitizedEntry]);
 
     if (error) {
       console.error('Erro ao registrar log de auditoria:', error);
@@ -80,18 +88,76 @@ export const logAssetChange = async (entry: {
   if (!supabase) return;
 
   try {
+    // Sanitiza dados para evitar erros de estrutura circular
+    const sanitizedEntry = {
+      ...entry,
+      old_data: entry.old_data ? sanitizeForSupabase(entry.old_data) : undefined,
+      new_data: entry.new_data ? sanitizeForSupabase(entry.new_data) : undefined,
+      timestamp: new Date().toISOString()
+    };
+
     const { error } = await supabase
       .from('asset_logs')
-      .insert([{
-        ...entry,
-        timestamp: new Date().toISOString()
-      }]);
+      .insert([sanitizedEntry]);
 
     if (error) {
       console.error('Erro ao registrar log de ativo:', error);
     }
   } catch (err) {
     console.error('Erro inesperado ao registrar log de ativo:', err);
+  }
+};
+
+/**
+ * Busca todas as localidades (legendas/metadados) do tenant
+ */
+export const getLocations = async (tenantid: string) => {
+  if (!supabase) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .from('locations')
+      .select('*')
+      .eq('_tenantid', tenantid);
+      
+    if (error) {
+      console.error('Erro ao buscar localidades:', error);
+      return [];
+    }
+    return data;
+  } catch (err) {
+    console.error('Erro inesperado ao buscar localidades:', err);
+    return [];
+  }
+};
+
+/**
+ * Salva ou atualiza uma localidade
+ */
+export const saveLocation = async (location: {
+  name: string;
+  description?: string;
+  latitude?: number;
+  longitude?: number;
+  _tenantid: string;
+}) => {
+  if (!supabase) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('locations')
+      .upsert([location], { onConflict: 'name, _tenantid' })
+      .select()
+      .single();
+      
+    if (error) {
+      console.error('Erro ao salvar localidade:', error);
+      throw error;
+    }
+    return data;
+  } catch (err) {
+    console.error('Erro inesperado ao salvar localidade:', err);
+    throw err;
   }
 };
 
@@ -213,7 +279,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
 
-    const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+    const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
     const tenantid = normalizeValue(profile.tenantid || metadata?.tenantid || '');
     const unitid = normalizeValue(profile.unitid || metadata?.unitid || '');
     
@@ -256,7 +322,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   };
 
   const defaultTenant = normalizeValue(metadata?.tenantid || '');
-  const is_admin = metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com') || false;
+  const is_admin = metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
   
   console.log(`[Supabase] Valores iniciais para novo perfil:`, { is_admin, defaultTenant });
 
@@ -439,32 +505,54 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       .upsert(batch, { onConflict: 'id' });
 
     if (error) {
-      // Se o erro for coluna inexistente (_is_deleted), tentamos sem ela
-      if (error.code === '42703' && error.message?.includes('_is_deleted')) {
-        console.warn('[Supabase] Coluna _is_deleted não encontrada. Tentando upsert sem ela...');
-        const batchWithoutDeletedFlag = batch.map((a) => {
-          const rest = { ...a as Record<string, unknown> };
-          delete rest._is_deleted;
-          return rest;
-        });
-        const { error: retryError } = await supabase
-          .from('assets')
-          .upsert(batchWithoutDeletedFlag, { onConflict: 'id' });
+      // Se o erro for coluna inexistente (42703), tentamos identificar e remover a coluna
+      if (error.code === '42703') {
+        // Regex mais flexível para capturar o nome da coluna em diferentes formatos de erro (com ou sem schema)
+        const missingColumnMatch = error.message?.match(/column "(.+)" of relation ".+" does not exist/);
+        const missingColumn = missingColumnMatch ? missingColumnMatch[1] : null;
         
-        if (retryError) {
-          console.error('Erro ao sincronizar ativos (retry sem _is_deleted):', retryError);
-          throw retryError;
+        if (missingColumn) {
+          console.warn(`[Supabase] Coluna "${missingColumn}" não encontrada no banco. Tentando upsert sem ela...`);
+          const batchWithoutColumn = batch.map((a) => {
+            const rest = { ...a as Record<string, unknown> };
+            delete rest[missingColumn];
+            return rest;
+          });
+          
+          const { error: retryError } = await supabase
+            .from('assets')
+            .upsert(batchWithoutColumn, { onConflict: 'id' });
+            
+          if (retryError) {
+            // Se falhar de novo, pode ser outra coluna. Recursividade simples ou log de erro.
+            console.error(`[Supabase] Falha no retry de sincronização (coluna ${missingColumn}):`, retryError);
+            throw retryError;
+          }
+          continue; // Sucesso no retry, vai para o próximo lote
+        } else if (error.message?.includes('_is_deleted')) {
+          // Fallback para _is_deleted se o match do regex falhar
+          console.warn('[Supabase] Coluna _is_deleted não encontrada. Tentando upsert sem ela...');
+          const batchWithoutDeletedFlag = batch.map((a) => {
+            const rest = { ...a as Record<string, unknown> };
+            delete rest._is_deleted;
+            return rest;
+          });
+          const { error: retryError } = await supabase
+            .from('assets')
+            .upsert(batchWithoutDeletedFlag, { onConflict: 'id' });
+          if (retryError) throw retryError;
+          continue;
         }
-        continue; // Sucesso no retry, vai para o próximo lote
       }
-
+      
+      console.error('Erro ao sincronizar ativos com o Supabase:', error);
+      
       // Handle network errors gracefully
       if (error.message === 'Failed to fetch') {
         console.warn('Supabase sync failed: Network error or invalid URL.');
         throw new Error('Erro de conexão');
       }
-
-      console.error('Error syncing assets to Supabase:', error);
+      
       throw error;
     }
   }
@@ -731,7 +819,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
-      const is_admin = role === 'ADMIN' || role === 'MASTER' || (email.toLowerCase() === 'semorr@gmail.com');
+      const is_admin = role === 'ADMIN' || role === 'MASTER' || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br');
       const normTenantId = normalizeValue(tenantid || '');
       const normUnitId = normalizeValue(unitid || '');
 
@@ -1024,12 +1112,6 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
   }
 };
 
-/**
- * Busca todo o inventário (ativos e configuração) do Supabase
- */
-/**
- * Busca todo o inventário (ativos e configuração) do Supabase
- */
 export const fetchFullInventory = async (tenantid?: string | string[], unitid?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
@@ -1037,66 +1119,94 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
-    // Filtramos ativos deletados (_is_deleted != true) se a coluna existir
-    let assetsQuery = supabase.from('assets').select('*').or('_is_deleted.is.null,_is_deleted.eq.false');
+    let assets: Asset[] = [];
+    let assetsQuery = supabase.from('assets').select('*');
+    
     if (tenantid) {
-      if (Array.isArray(tenantid)) {
-        assetsQuery = assetsQuery.in('_tenantid', tenantid);
-      } else {
-        assetsQuery = assetsQuery.eq('_tenantid', tenantid);
-      }
-    } else {
-      // Se tenantid for undefined ou '', buscamos tudo (global)
-      console.log('>>> [Supabase] Buscando ativos sem filtro de tenant (Global)');
+      if (Array.isArray(tenantid)) assetsQuery = assetsQuery.in('_tenantid', tenantid);
+      else assetsQuery = assetsQuery.eq('_tenantid', tenantid);
     }
     
     if (unitid && unitid !== '') {
       const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
-      // Busca flexível: tenta bater com _unitid ou UNIDADE_OPERACIONAL
-      assetsQuery = assetsQuery.or(`_unitid.eq."${cleanUnitId}",UNIDADE_OPERACIONAL.eq."${cleanUnitId}"`);
+      assetsQuery = assetsQuery.eq('_unitid', cleanUnitId);
     }
 
-    let assets: Asset[] = [];
     const { data: initialAssets, error: assetsError } = await assetsQuery;
-    assets = (initialAssets as unknown as Asset[]) || [];
+    
+    if (!assetsError) {
+      assets = (initialAssets as unknown as Asset[]) || [];
+    } else {
+      // Tratamento de erros de schema ou colunas
+      if (assetsError.code === '3F000' || assetsError.code === '42P01') {
+        const errorMsg = `[CRÍTICO] O ambiente "${supabaseSchema}" não está configurado no Supabase. Execute o script de provisionamento de schema.`;
+        console.error(errorMsg, assetsError);
+        throw new Error(errorMsg);
+      }
 
-    if (assetsError) {
-      // Se o erro for coluna inexistente (_is_deleted), tentamos sem ela
-      if (assetsError.code === '42703' && assetsError.message?.includes('_is_deleted')) {
-        let retryQuery = supabase.from('assets').select('*');
+      if (assetsError.code === '42703') {
+        console.warn(`[Supabase] Erro de coluna em fetchFullInventory (schema "${supabaseSchema}"). Tentando fallbacks...`);
+        
+        // Fallback 1: Tenta UNIDADE_OPERACIONAL
+        let fallbackQuery = supabase.from('assets').select('*');
         if (tenantid) {
-          if (Array.isArray(tenantid)) {
-            retryQuery = retryQuery.in('_tenantid', tenantid);
-          } else {
-            retryQuery = retryQuery.eq('_tenantid', tenantid);
-          }
+          if (Array.isArray(tenantid)) fallbackQuery = fallbackQuery.in('_tenantid', tenantid);
+          else fallbackQuery = fallbackQuery.eq('_tenantid', tenantid);
         }
         if (unitid && unitid !== '') {
           const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
-          retryQuery = retryQuery.or(`_unitid.eq."${cleanUnitId}",UNIDADE_OPERACIONAL.eq."${cleanUnitId}"`);
+          fallbackQuery = fallbackQuery.eq('UNIDADE_OPERACIONAL', cleanUnitId);
         }
         
-        const { data: retryAssets, error: retryError } = await retryQuery;
-        if (retryError) {
-          console.error('Erro ao buscar ativos do Supabase (retry):', retryError);
-          throw retryError;
+        const { data: fallbackData, error: fallbackError } = await fallbackQuery;
+        
+        if (!fallbackError) {
+          assets = (fallbackData as unknown as Asset[]) || [];
+        } else if (fallbackError.code === '42703') {
+          // Fallback 2: Tenta unidade_operacional (lowercase)
+          console.warn('[Supabase] Tentando unidade_operacional (lowercase)...');
+          let finalQuery = supabase.from('assets').select('*');
+          if (tenantid) {
+            if (Array.isArray(tenantid)) finalQuery = finalQuery.in('_tenantid', tenantid);
+            else finalQuery = finalQuery.eq('_tenantid', tenantid);
+          }
+          if (unitid && unitid !== '') {
+            const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
+            finalQuery = finalQuery.eq('unidade_operacional', cleanUnitId);
+          }
+          const { data: finalData, error: finalError } = await finalQuery;
+          
+          if (!finalError) {
+            assets = (finalData as unknown as Asset[]) || [];
+          } else if (finalError.code === '42703') {
+            // Fallback 3: Busca tudo sem filtro de unidade
+            console.warn('[Supabase] Fallback final: buscando tudo sem filtros de unidade...');
+            let allQuery = supabase.from('assets').select('*');
+            if (tenantid) {
+              if (Array.isArray(tenantid)) allQuery = allQuery.in('_tenantid', tenantid);
+              else allQuery = allQuery.eq('_tenantid', tenantid);
+            }
+            const { data: allData, error: allError } = await allQuery;
+            if (allError) throw allError;
+            assets = (allData as unknown as Asset[]) || [];
+          } else {
+            throw finalError;
+          }
+        } else {
+          throw fallbackError;
         }
-        // Continue para buscar a configuração
-        assets = retryAssets || [];
       } else {
         console.error('Erro ao buscar ativos do Supabase:', assetsError);
         throw assetsError;
       }
     }
 
-    // 2. Busca a configuração (pode ser global ou por tenant)
+    // 2. Busca a configuração
     const configId = tenantid 
       ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
       : 'global_config';
     
     let config = {};
-    
-    // Busca resiliente: tenta select('*')
     const { data: configData, error: configError } = await supabase
       .from('inventory_config')
       .select('*')
@@ -1108,20 +1218,16 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     } else if (configData) {
       config = configData;
     } else {
-      // Fallback para global_config se a configuração específica não existir
       const { data: globalConfigData } = await supabase
         .from('inventory_config')
         .select('*')
         .eq('id', 'global_config')
         .maybeSingle();
-      
-      if (globalConfigData) {
-        config = globalConfigData;
-      }
+      if (globalConfigData) config = globalConfigData;
     }
 
     return {
-      assets: (assets as Asset[]) || [],
+      assets: assets,
       config: config as Partial<InventoryState>
     };
   } catch (err) {
@@ -1207,30 +1313,60 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     // 1. Limpa os ativos
     let query = supabase.from('assets').delete({ count: 'exact' });
     
-    // Filtro por Tenant (Segurança RLS)
-    if (tenantid) {
-      query = query.eq('_tenantid', tenantid);
-    }
-    
-    if (companyToClear) {
-      if (Array.isArray(companyToClear)) {
-        const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
-        // Tenta filtrar por ambas as colunas para garantir compatibilidade durante a transição
-        query = query.or(`UNIDADE_OPERACIONAL.in.(${normalizedCompanies.join(',')})`);
+    try {
+      if (tenantid) query = query.eq('_tenantid', tenantid);
+      
+      if (companyToClear) {
+        if (Array.isArray(companyToClear)) {
+          const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
+          query = query.in('_unitid', normalizedCompanies);
+        } else {
+          const normalized = companyToClear.toUpperCase().trim();
+          query = query.eq('_unitid', normalized);
+        }
       } else {
-        const normalized = companyToClear.toUpperCase().trim();
-        query = query.or(`UNIDADE_OPERACIONAL.eq.${normalized}`);
+        // Se não houver empresa específica, garante que não deletamos tudo acidentalmente se não houver tenantid
+        if (!tenantid) {
+          query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+        }
       }
-    } else {
-      // Limpeza total (se houver tenantid, o filtro acima já limita ao tenant)
-      if (!tenantid) {
-        query = query.neq('id', '00000000-0000-0000-0000-000000000000');
-      }
+    } catch (e) {
+      console.warn('[Supabase] Erro ao construir query de limpeza:', e);
     }
 
     const { error: assetsError, count } = await query;
 
     if (assetsError) {
+      // Se o erro for coluna inexistente (_unitid ou _tenantid), tentamos fallbacks
+      if (assetsError.code === '42703') {
+        console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallbacks...');
+        let retryQuery = supabase.from('assets').delete({ count: 'exact' });
+        
+        // Se houver empresa, tenta UNIDADE_OPERACIONAL
+        if (companyToClear) {
+          if (Array.isArray(companyToClear)) {
+            const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
+            retryQuery = retryQuery.or(`UNIDADE_OPERACIONAL.in.(${normalizedCompanies.join(',')}),unidade_operacional.in.(${normalizedCompanies.join(',')})`);
+          } else {
+            const normalized = companyToClear.toUpperCase().trim();
+            retryQuery = retryQuery.or(`UNIDADE_OPERACIONAL.eq.${normalized},unidade_operacional.eq.${normalized}`);
+          }
+        } else if (!tenantid) {
+           retryQuery = retryQuery.neq('id', '00000000-0000-0000-0000-000000000000');
+        }
+        
+        const { error: retryError, count: retryCount } = await retryQuery;
+        if (retryError) {
+          // Se ainda falhar, tenta o delete mais radical (sem filtros de coluna)
+          console.warn('[Supabase] Fallback falhou. Tentando delete radical...');
+          const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
+          if (finalError) throw finalError;
+          console.log(`[Supabase] Limpeza radical concluída. Afetados: ${finalCount}`);
+          return;
+        }
+        console.log(`[Supabase] Limpeza concluída via fallback. Afetados: ${retryCount}`);
+        return;
+      }
       console.error('Erro ao limpar ativos na nuvem:', assetsError);
       throw assetsError;
     }
@@ -1511,6 +1647,23 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
 };
 
 /**
+ * Exclui uma campanha (apenas para administradores)
+ */
+export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  if (!supabase) return false;
+  const { error } = await supabase
+    .from('inventory_campaigns')
+    .delete()
+    .eq('id', campaignId);
+  
+  if (error) {
+    console.error('Erro ao excluir campanha:', error);
+    return false;
+  }
+  return true;
+};
+
+/**
  * Busca estatísticas de uma campanha
  */
 export const fetchCampaignStats = async (campaignId: string, tenantid: string) => {
@@ -1546,5 +1699,63 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
   } catch (err) {
     console.error('Erro ao buscar estatísticas da campanha:', err);
     return null;
+  }
+};
+
+/**
+ * Busca as configurações de geofencing das unidades de um tenant
+ */
+export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
+  if (!supabase) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .from('unit_configs')
+      .select('*')
+      .eq('tenant_id', tenantid);
+    
+    if (error) {
+      // Se a tabela não existir ainda ou não estiver no cache, retorna vazio silenciosamente
+      if (error.code === '42P01' || error.code === 'PGRST205') return [];
+      console.error('Erro ao buscar configurações de unidades:', error);
+      return [];
+    }
+    
+    return (data || []) as UnitConfig[];
+  } catch (err) {
+    console.error('Erro inesperado ao buscar configurações de unidades:', err);
+    return [];
+  }
+};
+
+/**
+ * Salva ou atualiza a configuração de geofencing de uma unidade
+ */
+export const saveUnitConfig = async (config: UnitConfig): Promise<boolean> => {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('unit_configs')
+      .upsert([config], { onConflict: 'tenant_id,unit_id' });
+    
+    if (error) {
+      console.error('Erro ao salvar configuração de unidade:', error);
+      return false;
+    }
+    
+    // Log de Auditoria
+    await logAuditEvent({
+      user_email: config.updated_by || 'system',
+      action: 'UPDATE_UNIT_GEOFENCING',
+      table_name: 'unit_configs',
+      details: `Configuração de geofencing atualizada para unidade: ${config.unit_id}`,
+      tenant_id: config.tenant_id
+    });
+    
+    return true;
+  } catch (err) {
+    console.error('Erro inesperado ao salvar configuração de unidade:', err);
+    return false;
   }
 };

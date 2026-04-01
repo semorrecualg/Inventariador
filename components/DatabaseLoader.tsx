@@ -96,27 +96,35 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
       const rawHeaders = rawRows[headerIdx].map(h => String(h || '').trim().toUpperCase());
       
-      // Mapeamento v25.00 - Ordem Estrita: GRUPO_EMPRESARIAL;UNIDADE_OPERACIONAL;STATUS;ETIQUETA;QT;DESCRICAODOATIVO;SERIAL;DATAAQUSIC;CNPJ;NOMEFORNECEDOR;NOTAFISCAL;ENDERECO;REGISTRO;SUBREG;DATABAIXA;CONTACONTABIL;PRIMARYKEY;CENTRODECUSTO;VLRAQUISIC;SN1_RECNO;SN3_RECNO
+      // Mapeamento v25.00 - Ordem Estrita: GRUPO_EMPRESARIAL;UNIDADE_OPERACIONAL;STATUS;ETIQUETA;QT;DESCRICAO;SERIAL;DATA_AQ;CNPJ;FORNECEDOR;NF;ENDERECO;REGISTRO;SUBREG;DATA_BAIXA;CONTA;PK;CUSTO;VALOR;SN1_RECNO;SN3_RECNO
+      const findIdx = (names: string[]) => {
+        for (const name of names) {
+          const idx = rawHeaders.indexOf(name.toUpperCase());
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+
       const m = {
-        GRUPO_EMPRESARIAL: rawHeaders.indexOf('GRUPO_EMPRESARIAL'),
-        UNIDADE_OPERACIONAL: rawHeaders.indexOf('UNIDADE_OPERACIONAL'),
-        STATUS: rawHeaders.indexOf('STATUS'),
-        ETIQUETA: rawHeaders.indexOf('ETIQUETA'),
-        QT: rawHeaders.indexOf('QT'),
-        DESCRICAO: rawHeaders.indexOf('DESCRICAODOATIVO'),
-        SERIAL: rawHeaders.indexOf('SERIAL'),
-        DATA_AQ: rawHeaders.indexOf('DATAAQUSIC'),
-        CNPJ: rawHeaders.indexOf('CNPJ'),
-        FORNECEDOR: rawHeaders.indexOf('NOMEFORNECEDOR'),
-        NF: rawHeaders.indexOf('NOTAFISCAL'),
-        ENDERECO: rawHeaders.indexOf('ENDERECO'),
-        REGISTRO: rawHeaders.indexOf('REGISTRO'),
-        SUBREG: rawHeaders.indexOf('SUBREG'),
-        DATA_BAIXA: rawHeaders.indexOf('DATABAIXA'),
-        CONTA: rawHeaders.indexOf('CONTACONTABIL'),
-        PK: rawHeaders.indexOf('PRIMARYKEY'),
-        CUSTO: rawHeaders.indexOf('CENTRODECUSTO'),
-        VALOR: rawHeaders.indexOf('VLRAQUISIC'),
+        GRUPO_EMPRESARIAL: findIdx(['GRUPO_EMPRESARIAL']),
+        UNIDADE_OPERACIONAL: findIdx(['UNIDADE_OPERACIONAL']),
+        STATUS: findIdx(['STATUS']),
+        ETIQUETA: findIdx(['ETIQUETA']),
+        QT: findIdx(['QT']),
+        DESCRICAO: findIdx(['DESCRICAO', 'DESCRICAODOATIVO']),
+        SERIAL: findIdx(['SERIAL']),
+        DATA_AQ: findIdx(['DATA_AQ', 'DATAAQUISIC']),
+        CNPJ: findIdx(['CNPJ']),
+        FORNECEDOR: findIdx(['FORNECEDOR', 'NOMEFORNECEDOR']),
+        NF: findIdx(['NF', 'NOTAFISCAL']),
+        ENDERECO: findIdx(['ENDERECO']),
+        REGISTRO: findIdx(['REGISTRO']),
+        SUBREG: findIdx(['SUBREG']),
+        DATA_BAIXA: findIdx(['DATA_BAIXA', 'DATABAIXA']),
+        CONTA: findIdx(['CONTA', 'CONTACONTABIL']),
+        PK: findIdx(['PK', 'PRIMARYKEY']),
+        CUSTO: findIdx(['CUSTO', 'CENTRODECUSTO']),
+        VALOR: findIdx(['VALOR', 'VLRAQUISIC']),
         RECNO: rawHeaders.indexOf('SN1_RECNO') !== -1 ? rawHeaders.indexOf('SN1_RECNO') : rawHeaders.indexOf('RECNO'),
         RECNO3: rawHeaders.indexOf('SN3_RECNO') !== -1 ? rawHeaders.indexOf('SN3_RECNO') : -1
       };
@@ -164,32 +172,41 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
       const finalAssets: Asset[] = [];
       const companyCounts: Record<string, number> = {};
+      let missingTenantRows = 0;
 
       rawRows.slice(headerIdx + 1).forEach((row) => {
         if (!row.some(c => String(c).trim() !== "")) return;
 
         const status = cleanDisplayValue(row[m.STATUS]);
+        const isAtivo = status.includes('ATIVO');
+
+        // REGRA DE OURO v25: Somente Importamos ATIVOS
+        if (!isAtivo) return;
+
+        const grupoEmpresarial = cleanDisplayValue(row[m.GRUPO_EMPRESARIAL]);
+        
+        // REGRA DE OURO PARA tenantid: O campo GRUPO_EMPRESARIAL é OBRIGATÓRIO
+        if (!grupoEmpresarial || grupoEmpresarial.trim() === "" || grupoEmpresarial.toUpperCase() === "DEFAULT" || grupoEmpresarial.toUpperCase() === "NULL") {
+          missingTenantRows++;
+          return; // Skip this row for now, but we will fail the whole process below
+        }
+
         const etiqueta = cleanDisplayValue(row[m.ETIQUETA]);
         const conta = cleanDisplayValue(row[m.CONTA]);
         const dataBaixa = cleanDisplayValue(row[m.DATA_BAIXA]);
         
-        const isAtivo = status.includes('ATIVO');
-
-        // REGRA DE OURO GBR v25: Somente Importamos ATIVOS
-        if (!isAtivo) return;
-
         // Filtro de Contas Excluídas (Parametrizado)
         if (excludedAccounts?.includes(conta)) return;
 
         const asset: Asset = { id: generateUUID() };
-        asset.GRUPO_EMPRESARIAL = cleanDisplayValue(row[m.GRUPO_EMPRESARIAL]);
+        asset.GRUPO_EMPRESARIAL = grupoEmpresarial;
         asset.UNIDADE_OPERACIONAL = cleanDisplayValue(row[m.UNIDADE_OPERACIONAL]) || "GERAL";
         asset.STATUS = status || "ATIVO";
         asset.ETIQUETA = etiqueta;
         asset.QT = cleanDisplayValue(row[m.QT]) || "1";
         asset.DESCRICAODOATIVO = cleanDisplayValue(row[m.DESCRICAO]);
         asset.SERIAL = cleanDisplayValue(row[m.SERIAL]);
-        asset.DATAAQUSIC = cleanDisplayValue(row[m.DATA_AQ]);
+        asset.DATAAQUISIC = cleanDisplayValue(row[m.DATA_AQ]);
         asset.CNPJ = cleanDisplayValue(row[m.CNPJ]);
         asset.NOMEFORNECEDOR = cleanDisplayValue(row[m.FORNECEDOR]);
         asset.NOTAFISCAL = cleanDisplayValue(row[m.NF]);
@@ -219,13 +236,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
         asset._plaquetaMaster = asset.ETIQUETA || "S/ ETQ";
         asset._localMaster = asset.ENDERECO;
+        asset._localMaster = asset.ENDERECO;
         asset._descricaoMaster = asset.DESCRICAODOATIVO || "SEM DESCRICAO";
         asset._empresaNormalizada = asset.UNIDADE_OPERACIONAL;
         asset._baseSinteticaLoc = Array.from(baseSinteticaLoc);
+        asset._tenantid = asset.GRUPO_EMPRESARIAL; // Garantir que o campo interno esteja preenchido
 
         finalAssets.push(asset);
         companyCounts[asset.UNIDADE_OPERACIONAL] = (companyCounts[asset.UNIDADE_OPERACIONAL] || 0) + 1;
       });
+
+      // VALIDAÇÃO DA REGRA DE OURO: Se houver linhas sem GRUPO_EMPRESARIAL, abortamos tudo
+      if (missingTenantRows > 0) {
+        throw new Error(`REGRA DE OURO VIOLADA: Foram encontradas ${missingTenantRows} linhas sem o campo 'GRUPO_EMPRESARIAL' preenchido. O preenchimento deste campo é obrigatório para garantir a segurança e isolamento dos dados entre empresas. Por favor, corrija a planilha e tente novamente.`);
+      }
 
       rawExtractedAssetsRef.current = finalAssets;
       const companiesList = Object.keys(companyCounts).sort().map(name => ({ name, count: companyCounts[name] }));
@@ -364,7 +388,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               <span className="text-[10px] font-bold uppercase tracking-widest">Requisito de Arquivo</span>
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              O sistema exige arquivos <strong>Excel (.xls ou .xlsx)</strong> seguindo o modelo oficial GBR v25.
+              O sistema exige arquivos <strong>Excel (.xls ou .xlsx)</strong> seguindo o modelo oficial v25.
             </p>
           </div>
 
@@ -376,20 +400,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               2: STATUS<br/>
               3: ETIQUETA<br/>
               4: QT<br/>
-              5: DESCRICAODOATIVO<br/>
+              5: DESCRICAO<br/>
               6: SERIAL<br/>
-              7: DATAAQUSIC<br/>
+              7: DATA_AQ<br/>
               8: CNPJ<br/>
-              9: NOMEFORNECEDOR<br/>
-              10: NOTAFISCAL<br/>
+              9: FORNECEDOR<br/>
+              10: NF<br/>
               11: ENDERECO<br/>
               12: REGISTRO<br/>
               13: SUBREG<br/>
-              14: DATABAIXA<br/>
-              15: CONTACONTABIL<br/>
-              16: PRIMARYKEY<br/>
-              17: CENTRODECUSTO<br/>
-              18: VLRAQUISIC<br/>
+              14: DATA_BAIXA<br/>
+              15: CONTA<br/>
+              16: PK<br/>
+              17: CUSTO<br/>
+              18: VALOR<br/>
               19: SN1_RECNO<br/>
               20: SN3_RECNO
             </div>
@@ -397,11 +421,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
           <button 
             onClick={() => {
-              const headers = ['GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAODOATIVO', 'SERIAL', 'DATAAQUSIC', 'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'REGISTRO', 'SUBREG', 'DATABAIXA', 'CONTACONTABIL', 'PRIMARYKEY', 'CENTRODECUSTO', 'VLRAQUISIC', 'SN1_RECNO', 'SN3_RECNO'];
+              const headers = ['GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'];
               const ws = XLSX.utils.aoa_to_sheet([headers]);
               const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, "Template_GBR_v25");
-              XLSX.writeFile(wb, "Template_Carga_Expert_GBR_v25.xlsx");
+              XLSX.utils.book_append_sheet(wb, ws, "Template_v25");
+              XLSX.writeFile(wb, "Template_Carga_Expert_v25.xlsx");
             }}
             className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold uppercase tracking-widest text-[10px] flex items-center justify-center space-x-2"
           >
@@ -428,19 +452,62 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         {step === 'SOURCE' && (
           <div className="space-y-6">
             <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
-               <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v24.50</span>
+               <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v25.00</span>
                <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-1.5 mb-2">Reestruturação</h3>
                <p className="text-[10px] font-bold text-slate-400 leading-relaxed uppercase tracking-widest">
-                Suporte nativo para Centro de Custo, Valor e Fornecedor. Utilize arquivos <strong>.xls</strong> com 18 colunas.
+                Suporte nativo para Centro de Custo, Valor e Fornecedor. Utilize arquivos <strong>Excel</strong> com 21 colunas.
                </p>
             </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
               <div className="w-16 h-16 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={32} /></div>
               <div className="text-center">
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Carregar Base GBR</h3>
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Carregar Base de Dados</h3>
                 <p className="text-[9px] font-bold text-slate-400 uppercase mt-1.5 tracking-widest">Excel / CSV Autodetect</p>
               </div>
             </button>
+
+            <button 
+              onClick={() => {
+                const headers = [
+                  'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 
+                  'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 
+                  'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 
+                  'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'
+                ];
+                const exampleData = [{
+                  GRUPO_EMPRESARIAL: 'EXEMPLO_SA',
+                  UNIDADE_OPERACIONAL: 'MATRIZ',
+                  STATUS: 'ATIVO',
+                  ETIQUETA: 'PAT-0001',
+                  QT: 1,
+                  DESCRICAO: 'NOTEBOOK DELL LATITUDE',
+                  SERIAL: 'ABC123XYZ',
+                  DATA_AQ: '2023-01-15',
+                  CNPJ: '00.000.000/0001-00',
+                  FORNECEDOR: 'DELL BRASIL',
+                  NF: '12345',
+                  ENDERECO: 'SALA 101 - TI',
+                  REGISTRO: 'REG-001',
+                  SUBREG: '00',
+                  DATA_BAIXA: '',
+                  CONTA: '1.02.01.01.01',
+                  PK: 'ERP-001',
+                  CUSTO: '10101',
+                  VALOR: 5500.00,
+                  SN1_RECNO: 1,
+                  SN3_RECNO: 1
+                }];
+                const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "CargaExpert");
+                XLSX.writeFile(wb, "Matriz_Carga_Expert_v25.xls");
+              }}
+              className="w-full py-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl border border-slate-200 flex items-center justify-center space-x-2 transition-all group"
+            >
+              <Download size={16} className="group-hover:translate-y-0.5 transition-transform" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Baixar Planilha Matriz</span>
+            </button>
+
             <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={(e) => {
                const f = e.target.files?.[0];
                if (f) {

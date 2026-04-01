@@ -151,7 +151,7 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
     asset.QT || '1',
     asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
     asset.SERIAL || 'S/N',
-    formatMonthYearBR(asset.DATAAQUSIC),
+    formatMonthYearBR(asset.DATAAQUISIC),
     asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'
   ].join('; ');
 
