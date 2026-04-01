@@ -398,6 +398,35 @@ const App: React.FC = () => {
     } catch { return []; }
   });
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // Monitor de Autenticação Supabase v24.50
+  useEffect(() => {
+    if (!supabase) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string) => {
+      console.log(`[Supabase] Evento de Auth: ${event}`);
+      
+      // Se o token de atualização falhar, forçamos o logout para evitar loops de erro
+      if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED') {
+        const currentUser = localStorage.getItem('app_current_user');
+        if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
+          console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
+          setModalConfig({
+            isOpen: true,
+            title: 'Sessão Expirada',
+            message: 'Sua sessão na nuvem expirou ou o token de acesso é inválido. Por favor, faça login novamente.',
+            type: 'error',
+            onConfirm: () => {
+              import('./services/supabaseService').then(m => m.signOut());
+            }
+          });
+        }
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [databaseMode]);
+
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);

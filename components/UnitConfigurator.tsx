@@ -135,12 +135,24 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     };
 
     console.log('Saving Unit Config:', configToSave);
-    const success = await saveUnitConfig(configToSave);
-    if (success) {
-      setMessage({ text: 'Configuração salva com sucesso!', type: 'success' });
-      await loadConfigs();
-    } else {
-      setMessage({ text: 'Erro ao salvar configuração. Verifique as permissões.', type: 'error' });
+    try {
+      const success = await saveUnitConfig(configToSave);
+      if (success) {
+        setMessage({ text: 'Configuração salva com sucesso!', type: 'success' });
+        await loadConfigs();
+      } else {
+        setMessage({ 
+          text: 'Erro ao salvar configuração. Verifique as permissões do Schema Staging.', 
+          type: 'error' 
+        });
+      }
+    } catch (err: unknown) {
+      console.error('[UnitConfigurator] Erro ao salvar:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Erro desconhecido';
+      setMessage({ 
+        text: `Falha na Gravação: ${errorMsg}. Verifique se o Schema Staging possui permissões de escrita.`, 
+        type: 'error' 
+      });
     }
     setSaving(false);
   };

@@ -26,9 +26,36 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey, {
       db: {
         schema: supabaseSchema
+      },
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
       }
     })
   : null;
+
+/**
+ * Realiza o logout completo do sistema, limpando sessões locais e da nuvem
+ */
+export const signOut = async () => {
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('[Supabase] Erro ao deslogar da nuvem:', err);
+    }
+  }
+  
+  // Limpa o localStorage independente do sucesso do Supabase
+  localStorage.removeItem('app_current_user');
+  localStorage.removeItem('app_database_mode');
+  localStorage.removeItem('app_selected_unit');
+  localStorage.removeItem('app_screen_history');
+  
+  // Recarrega para limpar o estado do React
+  window.location.href = '/';
+};
 
 // Função para gerar UUID v4 simples para uso local/offline
 export const generateUUID = () => {
@@ -436,12 +463,6 @@ export const signInWithMagicLink = async (email: string) => {
   });
   if (error) throw error;
   return data;
-};
-
-export const signOut = async () => {
-  if (!supabase) throw new Error("Supabase não configurado.");
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]) => {
