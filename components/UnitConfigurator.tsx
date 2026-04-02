@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   Loader2,
   ChevronRight,
-  Info
+  Info,
+  Layers
 } from 'lucide-react';
 import { UnitConfig, User } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
@@ -69,6 +70,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [mapType, setMapType] = useState<'street' | 'satellite'>('street');
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
 
@@ -290,10 +292,17 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                   style={{ height: '100%', width: '100%' }}
                   className="z-0"
                 >
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
+                  {mapType === 'street' ? (
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                  ) : (
+                    <TileLayer
+                      attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                      url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    />
+                  )}
                   <MapController center={mapCenter} />
                   <MapEvents onClick={handleMapClick} />
                   {currentConfig.lat && currentConfig.lng && (
@@ -341,6 +350,19 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                     >
                       <Target size={18} />
                       <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Minha Posição</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
+                      className={`p-3 border rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0 ${
+                        mapType === 'satellite' ? 'bg-accent text-white border-accent' : 'bg-white text-ink-muted border-border'
+                      }`}
+                      title="Alternar visão Satélite"
+                    >
+                      <Layers size={18} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">
+                        {mapType === 'street' ? 'Satélite' : 'Mapa'}
+                      </span>
                     </button>
                   </div>
                 </div>
