@@ -1401,8 +1401,10 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
         }
       } else {
         // Se não houver empresa específica, garante que não deletamos tudo acidentalmente se não houver tenantid
+        // Removido o filtro de ID fixo que causava erro de bigint/uuid
         if (!tenantid) {
-          query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+          console.warn('[Supabase] Tentativa de limpeza global sem tenantid. Abortando por segurança.');
+          return;
         }
       }
     } catch (e) {
@@ -1811,19 +1813,46 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean> => {
   if (!supabase) return false;
   
   try {
+    console.log('>>> [Supabase] Chamando RPC save_unit_config:', config);
+    
     // Usamos RPC para contornar o erro de cache de esquema (PGRST205)
     // Forçamos Number() para garantir que o banco receba NUMERIC/DOUBLE PRECISION correto
     const { data, error } = await supabase.rpc('save_unit_config', {
+      p_tenant_id: String(config.tenant_id || 'default'),
+      p_unit_id: String(config.unit_id),
       p_lat: Number(config.lat),
       p_lng: Number(config.lng),
       p_radius_meters: Number(config.radius_meters),
       p_is_active: Boolean(config.is_active),
-      p_updated_by: String(config.updated_by || 'system'),
-      p_unit_id: String(config.unit_id)
+      p_updated_by: String(config.updated_by || 'system')
     });
     
     if (error) {
       console.error('Erro ao salvar configuração de unidade via RPC:', error);
+      
+      // Se a RPC falhar por não existir (PGRST202), tentamos o insert direto como fallback
+      if (error.code === 'PGRST202') {
+        console.warn('>>> [Supabase] RPC não encontrada. Tentando insert direto na tabela unit_configs...');
+        const { error: insertError } = await supabase
+          .from('unit_configs')
+          .upsert({
+            tenant_id: config.tenant_id || 'default',
+            unit_id: config.unit_id,
+            lat: config.lat,
+            lng: config.lng,
+            radius_meters: config.radius_meters,
+            is_active: config.is_active,
+            updated_by: config.updated_by || 'system',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'tenant_id,unit_id' });
+          
+        if (insertError) {
+          console.error('Erro no fallback de insert direto:', insertError);
+          return false;
+        }
+        return true;
+      }
+      
       return false;
     }
 
