@@ -517,66 +517,63 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
   console.log(`>>> [Supabase] Exemplo de _tenantid atribuído: ${assetsWithTenant[0]?._tenantid || 'Nenhum'}`);
   
-  // Tenta fazer upsert dos ativos em lotes para evitar erros de tamanho de payload
-  const BATCH_SIZE = 1000;
+  // Tenta fazer upsert dos ativos em lotes menores para maior confiabilidade
+  const BATCH_SIZE = 500;
   for (let i = 0; i < assetsWithTenant.length; i += BATCH_SIZE) {
     const batch = assetsWithTenant.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase
-      .from('assets')
-      .upsert(batch, { onConflict: 'id' });
+    console.log(`>>> [Supabase] Sincronizando lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(assetsWithTenant.length / BATCH_SIZE)} (${batch.length} ativos)...`);
+    
+    let currentBatch = [...batch];
+    let success = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
 
-    if (error) {
+    while (!success && attempts < MAX_ATTEMPTS) {
+      const { error } = await supabase
+        .from('assets')
+        .upsert(currentBatch, { onConflict: 'id' });
+
+      if (!error) {
+        success = true;
+        continue;
+      }
+
+      attempts++;
+      console.warn(`>>> [Supabase] Erro no lote (tentativa ${attempts}/${MAX_ATTEMPTS}):`, error.message);
+
       // Se o erro for coluna inexistente (42703), tentamos identificar e remover a coluna
       if (error.code === '42703') {
-        // Regex mais flexível para capturar o nome da coluna em diferentes formatos de erro (com ou sem schema)
         const missingColumnMatch = error.message?.match(/column "(.+)" of relation ".+" does not exist/);
         const missingColumn = missingColumnMatch ? missingColumnMatch[1] : null;
         
         if (missingColumn) {
-          console.warn(`[Supabase] Coluna "${missingColumn}" não encontrada no banco. Tentando upsert sem ela...`);
-          const batchWithoutColumn = batch.map((a) => {
+          console.warn(`>>> [Supabase] Coluna "${missingColumn}" não encontrada. Removendo do lote e tentando novamente...`);
+          currentBatch = currentBatch.map((a) => {
             const rest = { ...a as Record<string, unknown> };
             delete rest[missingColumn];
             return rest;
           });
-          
-          const { error: retryError } = await supabase
-            .from('assets')
-            .upsert(batchWithoutColumn, { onConflict: 'id' });
-            
-          if (retryError) {
-            // Se falhar de novo, pode ser outra coluna. Recursividade simples ou log de erro.
-            console.error(`[Supabase] Falha no retry de sincronização (coluna ${missingColumn}):`, retryError);
-            throw retryError;
-          }
-          continue; // Sucesso no retry, vai para o próximo lote
-        } else if (error.message?.includes('_is_deleted')) {
-          // Fallback para _is_deleted se o match do regex falhar
-          console.warn('[Supabase] Coluna _is_deleted não encontrada. Tentando upsert sem ela...');
-          const batchWithoutDeletedFlag = batch.map((a) => {
-            const rest = { ...a as Record<string, unknown> };
-            delete rest._is_deleted;
-            return rest;
-          });
-          const { error: retryError } = await supabase
-            .from('assets')
-            .upsert(batchWithoutDeletedFlag, { onConflict: 'id' });
-          if (retryError) throw retryError;
-          continue;
+          continue; // Tenta novamente com o lote limpo
         }
       }
-      
-      console.error('Erro ao sincronizar ativos com o Supabase:', error);
-      
-      // Handle network errors gracefully
-      if (error.message === 'Failed to fetch') {
-        console.warn('Supabase sync failed: Network error or invalid URL.');
-        throw new Error('Erro de conexão');
+
+      // Se for erro de timeout ou rede, espera um pouco e tenta de novo
+      if (error.message === 'Failed to fetch' || error.code === 'PGRST100') {
+        console.warn('>>> [Supabase] Timeout ou erro de rede. Aguardando 2s antes de re-tentar...');
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
       }
-      
+
+      // Outros erros: loga e desiste do lote
+      console.error('>>> [Supabase] Erro fatal no lote:', error);
       throw error;
     }
+
+    if (!success) {
+      throw new Error(`Falha ao sincronizar lote após ${MAX_ATTEMPTS} tentativas.`);
+    }
   }
+  console.log('>>> [Supabase] Sincronização de ativos concluída com sucesso.');
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
@@ -586,34 +583,55 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
   const allowedKeys = [
     'id', 
     'companies', 
-    'lastUpdated', 
+    'last_updated', 
     'status',
-    'editableFields', 
-    'qrCodeFields', 
-    'scannerMode', 
-    'autoConfirmOnScan', 
-    'scanFeedbackMode', 
-    'inventorySearchMode',
-    'immersiveMode',
-    'darkMode',
-    'batterySaver',
-    'protheusIntegrationEnabled',
-    'protheusApiUrl',
-    'mandatoryPhotoOnDivergence',
-    'mandatoryPhotoOnNewItem',
-    'databaseMode',
+    'editable_fields', 
+    'qr_code_fields', 
+    'scanner_mode', 
+    'auto_confirm_on_scan', 
+    'scan_feedback_mode', 
+    'inventory_search_mode',
+    'immersive_mode',
+    'dark_mode',
+    'battery_saver',
+    'protheus_integration_enabled',
+    'protheus_api_url',
+    'mandatory_photo_on_divergence',
+    'mandatory_photo_on_new_item',
+    'database_mode',
     '_tenantid'
   ];
 
   const configId = tenantid 
     ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
     : 'global_config';
+  
   const filteredConfig: Record<string, unknown> = { id: configId };
   if (tenantid) filteredConfig._tenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   
+  // Mapeamento de camelCase para snake_case
+  const mapping: Record<string, string> = {
+    'lastUpdated': 'last_updated',
+    'editableFields': 'editable_fields',
+    'qrCodeFields': 'qr_code_fields',
+    'scannerMode': 'scanner_mode',
+    'autoConfirmOnScan': 'auto_confirm_on_scan',
+    'scanFeedbackMode': 'scan_feedback_mode',
+    'inventorySearchMode': 'inventory_search_mode',
+    'immersiveMode': 'immersive_mode',
+    'darkMode': 'dark_mode',
+    'batterySaver': 'battery_saver',
+    'protheusIntegrationEnabled': 'protheus_integration_enabled',
+    'protheusApiUrl': 'protheus_api_url',
+    'mandatoryPhotoOnDivergence': 'mandatory_photo_on_divergence',
+    'mandatoryPhotoOnNewItem': 'mandatory_photo_on_new_item',
+    'databaseMode': 'database_mode'
+  };
+
   Object.keys(config).forEach(key => {
-    if (allowedKeys.includes(key)) {
-      filteredConfig[key] = (config as Record<string, unknown>)[key];
+    const dbKey = mapping[key] || key;
+    if (allowedKeys.includes(dbKey)) {
+      filteredConfig[dbKey] = (config as Record<string, unknown>)[key];
     }
   });
 
@@ -1229,6 +1247,8 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
       : 'global_config';
     
+    console.log(`>>> [Supabase] Buscando config para ID: ${configId}`);
+    
     let config = {};
     const { data: configData, error: configError } = await supabase
       .from('inventory_config')
@@ -1239,19 +1259,51 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     if (configError) {
       console.warn('Erro ao buscar configuração do Supabase:', configError);
     } else if (configData) {
+      console.log('>>> [Supabase] Config encontrada para o tenant.');
       config = configData;
     } else {
+      console.log('>>> [Supabase] Config não encontrada para o tenant. Tentando global_config...');
       const { data: globalConfigData } = await supabase
         .from('inventory_config')
         .select('*')
         .eq('id', 'global_config')
         .maybeSingle();
-      if (globalConfigData) config = globalConfigData;
+      if (globalConfigData) {
+        console.log('>>> [Supabase] global_config encontrada.');
+        config = globalConfigData;
+      } else {
+        console.warn('>>> [Supabase] Nenhuma configuração encontrada (nem tenant nem global).');
+      }
     }
+
+    // Mapeamento reverso de snake_case para camelCase
+    const reverseMapping: Record<string, string> = {
+      'last_updated': 'lastUpdated',
+      'editable_fields': 'editableFields',
+      'qr_code_fields': 'qrCodeFields',
+      'scanner_mode': 'scannerMode',
+      'auto_confirm_on_scan': 'autoConfirmOnScan',
+      'scan_feedback_mode': 'scanFeedbackMode',
+      'inventory_search_mode': 'inventorySearchMode',
+      'immersive_mode': 'immersiveMode',
+      'dark_mode': 'darkMode',
+      'battery_saver': 'batterySaver',
+      'protheus_integration_enabled': 'protheusIntegrationEnabled',
+      'protheus_api_url': 'protheusApiUrl',
+      'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
+      'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
+      'database_mode': 'databaseMode'
+    };
+
+    const mappedConfig: Record<string, unknown> = {};
+    Object.keys(config).forEach(key => {
+      const camelKey = reverseMapping[key] || key;
+      mappedConfig[camelKey] = (config as Record<string, unknown>)[key];
+    });
 
     return {
       assets: assets,
-      config: config as Partial<InventoryState>
+      config: mappedConfig as Partial<InventoryState>
     };
   } catch (err) {
     console.error('Erro inesperado ao buscar inventário completo:', err);
@@ -1760,13 +1812,14 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean> => {
   
   try {
     // Usamos RPC para contornar o erro de cache de esquema (PGRST205)
+    // Forçamos Number() para garantir que o banco receba NUMERIC/DOUBLE PRECISION correto
     const { data, error } = await supabase.rpc('save_unit_config', {
-      p_lat: config.lat,
-      p_lng: config.lng,
-      p_radius_meters: config.radius_meters,
-      p_is_active: config.is_active,
-      p_updated_by: config.updated_by || 'system',
-      p_unit_id: config.unit_id
+      p_lat: Number(config.lat),
+      p_lng: Number(config.lng),
+      p_radius_meters: Number(config.radius_meters),
+      p_is_active: Boolean(config.is_active),
+      p_updated_by: String(config.updated_by || 'system'),
+      p_unit_id: String(config.unit_id)
     });
     
     if (error) {

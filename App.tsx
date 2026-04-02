@@ -2979,6 +2979,12 @@ const App: React.FC = () => {
       console.log(`>>> [fullCompaniesWithStatus] Processing ${assets.length} assets.`);
     }
 
+    if (inventory.companies && inventory.companies.length > 0) {
+      console.log(`>>> [fullCompaniesWithStatus] Inventory companies: ${JSON.stringify(inventory.companies)}`);
+    } else {
+      console.log('>>> [fullCompaniesWithStatus] Inventory companies is empty.');
+    }
+
     // 1. Agrupar estatísticas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
     const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string> }>();
@@ -3169,11 +3175,12 @@ const App: React.FC = () => {
       syncFromCloud(tenants, databaseMode).then(() => {
         console.log('>>> [AutoSync] Sincronização automática concluída.');
       });
-    } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing) {
+    } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing && isDataLoaded) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
-      // Mas apenas se for realmente um administrador do sistema
+      // Mas apenas se for realmente um administrador do sistema e os dados já foram carregados
       const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
       if (isSystemAdmin) {
+        console.log('>>> [Redirect] Base vazia detectada após carregamento. Redirecionando para Carga Expert.');
         pushScreen(AppScreen.LOAD_DATABASE);
       }
     }
@@ -3500,13 +3507,10 @@ const App: React.FC = () => {
                         // Passamos o tenantId para garantir que só limpamos os dados deste cliente
                         await clearCloudInventory(undefined, forcedTenantId);
                         
-                        // Sincroniza todos os ativos em lotes
-                        const batchSize = 1000;
-                        for (let i = 0; i < a.length; i += batchSize) {
-                          const batch = a.slice(i, i + batchSize);
-                          await syncAssetsToCloud(batch, forcedTenantId);
-                          setSyncProgress({ current: Math.min(i + batchSize, a.length), total: a.length });
-                        }
+                        // Sincroniza todos os ativos (o syncAssetsToCloud agora lida com lotes internamente)
+                        console.log(`>>> [DatabaseLoader] Enviando ${a.length} ativos para a nuvem...`);
+                        await syncAssetsToCloud(a, forcedTenantId);
+                        setSyncProgress({ current: a.length, total: a.length });
 
                         // Sincroniza a config (que contém o lastUpdated)
                         const configToSync = { ...newInventory };

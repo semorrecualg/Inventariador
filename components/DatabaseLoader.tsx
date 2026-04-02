@@ -449,6 +449,43 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       </Modal>
 
       <div className="flex-1 overflow-y-auto p-5 no-scrollbar pb-24">
+        {isSyncing && (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
+            <div className="relative mb-8">
+              <Loader2 className="text-blue-400 animate-spin" size={100} strokeWidth={1.5} />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Cloud className="text-blue-400 animate-pulse" size={40} />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-white uppercase tracking-[0.2em] mb-2">Sincronizando Nuvem</h3>
+            <p className="text-blue-200/60 text-[10px] font-bold uppercase tracking-widest mb-8">Enviando Base Mestre em Lotes de 500</p>
+            
+            {syncProgress && (
+              <div className="w-full max-w-xs">
+                <div className="flex justify-between text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-2">
+                  <span>Progresso</span>
+                  <span>{Math.round((syncProgress.current / syncProgress.total) * 100)}%</span>
+                </div>
+                <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    className="h-full bg-blue-500 transition-all duration-500 ease-out shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+                    style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
+                  />
+                </div>
+                <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-4">
+                  {syncProgress.current} de {syncProgress.total} Ativos Processados
+                </p>
+              </div>
+            )}
+            
+            <div className="mt-12 p-4 bg-white/5 rounded-2xl border border-white/10 max-w-sm">
+              <p className="text-[10px] text-blue-100/80 leading-relaxed italic">
+                "Aguarde a finalização. O sistema está unitarizando os dados e validando a integridade referencial no servidor."
+              </p>
+            </div>
+          </div>
+        )}
+
         {step === 'SOURCE' && (
           <div className="space-y-6">
             <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
