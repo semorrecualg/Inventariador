@@ -1,55 +1,128 @@
+-- ===============================================================
+-- GBR v24.50 - CORREÇÃO DEFINITIVA: RPC E RLS (APP_METADATA)
+-- ===============================================================
 
--- 1. Garantir que a tabela assets tenha a coluna _is_deleted
-ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS _is_deleted BOOLEAN DEFAULT FALSE;
-ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS _tenantid TEXT;
-ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS _unitid TEXT;
+-- 1. Funções de Apoio para RLS (Usando app_metadata para segurança máxima)
+CREATE OR REPLACE FUNCTION get_auth_tenant() RETURNS TEXT AS $$
+  SELECT (auth.jwt() -> 'app_metadata' ->> 'tenantid')::TEXT;
+$$ LANGUAGE sql STABLE;
 
--- 2. Garantir que a tabela unit_configs exista no schema public
-CREATE TABLE IF NOT EXISTS public.unit_configs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id TEXT NOT NULL,
-    unit_id TEXT NOT NULL,
-    lat DECIMAL(10,8),
-    lng DECIMAL(11,8),
-    radius_meters INTEGER DEFAULT 500,
-    is_active BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_by TEXT,
-    UNIQUE(tenant_id, unit_id)
-);
+CREATE OR REPLACE FUNCTION is_admin() RETURNS BOOLEAN AS $$
+  SELECT 
+    (auth.jwt() -> 'app_metadata' ->> 'role')::TEXT IN ('ADMIN', 'MASTER') OR
+    (auth.jwt() ->> 'email')::TEXT = 'semorr@gmail.com';
+$$ LANGUAGE sql STABLE;
 
--- 3. Garantir permissões explícitas para a tabela unit_configs
-GRANT ALL ON public.unit_configs TO postgres;
-GRANT ALL ON public.unit_configs TO authenticated;
-GRANT ALL ON public.unit_configs TO service_role;
-GRANT ALL ON public.unit_configs TO anon;
+-- 2. RPC para salvar Unit Config (Contorna erro PGRST205 de cache)
+CREATE OR REPLACE FUNCTION save_unit_config(
+  p_lat DOUBLE PRECISION,
+  p_lng DOUBLE PRECISION,
+  p_radius_meters INTEGER,
+  p_is_active BOOLEAN,
+  p_updated_by TEXT,
+  p_unit_id TEXT
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_tenant_id TEXT;
+BEGIN
+  v_tenant_id := get_auth_tenant();
 
--- 4. Comentário para forçar atualização do cache do PostgREST
-COMMENT ON TABLE public.unit_configs IS 'Configurações de Geofencing por Unidade (v2)';
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN json_build_object('status', 'error', 'message', 'Sessão inválida: Tenant não identificado');
+  END IF;
 
--- 5. Notificar PostgREST para recarregar o esquema
-NOTIFY pgrst, 'reload schema';
+  INSERT INTO public.unit_configs (
+    tenant_id, unit_id, lat, lng, radius_meters, is_active, updated_by, updated_at
+  )
+  VALUES (
+    v_tenant_id, p_unit_id, p_lat, p_lng, p_radius_meters, p_is_active, p_updated_by, NOW()
+  )
+  ON CONFLICT (tenant_id, unit_id) DO UPDATE SET
+    lat = EXCLUDED.lat,
+    lng = EXCLUDED.lng,
+    radius_meters = EXCLUDED.radius_meters,
+    is_active = EXCLUDED.is_active,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = NOW();
 
--- 6. Garantir que as políticas de RLS permitam acesso
+  RETURN json_build_object('status', 'success', 'message', 'Unidade ' || p_unit_id || ' configurada');
+EXCEPTION WHEN OTHERS THEN
+  RETURN json_build_object('status', 'error', 'message', SQLERRM);
+END;
+$$;
+
+-- 3. Políticas de Segurança (RLS) - Mapeamento Exato de Colunas
+
+-- Audit Logs (tenant_id)
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Audit Logs: Read Access" ON public.audit_logs;
+CREATE POLICY "Audit Logs: Read Access" ON public.audit_logs
+  FOR SELECT TO authenticated 
+  USING (tenant_id = get_auth_tenant() OR user_email = (auth.jwt() ->> 'email') OR is_admin());
+
+-- Inventory Campaigns (tenantid - Conforme erro 42703)
+ALTER TABLE public.inventory_campaigns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Campaigns: Read Access" ON public.inventory_campaigns;
+DROP POLICY IF EXISTS "Campaigns: Admin Write" ON public.inventory_campaigns;
+
+CREATE POLICY "Campaigns: Read Access" ON public.inventory_campaigns
+  FOR SELECT TO authenticated 
+  USING (tenantid = get_auth_tenant() OR is_admin());
+
+CREATE POLICY "Campaigns: Admin Write" ON public.inventory_campaigns
+  FOR ALL TO authenticated
+  USING (is_admin())
+  WITH CHECK (is_admin());
+
+-- Unit Configs (tenant_id)
 ALTER TABLE public.unit_configs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Unit Configs: Read Access" ON public.unit_configs;
+DROP POLICY IF EXISTS "Unit Configs: Admin Write" ON public.unit_configs;
 
-DROP POLICY IF EXISTS "Permitir leitura para usuários autenticados" ON public.unit_configs;
-CREATE POLICY "Permitir leitura para usuários autenticados" 
-ON public.unit_configs FOR SELECT 
-TO authenticated 
-USING (true);
+CREATE POLICY "Unit Configs: Read Access" ON public.unit_configs
+  FOR SELECT TO authenticated 
+  USING (tenant_id = get_auth_tenant() OR is_admin());
 
-DROP POLICY IF EXISTS "Permitir inserção/atualização para administradores" ON public.unit_configs;
-CREATE POLICY "Permitir inserção/atualização para administradores" 
-ON public.unit_configs FOR ALL 
-TO authenticated 
-USING (true)
-WITH CHECK (true);
+CREATE POLICY "Unit Configs: Admin Write" ON public.unit_configs
+  FOR ALL TO authenticated
+  USING (is_admin())
+  WITH CHECK (is_admin());
 
--- 7. Verificar se a coluna _is_deleted foi realmente adicionada
-DO $$ 
-BEGIN 
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='assets' AND column_name='_is_deleted') THEN
-        ALTER TABLE public.assets ADD COLUMN _is_deleted BOOLEAN DEFAULT FALSE;
-    END IF;
-END $$;
+-- Asset Depreciation History (_tenantid)
+ALTER TABLE public.asset_depreciation_history ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Depreciation: Read Access" ON public.asset_depreciation_history;
+DROP POLICY IF EXISTS "Depreciation: Admin Insert" ON public.asset_depreciation_history;
+DROP POLICY IF EXISTS "Depreciation: Admin Update" ON public.asset_depreciation_history;
+
+CREATE POLICY "Depreciation: Read Access" ON public.asset_depreciation_history
+  FOR SELECT TO authenticated 
+  USING (_tenantid = get_auth_tenant() OR is_admin());
+
+CREATE POLICY "Depreciation: Admin Insert" ON public.asset_depreciation_history
+  FOR INSERT TO authenticated WITH CHECK (is_admin());
+
+CREATE POLICY "Depreciation: Admin Update" ON public.asset_depreciation_history
+  FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+
+-- Asset Groups (_tenantid)
+ALTER TABLE public.asset_groups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Groups: Read Access" ON public.asset_groups;
+DROP POLICY IF EXISTS "Groups: Admin Insert" ON public.asset_groups;
+DROP POLICY IF EXISTS "Groups: Admin Update" ON public.asset_groups;
+
+CREATE POLICY "Groups: Read Access" ON public.asset_groups
+  FOR SELECT TO authenticated 
+  USING (_tenantid = get_auth_tenant() OR is_admin());
+
+CREATE POLICY "Groups: Admin Insert" ON public.asset_groups
+  FOR INSERT TO authenticated WITH CHECK (is_admin());
+
+CREATE POLICY "Groups: Admin Update" ON public.asset_groups
+  FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+
+-- Notificar PostgREST
+NOTIFY pgrst, 'reload schema';

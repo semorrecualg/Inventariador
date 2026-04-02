@@ -1750,18 +1750,31 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 };
 
 /**
- * Salva ou atualiza a configuração de geofencing de uma unidade
+ * Salva ou atualiza a configuração de geofencing de uma unidade via RPC
+ * Isso contorna o erro PGRST205 (Schema Cache) da API REST
  */
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean> => {
   if (!supabase) return false;
   
   try {
-    const { error } = await supabase
-      .from('unit_configs')
-      .upsert([config], { onConflict: 'tenant_id,unit_id' });
+    // Usamos RPC para contornar o erro de cache de esquema (PGRST205)
+    const { data, error } = await supabase.rpc('save_unit_config', {
+      p_lat: config.lat,
+      p_lng: config.lng,
+      p_radius_meters: config.radius_meters,
+      p_is_active: config.is_active,
+      p_updated_by: config.updated_by || 'system',
+      p_unit_id: config.unit_id
+    });
     
     if (error) {
-      console.error('Erro ao salvar configuração de unidade:', error);
+      console.error('Erro ao salvar configuração de unidade via RPC:', error);
+      return false;
+    }
+
+    // A RPC retorna um JSON com {status: 'success' | 'error', message: string}
+    if (data && data.status === 'error') {
+      console.error('Erro lógico no banco ao salvar unidade:', data.message);
       return false;
     }
     
