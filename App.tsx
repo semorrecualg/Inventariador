@@ -668,6 +668,9 @@ const App: React.FC = () => {
           setTimeout(() => setShowRecoveryToast(false), 5000);
         }
       } else {
+        // Mesmo se não houver dados, atualizamos o lastSyncTime para evitar loops de auto-sync
+        const syncTimestamp = new Date().toISOString();
+        setInventory(prev => ({ ...prev, lastUpdated: syncTimestamp }));
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
         if (!explicitTenantId) { // Só mostra modal se não for o sync automático do login
@@ -1572,25 +1575,30 @@ const App: React.FC = () => {
       try {
         // Garante que o usuário tenha um perfil na tabela user_permissions
         // Passamos os metadados para garantir que o tenantId e role sejam preservados
-        const permissions = await ensureUserProfile(session.user.email!, session.user.user_metadata, session.user.id);
+        // Unificamos user_metadata e app_metadata para garantir que o tenantid seja encontrado
+        const unifiedMetadata = { 
+          ...(session.user.user_metadata || {}), 
+          ...(session.user.app_metadata || {}) 
+        };
+        const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
         console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
           dbTenant: permissions.tenantid, 
-          metaTenant: session.user.user_metadata?.tenantid,
-          finalTenant: permissions.tenantid || session.user.user_metadata?.tenantid || ''
+          metaTenant: unifiedMetadata.tenantid,
+          finalTenant: permissions.tenantid || unifiedMetadata.tenantid || ''
         });
         
         const loggedUser: User = {
-          username: session.user.user_metadata?.username || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
-          name: permissions.name || session.user.user_metadata?.name || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
+          username: session.user.user_metadata?.username || session.user.app_metadata?.username || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
+          name: permissions.name || session.user.user_metadata?.name || session.user.app_metadata?.name || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
           email: session.user.email!,
-          role: (permissions.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
-          is_admin: !!permissions.is_admin || session.user.user_metadata?.isAdmin === true,
-          isAdmin: !!permissions.is_admin || session.user.user_metadata?.isAdmin === true,
+          role: (permissions.role as UserRole) || (session.user.app_metadata?.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
+          is_admin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
+          isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           mustChangePassword: false,
-          tenantid: permissions.tenantid || session.user.user_metadata?.tenantid || '',
-          unitid: permissions.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.user_metadata?.tenantid || '',
-          units: permissions.units || session.user.user_metadata?.units || (permissions.tenantid || session.user.user_metadata?.tenantid ? [permissions.tenantid || session.user.user_metadata?.tenantid] : []),
-          tenants: permissions.tenants || (permissions.tenantid || session.user.user_metadata?.tenantid ? [permissions.tenantid || session.user.user_metadata?.tenantid] : [])
+          tenantid: permissions.tenantid || session.user.app_metadata?.tenantid || session.user.user_metadata?.tenantid || '',
+          unitid: permissions.unitid || session.user.app_metadata?.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.app_metadata?.tenantid || '',
+          units: permissions.units || session.user.app_metadata?.units || session.user.user_metadata?.units || (permissions.tenantid || session.user.app_metadata?.tenantid ? [permissions.tenantid || session.user.app_metadata?.tenantid] : []),
+          tenants: permissions.tenants || (permissions.tenantid || session.user.app_metadata?.tenantid ? [permissions.tenantid || session.user.app_metadata?.tenantid] : [])
         };
 
         // Só atualizamos se houver mudança real para evitar loops de renderização

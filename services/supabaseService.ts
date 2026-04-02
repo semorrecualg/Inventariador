@@ -1158,6 +1158,8 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     if (!assetsError) {
       assets = (initialAssets as unknown as Asset[]) || [];
     } else {
+      console.error(`[Supabase] Erro em fetchFullInventory (Assets): ${assetsError.code} - ${assetsError.message}`, assetsError);
+      
       // Tratamento de erros de schema ou colunas
       if (assetsError.code === '3F000' || assetsError.code === '42P01') {
         const errorMsg = `[CRÍTICO] O ambiente "${supabaseSchema}" não está configurado no Supabase. Execute o script de provisionamento de schema.`;
