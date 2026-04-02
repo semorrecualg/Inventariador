@@ -1546,8 +1546,13 @@ const App: React.FC = () => {
       return;
     }
 
-    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) setHistory([s]);
-    else setHistory(prev => [...prev, s]);
+    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
+      console.log(`>>> [Navigation] Resetting history to: ${s}`);
+      setHistory([s]);
+    } else {
+      console.log(`>>> [Navigation] Pushing screen: ${s}`);
+      setHistory(prev => [...prev, s]);
+    }
   }, [databaseMode]);
 
   // Expose pushScreen to window for components that need it
@@ -1917,6 +1922,7 @@ const App: React.FC = () => {
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
       const newScreen = newHistory[newHistory.length - 1];
+      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
       if (newScreen !== AppScreen.ASSET_DETAIL) {
         setSelectedAssets([]);
       }
@@ -3501,7 +3507,8 @@ const App: React.FC = () => {
                       console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
                       try {
                         const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-                        const forcedTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+                        // Mesmo para admins globais, se houver um tenantid no perfil, usamos ele como alvo da carga
+                        const forcedTenantId = user?.tenantid || (isGlobalAdmin ? undefined : 'default');
                         
                         // Limpa a nuvem antes de subir a nova base para garantir espelhamento
                         // Passamos o tenantId para garantir que só limpamos os dados deste cliente

@@ -24,6 +24,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
     u.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Log para depuração de unidades
+  if (units.length === 0) {
+    console.warn('>>> [UnitSelector] Recebeu 0 unidades para exibir.');
+  } else {
+    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${units.length} unidades.`);
+  }
+
   const handleDownload = async (e: React.MouseEvent, unitName: string) => {
     e.stopPropagation();
     if (!onDownload || downloadingUnit) return;

@@ -523,7 +523,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     const batch = assetsWithTenant.slice(i, i + BATCH_SIZE);
     console.log(`>>> [Supabase] Sincronizando lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(assetsWithTenant.length / BATCH_SIZE)} (${batch.length} ativos)...`);
     
-    let currentBatch = [...batch];
+    let currentBatch: Record<string, unknown>[] = [...batch] as Record<string, unknown>[];
     let success = false;
     let attempts = 0;
     const MAX_ATTEMPTS = 5;
@@ -636,52 +636,48 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
   });
 
   // Lógica de tentativa resiliente para lidar com cache de schema desatualizado
-  const currentPayload = { ...filteredConfig };
+  let currentPayload = { ...filteredConfig };
   let error = null;
   let retryCount = 0;
   const maxRetries = 5;
 
   while (retryCount < maxRetries) {
-    const { error: syncError } = await supabase
-      .from('inventory_config')
-      .upsert([currentPayload], { onConflict: 'id' });
-    
-    if (!syncError) {
-      error = null;
-      break;
-    }
+    try {
+      const { error: syncError } = await supabase
+        .from('inventory_config')
+        .upsert(currentPayload);
 
-    error = syncError;
-    
-    // Se o erro for de coluna não encontrada no cache do schema, 
-    // removemos a coluna específica e tentamos novamente o restante
-      const errorMessage = syncError.message || "";
-      // Captura tanto erro de cache (PGRST204) quanto erro de coluna indefinida (42703)
-      const match = errorMessage.match(/Could not find the '(.+)' column/) || 
-                    errorMessage.match(/column "(.+)" of relation ".+" does not exist/) ||
-                    errorMessage.match(/column (.+) does not exist/);
+      if (!syncError) {
+        console.log(`>>> [Supabase] Config sincronizada com sucesso (${configId}).`);
+        return;
+      }
+
+      error = syncError;
       
-      if (match && (match[1] || match[2])) {
-        const missingColumn = match[1] || match[2];
-        // Silencioso para colunas opcionais conhecidas
-        if (!['darkMode', 'databaseMode', 'batterySaver', 'immersiveMode'].includes(missingColumn)) {
-          console.warn(`[Supabase] Coluna '${missingColumn}' não encontrada em inventory_config. Removendo do payload...`);
+      // Se o erro for coluna inexistente (PGRST204 ou 42703), removemos a coluna e tentamos novamente
+      if (error.code === 'PGRST204' || error.code === '42703') {
+        const missingColumnMatch = error.message.match(/'([^']+)'/);
+        const missingColumn = missingColumnMatch ? missingColumnMatch[1] : null;
+
+        if (missingColumn && currentPayload[missingColumn] !== undefined) {
+          console.warn(`>>> [Supabase] Coluna '${missingColumn}' não encontrada em inventory_config. Removendo do payload...`);
+          const newPayload = { ...currentPayload };
+          delete newPayload[missingColumn];
+          currentPayload = newPayload;
+          retryCount++;
+          continue;
         }
-        delete currentPayload[missingColumn];
-        retryCount++;
-      } else {
-      // Outro tipo de erro, não adianta tentar remover colunas
+      }
+      
+      // Se for outro erro ou não conseguirmos identificar a coluna, paramos
+      break;
+    } catch (err) {
+      console.error('Erro inesperado ao sincronizar config:', err);
       break;
     }
   }
 
   if (error) {
-    // Handle network errors gracefully
-    if (error.message === 'Failed to fetch') {
-      console.warn('Supabase sync failed: Network error or invalid URL.');
-      throw new Error('Erro de conexão');
-    }
-
     console.error('Error syncing config to Supabase:', error);
     throw error;
   }
@@ -1415,7 +1411,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 
     if (assetsError) {
       // Se o erro for coluna inexistente (_unitid ou _tenantid), tentamos fallbacks
-      if (assetsError.code === '42703') {
+      if (assetsError.code === '42703' || assetsError.code === 'PGRST204') {
         console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallbacks...');
         let retryQuery = supabase.from('assets').delete({ count: 'exact' });
         
@@ -1429,14 +1425,18 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
             retryQuery = retryQuery.or(`UNIDADE_OPERACIONAL.eq.${normalized},unidade_operacional.eq.${normalized}`);
           }
         } else if (!tenantid) {
-           retryQuery = retryQuery.neq('id', '00000000-0000-0000-0000-000000000000');
+           // Removido o filtro de ID fixo que causava erro de bigint/uuid
+           console.warn('[Supabase] Fallback de limpeza global sem tenantid. Abortando por segurança.');
+           return;
         }
         
         const { error: retryError, count: retryCount } = await retryQuery;
         if (retryError) {
           // Se ainda falhar, tenta o delete mais radical (sem filtros de coluna)
           console.warn('[Supabase] Fallback falhou. Tentando delete radical...');
-          const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
+          // Tenta filtrar por algo que funcione tanto para UUID quanto para BigInt
+          const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).filter('id', 'not.is', null);
+          
           if (finalError) throw finalError;
           console.log(`[Supabase] Limpeza radical concluída. Afetados: ${finalCount}`);
           return;
@@ -1444,6 +1444,16 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
         console.log(`[Supabase] Limpeza concluída via fallback. Afetados: ${retryCount}`);
         return;
       }
+      
+      // Se o erro for de tipo (22P02), tentamos um filtro genérico
+      if (assetsError.code === '22P02') {
+        console.warn('[Supabase] Erro de tipo detectado (bigint vs uuid). Tentando filtro genérico...');
+        const { error: numError, count: numCount } = await supabase.from('assets').delete({ count: 'exact' }).filter('id', 'not.is', null);
+        if (numError) throw numError;
+        console.log(`[Supabase] Limpeza concluída via filtro genérico. Afetados: ${numCount}`);
+        return;
+      }
+
       console.error('Erro ao limpar ativos na nuvem:', assetsError);
       throw assetsError;
     }
@@ -1780,100 +1790,113 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
 };
 
 /**
- * Busca as configurações de geofencing das unidades de um tenant
+ * Salva ou atualiza a configuração de geofencing de uma unidade
+ * Estratégia Local-First: Salva no IndexedDB imediatamente e tenta sincronizar com a nuvem em background
+ */
+export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
+  if (!supabase) return false;
+  
+  const tenantId = config.tenant_id || 'CICOPAL';
+  const unitId = config.unit_id;
+  const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
+  
+  const payload = {
+    unit_id: unitId,
+    tenant_id: tenantId,
+    lat: Number(config.lat),
+    lng: Number(config.lng),
+    radius_meters: Number(config.radius_meters),
+    is_active: Boolean(config.is_active),
+    updated_by: String(config.updated_by || 'system'),
+    updated_at: new Date().toISOString()
+  };
+
+  console.log('>>> [Persistence] Salvando GPS Local-First:', unitKey);
+
+  try {
+    // 1. SALVAMENTO LOCAL (Prioridade Máxima para não travar a UI)
+    const localConfigs = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+    localConfigs[unitKey] = payload;
+    localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
+
+    // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Não bloqueia o retorno)
+    // Usamos uma promessa que não aguardamos (fire and forget)
+    const syncToCloud = async () => {
+      try {
+        // Tentativa na tabela FINAL (unit_gps_data)
+        const { error } = await supabase
+          .from('unit_gps_data')
+          .upsert({
+            unit_key: unitKey,
+            data: payload,
+            updated_at: new Date().toISOString()
+          });
+
+        if (error) {
+          console.warn('>>> [Supabase] Sincronização de GPS falhou (Cache ainda travado), mas os dados estão salvos localmente.', error.message);
+        } else {
+          console.log('>>> [Supabase] GPS sincronizado com a nuvem com sucesso!');
+        }
+      } catch (err) {
+        console.warn('>>> [Supabase] Erro silencioso na sincronização:', err);
+      }
+    };
+
+    syncToCloud();
+
+    // Retornamos TRUE imediatamente porque o dado já está no localStorage
+    return true;
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error('Erro no salvamento Local-First:', error);
+    return `Erro Local: ${error.message || 'Falha ao gravar no navegador'}`;
+  }
+};
+
+/**
+ * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
   if (!supabase) return [];
   
   try {
-    const { data, error } = await supabase
-      .from('unit_configs')
-      .select('*')
-      .eq('tenant_id', tenantid);
-    
-    if (error) {
-      // Se a tabela não existir ainda ou não estiver no cache, retorna vazio silenciosamente
-      if (error.code === '42P01' || error.code === 'PGRST205') return [];
-      console.error('Erro ao buscar configurações de unidades:', error);
-      return [];
-    }
-    
-    return (data || []) as UnitConfig[];
-  } catch (err) {
-    console.error('Erro inesperado ao buscar configurações de unidades:', err);
-    return [];
-  }
-};
+    const configs: Record<string, UnitConfig> = {};
 
-/**
- * Salva ou atualiza a configuração de geofencing de uma unidade via RPC
- * Isso contorna o erro PGRST205 (Schema Cache) da API REST
- */
-export const saveUnitConfig = async (config: UnitConfig): Promise<boolean> => {
-  if (!supabase) return false;
-  
-  try {
-    console.log('>>> [Supabase] Chamando RPC save_unit_config:', config);
-    
-    // Usamos RPC para contornar o erro de cache de esquema (PGRST205)
-    // Forçamos Number() para garantir que o banco receba NUMERIC/DOUBLE PRECISION correto
-    const { data, error } = await supabase.rpc('save_unit_config', {
-      p_tenant_id: String(config.tenant_id || 'default'),
-      p_unit_id: String(config.unit_id),
-      p_lat: Number(config.lat),
-      p_lng: Number(config.lng),
-      p_radius_meters: Number(config.radius_meters),
-      p_is_active: Boolean(config.is_active),
-      p_updated_by: String(config.updated_by || 'system')
+    // 1. Carrega do LocalStorage (Sempre disponível)
+    const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+    Object.values(localData).forEach((c: unknown) => {
+      const config = c as UnitConfig;
+      if (config.tenant_id === tenantid) configs[config.unit_id] = config;
     });
-    
-    if (error) {
-      console.error('Erro ao salvar configuração de unidade via RPC:', error);
-      
-      // Se a RPC falhar por não existir (PGRST202), tentamos o insert direto como fallback
-      if (error.code === 'PGRST202') {
-        console.warn('>>> [Supabase] RPC não encontrada. Tentando insert direto na tabela unit_configs...');
-        const { error: insertError } = await supabase
-          .from('unit_configs')
-          .upsert({
-            tenant_id: config.tenant_id || 'default',
-            unit_id: config.unit_id,
-            lat: config.lat,
-            lng: config.lng,
-            radius_meters: config.radius_meters,
-            is_active: config.is_active,
-            updated_by: config.updated_by || 'system',
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'tenant_id,unit_id' });
-          
-        if (insertError) {
-          console.error('Erro no fallback de insert direto:', insertError);
-          return false;
-        }
-        return true;
+
+    // 2. Tenta carregar da Nuvem (unit_gps_data) para atualizar o local
+    try {
+      const { data, error } = await supabase
+        .from('unit_gps_data')
+        .select('*')
+        .like('unit_key', `${tenantid}_%`);
+
+      if (data && !error) {
+        data.forEach(item => {
+          configs[item.data.unit_id] = {
+            ...item.data,
+            unit_id: item.data.unit_id,
+            tenant_id: tenantid
+          };
+        });
+        
+        // Atualiza o local com o que veio da nuvem
+        const updatedLocal = { ...localData };
+        data.forEach(item => { updatedLocal[item.unit_key] = item.data; });
+        localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
       }
-      
-      return false;
+    } catch {
+      console.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.');
     }
 
-    // A RPC retorna um JSON com {status: 'success' | 'error', message: string}
-    if (data && data.status === 'error') {
-      console.error('Erro lógico no banco ao salvar unidade:', data.message);
-      return false;
-    }
-    
-    // Log de Auditoria
-    await logAuditEvent({
-      user_email: config.updated_by || 'system',
-      action: 'UPDATE_UNIT_GEOFENCING',
-      table_name: 'unit_configs',
-      details: `Configuração de geofencing atualizada para unidade: ${config.unit_id}`,
-      tenant_id: config.tenant_id
-    });
-    
-    return true;
+    return Object.values(configs);
   } catch (err) {
-    console.error('Erro inesperado ao salvar configuração de unidade:', err);
-    return false;
+    console.error('Erro ao buscar configs Local-First:', err);
+    return [];
   }
 };

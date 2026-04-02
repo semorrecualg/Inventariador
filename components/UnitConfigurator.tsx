@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Circle, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
 import { 
   MapPin, 
   Save, 
@@ -48,6 +48,14 @@ const MapEvents = ({ onClick }: { onClick: (lat: number, lng: number) => void })
   return null;
 };
 
+const MapController = ({ center }: { center: [number, number] }) => {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, map.getZoom());
+  }, [center, map]);
+  return null;
+};
+
 const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs }) => {
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
@@ -59,6 +67,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
 
@@ -72,6 +82,35 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setConfigs(data);
     if (onUpdateConfigs) onUpdateConfigs(data);
     setLoading(false);
+  };
+
+  const handleSearchLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setSearching(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`);
+      const data = await response.json();
+
+      if (data && data.length > 0) {
+        const { lat, lon } = data[0];
+        const newLat = parseFloat(lat);
+        const newLng = parseFloat(lon);
+        
+        setMapCenter([newLat, newLng]);
+        if (selectedUnit) {
+          setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
+        }
+      } else {
+        setMessage({ text: 'Localização não encontrada.', type: 'error' });
+      }
+    } catch (err) {
+      console.error('Erro na busca de localização:', err);
+      setMessage({ text: 'Erro ao buscar localização.', type: 'error' });
+    } finally {
+      setSearching(false);
+    }
   };
 
   const handleSelectUnit = (unit: string) => {
@@ -136,21 +175,23 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     console.log('Saving Unit Config:', configToSave);
     try {
-      const success = await saveUnitConfig(configToSave);
-      if (success) {
+      const result = await saveUnitConfig(configToSave);
+      if (result === true) {
         setMessage({ text: 'Configuração salva com sucesso!', type: 'success' });
         await loadConfigs();
       } else {
+        const errorMsg = typeof result === 'string' ? result : 'Erro desconhecido ao salvar';
         setMessage({ 
-          text: 'Erro ao salvar configuração. Verifique as permissões do Schema Staging.', 
+          text: `Falha na Gravação: ${errorMsg}. Verifique se o Schema possui permissões de escrita.`, 
           type: 'error' 
         });
       }
     } catch (err: unknown) {
-      console.error('[UnitConfigurator] Erro ao salvar:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Erro desconhecido';
+      const error = err as Error;
+      console.error('[UnitConfigurator] Erro ao salvar:', error);
+      const errorMsg = error.message || 'Erro inesperado';
       setMessage({ 
-        text: `Falha na Gravação: ${errorMsg}. Verifique se o Schema Staging possui permissões de escrita.`, 
+        text: `Erro Crítico: ${errorMsg}`, 
         type: 'error' 
       });
     }
@@ -253,6 +294,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
+                  <MapController center={mapCenter} />
                   <MapEvents onClick={handleMapClick} />
                   {currentConfig.lat && currentConfig.lng && (
                     <>
@@ -267,15 +309,40 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 </MapContainer>
 
                 {/* Map Overlay Controls */}
-                <div className="absolute top-4 right-4 z-[1000] flex flex-col space-y-2">
-                  <button 
-                    onClick={handleUseCurrentLocation}
-                    className="p-3 bg-white border border-border rounded-xl shadow-lg text-accent active:scale-95 transition-all flex items-center space-x-2"
-                    title="Usar minha localização atual"
-                  >
-                    <Target size={18} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Minha Posição</span>
-                  </button>
+                <div className="absolute top-4 left-4 right-4 z-[1000] flex flex-col space-y-2 pointer-events-none">
+                  <div className="flex flex-col md:flex-row gap-2 pointer-events-auto">
+                    <form 
+                      onSubmit={handleSearchLocation}
+                      className="flex-1 flex items-center bg-white border border-border rounded-xl shadow-lg overflow-hidden"
+                    >
+                      <div className="pl-3 text-ink-muted">
+                        <Search size={16} />
+                      </div>
+                      <input 
+                        type="text" 
+                        placeholder="Buscar cidade ou endereço..." 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="flex-1 px-3 py-2.5 text-xs focus:outline-none"
+                      />
+                      <button 
+                        type="submit"
+                        disabled={searching}
+                        className="px-4 py-2.5 bg-accent text-white font-bold text-[10px] uppercase tracking-widest hover:bg-accent-dark transition-colors disabled:opacity-50"
+                      >
+                        {searching ? <Loader2 size={14} className="animate-spin" /> : 'Buscar'}
+                      </button>
+                    </form>
+
+                    <button 
+                      onClick={handleUseCurrentLocation}
+                      className="p-3 bg-white border border-border rounded-xl shadow-lg text-accent active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0"
+                      title="Usar minha localização atual"
+                    >
+                      <Target size={18} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Minha Posição</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Map Legend/Info */}

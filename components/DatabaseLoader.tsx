@@ -11,7 +11,8 @@ import {
   Info,
   HelpCircle,
   RefreshCw,
-  Download
+  Download,
+  Cloud
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
@@ -480,7 +481,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             
             <div className="mt-12 p-4 bg-white/5 rounded-2xl border border-white/10 max-w-sm">
               <p className="text-[10px] text-blue-100/80 leading-relaxed italic">
-                "Aguarde a finalização. O sistema está unitarizando os dados e validando a integridade referencial no servidor."
+                &quot;Aguarde a finalização. O sistema está unitarizando os dados e validando a integridade referencial no servidor.&quot;
               </p>
             </div>
           </div>
