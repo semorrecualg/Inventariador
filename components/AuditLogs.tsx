@@ -111,7 +111,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
   return (
     <div className="flex flex-col h-full bg-bg text-ink font-sans overflow-hidden">
       {/* Header */}
-      <header className="bg-ink text-bg px-6 py-4 flex items-center justify-between shadow-lg z-10">
+      <header className="bg-ink text-white px-6 py-4 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-4">
           <BackButton onClick={onBack} label="Voltar" subLabel="Log de Auditoria" />
           <div>
@@ -134,13 +134,13 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         <div className="flex p-1 bg-bg rounded-xl border border-line">
           <button
             onClick={() => { setLogType('ASSET'); setFilterAction('ALL'); }}
-            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'ASSET' ? 'bg-ink text-bg shadow-sm' : 'text-ink-muted'}`}
+            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'ASSET' ? 'bg-ink text-white shadow-sm' : 'text-ink-muted'}`}
           >
             Ativos (Granular)
           </button>
           <button
             onClick={() => { setLogType('SYSTEM'); setFilterAction('ALL'); }}
-            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'SYSTEM' ? 'bg-ink text-bg shadow-sm' : 'text-ink-muted'}`}
+            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${logType === 'SYSTEM' ? 'bg-ink text-white shadow-sm' : 'text-ink-muted'}`}
           >
             Sistema (Geral)
           </button>
@@ -164,7 +164,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
               onClick={() => setFilterAction(action)}
               className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest whitespace-nowrap transition-all border ${
                 filterAction === action 
-                ? 'bg-ink text-bg border-ink' 
+                ? 'bg-ink text-white border-ink' 
                 : 'bg-bg text-ink-muted border-line hover:border-ink'
               }`}
             >
@@ -215,7 +215,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-tighter bg-ink text-bg px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-black uppercase tracking-tighter bg-ink text-white px-1.5 py-0.5 rounded">
                             {log.action}
                           </span>
                           <span className="text-xs font-bold text-ink truncate max-w-[150px]">
@@ -285,7 +285,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
           {showScrollTop && (
             <button
               onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
-              className="absolute bottom-6 right-6 w-12 h-12 bg-ink text-bg rounded-full shadow-2xl flex items-center justify-center animate-bounce z-30 border-4 border-white active:scale-90 transition-all"
+              className="absolute bottom-6 right-6 w-12 h-12 bg-ink text-white rounded-full shadow-2xl flex items-center justify-center animate-bounce z-30 border-4 border-white active:scale-90 transition-all"
             >
               <ArrowUp size={24} strokeWidth={3} />
             </button>

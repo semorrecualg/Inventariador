@@ -237,11 +237,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
         asset._plaquetaMaster = asset.ETIQUETA || "S/ ETQ";
         asset._localMaster = asset.ENDERECO;
-        asset._localMaster = asset.ENDERECO;
         asset._descricaoMaster = asset.DESCRICAODOATIVO || "SEM DESCRICAO";
         asset._empresaNormalizada = asset.UNIDADE_OPERACIONAL;
         asset._baseSinteticaLoc = Array.from(baseSinteticaLoc);
         asset._tenantid = asset.GRUPO_EMPRESARIAL; // Garantir que o campo interno esteja preenchido
+        asset._unitid = asset.UNIDADE_OPERACIONAL; // Garantir que o campo interno esteja preenchido
 
         finalAssets.push(asset);
         companyCounts[asset.UNIDADE_OPERACIONAL] = (companyCounts[asset.UNIDADE_OPERACIONAL] || 0) + 1;

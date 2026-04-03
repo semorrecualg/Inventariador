@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
   Plus, 
@@ -16,79 +16,93 @@ import {
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
-import { fetchCampaigns, createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign } from '../services/supabaseService';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign } from '../services/supabaseService';
 
 interface CampaignManagerProps {
   user: User | null;
   onBack: () => void;
   onActivate: (campaignId: string) => void;
   currentCampaignId?: string;
+  availableUnits?: string[];
+  campaigns?: InventoryCampaign[];
+  onRefresh?: () => void;
 }
 
-const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActivate, currentCampaignId }) => {
-  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
-  const [loading, setLoading] = useState(true);
+const CampaignManager: React.FC<CampaignManagerProps> = ({ 
+  user, 
+  onBack, 
+  onActivate, 
+  currentCampaignId, 
+  availableUnits = [],
+  campaigns = [],
+  onRefresh
+}) => {
   const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newCampaignDesc, setNewCampaignDesc] = useState('');
+  const [newCampaignUnit, setNewCampaignUnit] = useState<string>('');
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
-  useEffect(() => {
-    loadCampaigns();
-  }, [user]);
-
-  const loadCampaigns = async () => {
-    if (user?.tenantid) {
-      setLoading(true);
-      const data = await fetchCampaigns(user.tenantid);
-      setCampaigns(data);
-      setLoading(false);
-    }
-  };
-
   const handleCreateCampaign = async () => {
-    if (!newCampaignName || !user?.tenantid) return;
+    if (!newCampaignName) return;
 
-    const newCampaign: Partial<InventoryCampaign> = {
-      name: newCampaignName,
-      description: newCampaignDesc,
-      status: CampaignStatus.ACTIVE,
-      tenantid: user.tenantid,
-      created_by: user.email,
-      start_date: new Date().toISOString()
-    };
+    if (!user?._tenantid && !user?.tenantid) {
+      console.error('Erro: Tenant ID não encontrado. Sua sessão pode ter expirado. Por favor, saia e entre novamente.');
+      return;
+    }
 
-    const result = await createCampaign(newCampaign);
-    if (result) {
-      setCampaigns([result, ...campaigns]);
-      setIsCreating(false);
-      setNewCampaignName('');
-      setNewCampaignDesc('');
-      alert('Campanha criada com sucesso!');
-    } else {
-      alert('Erro ao criar campanha. Verifique sua conexão ou permissões.');
+    setIsSaving(true);
+    try {
+      const tenantId = user._tenantid || user.tenantid;
+      const newCampaign: Partial<InventoryCampaign> = {
+        name: newCampaignName,
+        description: newCampaignDesc,
+        status: CampaignStatus.ACTIVE,
+        _tenantid: tenantId,
+        _unitid: newCampaignUnit || undefined,
+        tenantid: tenantId, // Legado
+        unit_id: newCampaignUnit || undefined, // Legado
+        created_by: user.email,
+        start_date: new Date().toISOString()
+      };
+
+      const result = await createCampaign(newCampaign);
+      if (result) {
+        if (onRefresh) onRefresh();
+        setIsCreating(false);
+        setNewCampaignName('');
+        setNewCampaignDesc('');
+        setNewCampaignUnit('');
+        console.log('Campanha criada com sucesso!');
+      }
+    } catch (err: unknown) {
+      console.error('Erro ao criar campanha:', err);
+      const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error(`Erro ao criar campanha: ${errorMsg}\n\nO sistema tentou corrigir o erro automaticamente, mas falhou. Verifique se a tabela inventory_campaigns possui a coluna _tenantid.`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDeleteCampaign = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta campanha? Esta ação não pode ser desfeita.')) return;
-    
+    // Removido window.confirm para compatibilidade com iframe
     const success = await deleteCampaign(id);
     if (success) {
-      alert('Campanha excluída com sucesso!');
+      console.log('Campanha excluída com sucesso!');
       setSelectedCampaign(null);
-      loadCampaigns();
+      if (onRefresh) onRefresh();
     } else {
-      alert('Erro ao excluir campanha.');
+      console.error('Erro ao excluir campanha.');
     }
   };
 
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
     const success = await updateCampaignStatus(id, status);
     if (success) {
-      setCampaigns(campaigns.map(c => c.id === id ? { ...c, status } : c));
+      if (onRefresh) onRefresh();
       if (selectedCampaign?.id === id) {
         setSelectedCampaign({ ...selectedCampaign, status });
       }
@@ -97,9 +111,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    if (user?.tenantid) {
+    const tenantId = user?._tenantid || user?.tenantid;
+    if (tenantId) {
       setStatsLoading(true);
-      const campaignStats = await fetchCampaignStats(campaign.id, user.tenantid);
+      const campaignStats = await fetchCampaignStats(campaign.id, tenantId);
       setStats(campaignStats);
       setStatsLoading(false);
     }
@@ -117,7 +132,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
   return (
     <div className="flex flex-col h-full bg-bg text-ink font-sans overflow-hidden">
       {/* Header */}
-      <header className="bg-ink text-bg px-6 py-4 flex items-center justify-between shadow-lg z-10">
+      <header className="bg-ink text-white px-6 py-4 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-4">
           <BackButton onClick={onBack} label="Voltar" subLabel="Eventos de Inventário" />
           <div>
@@ -136,6 +151,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
         )}
       </header>
 
+      {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {isCreating ? (
           <motion.div 
@@ -164,6 +180,19 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
                   className="w-full p-3 bg-bg border border-line rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/20 h-24"
                 />
               </div>
+              <div>
+                <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1 block">Unidade Operacional (Opcional)</label>
+                <select 
+                  value={newCampaignUnit}
+                  onChange={(e) => setNewCampaignUnit(e.target.value)}
+                  className="w-full p-3 bg-bg border border-line rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/20 appearance-none"
+                >
+                  <option value="">TODAS AS UNIDADES (GLOBAL)</option>
+                  {availableUnits.map(unit => (
+                    <option key={unit} value={unit}>{unit}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex gap-3 pt-2">
                 <button 
                   onClick={() => setIsCreating(false)}
@@ -173,10 +202,17 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName}
-                  className="flex-1 py-3 bg-ink text-bg rounded-xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-30"
+                  disabled={!newCampaignName || !user?.tenantid || isSaving}
+                  className="flex-1 py-3 bg-ink text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-30 flex items-center justify-center gap-2 shadow-lg shadow-ink/20"
                 >
-                  Criar Campanha
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <span>Criar Campanha</span>
+                  )}
                 </button>
               </div>
             </div>
@@ -268,12 +304,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
           </motion.div>
         ) : (
           <div className="space-y-3">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center py-20 space-y-4">
-                <Loader2 className="w-10 h-10 animate-spin text-ink-muted" />
-                <p className="text-xs font-bold uppercase tracking-widest text-ink-muted">Carregando campanhas...</p>
-              </div>
-            ) : campaigns.length === 0 ? (
+            {campaigns.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 space-y-4 opacity-40">
                 <BarChart3 className="w-16 h-16" />
                 <p className="text-xs font-bold uppercase tracking-widest">Nenhuma campanha ativa</p>
@@ -307,6 +338,11 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({ user, onBack, onActiv
                         <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${getStatusColor(campaign.status)}`}>
                           {campaign.status}
                         </span>
+                        {campaign.unit_id && (
+                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200">
+                            {campaign.unit_id}
+                          </span>
+                        )}
                         <span className="text-[10px] text-ink-muted font-mono">
                           {new Date(campaign.start_date).toLocaleDateString()}
                         </span>

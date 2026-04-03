@@ -15,9 +15,11 @@ export interface User {
   is_admin?: boolean; // Novo padrão unificado
   isAdmin?: boolean; // Deprecated: use is_admin
   mustChangePassword?: boolean;
-  tenantid: string;  // ID da Organização (ex: CICOPAL) - Unificado
-  tenants?: string | string[];  // Deprecated: use tenantid
-  unitid?: string;   // Unidade Operacional Padrão - Unificado
+  _tenantid: string;  // ID da Organização (ex: CICOPAL) - Unificado
+  _unitid?: string;   // Unidade Operacional Padrão - Unificado
+  tenantid: string;  // Deprecated: use _tenantid
+  tenants?: string | string[];  // Deprecated: use _tenantid
+  unitid?: string;   // Deprecated: use _unitid
   units?: string[];  // Lista de Unidades Operacionais autorizadas
 }
 
@@ -364,7 +366,10 @@ export interface InventoryCampaign {
   start_date: string;
   end_date?: string;
   status: CampaignStatus;
-  tenantid: string;
+  _tenantid: string;
+  _unitid?: string; // ID ou Nome da Unidade Operacional vinculada
+  tenantid: string; // Deprecated: use _tenantid
+  unit_id?: string; // Deprecated: use _unitid
   created_by: string;
   // Estatísticas calculadas
   total_assets?: number;
@@ -374,8 +379,10 @@ export interface InventoryCampaign {
 
 export interface UnitConfig {
   id?: string;
-  tenant_id: string;
-  unit_id: string; // Nome da unidade (ex: "MATRIZ")
+  _tenantid: string;
+  _unitid: string; // Nome da unidade (ex: "MATRIZ")
+  tenant_id: string; // Deprecated: use _tenantid
+  unit_id: string; // Deprecated: use _unitid
   lat: number;
   lng: number;
   radius_meters: number;

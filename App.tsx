@@ -53,7 +53,7 @@ import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Spar
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange, fetchUnitConfigs } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange, fetchUnitConfigs, fetchCampaigns } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
@@ -161,8 +161,11 @@ const App: React.FC = () => {
           const s = String(v).toUpperCase();
           return (s === 'DEFAULT' || s === 'NULL' || s === '0' || s === 'default') ? '' : String(v);
         };
-        parsed.tenantid = normalizeValue(parsed.tenantid);
-        parsed.unitid = normalizeValue(parsed.unitid);
+        parsed._tenantid = normalizeValue(parsed._tenantid || parsed.tenantid);
+        parsed._unitid = normalizeValue(parsed._unitid || parsed.unitid);
+        parsed.tenantid = parsed._tenantid;
+        parsed.unitid = parsed._unitid;
+        
         if (Array.isArray(parsed.units)) {
           parsed.units = parsed.units.filter((u: unknown) => normalizeValue(u) !== '');
         }
@@ -255,6 +258,23 @@ const App: React.FC = () => {
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
+    // Check for invalid session on mount
+    if (supabase) {
+      supabase.auth.getSession().then(({ error }) => {
+        if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
+          console.warn('[Supabase] Sessão inválida detectada no início. Limpando...');
+          localStorage.removeItem('app_current_user');
+          if (supabase) {
+            supabase.auth.signOut().then(() => {
+              window.location.reload();
+            });
+          } else {
+            window.location.reload();
+          }
+        }
+      });
+    }
+
     // Debug environment variables
     const env = import.meta.env.VITE_ENVIRONMENT || 'development';
     const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -390,6 +410,7 @@ const App: React.FC = () => {
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
     try {
@@ -592,7 +613,7 @@ const App: React.FC = () => {
     }
     
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-    const rawTenantId = explicitTenantId || user?.tenantid;
+    const rawTenantId = explicitTenantId || user?._tenantid || user?.tenantid;
     
     // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
     const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
@@ -1075,6 +1096,18 @@ const App: React.FC = () => {
     };
     init();
   }, []);
+
+  // Carregamento de Campanhas para visibilidade global
+  const refreshCampaigns = async () => {
+    if (user?.tenantid && databaseMode !== DatabaseMode.INTERNAL) {
+      const data = await fetchCampaigns(user.tenantid);
+      setCampaigns(data);
+    }
+  };
+
+  useEffect(() => {
+    refreshCampaigns();
+  }, [user?.tenantid, databaseMode]);
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
 
@@ -1593,17 +1626,20 @@ const App: React.FC = () => {
         });
         
         const loggedUser: User = {
-          username: session.user.user_metadata?.username || session.user.app_metadata?.username || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
-          name: permissions.name || session.user.user_metadata?.name || session.user.app_metadata?.name || permissions.username || session.user.email?.split('@')[0] || 'Usuário',
-          email: session.user.email!,
+          id: session.user.id,
+          email: session.user.email || '',
+          username: permissions.username || unifiedMetadata.username || session.user.email?.split('@')[0] || 'user',
+          name: permissions.name || unifiedMetadata.name || permissions.username || unifiedMetadata.username || session.user.email?.split('@')[0] || 'User',
           role: (permissions.role as UserRole) || (session.user.app_metadata?.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
           is_admin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           mustChangePassword: false,
-          tenantid: permissions.tenantid || session.user.app_metadata?.tenantid || session.user.user_metadata?.tenantid || '',
-          unitid: permissions.unitid || session.user.app_metadata?.unitid || session.user.user_metadata?.unitid || permissions.tenantid || session.user.app_metadata?.tenantid || '',
-          units: permissions.units || session.user.app_metadata?.units || session.user.user_metadata?.units || (permissions.tenantid || session.user.app_metadata?.tenantid ? [permissions.tenantid || session.user.app_metadata?.tenantid] : []),
-          tenants: permissions.tenants || (permissions.tenantid || session.user.app_metadata?.tenantid ? [permissions.tenantid || session.user.app_metadata?.tenantid] : [])
+          _tenantid: permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || '',
+          _unitid: permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || permissions._tenantid || permissions.tenantid || '',
+          tenantid: permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || '',
+          unitid: permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || permissions._tenantid || permissions.tenantid || '',
+          units: permissions.units || unifiedMetadata.units || (permissions._unitid || permissions.unitid ? [permissions._unitid || permissions.unitid] : []),
+          tenants: permissions.tenants || unifiedMetadata.tenants || (permissions._tenantid || permissions.tenantid ? [permissions._tenantid || permissions.tenantid] : [])
         };
 
         // Só atualizamos se houver mudança real para evitar loops de renderização
@@ -3080,13 +3116,40 @@ const App: React.FC = () => {
       }
     });
 
-    const result = Array.from(mergedCompanies.values());
+    const result = Array.from(mergedCompanies.values()).map(unit => {
+      const norm = normalizeKey(unit.name);
+      // Uma unidade tem campanha se houver uma campanha ativa/encerrada vinculada a ela
+      // ou se houver ativos na unidade vinculados a alguma campanha
+      const hasDirectCampaign = campaigns.some(c => {
+        const cNorm = c.unit_id ? normalizeKey(c.unit_id) : '';
+        const match = cNorm && cNorm === norm;
+        if (match) console.log(`>>> [App] Unidade ${unit.name} (norm: ${norm}) tem campanha direta: ${c.name} (unit_id: ${c.unit_id}, cNorm: ${cNorm})`);
+        return match;
+      });
+      
+      const hasAssetCampaign = assets.some(a => {
+        const assetUnit = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || '');
+        const match = assetUnit === norm && !!a._campaignId;
+        if (match) console.log(`>>> [App] Unidade ${unit.name} (norm: ${norm}) tem campanha via ativo: ${a.ETIQUETA || a.TAG || a.id} (campanha: ${a._campaignId})`);
+        return match;
+      });
+
+      if (hasDirectCampaign || hasAssetCampaign) {
+        console.log(`>>> [App] Unidade ${unit.name} MARCADA com campanha.`);
+      }
+
+      return {
+        ...unit,
+        hasCampaign: hasDirectCampaign || hasAssetCampaign
+      };
+    });
+
     console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
     if (result.length === 0 && assets.length > 0) {
       console.warn('>>> [fullCompaniesWithStatus] WARNING: Assets exist but no units were extracted!');
     }
     return result;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns]);
 
   const unitsByTenant = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -3739,7 +3802,8 @@ const App: React.FC = () => {
                   name: c.name, 
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
-                  isDownloaded: downloadedUnits.includes(c.name)
+                  isDownloaded: downloadedUnits.includes(c.name),
+                  hasCampaign: c.hasCampaign
                 }))
               } 
               onSelect={(u) => { 
@@ -3882,6 +3946,9 @@ const App: React.FC = () => {
                 pushScreen(AppScreen.INVENTORY);
               }}
               currentCampaignId={inventory.currentCampaignId}
+              availableUnits={fullCompaniesWithStatus.map(c => c.name)}
+              campaigns={campaigns}
+              onRefresh={refreshCampaigns}
             />
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} onBack={popScreen} />}
@@ -3927,7 +3994,7 @@ const App: React.FC = () => {
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] bg-ink text-bg px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] bg-ink text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
           >
             <div className="relative">
               <RefreshCw size={16} className="animate-spin text-accent" />
@@ -3935,7 +4002,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] font-black uppercase tracking-widest leading-none">Sincronizando Fotos</span>
-              <span className="text-[8px] font-bold text-bg/60 uppercase tracking-tighter mt-0.5">
+              <span className="text-[8px] font-bold text-white/60 uppercase tracking-tighter mt-0.5">
                 {syncQueueLength} {syncQueueLength === 1 ? 'item pendente' : 'itens pendentes'} na fila
               </span>
             </div>

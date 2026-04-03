@@ -78,10 +78,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenantId, setNewTenantId] = useState(currentUser?.tenantid || '');
+  const [newTenantId, setNewTenantId] = useState(currentUser?._tenantid || currentUser?.tenantid || '');
   const [newUnits, setNewUnits] = useState<string[]>(
-    currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' 
-      ? [currentUser.unitid] 
+    (currentUser?._unitid || currentUser?.unitid) && (currentUser?._unitid || currentUser?.unitid)?.toUpperCase() !== 'DEFAULT' 
+      ? [currentUser?._unitid || currentUser?.unitid || ''] 
       : []
   );
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -90,13 +90,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
   React.useEffect(() => {
     if (currentUser) {
-      const currentTenant = currentUser.tenantid;
+      const currentTenant = currentUser._tenantid || currentUser.tenantid;
+      const currentUnit = currentUser._unitid || currentUser.unitid;
       
       if (currentTenant && !newTenantId) {
         setNewTenantId(currentTenant);
       }
-      if (currentUser.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
-        setNewUnits([currentUser.unitid]);
+      if (currentUnit && currentUnit.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
+        setNewUnits([currentUnit]);
       }
     }
   }, [currentUser, newTenantId, newUnits.length]);

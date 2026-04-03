@@ -5,7 +5,7 @@ import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
 
 interface UnitSelectorProps {
-  units: Array<{ name: string; hasData: boolean; isDownloaded?: boolean }>;
+  units: Array<{ name: string; hasData: boolean; isDownloaded?: boolean; hasCampaign?: boolean }>;
   onSelect: (unit: string) => void;
   onBack: () => void;
   onSync?: () => void;
@@ -66,6 +66,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
       Icon: icons[hash % icons.length]
     };
   };
+
+  console.log(`>>> [UnitSelector] Renderizando ${units.length} unidades. Unidades com campanha: ${units.filter(u => u.hasCampaign).map(u => u.name).join(', ') || 'NENHUMA'}`);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
@@ -152,6 +154,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                            <span className={`text-[9px] font-bold uppercase tracking-widest ${unit.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
                              {unit.hasData ? 'Base Master Disponível' : 'Sem Itens Ativos'}
                            </span>
+                           {unit.hasCampaign && (
+                             <>
+                               <span className="text-slate-300 mx-1">•</span>
+                               <div className="flex items-center space-x-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                                 <div className="w-1 h-1 rounded-full bg-amber-500 animate-pulse"></div>
+                                 <span className="text-[8px] font-bold text-amber-600 uppercase tracking-tighter">Campanha Ativa</span>
+                               </div>
+                             </>
+                           )}
                         </div>
                       </div>
                     </div>
