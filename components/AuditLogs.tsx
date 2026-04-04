@@ -33,6 +33,7 @@ interface AuditLogDB {
   old_data?: unknown;
   new_data?: unknown;
   details?: string;
+  _tenantid?: string;
   tenant_id?: string;
   origin?: string;
 }
@@ -62,7 +63,8 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
             // Se for asset_logs, mapear campos correspondentes
             record_id: (log.record_id || log.asset_id) as string,
             table_name: (log.table_name || 'assets') as string,
-            tenant_id: (log.tenant_id || log.tenantid) as string
+            _tenantid: (log._tenantid || log.tenant_id || log.tenantid) as string,
+            tenant_id: (log._tenantid || log.tenant_id || log.tenantid) as string
           }));
 
           setLogs(normalizedData as unknown as AuditLogDB[]);

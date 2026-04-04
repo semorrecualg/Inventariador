@@ -194,6 +194,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
       mustChangePassword: true,
+      _tenantid: normTenantId,
+      _unitid: normUnitId,
       tenantid: normTenantId,
       unitid: normUnitId,
       units: normUnits,

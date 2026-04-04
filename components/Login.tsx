@@ -111,14 +111,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
       if (error) throw error;
       if (data.user) {
         const cloudUser = await ensureUserProfile(data.user.email!, data.user.user_metadata, data.user.id);
-        const loggedUser = {
+        const loggedUser: User = {
+          id: data.user.id,
           username: cloudUser.username,
           email: cloudUser.email,
           role: cloudUser.role as UserRole,
           is_admin: cloudUser.is_admin || cloudUser.isAdmin || false,
           isAdmin: cloudUser.is_admin || cloudUser.isAdmin || false,
           mustChangePassword: false,
-          tenantid: cloudUser.tenantid || '',
+          _tenantid: cloudUser._tenantid || cloudUser.tenantid || '',
+          tenantid: cloudUser._tenantid || cloudUser.tenantid || '',
           tenants: cloudUser.tenants || [cloudUser.tenantid || '']
         };
         localStorage.setItem('app_current_user', safeStringify(loggedUser));
@@ -280,8 +282,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           is_admin: is_admin,
           isAdmin: is_admin,
           mustChangePassword: false,
-          tenantid: normalizeValue(cloudUser.tenantid || ''),
-          unitid: normalizeValue(cloudUser.unitid || ''),
+          _tenantid: normalizeValue(cloudUser._tenantid || cloudUser.tenantid || ''),
+          _unitid: normalizeValue(cloudUser._unitid || cloudUser.unitid || ''),
+          tenantid: normalizeValue(cloudUser._tenantid || cloudUser.tenantid || ''),
+          unitid: normalizeValue(cloudUser._unitid || cloudUser.unitid || ''),
           units: normalizeArray(cloudUser.units || (cloudUser.unitid ? [cloudUser.unitid] : [])),
           tenants: normalizeArray(cloudUser.tenants || [cloudUser.tenantid || ''])
         };
@@ -322,7 +326,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno'}`,
-          tenant_id: loggedUser.tenantid
+          _tenantid: loggedUser._tenantid || loggedUser.tenantid
         });
 
         onLogin(loggedUser);

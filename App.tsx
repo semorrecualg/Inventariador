@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign } from './types';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -516,7 +516,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'SYNC_PUSH',
             details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
-            tenant_id: user?.tenantid
+            _tenantid: user?._tenantid || user?.tenantid
           });
         }
       } catch (err) {
@@ -676,7 +676,7 @@ const App: React.FC = () => {
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
               details: `Sincronização de ${assets.length} ativos da nuvem para o local.`,
-              tenant_id: user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
+              _tenantid: user?._tenantid || user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
             });
           }
 
@@ -1197,6 +1197,7 @@ const App: React.FC = () => {
           is_admin: true,
           isAdmin: true, 
           mustChangePassword: false,
+          _tenantid: '',
           tenantid: ''
         });
       } else if (userList[adminIndex].password === 'admin') {
@@ -1658,7 +1659,7 @@ const App: React.FC = () => {
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Usuário logado no sistema (${loggedUser.role})`,
-          tenant_id: loggedUser.tenantid
+          _tenantid: loggedUser._tenantid || loggedUser.tenantid
         });
         
         // Se logou via Supabase, garante que o modo está correto
@@ -1683,6 +1684,7 @@ const App: React.FC = () => {
           role: UserRole.AUDITOR,
           isAdmin: false,
           mustChangePassword: false,
+          _tenantid: '',
           tenantid: '',
           tenants: []
         };
@@ -2167,7 +2169,7 @@ const App: React.FC = () => {
         record_id: String(updatedAsset.id),
         new_data: assetWithHistory,
         details: auditEntry.details,
-        tenant_id: user?.tenantid,
+        _tenantid: user?._tenantid || user?.tenantid,
         origin: updatedAsset._origemTransacao
       });
 
@@ -2178,7 +2180,7 @@ const App: React.FC = () => {
         action: isNew ? 'CREATE' : 'UPDATE',
         old_data: existing,
         new_data: assetWithHistory,
-        tenant_id: user?.tenantid
+        _tenantid: user?._tenantid || user?.tenantid
       });
     }
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
@@ -2431,7 +2433,7 @@ const App: React.FC = () => {
           record_id: String(assetId),
           new_data: deletedAsset,
           details: 'Soft Delete executado',
-          tenant_id: user?.tenantid
+          _tenantid: user?._tenantid || user?.tenantid
         });
 
         logAssetChange({
@@ -2440,7 +2442,7 @@ const App: React.FC = () => {
           action: 'DELETE',
           old_data: assetToDelete,
           new_data: deletedAsset,
-          tenant_id: user?.tenantid
+          _tenantid: user?._tenantid || user?.tenantid
         });
       } catch (err) {
         console.error('Erro ao sincronizar exclusão com Supabase:', err);
@@ -2523,7 +2525,7 @@ const App: React.FC = () => {
               record_id: String(a.id),
               new_data: updates,
               details: historyEntry.details,
-              tenant_id: user?.tenantid || '',
+              _tenantid: user?._tenantid || user?.tenantid || '',
               origin: origin
             });
 
@@ -2533,7 +2535,7 @@ const App: React.FC = () => {
               action: 'UPDATE',
               old_data: a,
               new_data: updates,
-              tenant_id: user?.tenantid || ''
+              _tenantid: user?._tenantid || user?.tenantid || ''
             });
           }
 
@@ -2607,7 +2609,7 @@ const App: React.FC = () => {
         action: 'BULK_UPDATE',
         table_name: 'assets',
         details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-        tenant_id: user?.tenantid,
+        _tenantid: user?._tenantid || user?.tenantid,
         origin: origin
       });
     }
@@ -2692,7 +2694,7 @@ const App: React.FC = () => {
         action: 'EXPORT',
         table_name: 'assets',
         details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
-        tenant_id: user?.tenantid
+        _tenantid: user?._tenantid || user?.tenantid
       });
     }
   };
@@ -2733,7 +2735,7 @@ const App: React.FC = () => {
           user_email: user?.email || 'unknown',
           action: 'RESTORE',
           details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
-          tenant_id: user?.tenantid
+          _tenantid: user?._tenantid || user?.tenantid
         });
       }
     } else {
@@ -2797,7 +2799,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'DOWNLOAD',
             details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
-            tenant_id: user?.tenantid
+            _tenantid: user?._tenantid || user?.tenantid
           });
         }
       } else {
@@ -2848,7 +2850,7 @@ const App: React.FC = () => {
             action: 'DELETE',
             table_name: 'assets',
             details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
-            tenant_id: user?.tenantid
+            _tenantid: user?._tenantid || user?.tenantid
           });
 
           // Atualiza o timestamp na nuvem para notificar outros usuários
@@ -3833,7 +3835,7 @@ const App: React.FC = () => {
                       user_email: user?.email || 'unknown',
                       action: 'LOGOUT',
                       details: 'Usuário saiu do sistema.',
-                      tenant_id: user?.tenantid
+                      _tenantid: user?._tenantid || user?.tenantid
                     });
                     await supabase.auth.signOut();
                   }
@@ -3896,7 +3898,7 @@ const App: React.FC = () => {
                     user_email: user?.email || 'unknown',
                     action: 'LOGOUT',
                     details: 'Usuário saiu do sistema.',
-                    tenant_id: user?.tenantid
+                    _tenantid: user?._tenantid || user?.tenantid
                   });
                   await supabase.auth.signOut();
                 }

@@ -968,10 +968,11 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       const initialData = (initialAssets as unknown as Record<string, unknown>[]) || [];
       assets = initialData.map(a => ({
         ...a,
-        _tenantid: a._tenantid,
-        _unitid: a._unitid,
-        tenantid: a._tenantid, // Legado
-        unitid: a._unitid      // Legado
+        id: a.id as string | number,
+        _tenantid: a._tenantid as string,
+        _unitid: a._unitid as string,
+        tenantid: a._tenantid as string, // Legado
+        unitid: a._unitid as string      // Legado
       })) as Asset[];
     } else {
       console.error(`[Supabase] Erro em fetchFullInventory (Assets): ${assetsError.code} - ${assetsError.message}`, assetsError);

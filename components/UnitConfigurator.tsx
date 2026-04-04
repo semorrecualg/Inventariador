@@ -166,7 +166,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setSaving(true);
     const configToSave: UnitConfig = {
       id: currentConfig.id, // Preserve ID if it exists
-      tenant_id: user.tenantid,
+      _tenantid: user._tenantid || user.tenantid,
+      _unitid: selectedUnit,
+      tenant_id: user._tenantid || user.tenantid,
       unit_id: selectedUnit,
       lat: Number(currentConfig.lat),
       lng: Number(currentConfig.lng),

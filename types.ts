@@ -7,6 +7,7 @@ export enum UserRole {
 }
 
 export interface User {
+  id?: string; // UUID do Supabase
   username: string;
   name?: string; // Nome completo para exibição
   email: string;
@@ -35,7 +36,8 @@ export interface AuditLogEntry {
   user: string;
   action: string;
   details?: string;
-  tenantid?: string;
+  _tenantid?: string;
+  tenantid?: string; // Deprecated
   origin?: TransactionOrigin;
 }
 
