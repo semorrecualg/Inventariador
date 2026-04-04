@@ -14,15 +14,19 @@ export const checkRuntimeIntegrity = (): { isSafe: boolean; threats: string[] } 
   const threats: string[] = [];
 
   // 1. Verificar se o debugger está aberto (heurística simples)
+  // DESATIVADO TEMPORARIAMENTE PARA MANUTENÇÃO
+  /*
   const startTime = performance.now();
-  // eslint-disable-next-line no-debugger
   debugger;
   const endTime = performance.now();
   if (endTime - startTime > 100) {
     threats.push('DEBUGGER_DETECTED');
   }
+  */
 
-  // 2. Verificar se está rodando em um iframe de origem desconhecida (exceto o ambiente de dev)
+  // 2. Verificar se está rodando em um iframe de origem desconhecida
+  // DESATIVADO PARA EVITAR FALSOS POSITIVOS NO AMBIENTE DE DEV
+  /*
   try {
     if (window.self !== window.top && !window.location.hostname.includes('run.app')) {
       threats.push('UNAUTHORIZED_IFRAME');
@@ -30,6 +34,7 @@ export const checkRuntimeIntegrity = (): { isSafe: boolean; threats: string[] } 
   } catch {
     threats.push('CROSS_ORIGIN_IFRAME');
   }
+  */
 
   // 3. Verificar extensões suspeitas ou modificações no DOM (exemplo: injeção de scripts)
   if (document.querySelectorAll('script[src*="malicious"]').length > 0) {

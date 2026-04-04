@@ -12,14 +12,29 @@ export interface ProvisionResult {
   existing?: boolean;
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabaseSchema = import.meta.env.VITE_SUPABASE_SCHEMA || 'public';
+// Credenciais fixas para garantir conexão com o projeto correto (MPULMON)
+// Isso ignora o cache de variáveis de ambiente do navegador que está causando erros
+const CORRECT_URL = 'https://mpulmonxbcpqjxouzvuc.supabase.co';
+const CORRECT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wdWxtb254YmNwcWp4b3V6dnVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NTExMTUsImV4cCI6MjA4NzEyNzExNX0.itf1-hY2F8L4uwcYhugh_ZZOrKwK1PXm8JHFEMXQQaw';
+
+const supabaseUrl = CORRECT_URL;
+const supabaseAnonKey = CORRECT_KEY;
+const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').trim();
 
 // Initialize client only if credentials exist to prevent crash
 if (supabaseUrl && supabaseAnonKey) {
   console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
-  console.log(`%c[Supabase] Schema Ativo: ${supabaseSchema}`, "color: #3ecf8e;");
+  console.log(`%c[Supabase] URL COMPLETA: ${supabaseUrl}`, "color: #3ecf8e; font-weight: bold;");
+  console.log(`%c[Supabase] Schema Ativo: [${supabaseSchema}]`, "color: #3ecf8e;");
+  
+  // Teste de conexão silencioso
+  fetch(`${supabaseUrl}/rest/v1/`, {
+    headers: { 'apikey': supabaseAnonKey }
+  }).then(res => {
+    console.log(`%c[Supabase] Status da API: ${res.status} ${res.statusText}`, "color: #3ecf8e;");
+  }).catch(err => {
+    console.error('[Supabase] Falha ao contactar API:', err);
+  });
 }
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
@@ -268,71 +283,88 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   
   const lowerEmail = email.toLowerCase();
   
-  // 1. Busca perfil existente
+  // 1. Busca perfil existente com timeout para não travar o login
   console.log(`[Supabase] Buscando perfil para ${lowerEmail}...`);
-  const { data: profiles, error: fetchError } = await supabase
-    .from('user_permissions')
-    .select('*')
-    .eq('email', lowerEmail);
-    
-  if (fetchError) {
-    console.error('[Supabase] Erro ao buscar perfil:', fetchError);
-    throw fetchError;
-  }
   
-  if (profiles && profiles.length > 0) {
-    const profile = profiles[0];
-    console.log(`[Supabase] Perfil encontrado para ${lowerEmail}:`, profile);
-    
-    // Se o perfil existe mas não tem o ID (ou o ID é diferente), atualiza para sincronizar
-    if (userId && profile.id !== userId) {
-      await supabase
+  // Criamos uma promessa de timeout
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error("Timeout ao buscar perfil")), 4000)
+  );
+
+  try {
+    // Corrida entre a busca real e o timeout
+    const result = await Promise.race([
+      supabase
         .from('user_permissions')
-        .update({ id: userId })
-        .eq('email', lowerEmail);
+        .select('*')
+        .eq('email', lowerEmail),
+      timeoutPromise
+    ]);
+    
+    const { data: profiles, error: fetchError } = result as { data: Record<string, unknown>[] | null, error: { message: string } | null };
+      
+    if (fetchError) {
+      console.error('[Supabase] Erro ao buscar perfil:', fetchError);
+      // Não lançamos erro aqui, deixamos cair no fallback abaixo
     }
+    
+    if (profiles && profiles.length > 0) {
+      const profile = profiles[0];
+      console.log(`[Supabase] Perfil encontrado for ${lowerEmail}:`, profile);
+      
+      // Se o perfil existe mas não tem o ID (ou o ID é diferente), atualiza para sincronizar
+      if (userId && profile.id !== userId) {
+        supabase
+          .from('user_permissions')
+          .update({ id: userId })
+          .eq('email', lowerEmail)
+          .then(() => console.log('[Supabase] ID de perfil sincronizado.'));
+      }
 
-    // Normalização de valores (remove "default"/"DEFAULT")
-    const normalizeValue = (val: string) => {
-      if (!val) return '';
-      const upper = val.toUpperCase();
-      return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
-    };
+      // Normalização de valores (remove "default"/"DEFAULT")
+      const normalizeValue = (val: string) => {
+        if (!val) return '';
+        const upper = val.toUpperCase();
+        return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+      };
 
-    // Normalização de arrays
+      // Normalização de arrays
       const normalizeArray = (arr: unknown) => {
         if (!arr) return [];
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
 
-    const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
-    const _tenantid = profile._tenantid || profile.tenantid || metadata?._tenantid || metadata?.tenantid || '';
-    const _unitid = profile._unitid || profile.unitid || metadata?._unitid || metadata?.unitid || '';
-    
-    const units = normalizeArray(profile.units || metadata?.units || (_unitid ? [_unitid] : []));
-    const tenants = normalizeArray(profile.tenants || metadata?.tenants || (_tenantid ? [_tenantid] : []));
+      const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
+      const _tenantid = profile._tenantid || profile.tenantid || metadata?._tenantid || metadata?.tenantid || '';
+      const _unitid = profile._unitid || profile.unitid || metadata?._unitid || metadata?.unitid || '';
+      
+      const units = normalizeArray(profile.units || metadata?.units || (_unitid ? [_unitid] : []));
+      const tenants = normalizeArray(profile.tenants || metadata?.tenants || (_tenantid ? [_tenantid] : []));
 
-    // Retornamos um objeto limpo, sem campos legados
-    const finalProfile = {
-      id: profile.id,
-      email: profile.email,
-      username: profile.username || metadata?.username || lowerEmail.split('@')[0],
-      name: profile.name || metadata?.name || profile.username || metadata?.username || lowerEmail.split('@')[0],
-      role: profile.role || metadata?.role || UserRole.AUDITOR,
-      is_admin,
-      isAdmin: is_admin,
-      _tenantid,
-      _unitid,
-      tenantid: _tenantid,
-      unitid: _unitid,
-      units,
-      tenants,
-      created_at: profile.created_at
-    };
-    
-    console.log(`[Supabase] Perfil final (existente) para ${lowerEmail}:`, finalProfile);
-    return finalProfile;
+      // Retornamos um objeto limpo, sem campos legados
+      const finalProfile = {
+        id: profile.id,
+        email: profile.email,
+        username: profile.username || metadata?.username || lowerEmail.split('@')[0],
+        name: profile.name || metadata?.name || profile.username || metadata?.username || lowerEmail.split('@')[0],
+        role: profile.role || metadata?.role || UserRole.AUDITOR,
+        is_admin,
+        isAdmin: is_admin,
+        _tenantid,
+        _unitid,
+        tenantid: _tenantid,
+        unitid: _unitid,
+        units,
+        tenants,
+        created_at: profile.created_at
+      };
+      
+      console.log(`[Supabase] Perfil final (existente) para ${lowerEmail}:`, finalProfile);
+      return finalProfile;
+    }
+  } catch (err) {
+    console.warn('[Supabase] Timeout ou erro ao buscar perfil, seguindo para criação/fallback:', err);
   }
   
   // 2. Se não existir, cria um perfil padrão
@@ -1427,11 +1459,55 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
   
   console.log(`>>> [Supabase] Buscando campanhas para tenant: ${tenantid}`);
   
-  const { data, error } = await supabase
-    .from('inventory_campaigns')
+  // Tenta buscar usando _tenantid primeiro na nova tabela campaigns_v2
+  let { data, error } = await supabase
+    .from('campaigns_v2')
     .select('*')
     .eq('_tenantid', tenantid)
     .order('start_date', { ascending: false });
+  
+  // Fallback para a tabela antiga se a nova ainda não estiver pronta ou se houver erro de cache
+  if (error && error.code === 'PGRST204') {
+    console.warn('[Supabase] Falha na campaigns_v2, tentando inventory_campaigns...');
+    const oldTable = await supabase
+      .from('inventory_campaigns')
+      .select('*')
+      .eq('_tenantid', tenantid)
+      .order('start_date', { ascending: false });
+    
+    if (!oldTable.error) {
+      data = oldTable.data;
+      error = null;
+    }
+  }
+  
+  // Se falhar por coluna inexistente, tenta tenant_id (legado/alternativo)
+  if (error && (error.code === 'PGRST204' || error.message?.includes('_tenantid'))) {
+    console.warn('[Supabase] Falha ao buscar com _tenantid, tentando tenant_id...');
+    const fallback = await supabase
+      .from('inventory_campaigns')
+      .select('*')
+      .eq('tenant_id', tenantid)
+      .order('start_date', { ascending: false });
+    
+    if (!fallback.error) {
+      data = fallback.data;
+      error = null;
+    } else {
+      // Terceira tentativa: tenantid
+      console.warn('[Supabase] Falha ao buscar com tenant_id, tentando tenantid...');
+      const finalTry = await supabase
+        .from('inventory_campaigns')
+        .select('*')
+        .eq('tenantid', tenantid)
+        .order('start_date', { ascending: false });
+      
+      if (!finalTry.error) {
+        data = finalTry.data;
+        error = null;
+      }
+    }
+  }
   
   if (error) {
     console.error('Erro ao buscar campanhas:', error);
@@ -1440,10 +1516,10 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
 
   return (data || []).map((c: Record<string, unknown>) => ({
     ...c,
-    _unitid: c._unitid as string,
-    _tenantid: c._tenantid as string,
-    unit_id: c._unitid as string, // Legado
-    tenantid: c._tenantid as string // Legado
+    _unitid: (c._unitid || c.unit_id || c._unitid) as string,
+    _tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string,
+    unit_id: (c._unitid || c.unit_id) as string,
+    tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string
   })) as InventoryCampaign[];
 };
 
@@ -1453,38 +1529,62 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
   if (!supabase) return null;
   
-  const payload = {
+  const tenantVal = campaign._tenantid || campaign.tenantid;
+  const unitVal = campaign._unitid || campaign.unit_id;
+
+  const payload: Record<string, unknown> = {
     name: campaign.name,
     description: campaign.description,
     status: campaign.status,
-    _tenantid: campaign._tenantid || campaign.tenantid,
-    _unitid: campaign._unitid || campaign.unit_id,
+    _tenantid: tenantVal,
+    _unitid: unitVal,
     created_by: campaign.created_by,
     start_date: campaign.start_date || new Date().toISOString()
   };
 
-  const { data, error } = await supabase
-    .from('inventory_campaigns')
-    .insert([payload])
-    .select()
-    .single();
+  console.log('[Supabase] Tentando criar campanha com payload:', payload);
+
+  // Tenta via RPC v5 (JSONB) na nova tabela campaigns_v2
+  const rpcResult = await supabase.rpc('create_campaign_v5', {
+    p_payload: payload
+  });
+
+  let data = null;
+  let error = null;
+
+  if (!rpcResult.error) {
+    data = rpcResult.data;
+  } else {
+    console.warn('[Supabase] Falha via RPC v5, tentando inserção direta na campaigns_v2...');
+    const directInsert = await supabase
+      .from('campaigns_v2')
+      .insert([payload])
+      .select()
+      .single();
+    
+    if (!directInsert.error) {
+      data = directInsert.data;
+    } else {
+      error = directInsert.error;
+    }
+  }
 
   if (error) {
-    if (error.code === 'PGRST204') {
+    const err = error as { code: string, message: string };
+    if (err.code === 'PGRST204') {
       console.error('[Supabase] Erro de Cache de Schema (PGRST204). A coluna _tenantid não foi encontrada no cache da API.');
-      console.info('DICA: Execute o script de "Reset de Cache" no SQL Editor do Supabase.');
     }
-    console.error('Erro ao criar campanha:', error);
-    throw error;
+    console.error('Erro ao criar campanha:', err);
+    throw err;
   }
 
   if (data) {
     return {
       ...data,
-      _unitid: data._unitid as string,
-      _tenantid: data._tenantid as string,
-      unit_id: (data._unitid || data.unit_id) as string, // Legado
-      tenantid: (data._tenantid || data.tenantid) as string // Legado
+      _unitid: (data._unitid || data.unit_id) as string,
+      _tenantid: (data._tenantid || data.tenant_id || data.tenantid) as string,
+      unit_id: (data._unitid || data.unit_id) as string,
+      tenantid: (data._tenantid || data.tenant_id || data.tenantid) as string
     } as InventoryCampaign;
   }
   

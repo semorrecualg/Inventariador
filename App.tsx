@@ -1,4 +1,6 @@
 
+// v24.50.2 - Force Update to MPULMON Project
+console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign } from './types';
@@ -895,12 +897,10 @@ const App: React.FC = () => {
   // Apply theme class to body based on databaseMode, darkMode and environment
   useEffect(() => {
     const body = document.body;
-    body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark', 'theme-staging');
+    body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark');
     
     if (inventory.darkMode) {
       body.classList.add('theme-dark');
-    } else if (import.meta.env.VITE_ENVIRONMENT === 'staging' || import.meta.env.VITE_SUPABASE_SCHEMA === 'staging') {
-      body.classList.add('theme-staging');
     } else {
       if (databaseMode === DatabaseMode.SUPABASE) {
         body.classList.add('theme-supabase');
@@ -3348,11 +3348,11 @@ const App: React.FC = () => {
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
-                    className={`px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 cursor-pointer hover:scale-105 active:scale-95 transition-all ${import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'bg-amber-50 border-amber-100' : 'bg-indigo-50 border-indigo-100'}`}
+                    className="px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 cursor-pointer hover:scale-105 active:scale-95 transition-all bg-indigo-50 border-indigo-100"
                     title="Abrir Assistente de IA"
                   >
-                    <span className={`text-[7px] font-black uppercase tracking-widest ${import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'text-amber-600' : 'text-indigo-600'}`}>
-                      {import.meta.env.VITE_ENVIRONMENT === 'staging' ? 'STAGING' : 'DEV'}
+                    <span className="text-[7px] font-black uppercase tracking-widest text-indigo-600">
+                      DEV
                     </span>
                   </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
@@ -4035,13 +4035,6 @@ const App: React.FC = () => {
       <AIAssistant 
         isOpen={isAIAssistantOpen} 
         onClose={() => setIsAIAssistantOpen(false)} 
-        user={user}
-        onAssetsGenerated={(newAssets) => {
-          setInventory(prev => ({
-            ...prev,
-            assets: [...prev.assets, ...newAssets]
-          }));
-        }}
       />
 
       <Modal

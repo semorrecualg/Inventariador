@@ -153,6 +153,21 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     }
   };
 
+  const handleClearSession = async () => {
+    try {
+      setIsLoading(true);
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    } catch (err) {
+      console.error('Erro ao limpar sessão:', err);
+      window.location.reload();
+    }
+  };
+
   const handleMagicLink = async () => {
     if (!username.includes('@')) {
       setError("Por favor, insira um e-mail válido para o Magic Link.");
@@ -194,20 +209,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
       return;
     }
     
-    // Timeout de segurança para não travar a UI
+    // Timeout de segurança para não travar a UI (Aumentado para 45s para maior resiliência)
     const loginTimeout = setTimeout(() => {
-      if (isLoading) {
-        setIsLoading(false);
-        setError("A autenticação está demorando muito. Verifique sua conexão ou tente novamente.");
-        console.warn('[Login] Timeout de autenticação atingido.');
-      }
-    }, 15000);
+      setIsLoading(prev => {
+        if (prev) {
+          setError("A autenticação está demorando muito. Verifique sua conexão ou tente novamente.");
+          console.warn('[Login] Timeout de autenticação atingido (45s).');
+          return false;
+        }
+        return prev;
+      });
+    }, 45000);
 
     try {
       let loggedUser: User | null = null;
 
       if (databaseMode === DatabaseMode.SUPABASE) {
-        console.log('[Login] Autenticando via Supabase Auth...');
+        console.log('[Login] Autenticando via Supabase Auth...', { loginEmail: username.trim().toLowerCase() });
         
         let loginEmail = username.trim().toLowerCase();
         
@@ -222,41 +240,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           console.log('[Login] E-mail encontrado:', loginEmail);
         }
 
+        console.log('[Login] Chamando signInWithPassword...');
         // 1. Autenticação via Supabase Auth (Oficial)
         const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
           email: loginEmail,
-          password: password // Removido .trim() para evitar falhas se a senha contiver espaços intencionais
+          password: password
         });
 
         if (authError) {
           console.error('[Login] Erro Supabase Auth:', authError);
-          
-          // Se falhar no Auth, mostramos a mensagem real do Supabase para diagnóstico
-          if (authError.message.includes("Email not confirmed")) {
-            throw new Error("E-mail ainda não confirmado. Verifique sua caixa de entrada ou use o 'Magic Link' abaixo.");
-          }
-          if (authError.message.includes("Invalid login credentials")) {
-            // Verifica se o usuário está tentando usar a senha padrão do modo interno no modo nuvem
-            if (password.toLowerCase() === 'admin' || password === 'Glaucio@1970') {
-              throw new Error("A senha digitada parece ser do modo 'Mobile Puro'. No modo 'Cloud Sync', você deve usar sua senha da nuvem ou solicitar um 'Magic Link' abaixo.");
-            }
-            // Verifica se o usuário existe na tabela de permissões para dar uma dica melhor
-            const existsInDb = await getEmailByUsername(username.trim());
-            if (existsInDb) {
-              throw new Error("E-mail ou senha incorretos. O usuário foi encontrado no banco, mas a senha não confere. Tente o 'Magic Link' ou 'Esqueci minha senha' abaixo.");
-            }
-            throw new Error("E-mail ou senha incorretos. Se você ainda não tem uma conta, clique em 'Criar Nova Conta' abaixo.");
-          }
-          throw new Error(`Erro Supabase: ${authError.message}`);
+          throw authError;
         }
         
         if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
 
-        console.log('[Login] Supabase Auth OK. Garantindo perfil do usuário...');
-        // 2. Garante que o usuário tenha um perfil na tabela user_permissions
-        // Buscamos o perfil completo para garantir que temos os dados mais recentes da nuvem
-        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id);
-        console.log('[Login] Perfil garantido:', cloudUser);
+    // 2. Garante que o usuário tenha um perfil na tabela user_permissions
+    // Tornamos isso mais resiliente para não travar o login se o perfil demorar
+    console.log('[Login] Chamando ensureUserProfile...');
+    const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
+      .catch(err => {
+        console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
+        return {
+          email: authData.user.email,
+          username: authData.user.email?.split('@')[0],
+          role: 'AUDITOR',
+          is_admin: (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br')
+        };
+      });
+    
+    console.log('[Login] Perfil processado.');
         
         // Se o usuário logou com username, garantimos que o objeto User tenha esse username
         const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
@@ -424,6 +436,30 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             <span>Cloud Sync</span>
           </button>
         </div>
+        
+        {/* Botão de Emergência para Limpar Cache */}
+        <button 
+          type="button"
+          onClick={() => {
+            if (window.confirm('Isso vai limpar todo o cache do navegador e deslogar você. Deseja continuar?')) {
+              localStorage.clear();
+              sessionStorage.clear();
+              // Tenta desregistrar service workers
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                  for (const registration of registrations) {
+                    registration.unregister();
+                  }
+                });
+              }
+              window.location.reload();
+            }
+          }}
+          className="w-full mt-2 py-1.5 border border-red-200 bg-red-50 text-red-600 rounded-xl text-[7px] font-black uppercase tracking-[0.2em] hover:bg-red-100 transition-colors flex items-center justify-center space-x-2"
+        >
+          <RefreshCw size={10} className="animate-spin-slow" />
+          <span>Forçar Limpeza de Cache (Emergência)</span>
+        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
@@ -486,22 +522,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         </button>
 
         {databaseMode === DatabaseMode.SUPABASE && (
-          <button 
-            type="button"
-            onClick={() => {
-              // Navega para a tela de registro
-              const pushScreen = window.pushScreen;
-              if (pushScreen) {
-                pushScreen(AppScreen.REGISTER);
-              } else {
-                // Fallback se pushScreen não estiver no window
-                window.dispatchEvent(new CustomEvent('app_navigate', { detail: AppScreen.REGISTER }));
-              }
-            }}
-            className="w-full bg-white border border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
-          >
-            <span>Criar Nova Conta</span>
-          </button>
+          <>
+            <button 
+              type="button"
+              onClick={() => {
+                // Navega para a tela de registro
+                const pushScreen = window.pushScreen;
+                if (pushScreen) {
+                  pushScreen(AppScreen.REGISTER);
+                } else {
+                  // Fallback se pushScreen não estiver no window
+                  window.dispatchEvent(new CustomEvent('app_navigate', { detail: AppScreen.REGISTER }));
+                }
+              }}
+              className="w-full bg-white border border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+            >
+              <span>Criar Nova Conta</span>
+            </button>
+
+            {/* Botão de Limpar Sessão (Recuperação) - Movido para maior visibilidade */}
+            <button
+              type="button"
+              onClick={handleClearSession}
+              className="w-full py-2 px-4 text-[9px] text-gray-400 hover:text-gray-600 flex items-center justify-center gap-2 transition-colors mt-2"
+              title="Use se o login estiver travado ou se mudou de projeto"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Limpar Sessão e Cache (Recuperação)
+            </button>
+          </>
         )}
 
         {hasBio && !isLoading && (

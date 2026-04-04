@@ -57,48 +57,6 @@
   --ink-muted: #059669;
 }
 
-.theme-staging {
-  /* Staging (Vibrant Amber/Orange) - Para diferenciar do DEV */
-  --accent: #F59E0B;
-  --accent-soft: #FFFBEB;
-  --bg-main: #FFFDF5;
-  --ink: #78350F;
-  --ink-muted: #B45309;
-  --surface: #FFFFFF;
-  --border: #FEF3C7;
-}
-
-/* Overrides for hardcoded blue/indigo classes in Staging mode */
-.theme-staging .bg-indigo-600, 
-.theme-staging .bg-blue-600 { background-color: #D97706 !important; } /* Amber 700 */
-
-.theme-staging .bg-indigo-500, 
-.theme-staging .bg-blue-500 { background-color: #F59E0B !important; } /* Amber 600 */
-
-.theme-staging .bg-indigo-400, 
-.theme-staging .bg-blue-400 { background-color: #FBBF24 !important; } /* Amber 400 */
-
-.theme-staging .bg-indigo-50, 
-.theme-staging .bg-blue-50 { background-color: #FEF3C7 !important; } /* Amber 100 */
-
-.theme-staging .text-indigo-600, 
-.theme-staging .text-blue-600 { color: #D97706 !important; }
-
-.theme-staging .text-indigo-500, 
-.theme-staging .text-blue-500 { color: #F59E0B !important; }
-
-.theme-staging .text-indigo-400, 
-.theme-staging .text-blue-400 { color: #FBBF24 !important; }
-
-.theme-staging .border-indigo-600, 
-.theme-staging .border-blue-600 { border-color: #D97706 !important; }
-
-.theme-staging .border-indigo-100, 
-.theme-staging .border-blue-100 { border-color: #FEF3C7 !important; }
-
-.theme-staging .accent-indigo-600,
-.theme-staging .accent-blue-600 { accent-color: #F59E0B !important; }
-
 .theme-protheus {
   /* Protheus (Vibrant Indigo) */
   --accent: #6366F1;

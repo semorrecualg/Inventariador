@@ -49,14 +49,34 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const handleCreateCampaign = async () => {
     if (!newCampaignName) return;
 
-    if (!user?._tenantid && !user?.tenantid) {
+    // Tenta resolver o tenantId de várias formas
+    const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
+    let tenantId = user?._tenantid || user?.tenantid;
+    
+    // Se for admin e não tiver tenantId direto, tenta pegar do array de tenants
+    if (!tenantId && isAdmin && user?.tenants && user.tenants.length > 0) {
+      tenantId = user.tenants[0];
+    }
+
+    if (!tenantId && !isAdmin) {
       console.error('Erro: Tenant ID não encontrado. Sua sessão pode ter expirado. Por favor, saia e entre novamente.');
       return;
     }
 
+    // Se ainda não tiver tenantId e for admin, tenta um valor global ou o que estiver disponível
+    if (!tenantId && isAdmin) {
+      tenantId = 'GLOBAL'; // Fallback para admin sem tenant
+    }
+
     setIsSaving(true);
     try {
-      const tenantId = user._tenantid || user.tenantid;
+      console.log('[CampaignManager] Criando campanha com User:', { 
+        email: user?.email, 
+        tenantId, 
+        _tenantid: user?._tenantid, 
+        tenantid: user?.tenantid 
+      });
+      
       const newCampaign: Partial<InventoryCampaign> = {
         name: newCampaignName,
         description: newCampaignDesc,
@@ -65,7 +85,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         _unitid: newCampaignUnit || undefined,
         tenantid: tenantId, // Legado
         unit_id: newCampaignUnit || undefined, // Legado
-        created_by: user.email,
+        created_by: user?.email || 'admin',
         start_date: new Date().toISOString()
       };
 
@@ -202,7 +222,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || !user?.tenantid || isSaving}
+                  disabled={!newCampaignName || isSaving}
                   className="flex-1 py-3 bg-ink text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-30 flex items-center justify-center gap-2 shadow-lg shadow-ink/20"
                 >
                   {isSaving ? (
