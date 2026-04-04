@@ -1470,6 +1470,10 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
     .single();
 
   if (error) {
+    if (error.code === 'PGRST204') {
+      console.error('[Supabase] Erro de Cache de Schema (PGRST204). A coluna _tenantid não foi encontrada no cache da API.');
+      console.info('DICA: Execute o script de "Reset de Cache" no SQL Editor do Supabase.');
+    }
     console.error('Erro ao criar campanha:', error);
     throw error;
   }
