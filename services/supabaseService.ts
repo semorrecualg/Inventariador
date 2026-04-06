@@ -19,22 +19,28 @@ const CORRECT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 const supabaseUrl = CORRECT_URL;
 const supabaseAnonKey = CORRECT_KEY;
-const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').trim();
+// Limpeza robusta do schema para evitar caracteres como [ ] vindos de logs ou envs
+const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').replace(/[[]\]/g, '').trim();
 
 // Initialize client only if credentials exist to prevent crash
 if (supabaseUrl && supabaseAnonKey) {
   console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
-  console.log(`%c[Supabase] URL COMPLETA: ${supabaseUrl}`, "color: #3ecf8e; font-weight: bold;");
-  console.log(`%c[Supabase] Schema Ativo: [${supabaseSchema}]`, "color: #3ecf8e;");
+  console.log(`%c[Supabase] URL: ${supabaseUrl}`, "color: #3ecf8e;");
+  console.log(`%c[Supabase] Schema: [${supabaseSchema}]`, "color: #3ecf8e;");
   
-  // Teste de conexão silencioso
-  fetch(`${supabaseUrl}/rest/v1/`, {
-    headers: { 'apikey': supabaseAnonKey }
-  }).then(res => {
-    console.log(`%c[Supabase] Status da API: ${res.status} ${res.statusText}`, "color: #3ecf8e;");
-  }).catch(err => {
-    console.error('[Supabase] Falha ao contactar API:', err);
-  });
+  // Teste de conexão expandido (REST e AUTH)
+  const testConnection = async () => {
+    try {
+      const restTest = await fetch(`${supabaseUrl}/rest/v1/`, { headers: { 'apikey': supabaseAnonKey } });
+      console.log(`%c[Supabase] Conectividade REST: ${restTest.status === 200 ? 'OK' : 'ERRO ' + restTest.status}`, restTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
+      
+      const authTest = await fetch(`${supabaseUrl}/auth/v1/health`, { headers: { 'apikey': supabaseAnonKey } });
+      console.log(`%c[Supabase] Conectividade AUTH: ${authTest.status === 200 ? 'OK' : 'ERRO ' + authTest.status}`, authTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
+    } catch (err) {
+      console.error('[Supabase] Falha crítica de conectividade:', err);
+    }
+  };
+  testConnection();
 }
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
@@ -104,11 +110,12 @@ export const logAuditEvent = async (entry: {
       old_data: entry.old_data ? sanitizeForSupabase(entry.old_data) : undefined
     };
 
-    const { error } = await supabase
-      .from('audit_logs')
-      .insert([sanitizedEntry]);
+    const { error } = await Promise.race([
+      supabase.from('audit_logs').insert([sanitizedEntry]),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("LOG_TIMEOUT")), 2000))
+    ]).catch(err => ({ error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-    if (error) {
+    if (error && error.message !== "LOG_TIMEOUT") {
       console.error('Erro ao registrar log de auditoria:', error);
     }
   } catch (err) {
@@ -283,153 +290,132 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   
   const lowerEmail = email.toLowerCase();
   
-  // 1. Busca perfil existente com timeout para não travar o login
+  // 1. Busca perfil existente com timeout estrito
   console.log(`[Supabase] Buscando perfil para ${lowerEmail}...`);
   
-  // Criamos uma promessa de timeout
-  const timeoutPromise = new Promise((_, reject) => 
-    setTimeout(() => reject(new Error("Timeout ao buscar perfil")), 4000)
-  );
+  const fetchPromise = supabase
+    .from('user_permissions')
+    .select('*')
+    .eq('email', lowerEmail)
+    .single();
 
-  try {
-    // Corrida entre a busca real e o timeout
-    const result = await Promise.race([
-      supabase
-        .from('user_permissions')
-        .select('*')
-        .eq('email', lowerEmail),
-      timeoutPromise
-    ]);
+  const result = await Promise.race([
+    fetchPromise,
+    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 3000))
+  ]).catch(err => {
+    console.warn('[Supabase] Timeout ou erro na busca de perfil:', err.message);
+    return { data: null, error: { message: err.message } };
+  }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  
+  const profile = result.data;
     
-    const { data: profiles, error: fetchError } = result as { data: Record<string, unknown>[] | null, error: { message: string } | null };
-      
-    if (fetchError) {
-      console.error('[Supabase] Erro ao buscar perfil:', fetchError);
-      // Não lançamos erro aqui, deixamos cair no fallback abaixo
+  if (profile) {
+    console.log(`[Supabase] Perfil encontrado para ${lowerEmail}:`, profile);
+    
+    // Sincronização de ID em background (não aguarda)
+    if (userId && profile.id !== userId) {
+      supabase.from('user_permissions').update({ id: userId }).eq('email', lowerEmail).then();
     }
+
+    const is_admin = (profile.is_admin === true || profile.isadmin === true || 
+                     (profile.role && profile.role.trim().toUpperCase() === 'ADMIN') || 
+                     (profile.role && profile.role.trim().toUpperCase() === 'MASTER') ||
+                     (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br'));
     
-    if (profiles && profiles.length > 0) {
-      const profile = profiles[0];
-      console.log(`[Supabase] Perfil encontrado for ${lowerEmail}:`, profile);
-      
-      // Se o perfil existe mas não tem o ID (ou o ID é diferente), atualiza para sincronizar
-      if (userId && profile.id !== userId) {
-        supabase
-          .from('user_permissions')
-          .update({ id: userId })
-          .eq('email', lowerEmail)
-          .then(() => console.log('[Supabase] ID de perfil sincronizado.'));
+    const finalRole = (profile.role || 'AUDITOR').trim().toUpperCase();
+    
+    const parseArray = (val: unknown) => {
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try {
+            return JSON.parse(trimmed);
+          } catch {
+            // Se falhar o parse, tenta limpar aspas extras
+            const cleaned = trimmed.replace(/^\["|"\]$/g, '').split('","');
+            return cleaned.filter(v => v !== '');
+          }
+        }
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          // Formato nativo Postgres {}
+          return trimmed.substring(1, trimmed.length - 1).split(',').map(v => v.replace(/"/g, ''));
+        }
+        return trimmed ? [trimmed] : [];
       }
+      return val ? [val] : [];
+    };
 
-      // Normalização de valores (remove "default"/"DEFAULT")
-      const normalizeValue = (val: string) => {
-        if (!val) return '';
-        const upper = val.toUpperCase();
-        return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
-      };
+    const finalProfile = {
+      id: profile.id,
+      email: profile.email,
+      username: profile.username || lowerEmail.split('@')[0],
+      name: profile.name || profile.username || lowerEmail.split('@')[0],
+      role: finalRole,
+      is_admin: is_admin,
+      isAdmin: is_admin,
+      _tenantid: (profile._tenantid || profile.tenantid || profile.tenantId || '').trim(),
+      _unitid: (profile._unitid || profile.unitid || profile.unitId || '').trim(),
+      units: parseArray(profile.units || profile.unitid || profile._unitid),
+      tenants: parseArray(profile.tenants || profile.tenantid || profile._tenantid)
+    };
 
-      // Normalização de arrays
-      const normalizeArray = (arr: unknown) => {
-        if (!arr) return [];
-        const array = Array.isArray(arr) ? arr : [arr];
-        return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
-      };
-
-      const is_admin = profile.is_admin || profile.isAdmin || metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
-      const _tenantid = profile._tenantid || profile.tenantid || metadata?._tenantid || metadata?.tenantid || '';
-      const _unitid = profile._unitid || profile.unitid || metadata?._unitid || metadata?.unitid || '';
-      
-      const units = normalizeArray(profile.units || metadata?.units || (_unitid ? [_unitid] : []));
-      const tenants = normalizeArray(profile.tenants || metadata?.tenants || (_tenantid ? [_tenantid] : []));
-
-      // Retornamos um objeto limpo, sem campos legados
-      const finalProfile = {
-        id: profile.id,
-        email: profile.email,
-        username: profile.username || metadata?.username || lowerEmail.split('@')[0],
-        name: profile.name || metadata?.name || profile.username || metadata?.username || lowerEmail.split('@')[0],
-        role: profile.role || metadata?.role || UserRole.AUDITOR,
-        is_admin,
-        isAdmin: is_admin,
-        _tenantid,
-        _unitid,
-        tenantid: _tenantid,
-        unitid: _unitid,
-        units,
-        tenants,
-        created_at: profile.created_at
-      };
-      
-      console.log(`[Supabase] Perfil final (existente) para ${lowerEmail}:`, finalProfile);
-      return finalProfile;
-    }
-  } catch (err) {
-    console.warn('[Supabase] Timeout ou erro ao buscar perfil, seguindo para criação/fallback:', err);
+    console.log(`[Supabase] Perfil final processado para ${lowerEmail}:`, finalProfile);
+    return finalProfile;
   }
-  
-  // 2. Se não existir, cria um perfil padrão
-  console.log(`[Supabase] Perfil não encontrado para ${lowerEmail}. Criando novo perfil...`);
-  
-  const normalizeValue = (val: string) => {
-    if (!val) return '';
-    const upper = val.toUpperCase();
-    return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
-  };
 
-  const normalizeArray = (arr: unknown) => {
-    if (!arr) return [];
-    const array = Array.isArray(arr) ? arr : [arr];
-    return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
-  };
-
-  const defaultTenant = normalizeValue(metadata?._tenantid || metadata?.tenantid || '');
-  const is_admin = metadata?.isAdmin || (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') || false;
+  // 2. Se não encontrou ou deu timeout, tenta criar/atualizar (Upsert) com timeout
+  console.log('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
   
-  console.log(`[Supabase] Valores iniciais para novo perfil:`, { is_admin, defaultTenant });
-
+  const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || '').trim();
+  const is_admin_new = (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br');
+  const fallbackTenant = defaultTenant || (is_admin_new ? 'CICOPAL' : '');
+  
   const insertData = {
     email: lowerEmail,
-    username: metadata?.username || lowerEmail.split('@')[0],
-    name: metadata?.name || metadata?.username || lowerEmail.split('@')[0],
-    role: metadata?.role || (is_admin ? UserRole.ADMIN : UserRole.AUDITOR),
-    is_admin,
-    _tenantid: defaultTenant,
-    _unitid: normalizeValue(metadata?._unitid || metadata?.unitid || ''),
-    units: normalizeArray(metadata?.units || (metadata?._unitid || metadata?.unitid ? [metadata?._unitid || metadata?.unitid] : [])),
-    tenants: normalizeArray(metadata?.tenants || (defaultTenant ? [defaultTenant] : [])),
+    username: (metadata?.username || lowerEmail.split('@')[0]).trim(),
+    name: (metadata?.name || metadata?.username || lowerEmail.split('@')[0]).trim(),
+    role: is_admin_new ? 'ADMIN' : 'AUDITOR',
+    is_admin: is_admin_new,
+    _tenantid: fallbackTenant,
+    _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || '').trim(),
     ...(userId ? { id: userId } : {})
   };
 
-  const { data: createdProfile, error } = await supabase
+  const upsertPromise = supabase
     .from('user_permissions')
     .upsert([insertData], { onConflict: 'email' })
     .select()
     .single();
 
-  if (error) {
-    console.warn("Não foi possível criar perfil automático:", error);
+  const upsertResult = await Promise.race([
+    upsertPromise,
+    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 5000))
+  ]).catch(() => null) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  if (upsertResult && !upsertResult.error && upsertResult.data) {
+    const d = upsertResult.data;
     return {
-      username: metadata?.username || lowerEmail.split('@')[0],
-      email: lowerEmail,
-      role: metadata?.role || UserRole.AUDITOR,
-      isAdmin: metadata?.isAdmin || false,
-      tenantid: metadata?.tenantid || '',
-      tenants: metadata?.tenants || []
+      ...d,
+      isAdmin: d.is_admin,
+      _tenantid: d._tenantid || fallbackTenant,
+      _unitid: d._unitid || ''
     };
   }
 
-  // Log de Auditoria
-  await logAuditEvent({
-    user_email: email,
-    action: 'ENSURE_PROFILE',
-    table_name: 'user_permissions',
-    record_id: userId || 'unknown',
-    details: `Perfil de usuário garantido/criado para ${email}`,
-    _tenantid: defaultTenant
-  });
-  
-  console.log(`[Supabase] Perfil final para ${email}:`, createdProfile);
-  return createdProfile;
+  // 3. Fallback Final: Retorna dados locais para não travar o login
+  console.warn('[Supabase] Usando perfil local (Fallback Total)');
+  return {
+    email: lowerEmail,
+    username: lowerEmail.split('@')[0],
+    role: is_admin_new ? 'ADMIN' : 'AUDITOR',
+    is_admin: is_admin_new,
+    isAdmin: is_admin_new,
+    _tenantid: fallbackTenant,
+    _unitid: '',
+    units: [],
+    tenants: [fallbackTenant]
+  };
 };
 
 export const signIn = async (email: string, password: string) => {
@@ -449,13 +435,24 @@ export const signIn = async (email: string, password: string) => {
 
 export const signInWithMagicLink = async (email: string) => {
   if (!supabase) throw new Error("Supabase não configurado.");
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: getAppBaseUrl(),
-    },
-  });
-  if (error) throw error;
+  
+  const redirectTo = getAppBaseUrl();
+  console.log('[Supabase] Solicitando Magic Link para:', email, 'Redirect:', redirectTo);
+
+  const { data, error } = await Promise.race([
+    supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo,
+      },
+    }),
+    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 10000))
+  ]).catch(err => ({ data: null, error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  
+  if (error) {
+    console.error('[Supabase] Erro ou Timeout no signInWithOtp:', error);
+    throw new Error(error.message === "AUTH_TIMEOUT" ? "O servidor de autenticação não respondeu a tempo. Tente novamente." : error.message);
+  }
   return data;
 };
 
@@ -627,18 +624,26 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
   if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase
+    const fetchPromise = supabase
       .from('user_permissions')
       .select('email')
       .ilike('username', username)
       .maybeSingle();
 
-    if (error) {
-      console.error('Erro ao buscar e-mail por username:', error);
+    const result = await Promise.race([
+      fetchPromise,
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 3000))
+    ]).catch(err => {
+      console.warn('[Supabase] Timeout ao buscar e-mail por username:', err.message);
+      return { data: null, error: { message: err.message } };
+    }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    if (result.error) {
+      console.error('Erro ao buscar e-mail por username:', result.error);
       return null;
     }
 
-    return data?.email || null;
+    return result.data?.email || null;
   } catch (err) {
     console.error('Erro inesperado ao buscar e-mail por username:', err);
     return null;
@@ -745,11 +750,8 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         name: name || username || email.split('@')[0],
         role: role || 'AUDITOR',
         is_admin,
-        isAdmin: is_admin,
         _tenantid: normTenantId,
         _unitid: normUnitId,
-        tenantid: normTenantId,
-        unitid: normUnitId,
         units: normalizeArray(units || (normUnitId ? [normUnitId] : [])),
         tenants: normalizeArray(tenants || (normTenantId ? [normTenantId] : []))
       };
@@ -799,11 +801,8 @@ export const syncUsersToCloud = async (users: User[]) => {
         name: u.name || u.username,
         role: u.role,
         is_admin,
-        isAdmin: is_admin,
         _tenantid,
         _unitid,
-        tenantid: _tenantid,
-        unitid: _unitid,
         units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
         tenants: normalizeArray(u.tenants || (_tenantid ? [_tenantid] : []))
       };
@@ -994,7 +993,10 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       assetsQuery = assetsQuery.eq('_unitid', cleanUnitId);
     }
 
-    const { data: initialAssets, error: assetsError } = await assetsQuery;
+    const { data: initialAssets, error: assetsError } = await Promise.race([
+      assetsQuery,
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("FETCH_TIMEOUT")), 10000))
+    ]).catch(err => ({ data: null, error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     
     if (!assetsError) {
       const initialData = (initialAssets as unknown as Record<string, unknown>[]) || [];
@@ -1457,70 +1459,101 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
 export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
   if (!supabase) return [];
   
-  console.log(`>>> [Supabase] Buscando campanhas para tenant: ${tenantid}`);
+  const cleanTenantId = (tenantid || '').trim();
+  console.log(`>>> [Supabase] Buscando campanhas para tenant: "${cleanTenantId}"`);
   
+  if (!cleanTenantId) {
+    console.warn('[Supabase] fetchCampaigns cancelado: tenantId vazio.');
+    return [];
+  }
+
   // Tenta buscar usando _tenantid primeiro na nova tabela campaigns_v2
   let { data, error } = await supabase
     .from('campaigns_v2')
     .select('*')
-    .eq('_tenantid', tenantid)
+    .eq('_tenantid', cleanTenantId)
     .order('start_date', { ascending: false });
   
+  if (error) {
+    console.warn(`>>> [Supabase] Falha na campaigns_v2 (Code: ${error.code}): ${error.message}`);
+  } else {
+    console.log(`>>> [Supabase] Sucesso na campaigns_v2: ${data?.length || 0} registros.`);
+  }
+
   // Fallback para a tabela antiga se a nova ainda não estiver pronta ou se houver erro de cache
-  if (error && error.code === 'PGRST204') {
-    console.warn('[Supabase] Falha na campaigns_v2, tentando inventory_campaigns...');
+  if ((error && error.code === 'PGRST204') || (!data || data.length === 0)) {
+    console.warn('[Supabase] Tentando fallback para inventory_campaigns...');
     const oldTable = await supabase
       .from('inventory_campaigns')
       .select('*')
-      .eq('_tenantid', tenantid)
+      .eq('_tenantid', cleanTenantId)
       .order('start_date', { ascending: false });
     
-    if (!oldTable.error) {
+    if (!oldTable.error && oldTable.data && oldTable.data.length > 0) {
+      console.log(`>>> [Supabase] Sucesso na inventory_campaigns: ${oldTable.data.length} registros.`);
       data = oldTable.data;
       error = null;
     }
   }
   
-  // Se falhar por coluna inexistente, tenta tenant_id (legado/alternativo)
-  if (error && (error.code === 'PGRST204' || error.message?.includes('_tenantid'))) {
-    console.warn('[Supabase] Falha ao buscar com _tenantid, tentando tenant_id...');
+  // Se ainda falhar ou estiver vazio, tenta tenant_id (legado/alternativo)
+  if ((error || !data || data.length === 0)) {
+    console.warn('[Supabase] Tentando fallback com tenant_id...');
     const fallback = await supabase
       .from('inventory_campaigns')
       .select('*')
-      .eq('tenant_id', tenantid)
+      .eq('tenant_id', cleanTenantId)
       .order('start_date', { ascending: false });
     
-    if (!fallback.error) {
+    if (!fallback.error && fallback.data && fallback.data.length > 0) {
       data = fallback.data;
       error = null;
-    } else {
-      // Terceira tentativa: tenantid
-      console.warn('[Supabase] Falha ao buscar com tenant_id, tentando tenantid...');
-      const finalTry = await supabase
+    }
+  }
+
+  // Se ainda falhar ou estiver vazio e for o usuário master, tenta uma busca sem filtro de tenant como último recurso
+  const isMaster = cleanTenantId === 'CICOPAL' || cleanTenantId.includes('semorr');
+  if (isMaster && (!data || data.length === 0)) {
+    console.warn('[Supabase] Emergency Fallback: Buscando TODAS as campanhas para o Master...');
+    const emergency = await supabase
+      .from('campaigns_v2')
+      .select('*')
+      .order('start_date', { ascending: false })
+      .limit(10);
+    
+    if (!emergency.error && emergency.data && emergency.data.length > 0) {
+      console.log(`>>> [Supabase] Sucesso no Emergency Fallback: ${emergency.data.length} registros.`);
+      data = emergency.data;
+      error = null;
+    } else if (emergency.error) {
+      // Tenta na tabela antiga também no fallback
+      const emergencyOld = await supabase
         .from('inventory_campaigns')
         .select('*')
-        .eq('tenantid', tenantid)
-        .order('start_date', { ascending: false });
-      
-      if (!finalTry.error) {
-        data = finalTry.data;
+        .order('start_date', { ascending: false })
+        .limit(10);
+      if (!emergencyOld.error && emergencyOld.data) {
+        data = emergencyOld.data;
         error = null;
       }
     }
   }
-  
+
   if (error) {
-    console.error('Erro ao buscar campanhas:', error);
+    console.error('>>> [Supabase] Erro final ao buscar campanhas:', error);
     return [];
   }
 
-  return (data || []).map((c: Record<string, unknown>) => ({
+  const result = (data || []).map((c: Record<string, unknown>) => ({
     ...c,
-    _unitid: (c._unitid || c.unit_id || c._unitid) as string,
+    _unitid: (c._unitid || c.unit_id || c.unitid) as string,
     _tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string,
-    unit_id: (c._unitid || c.unit_id) as string,
+    unit_id: (c._unitid || c.unit_id || c.unitid) as string,
     tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string
   })) as InventoryCampaign[];
+
+  console.log(`>>> [Supabase] Retornando ${result.length} campanhas processadas.`);
+  return result;
 };
 
 /**
@@ -1704,16 +1737,28 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
     const syncToCloud = async () => {
       try {
         // Tentativa na tabela FINAL (unit_gps_data)
+        // Adicionamos _tenantid e _unitid como colunas de topo para satisfazer políticas de RLS
         const { error } = await supabase
           .from('unit_gps_data')
           .upsert({
             unit_key: unitKey,
+            _tenantid: tenantId,
+            _unitid: unitId,
             data: payload,
             updated_at: new Date().toISOString()
           });
 
         if (error) {
-          console.warn('>>> [Supabase] Sincronização de GPS falhou (Cache ainda travado), mas os dados estão salvos localmente.', error.message);
+          console.warn(`>>> [Supabase] Sincronização de GPS falhou (Code: ${error.code}): ${error.message}`);
+          // Se for erro de RLS ou coluna, tentamos um fallback para log_audit para não perder o rastro
+          if (error.code === '42501' || error.code === 'PGRST204') {
+             await logAuditEvent({
+               user_email: payload.updated_by,
+               action: 'GPS_CONFIG_SYNC_FAIL',
+               details: `Falha ao sincronizar GPS da unidade ${unitId}. Erro: ${error.message}`,
+               _tenantid: tenantId
+             });
+          }
         } else {
           console.log('>>> [Supabase] GPS sincronizado com a nuvem com sucesso!');
         }
@@ -1770,9 +1815,18 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           };
         });
         
-        // Atualiza o local com o que veio da nuvem
+        // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach(item => { updatedLocal[item.unit_key] = item.data; });
+        data.forEach(item => { 
+          const cloudTime = new Date(item.updated_at || 0).getTime();
+          const localItem = localData[item.unit_key];
+          const localTime = localItem ? new Date(localItem.updated_at || 0).getTime() : 0;
+          
+          // Só sobrescreve se o dado da nuvem for realmente mais novo
+          if (cloudTime >= localTime) {
+            updatedLocal[item.unit_key] = item.data; 
+          }
+        });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
       }
     } catch {

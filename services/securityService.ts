@@ -163,16 +163,35 @@ class EncryptionProvider {
       );
 
       const decoder = new TextDecoder();
-      return JSON.parse(decoder.decode(decryptedContent));
+      const decoded = decoder.decode(decryptedContent);
+      
+      try {
+        return JSON.parse(decoded);
+      } catch {
+        // Se não for JSON, retorna o texto puro (suporte a strings simples)
+        return decoded;
+      }
     } catch (err) {
       // Se for erro de autenticação do AES-GCM, a chave provavelmente mudou
-      if (err instanceof Error && err.name === 'OperationError') {
+      if (err instanceof Error && (err.name === 'OperationError' || err.name === 'DataError')) {
         console.error('Falha na decriptografia: Chave de segurança inválida ou dados corrompidos.');
+        // Lançamos um erro específico para que o persistenceService possa tratar
+        throw new Error('DECRYPTION_FAILED');
       } else {
         console.error('Falha na decriptografia de segurança:', err);
+        throw err;
       }
-      return null;
     }
+  }
+
+  /**
+   * Reseta a chave de segurança local.
+   * CUIDADO: Isso tornará todos os dados locais criptografados anteriormente ilegíveis.
+   */
+  async resetSecurity(): Promise<void> {
+    localStorage.removeItem(ENCRYPTION_KEY_NAME);
+    this.key = null;
+    await this.generateKey();
   }
 }
 

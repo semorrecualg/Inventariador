@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint } from 'lucide-react';
-import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
+import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername, signInWithMagicLink } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
@@ -176,18 +176,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
     setError(null);
     setIsMagicLinkLoading(true);
-    const redirectTo = getAppBaseUrl();
-    console.log('[Login] Solicitando Magic Link. URL de Redirecionamento:', redirectTo);
     
     try {
-      const { error } = await supabase!.auth.signInWithOtp({
-        email: username.trim().toLowerCase(),
-        options: {
-          emailRedirectTo: redirectTo,
-        }
-      });
-
-      if (error) throw error;
+      await signInWithMagicLink(username.trim().toLowerCase());
       setMagicLinkSent(true);
     } catch (err: unknown) {
       const error = err as Error;
@@ -240,35 +231,49 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           console.log('[Login] E-mail encontrado:', loginEmail);
         }
 
-        console.log('[Login] Chamando signInWithPassword...');
-        // 1. Autenticação via Supabase Auth (Oficial)
-        const { data: authData, error: authError } = await supabase!.auth.signInWithPassword({
+        console.log('[Login] Chamando signInWithPassword com timeout...');
+        // 1. Autenticação via Supabase Auth (Oficial) com timeout de 10s
+        const signInPromise = supabase!.auth.signInWithPassword({
           email: loginEmail,
           password: password
         });
 
-        if (authError) {
-          console.error('[Login] Erro Supabase Auth:', authError);
-          throw authError;
+        const authResult = await Promise.race([
+          signInPromise,
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 30000))
+        ]).catch(err => {
+          console.error('[Login] Erro ou Timeout no Auth:', err.message);
+          if (err.message === "AUTH_TIMEOUT") {
+            throw new Error("O servidor de autenticação está demorando muito para responder. Isso pode ser instabilidade na rede ou o servidor acordando. Tente novamente em alguns instantes.");
+          }
+          throw err;
+        }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        if (authResult.error) {
+          console.error('[Login] Erro Supabase Auth:', authResult.error);
+          throw authResult.error;
         }
         
+        const authData = authResult.data;
         if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
 
-    // 2. Garante que o usuário tenha um perfil na tabela user_permissions
-    // Tornamos isso mais resiliente para não travar o login se o perfil demorar
-    console.log('[Login] Chamando ensureUserProfile...');
-    const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
-      .catch(err => {
-        console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
-        return {
-          email: authData.user.email,
-          username: authData.user.email?.split('@')[0],
-          role: 'AUDITOR',
-          is_admin: (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br')
-        };
-      });
-    
-    console.log('[Login] Perfil processado.');
+        // 2. Garante que o usuário tenha um perfil na tabela user_permissions
+        console.log('[Login] Chamando ensureUserProfile...');
+        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
+          .catch(err => {
+            console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
+            const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br');
+            return {
+              email: authData.user.email,
+              username: authData.user.email?.split('@')[0],
+              role: is_master ? 'ADMIN' : 'AUDITOR',
+              is_admin: is_master,
+              _tenantid: is_master ? 'CICOPAL' : '',
+              _unitid: is_master ? 'MATRIZ' : ''
+            };
+          });
+        
+        console.log('[Login] Perfil processado.');
         
         // Se o usuário logou com username, garantimos que o objeto User tenha esse username
         const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
@@ -284,7 +289,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
         };
 
-        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
+        const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
+        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
+
+        let tenantId = normalizeValue(cloudUser._tenantid || cloudUser.tenantid || '');
+        let unitId = normalizeValue(cloudUser._unitid || cloudUser.unitid || '');
+
+        if (is_master) {
+          if (!tenantId) tenantId = 'CICOPAL';
+          if (!unitId) unitId = 'MATRIZ';
+        }
 
         loggedUser = {
           username: finalUsername,
@@ -294,12 +308,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           is_admin: is_admin,
           isAdmin: is_admin,
           mustChangePassword: false,
-          _tenantid: normalizeValue(cloudUser._tenantid || cloudUser.tenantid || ''),
-          _unitid: normalizeValue(cloudUser._unitid || cloudUser.unitid || ''),
-          tenantid: normalizeValue(cloudUser._tenantid || cloudUser.tenantid || ''),
-          unitid: normalizeValue(cloudUser._unitid || cloudUser.unitid || ''),
-          units: normalizeArray(cloudUser.units || (cloudUser.unitid ? [cloudUser.unitid] : [])),
-          tenants: normalizeArray(cloudUser.tenants || [cloudUser.tenantid || ''])
+          _tenantid: tenantId,
+          _unitid: unitId,
+          tenantid: tenantId,
+          unitid: unitId,
+          units: normalizeArray(cloudUser.units || (unitId ? [unitId] : [])),
+          tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
         };
       } else {
         console.log('[Login] Autenticando via Banco Interno...');
@@ -319,6 +333,43 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
               localStorage.setItem('app_current_user', safeStringify(adminUser));
               onLogin(adminUser);
               return;
+            }
+          }
+
+          // Se falhou o login interno e estamos online, tentamos um "Auto-Switch" para Supabase
+          // Isso ajuda usuários que esqueceram que mudaram o modo ou novos usuários
+          if (navigator.onLine && supabase) {
+            console.log('[Login] Falha no login interno, tentando Supabase (Auto-Switch)...');
+            try {
+              let loginEmail = username.trim().toLowerCase();
+              if (!loginEmail.includes('@')) {
+                const foundEmail = await getEmailByUsername(username.trim());
+                if (foundEmail) loginEmail = foundEmail;
+              }
+
+              if (loginEmail.includes('@')) {
+                const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                  email: loginEmail,
+                  password: password
+                });
+
+                if (!authError && authData.user) {
+                  console.log('[Login] Sucesso via Supabase! Alterando modo para CLOUD SYNC.');
+                  onUpdateDatabaseMode(DatabaseMode.SUPABASE);
+                  // O useEffect de databaseMode vai limpar o erro e o loading, então retornamos
+                  // e deixamos o usuário clicar em login novamente ou disparamos o login aqui
+                  // Para melhor UX, vamos disparar o login novamente alterando o modo e chamando a si mesmo
+                  // Mas como databaseMode é prop, precisamos esperar o re-render ou simular o sucesso
+                  
+                  // Melhor: Lança um erro amigável sugerindo a troca de modo
+                  throw new Error("Suas credenciais parecem ser da Nuvem (Cloud Sync). Por favor, altere o modo para 'Cloud Sync' acima e tente novamente.");
+                }
+              }
+            } catch (switchErr) {
+              console.warn('[Login] Falha na tentativa de auto-switch:', switchErr);
+              if ((switchErr as Error).message.includes("Suas credenciais parecem ser da Nuvem")) {
+                throw switchErr;
+              }
             }
           }
           
@@ -436,6 +487,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             <span>Cloud Sync</span>
           </button>
         </div>
+
+        {databaseMode === DatabaseMode.INTERNAL && users.length <= 1 && (
+          <div className="mt-2 p-2 bg-amber-50 border border-amber-100 rounded-xl animate-pulse">
+            <p className="text-[7px] font-black text-amber-700 uppercase tracking-tighter leading-tight text-center">
+              ⚠️ Cache limpo detectado. No modo &quot;Mobile Puro&quot;, apenas o administrador padrão está disponível. 
+              Use &quot;Cloud Sync&quot; para restaurar seu acesso e baixar os dados.
+            </p>
+          </div>
+        )}
         
         {/* Botão de Emergência para Limpar Cache */}
         <button 

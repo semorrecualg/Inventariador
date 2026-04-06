@@ -181,8 +181,19 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     try {
       const result = await saveUnitConfig(configToSave);
       if (result === true) {
-        setMessage({ text: 'Configuração salva com sucesso!', type: 'success' });
-        await loadConfigs();
+        setMessage({ text: 'CONFIGURAÇÃO SALVA COM SUCESSO!', type: 'success' });
+        // Update local configs state immediately to reflect "Configurado" in the list
+        setConfigs(prev => {
+          const newConfigs = [...prev];
+          const idx = newConfigs.findIndex(c => c.unit_id?.trim().toUpperCase() === selectedUnit.trim().toUpperCase());
+          if (idx >= 0) {
+            newConfigs[idx] = configToSave;
+          } else {
+            newConfigs.push(configToSave);
+          }
+          if (onUpdateConfigs) onUpdateConfigs(newConfigs);
+          return newConfigs;
+        });
       } else {
         const errorMsg = typeof result === 'string' ? result : 'Erro desconhecido ao salvar';
         setMessage({ 
@@ -446,4 +457,4 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   );
 };
 
-export default UnitConfigurator;
+export default React.memo(UnitConfigurator);

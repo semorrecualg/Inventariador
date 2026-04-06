@@ -3,7 +3,7 @@
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig } from './types';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -151,6 +151,15 @@ const App: React.FC = () => {
           parsed.is_admin = true;
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
+          // FORCE CICOPAL for Master User if missing
+          if (!parsed._tenantid || parsed._tenantid === '') {
+            parsed._tenantid = 'CICOPAL';
+            parsed.tenantid = 'CICOPAL';
+          }
+          if (!parsed._unitid || parsed._unitid === '') {
+            parsed._unitid = 'MATRIZ';
+            parsed.unitid = 'MATRIZ';
+          }
         }
         // Normalizar flags de admin
         const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
@@ -406,13 +415,16 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem('app_database_mode');
       if (saved) return saved as DatabaseMode;
-      // O padrão agora é sempre INTERNAL para o primeiro contato
-      return DatabaseMode.INTERNAL;
+      
+      // Se estiver online, o padrão é SUPABASE (Cloud Sync) para garantir que novos usuários consigam logar
+      // Se estiver offline, o padrão é INTERNAL (Mobile Puro)
+      return navigator.onLine ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
     } catch { return DatabaseMode.INTERNAL; }
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
+  const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
     try {
@@ -421,34 +433,6 @@ const App: React.FC = () => {
     } catch { return []; }
   });
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
-
-  // Monitor de Autenticação Supabase v24.50
-  useEffect(() => {
-    if (!supabase) return;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string) => {
-      console.log(`[Supabase] Evento de Auth: ${event}`);
-      
-      // Se o token de atualização falhar, forçamos o logout para evitar loops de erro
-      if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED') {
-        const currentUser = localStorage.getItem('app_current_user');
-        if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
-          console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
-          setModalConfig({
-            isOpen: true,
-            title: 'Sessão Expirada',
-            message: 'Sua sessão na nuvem expirou ou o token de acesso é inválido. Por favor, faça login novamente.',
-            type: 'error',
-            onConfirm: () => {
-              import('./services/supabaseService').then(m => m.signOut());
-            }
-          });
-        }
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [databaseMode]);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -1097,17 +1081,36 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Carregamento de Campanhas para visibilidade global
+  // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = async () => {
-    if (user?.tenantid && databaseMode !== DatabaseMode.INTERNAL) {
-      const data = await fetchCampaigns(user.tenantid);
-      setCampaigns(data);
+    const tenantId = user?._tenantid || user?.tenantid;
+    if (!tenantId) return;
+
+    try {
+      // Configurações de GPS sempre são buscadas (local + nuvem se disponível)
+      const gpsData = await fetchUnitConfigs(tenantId);
+      setUnitConfigs(gpsData);
+      setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
+
+      // Campanhas só são buscadas na nuvem se não estiver no modo interno puro
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        console.log(`>>> [App] Atualizando lista de campanhas para tenant: ${tenantId}`);
+        const campaignData = await fetchCampaigns(tenantId);
+        setCampaigns(campaignData);
+        console.log(`>>> [App] ${campaignData.length} campanhas e ${gpsData.length} configs GPS encontradas.`);
+      } else {
+        console.log(`>>> [App] ${gpsData.length} configs GPS encontradas (Modo Interno).`);
+      }
+    } catch (err) {
+      console.error('>>> [App] Erro crítico ao buscar dados globais:', err);
     }
   };
 
   useEffect(() => {
-    refreshCampaigns();
-  }, [user?.tenantid, databaseMode]);
+    if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION) {
+      refreshCampaigns();
+    }
+  }, [screen, user?._tenantid, user?.tenantid, databaseMode]);
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
 
@@ -1626,6 +1629,10 @@ const App: React.FC = () => {
           finalTenant: permissions.tenantid || unifiedMetadata.tenantid || ''
         });
         
+        const is_master = (session.user.email?.toLowerCase() === 'semorr@gmail.com' || session.user.email?.toLowerCase() === 'semorr@gmail.com.br');
+        const resolvedTenantId = permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || (is_master ? 'CICOPAL' : '');
+        const resolvedUnitId = permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || (is_master ? 'MATRIZ' : '');
+
         const loggedUser: User = {
           id: session.user.id,
           email: session.user.email || '',
@@ -1635,12 +1642,12 @@ const App: React.FC = () => {
           is_admin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           mustChangePassword: false,
-          _tenantid: permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || '',
-          _unitid: permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || permissions._tenantid || permissions.tenantid || '',
-          tenantid: permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || '',
-          unitid: permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || permissions._tenantid || permissions.tenantid || '',
-          units: permissions.units || unifiedMetadata.units || (permissions._unitid || permissions.unitid ? [permissions._unitid || permissions.unitid] : []),
-          tenants: permissions.tenants || unifiedMetadata.tenants || (permissions._tenantid || permissions.tenantid ? [permissions._tenantid || permissions.tenantid] : [])
+          _tenantid: resolvedTenantId,
+          _unitid: resolvedUnitId,
+          tenantid: resolvedTenantId,
+          unitid: resolvedUnitId,
+          units: permissions.units || unifiedMetadata.units || (resolvedUnitId ? [resolvedUnitId] : []),
+          tenants: permissions.tenants || unifiedMetadata.tenants || (resolvedTenantId ? [resolvedTenantId] : [])
         };
 
         // Só atualizamos se houver mudança real para evitar loops de renderização
@@ -1761,9 +1768,24 @@ const App: React.FC = () => {
       
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
         processSession(session);
-      } else if (event === 'SIGNED_OUT') {
-        // Limpa estado se deslogar no Supabase
-        if (databaseMode !== DatabaseMode.INTERNAL) {
+      } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED') {
+        // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
+        const currentUser = localStorage.getItem('app_current_user');
+        if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
+          console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
+          setModalConfig({
+            isOpen: true,
+            title: 'Sessão Expirada',
+            message: 'Sua sessão na nuvem expirou ou o token de acesso é inválido. Por favor, faça login novamente.',
+            type: 'error',
+            onConfirm: () => {
+              import('./services/supabaseService').then(m => m.signOut());
+              setUser(null);
+              localStorage.removeItem('app_current_user');
+              setHistory([AppScreen.LOGIN]);
+            }
+          });
+        } else if (event === 'SIGNED_OUT') {
           setUser(null);
           localStorage.removeItem('app_current_user');
           setHistory([AppScreen.LOGIN]);
@@ -1956,7 +1978,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const popScreen = () => {
+  const popScreen = useCallback(() => {
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
       const newScreen = newHistory[newHistory.length - 1];
@@ -1966,7 +1988,13 @@ const App: React.FC = () => {
       }
       return newHistory;
     });
-  };
+  }, []);
+
+  const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
+    setInventory(prev => ({ ...prev, unitConfigs: configs }));
+    setUnitConfigs(configs);
+    refreshCampaigns();
+  }, [refreshCampaigns]);
 
   const completeOnboarding = useCallback(() => {
     try {
@@ -3029,9 +3057,9 @@ const App: React.FC = () => {
       console.log('>>> [fullCompaniesWithStatus] Inventory companies is empty.');
     }
 
-    // 1. Agrupar estatísticas por empresa em um único loop O(N)
+    // 1. Agrupar estatísticas e campanhas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
-    const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string> }>();
+    const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
     
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
@@ -3040,7 +3068,7 @@ const App: React.FC = () => {
       
       let stats = companyStatsMap.get(company);
       if (!stats) {
-        stats = { hasData: true, hasActiveAssets: false, unitIds: new Set() };
+        stats = { hasData: true, hasActiveAssets: false, unitIds: new Set(), hasAssetCampaign: false };
         companyStatsMap.set(company, stats);
       }
       
@@ -3051,6 +3079,30 @@ const App: React.FC = () => {
       if (a._unitid) {
         stats.unitIds.add(normalizeKey(a._unitid));
       }
+
+      if (!stats.hasAssetCampaign && !!a._campaignId) {
+        stats.hasAssetCampaign = true;
+      }
+    }
+
+    // Pre-calculate units with direct campaigns for O(1) lookup
+    const unitsWithDirectCampaign = new Set<string>();
+    campaigns.forEach(c => {
+      if (c.unit_id) unitsWithDirectCampaign.add(normalizeKey(c.unit_id));
+    });
+
+    // Pre-calculate units with GPS config
+    const unitsWithGps = new Set<string>();
+    unitConfigs.forEach(c => {
+      const uId = c._unitid || c.unit_id;
+      if (uId) {
+        const norm = normalizeKey(uId);
+        unitsWithGps.add(norm);
+      }
+    });
+
+    if (unitConfigs.length > 0) {
+      console.log(`>>> [App] GPS Configs: ${unitConfigs.length}, Units with GPS: ${Array.from(unitsWithGps).join(', ')}`);
     }
 
     // 2. Definir a lista base de empresas
@@ -3079,7 +3131,7 @@ const App: React.FC = () => {
     const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
 
     // 4. Agrupar e Mesclar empresas por chave normalizada para evitar duplicatas (ex: "UNIDADE A" vs "UNIDADE_A")
-    const mergedCompanies = new Map<string, { name: string; hasData: boolean; hasActiveAssets: boolean }>();
+    const mergedCompanies = new Map<string, { name: string; hasData: boolean; hasActiveAssets: boolean; hasAssetCampaign: boolean }>();
 
     baseCompanies.forEach(company => {
       const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
@@ -3112,7 +3164,8 @@ const App: React.FC = () => {
           mergedCompanies.set(norm, {
             name: isBetterName ? rawName : existing.name,
             hasData: (existing?.hasData || !!stats),
-            hasActiveAssets: (existing?.hasActiveAssets || stats?.hasActiveAssets || false)
+            hasActiveAssets: (existing?.hasActiveAssets || stats?.hasActiveAssets || false),
+            hasAssetCampaign: (existing?.hasAssetCampaign || stats?.hasAssetCampaign || false)
           });
         }
       }
@@ -3120,29 +3173,16 @@ const App: React.FC = () => {
 
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
-      // Uma unidade tem campanha se houver uma campanha ativa/encerrada vinculada a ela
-      // ou se houver ativos na unidade vinculados a alguma campanha
-      const hasDirectCampaign = campaigns.some(c => {
-        const cNorm = c.unit_id ? normalizeKey(c.unit_id) : '';
-        const match = cNorm && cNorm === norm;
-        if (match) console.log(`>>> [App] Unidade ${unit.name} (norm: ${norm}) tem campanha direta: ${c.name} (unit_id: ${c.unit_id}, cNorm: ${cNorm})`);
-        return match;
-      });
-      
-      const hasAssetCampaign = assets.some(a => {
-        const assetUnit = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || '');
-        const match = assetUnit === norm && !!a._campaignId;
-        if (match) console.log(`>>> [App] Unidade ${unit.name} (norm: ${norm}) tem campanha via ativo: ${a.ETIQUETA || a.TAG || a.id} (campanha: ${a._campaignId})`);
-        return match;
-      });
-
-      if (hasDirectCampaign || hasAssetCampaign) {
-        console.log(`>>> [App] Unidade ${unit.name} MARCADA com campanha.`);
-      }
+      const hasDirectCampaign = unitsWithDirectCampaign.has(norm);
+      const hasAssetCampaign = unit.hasAssetCampaign;
+      const hasGps = unitsWithGps.has(norm);
 
       return {
-        ...unit,
-        hasCampaign: hasDirectCampaign || hasAssetCampaign
+        name: unit.name,
+        hasData: unit.hasData,
+        hasActiveAssets: unit.hasActiveAssets,
+        hasCampaign: hasDirectCampaign || hasAssetCampaign,
+        hasGps
       };
     });
 
@@ -3151,7 +3191,9 @@ const App: React.FC = () => {
       console.warn('>>> [fullCompaniesWithStatus] WARNING: Assets exist but no units were extracted!');
     }
     return result;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs]);
+
+  const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
   const unitsByTenant = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -3344,7 +3386,7 @@ const App: React.FC = () => {
                     </span>
                   </div>
                   <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
-                    <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50 PRO</span>
+                    <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50.2 PRO</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
@@ -3805,7 +3847,8 @@ const App: React.FC = () => {
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
                   isDownloaded: downloadedUnits.includes(c.name),
-                  hasCampaign: c.hasCampaign
+                  hasCampaign: c.hasCampaign,
+                  hasGps: c.hasGps
                 }))
               } 
               onSelect={(u) => { 
@@ -3853,9 +3896,9 @@ const App: React.FC = () => {
           {screen === AppScreen.UNIT_CONFIGURATOR && user && (
             <UnitConfigurator 
               user={user}
-              units={fullCompaniesWithStatus.map(c => c.name)}
+              units={unitNames}
               onBack={popScreen}
-              onUpdateConfigs={(configs) => setInventory(prev => ({ ...prev, unitConfigs: configs }))}
+              onUpdateConfigs={handleUpdateUnitConfigs}
             />
           )}
           {screen === AppScreen.DASHBOARD && (

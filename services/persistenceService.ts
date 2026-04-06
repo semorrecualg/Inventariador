@@ -35,8 +35,19 @@ export const backupInventory = async (mode: DatabaseMode, customName?: string): 
 
     if (!encryptedAssets && !encryptedConfig) return false;
 
-    const assets = encryptedAssets ? await encryption.decrypt(encryptedAssets) : [];
-    const config = encryptedConfig ? await encryption.decrypt(encryptedConfig) : {};
+    let assets: Asset[] = [];
+    let config: Record<string, unknown> = {};
+
+    try {
+      assets = encryptedAssets ? await encryption.decrypt(encryptedAssets) as Asset[] : [];
+      config = encryptedConfig ? await encryption.decrypt(encryptedConfig) as Record<string, unknown> : {};
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+        console.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
+        return false;
+      }
+      throw error;
+    }
 
     const backupData = {
       version: 'v24.50',
@@ -167,16 +178,29 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     if (!encryptedConfig && !encryptedAssets) return null;
 
     // Decriptografamos os dados carregados
-    const [assets, config] = await Promise.all([
-      encryptedAssets ? encryption.decrypt(encryptedAssets) : Promise.resolve([]),
-      encryptedConfig ? encryption.decrypt(encryptedConfig) : Promise.resolve({})
-    ]);
+    try {
+      const [assets, config] = await Promise.all([
+        encryptedAssets ? encryption.decrypt(encryptedAssets) : Promise.resolve([]),
+        encryptedConfig ? encryption.decrypt(encryptedConfig) : Promise.resolve({})
+      ]);
 
-    return {
-      ...(config || {}),
-      assets: assets || [],
-      databaseMode: mode // Garante que o modo carregado é o correto
-    } as InventoryState;
+      return {
+        ...(config || {}),
+        assets: assets || [],
+        databaseMode: mode // Garante que o modo carregado é o correto
+      } as InventoryState;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+        console.warn('>>> [Persistence] Falha crítica de decriptografia. Limpando cache local corrompido...');
+        // Limpa os dados locais que não podem ser lidos para evitar erros persistentes
+        await Promise.all([
+          localforage.removeItem(keys.assets),
+          localforage.removeItem(keys.config)
+        ]);
+        return null;
+      }
+      throw error;
+    }
   } catch (error) {
     console.error('Error loading inventory from IndexedDB:', error);
     return null;
@@ -191,7 +215,17 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     const encryptedAssets = await localforage.getItem<Uint8Array | string>(keys.assets);
     if (!encryptedAssets) return;
 
-    const assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
+    let assets: Asset[] = [];
+    try {
+      assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+        console.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
+        await localforage.removeItem(keys.assets);
+        return;
+      }
+      throw error;
+    }
     const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
     
     const remainingAssets = assets.filter(a => 
@@ -213,7 +247,17 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
       const encryptedAssets = await localforage.getItem<Uint8Array | string>(keys.assets);
       if (!encryptedAssets) return;
 
-      const assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
+      let assets: Asset[] = [];
+      try {
+        assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+          console.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
+          await localforage.removeItem(keys.assets);
+          return;
+        }
+        throw error;
+      }
       const normalizedCompany = companyToClear.toUpperCase().trim();
       const remainingAssets = assets.filter(a => (a.UNIDADE_OPERACIONAL || a._unitid || '').toUpperCase().trim() !== normalizedCompany);
       

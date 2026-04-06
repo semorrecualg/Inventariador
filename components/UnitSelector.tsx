@@ -1,11 +1,32 @@
 
 import React, { useState } from 'react';
-import { Building2, Search, LayoutGrid, CheckCircle2, Factory, Landmark, Warehouse, Building, RefreshCw, Cloud, Download, CheckCircle, Navigation } from 'lucide-react';
+import { 
+  Building2, 
+  Search, 
+  LayoutGrid, 
+  Factory, 
+  Landmark, 
+  Warehouse, 
+  Building, 
+  RefreshCw, 
+  Cloud, 
+  Download, 
+  Navigation,
+  Database,
+  Calendar,
+  ChevronRight
+} from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
 
 interface UnitSelectorProps {
-  units: Array<{ name: string; hasData: boolean; isDownloaded?: boolean; hasCampaign?: boolean }>;
+  units: Array<{ 
+    name: string; 
+    hasData: boolean; 
+    isDownloaded?: boolean; 
+    hasCampaign?: boolean;
+    hasGps?: boolean;
+  }>;
   onSelect: (unit: string) => void;
   onBack: () => void;
   onSync?: () => void;
@@ -149,20 +170,30 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                         <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
                           {unit.name}
                         </h4>
-                        <div className="flex items-center space-x-1.5 mt-1">
-                           <div className={`w-1.5 h-1.5 rounded-full shadow-sm ${unit.hasData ? 'bg-success shadow-success/50' : 'bg-slate-300'}`}></div>
-                           <span className={`text-[9px] font-bold uppercase tracking-widest ${unit.hasData ? 'text-ink-muted' : 'text-slate-300'}`}>
-                             {unit.hasData ? 'Base Master Disponível' : 'Sem Itens Ativos'}
-                           </span>
-                           {unit.hasCampaign && (
-                             <>
-                               <span className="text-slate-300 mx-1">•</span>
-                               <div className="flex items-center space-x-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
-                                 <div className="w-1 h-1 rounded-full bg-amber-500 animate-pulse"></div>
-                                 <span className="text-[8px] font-bold text-amber-600 uppercase tracking-tighter">Campanha Ativa</span>
-                               </div>
-                             </>
-                           )}
+                        <div className="flex items-center space-x-3 mt-2">
+                           {/* Ícone de Dados */}
+                           <div className="flex flex-col items-center gap-1">
+                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${unit.hasData ? 'bg-blue-50 text-blue-600 border-blue-100 shadow-sm' : 'bg-gray-50 text-gray-300 border-gray-100'}`}>
+                               <Database size={14} />
+                             </div>
+                             <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasData ? 'text-blue-600' : 'text-gray-300'}`}>Dados</span>
+                           </div>
+
+                           {/* Ícone de GPS */}
+                           <div className="flex flex-col items-center gap-1">
+                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${unit.hasGps ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' : 'bg-gray-50 text-gray-300 border-gray-100'}`}>
+                               <Navigation size={14} />
+                             </div>
+                             <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-gray-300'}`}>GPS</span>
+                           </div>
+
+                           {/* Ícone de Campanha */}
+                           <div className="flex flex-col items-center gap-1">
+                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${unit.hasCampaign ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' : 'bg-gray-50 text-gray-300 border-gray-100'}`}>
+                               <Calendar size={14} />
+                             </div>
+                             <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>Campanha</span>
+                           </div>
                         </div>
                       </div>
                     </div>
@@ -181,17 +212,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                         >
                           {isDownloading ? (
                             <RefreshCw size={18} className="animate-spin" />
-                          ) : unit.isDownloaded ? (
-                            <CheckCircle size={18} />
                           ) : (
-                            <Download size={18} />
+                            <Download size={18} className={unit.isDownloaded ? 'text-emerald-500 opacity-50' : ''} />
                           )}
                         </button>
                       )}
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                        unit.hasData ? 'text-slate-100 group-hover:text-accent' : 'text-slate-50'
-                      }`}>
-                        <CheckCircle2 size={24} />
+                      <div className="w-8 h-8 flex items-center justify-center text-ink-muted/20 group-hover:text-accent/40 transition-colors">
+                        <ChevronRight size={20} />
                       </div>
                     </div>
                   </div>

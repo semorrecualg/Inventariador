@@ -12,7 +12,8 @@ import {
   AlertTriangle,
   Loader2,
   Activity,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
@@ -39,6 +40,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newCampaignDesc, setNewCampaignDesc] = useState('');
   const [newCampaignUnit, setNewCampaignUnit] = useState<string>('');
@@ -51,21 +53,21 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     // Tenta resolver o tenantId de várias formas
     const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
-    let tenantId = user?._tenantid || user?.tenantid;
+    let tenantId = (user?._tenantid || user?.tenantid || '').trim();
     
     // Se for admin e não tiver tenantId direto, tenta pegar do array de tenants
     if (!tenantId && isAdmin && user?.tenants && user.tenants.length > 0) {
       tenantId = user.tenants[0];
     }
 
+    // Se ainda estiver vazio e for admin, tenta o primeiro tenant do array ou CICOPAL como fallback seguro para este projeto
+    if (!tenantId && isAdmin) {
+      tenantId = 'CICOPAL'; 
+    }
+
     if (!tenantId && !isAdmin) {
       console.error('Erro: Tenant ID não encontrado. Sua sessão pode ter expirado. Por favor, saia e entre novamente.');
       return;
-    }
-
-    // Se ainda não tiver tenantId e for admin, tenta um valor global ou o que estiver disponível
-    if (!tenantId && isAdmin) {
-      tenantId = 'GLOBAL'; // Fallback para admin sem tenant
     }
 
     setIsSaving(true);
@@ -78,14 +80,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       });
       
       const newCampaign: Partial<InventoryCampaign> = {
-        name: newCampaignName,
-        description: newCampaignDesc,
+        name: newCampaignName.trim(),
+        description: newCampaignDesc.trim(),
         status: CampaignStatus.ACTIVE,
         _tenantid: tenantId,
-        _unitid: newCampaignUnit || undefined,
+        _unitid: (newCampaignUnit || user?._unitid || user?.unitid || 'MATRIZ').trim(),
         tenantid: tenantId, // Legado
-        unit_id: newCampaignUnit || undefined, // Legado
-        created_by: user?.email || 'admin',
+        unit_id: (newCampaignUnit || user?._unitid || user?.unitid || 'MATRIZ').trim(), // Legado
+        created_by: (user?.email || 'admin').toLowerCase(),
         start_date: new Date().toISOString()
       };
 
@@ -96,7 +98,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setNewCampaignName('');
         setNewCampaignDesc('');
         setNewCampaignUnit('');
-        console.log('Campanha criada com sucesso!');
+        setSuccessMessage('CAMPANHA CRIADA COM SUCESSO!');
+        setTimeout(() => setSuccessMessage(null), 5000);
       }
     } catch (err: unknown) {
       console.error('Erro ao criar campanha:', err);
@@ -111,7 +114,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     // Removido window.confirm para compatibilidade com iframe
     const success = await deleteCampaign(id);
     if (success) {
-      console.log('Campanha excluída com sucesso!');
+      setSuccessMessage('Campanha excluída com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
       setSelectedCampaign(null);
       if (onRefresh) onRefresh();
     } else {
@@ -122,6 +126,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
     const success = await updateCampaignStatus(id, status);
     if (success) {
+      setSuccessMessage('Status atualizado com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
       if (onRefresh) onRefresh();
       if (selectedCampaign?.id === id) {
         setSelectedCampaign({ ...selectedCampaign, status });
@@ -151,6 +157,16 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-bg text-ink font-sans overflow-hidden">
+      {/* Feedback de Sucesso */}
+      {successMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-emerald-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border-2 border-emerald-400/50 backdrop-blur-md">
+            <CheckCircle2 size={20} className="text-emerald-100" />
+            <span className="font-black uppercase tracking-widest text-[10px]">{successMessage}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-ink text-white px-6 py-4 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-4">
@@ -328,12 +344,26 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
               <div className="flex flex-col items-center justify-center py-20 space-y-4 opacity-40">
                 <BarChart3 className="w-16 h-16" />
                 <p className="text-xs font-bold uppercase tracking-widest">Nenhuma campanha ativa</p>
-                <button 
-                  onClick={() => setIsCreating(true)}
-                  className="text-[10px] font-bold text-accent underline uppercase tracking-widest"
-                >
-                  Criar minha primeira campanha
-                </button>
+                <div className="flex flex-col items-center gap-4">
+                  <button 
+                    onClick={() => onRefresh && onRefresh()}
+                    className="flex items-center gap-2 py-3 px-6 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-blue-100 transition-all border border-blue-100"
+                  >
+                    <RefreshCw className="w-4 h-4" /> Atualizar Lista
+                  </button>
+                  <button 
+                    onClick={() => setIsCreating(true)}
+                    className="text-[10px] font-bold text-accent underline uppercase tracking-widest"
+                  >
+                    Criar minha primeira campanha
+                  </button>
+                  <div className="text-[8px] text-ink-muted uppercase tracking-widest opacity-50 mt-4 flex flex-col items-center gap-1">
+                    <span>Tenant: {user?._tenantid || user?.tenantid || (user?.tenants && user.tenants.length > 0 ? user.tenants[0] : 'NÃO IDENTIFICADO')}</span>
+                    {Array.isArray(user?.tenants) && user.tenants.length > 1 && (
+                      <span className="text-[6px]">Disponíveis: {user.tenants.join(', ')}</span>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               campaigns.map(campaign => (
