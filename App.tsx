@@ -196,10 +196,6 @@ const App: React.FC = () => {
     return localStorage.getItem('app_accepted_terms') === 'true';
   });
 
-  const [showOnboardingTips, setShowOnboardingTips] = useState<boolean>(() => {
-    return localStorage.getItem('app_show_onboarding') !== 'false';
-  });
-
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
@@ -207,6 +203,27 @@ const App: React.FC = () => {
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
+  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
+    const saved = localStorage.getItem('app_database_mode');
+    return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+  });
+  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'info' | 'error' | 'success' | 'confirm' | 'warning';
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    showCancel?: boolean;
+    confirmText?: string;
+    cancelText?: string;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
   const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
     return localStorage.getItem('app_field_mode') === 'true';
   });
@@ -269,23 +286,32 @@ const App: React.FC = () => {
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
-    // Check for invalid session on mount
-    if (supabase) {
+    // Só monitora sessão do Supabase se estivermos em um modo que utilize a nuvem
+    if (supabase && databaseMode.startsWith('SUPABASE')) {
       supabase.auth.getSession().then(({ error }) => {
         if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
-          console.warn('[Supabase] Sessão inválida detectada no início. Limpando...');
+          console.warn('[Supabase] Sessão inválida detectada. Limpando...');
           localStorage.removeItem('app_current_user');
-          if (supabase) {
-            supabase.auth.signOut().then(() => {
+          
+          const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
+          if (!hasReloaded) {
+            sessionStorage.setItem('app_session_error_reloaded', 'true');
+            supabase?.auth.signOut().finally(() => {
               window.location.reload();
             });
           } else {
-            window.location.reload();
+            console.error('[Supabase] Loop detectado. Mantendo offline.');
+            setUser(null);
+            setTimeout(() => sessionStorage.removeItem('app_session_error_reloaded'), 5000);
           }
+        } else {
+          sessionStorage.removeItem('app_session_error_reloaded');
         }
       });
     }
+  }, [databaseMode]); // Adicionada dependência para reagir à troca de modo
 
+  useEffect(() => {
     // Debug environment variables
     const env = import.meta.env.VITE_ENVIRONMENT || 'development';
     const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -364,23 +390,6 @@ const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
 
-  const [modalConfig, setModalConfig] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    type: 'info' | 'error' | 'success' | 'confirm';
-    onConfirm?: () => void;
-    onCancel?: () => void;
-    showCancel?: boolean;
-    confirmText?: string;
-    cancelText?: string;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    type: 'info'
-  });
-
   const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
     assets: [], 
     companies: [], 
@@ -411,17 +420,6 @@ const App: React.FC = () => {
 
   console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
 
-  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
-    try {
-      const saved = localStorage.getItem('app_database_mode');
-      if (saved) return saved as DatabaseMode;
-      
-      // Se estiver online, o padrão é SUPABASE (Cloud Sync) para garantir que novos usuários consigam logar
-      // Se estiver offline, o padrão é INTERNAL (Mobile Puro)
-      return navigator.onLine ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
-    } catch { return DatabaseMode.INTERNAL; }
-  });
-
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
     try {
@@ -449,7 +447,6 @@ const App: React.FC = () => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
-  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
@@ -3382,14 +3379,8 @@ const App: React.FC = () => {
     );
   }
 
-  if (!inventory.hasCompletedOnboarding) {
-    console.log("Rendering OnboardingWizard overlay - hasCompletedOnboarding is false");
-    return (
-      <ErrorBoundary>
-        <OnboardingWizard onComplete={completeOnboarding} />
-      </ErrorBoundary>
-    );
-  }
+  // O Onboarding automático foi removido a pedido do usuário para evitar loops e travamentos.
+  // O acesso agora é estritamente manual via botão de ajuda (FloatingHelp).
 
   return (
     <ErrorBoundary>
@@ -4052,19 +4043,18 @@ const App: React.FC = () => {
           )}
         </div>
   
-        {showOnboardingTips && (
-          <FloatingHelp 
-            currentScreen={screen} 
-            onCloseOnboarding={() => {
-              setShowOnboardingTips(false);
-              localStorage.setItem('app_show_onboarding', 'false');
-            }} 
-            onOpenOnboarding={() => {
-              pushScreen(AppScreen.ONBOARDING);
-            }}
-            onOpenPalette={() => setIsPaletteOpen(true)}
-          />
-        )}
+        {/* FloatingHelp agora é renderizado sempre que os termos forem aceitos, 
+            permitindo acesso ao onboarding manual mesmo que não tenha sido completado automaticamente. */}
+        <FloatingHelp 
+          currentScreen={screen} 
+          onCloseOnboarding={() => {
+            localStorage.setItem('app_show_onboarding', 'false');
+          }} 
+          onOpenOnboarding={() => {
+            pushScreen(AppScreen.ONBOARDING);
+          }}
+          onOpenPalette={() => setIsPaletteOpen(true)}
+        />
 
         <PrivacyCenter 
           isOpen={isPrivacyCenterOpen} 
