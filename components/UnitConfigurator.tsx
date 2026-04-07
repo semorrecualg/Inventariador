@@ -38,6 +38,7 @@ interface UnitConfiguratorProps {
   units: string[];
   onBack: () => void;
   onUpdateConfigs?: (configs: UnitConfig[]) => void;
+  initialUnit?: string | null;
 }
 
 const MapEvents = ({ onClick }: { onClick: (lat: number, lng: number) => void }) => {
@@ -57,7 +58,7 @@ const MapController = ({ center }: { center: [number, number] }) => {
   return null;
 };
 
-const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs }) => {
+const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, initialUnit }) => {
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
@@ -78,11 +79,22 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     loadConfigs();
   }, [user.tenantid]);
 
+  useEffect(() => {
+    if (initialUnit && units.includes(initialUnit)) {
+      handleSelectUnit(initialUnit);
+    }
+  }, [initialUnit, units, loading]); // loading is a dependency to ensure configs are loaded before selecting
+
+  useEffect(() => {
+    if (onUpdateConfigs && configs.length > 0) {
+      onUpdateConfigs(configs);
+    }
+  }, [configs, onUpdateConfigs]);
+
   const loadConfigs = async () => {
     setLoading(true);
     const data = await fetchUnitConfigs(user.tenantid);
     setConfigs(data);
-    if (onUpdateConfigs) onUpdateConfigs(data);
     setLoading(false);
   };
 
@@ -191,7 +203,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           } else {
             newConfigs.push(configToSave);
           }
-          if (onUpdateConfigs) onUpdateConfigs(newConfigs);
           return newConfigs;
         });
       } else {

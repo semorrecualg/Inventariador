@@ -31,13 +31,14 @@ interface UnitSelectorProps {
   onBack: () => void;
   onSync?: () => void;
   onDownload?: (unit: string) => void;
-  onConfigGPS?: () => void;
+  onConfigGPS?: (unit: string) => void;
+  onCampaigns?: (unit: string) => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   isAdmin?: boolean;
 }
 
-const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, isSyncing, isAdmin }) => {
+const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, isSyncing, isAdmin }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
@@ -104,15 +105,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
           <div className="flex items-center space-x-2">
-            {isAdmin && onConfigGPS && (
-              <button 
-                onClick={onConfigGPS}
-                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft"
-                title="Configurar GPS das Unidades"
-              >
-                <Navigation size={20} />
-              </button>
-            )}
             {onSync && (
               <button 
                 onClick={onSync}
@@ -180,16 +172,36 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                            </div>
 
                            {/* Ícone de GPS */}
-                           <div className="flex flex-col items-center gap-1">
-                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${unit.hasGps ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' : 'bg-gray-50 text-gray-300 border-gray-100'}`}>
+                           <div 
+                             className="flex flex-col items-center gap-1 group/icon"
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               if (isAdmin && onConfigGPS) onConfigGPS(unit.name);
+                             }}
+                           >
+                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
+                               unit.hasGps 
+                                 ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
+                                 : 'bg-gray-50 text-gray-300 border-gray-100'
+                             } ${isAdmin ? 'cursor-pointer hover:scale-110 active:scale-95 hover:bg-emerald-100' : ''}`}>
                                <Navigation size={14} />
                              </div>
                              <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-gray-300'}`}>GPS</span>
                            </div>
-
+ 
                            {/* Ícone de Campanha */}
-                           <div className="flex flex-col items-center gap-1">
-                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${unit.hasCampaign ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' : 'bg-gray-50 text-gray-300 border-gray-100'}`}>
+                           <div 
+                             className="flex flex-col items-center gap-1 group/icon"
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               if (onCampaigns) onCampaigns(unit.name);
+                             }}
+                           >
+                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
+                               unit.hasCampaign 
+                                 ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' 
+                                 : 'bg-gray-50 text-gray-300 border-gray-100'
+                             } cursor-pointer hover:scale-110 active:scale-95 hover:bg-amber-100`}>
                                <Calendar size={14} />
                              </div>
                              <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>Campanha</span>

@@ -316,79 +316,43 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
         };
       } else {
-        console.log('[Login] Autenticando via Banco Interno...');
-        // Banco de Dados Interno (Independente)
+        console.log('[Login] Autenticando via Banco Interno (Mobile Puro)...');
+        // Isolamento Total: No modo Mobile Puro, a autenticação é 100% local.
         const localUser = users.find(u => 
           (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
           u.password === password
         );
 
         if (!localUser) {
-          // Fallback para o admin padrão se a senha for 'admin' e o usuário for o semorr
-          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com' || username.trim().toLowerCase() === 'semorr@gmail.com.br') && password === 'admin';
+          // Fallback para admin padrão apenas se for o usuário mestre configurado localmente
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com') && password === 'admin';
           
           if (isAdminFallback) {
-            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com' || u.email.toLowerCase() === 'semorr@gmail.com.br');
+            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
             if (adminUser) {
-              localStorage.setItem('app_current_user', safeStringify(adminUser));
-              onLogin(adminUser);
-              return;
-            }
-          }
-
-          // Se falhou o login interno e estamos online, tentamos um "Auto-Switch" para Supabase
-          // Isso ajuda usuários que esqueceram que mudaram o modo ou novos usuários
-          if (navigator.onLine && supabase) {
-            console.log('[Login] Falha no login interno, tentando Supabase (Auto-Switch)...');
-            try {
-              let loginEmail = username.trim().toLowerCase();
-              if (!loginEmail.includes('@')) {
-                const foundEmail = await getEmailByUsername(username.trim());
-                if (foundEmail) loginEmail = foundEmail;
-              }
-
-              if (loginEmail.includes('@')) {
-                const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-                  email: loginEmail,
-                  password: password
-                });
-
-                if (!authError && authData.user) {
-                  console.log('[Login] Sucesso via Supabase! Alterando modo para CLOUD SYNC.');
-                  onUpdateDatabaseMode(DatabaseMode.SUPABASE);
-                  // O useEffect de databaseMode vai limpar o erro e o loading, então retornamos
-                  // e deixamos o usuário clicar em login novamente ou disparamos o login aqui
-                  // Para melhor UX, vamos disparar o login novamente alterando o modo e chamando a si mesmo
-                  // Mas como databaseMode é prop, precisamos esperar o re-render ou simular o sucesso
-                  
-                  // Melhor: Lança um erro amigável sugerindo a troca de modo
-                  throw new Error("Suas credenciais parecem ser da Nuvem (Cloud Sync). Por favor, altere o modo para 'Cloud Sync' acima e tente novamente.");
-                }
-              }
-            } catch (switchErr) {
-              console.warn('[Login] Falha na tentativa de auto-switch:', switchErr);
-              if ((switchErr as Error).message.includes("Suas credenciais parecem ser da Nuvem")) {
-                throw switchErr;
-              }
+              loggedUser = { ...adminUser };
             }
           }
           
-          throw new Error("Credenciais internas inválidas. Verifique se está no modo correto (Interno vs Supabase) ou consulte o administrador.");
+          if (!loggedUser) {
+            throw new Error("Credenciais internas inválidas. O modo 'Mobile Puro' é 100% local e não reconhece contas da nuvem.");
+          }
+        } else {
+          loggedUser = { ...localUser };
         }
-
-        loggedUser = { ...localUser };
       }
 
       if (loggedUser) {
-        console.log('[Login] Sucesso! Logando usuário:', loggedUser.email);
-        // Salva no localStorage para persistência
+        console.log('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
+        
+        // Salva no localStorage para persistência (Token Local)
         localStorage.setItem('app_current_user', safeStringify(loggedUser));
         
-        // Log de Auditoria
+        // Log de Auditoria Local
         logAuditEvent({
           user_email: loggedUser.email,
           action: 'LOGIN',
-          details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno'}`,
+          details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno (Isolado)'}`,
           _tenantid: loggedUser._tenantid || loggedUser.tenantid
         });
 

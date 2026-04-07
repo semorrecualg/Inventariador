@@ -1457,10 +1457,25 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
  * Busca todas as campanhas de um tenant com resiliência total
  */
 export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
-  if (!supabase) return [];
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode === 'INTERNAL';
+
+  if (isInternal) {
+    console.log('>>> [Local] Buscando campanhas locais (Modo Mobile Puro)...');
+    const cached = localStorage.getItem('inventory_campaigns_cache');
+    return cached ? JSON.parse(cached) : [];
+  }
+
+  if (!supabase) {
+    console.warn('[Supabase] fetchCampaigns abortado: Cliente Supabase não inicializado.');
+    return [];
+  }
   
   const cleanTenantId = (tenantid || '').trim();
-  console.log(`>>> [Supabase] Buscando campanhas para tenant: "${cleanTenantId}"`);
+  
+  // Debug de Autenticação
+  const { data: { user: sbUser } } = await supabase.auth.getUser();
+  console.log(`>>> [Supabase] fetchCampaigns INICIADO. Tenant: "${cleanTenantId}", Auth: ${sbUser?.email || 'ANÔNIMO'}`);
   
   if (!cleanTenantId) {
     console.warn('[Supabase] fetchCampaigns cancelado: tenantId vazio.');
@@ -1468,6 +1483,7 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
   }
 
   // Tenta buscar usando _tenantid primeiro na nova tabela campaigns_v2
+  console.log(`>>> [Supabase] Tentando campaigns_v2 (eq _tenantid: ${cleanTenantId})...`);
   let { data, error } = await supabase
     .from('campaigns_v2')
     .select('*')
@@ -1477,11 +1493,11 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
   if (error) {
     console.warn(`>>> [Supabase] Falha na campaigns_v2 (Code: ${error.code}): ${error.message}`);
   } else {
-    console.log(`>>> [Supabase] Sucesso na campaigns_v2: ${data?.length || 0} registros.`);
+    console.log(`>>> [Supabase] Sucesso na campaigns_v2: ${data?.length || 0} registros encontrados.`);
   }
 
   // Fallback para a tabela antiga se a nova ainda não estiver pronta ou se houver erro de cache
-  if ((error && error.code === 'PGRST204') || (!data || data.length === 0)) {
+  if ((error && (error.code === 'PGRST204' || error.code === '42P01')) || (!data || data.length === 0)) {
     console.warn('[Supabase] Tentando fallback para inventory_campaigns...');
     const oldTable = await supabase
       .from('inventory_campaigns')
@@ -1512,27 +1528,27 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
   }
 
   // Se ainda falhar ou estiver vazio e for o usuário master, tenta uma busca sem filtro de tenant como último recurso
-  const isMaster = cleanTenantId === 'CICOPAL' || cleanTenantId.includes('semorr');
+  const isMaster = cleanTenantId === 'CICOPAL' || cleanTenantId.includes('semorr') || (sbUser?.email?.toLowerCase() === 'semorr@gmail.com');
   if (isMaster && (!data || data.length === 0)) {
     console.warn('[Supabase] Emergency Fallback: Buscando TODAS as campanhas para o Master...');
     const emergency = await supabase
       .from('campaigns_v2')
       .select('*')
       .order('start_date', { ascending: false })
-      .limit(10);
+      .limit(20);
     
     if (!emergency.error && emergency.data && emergency.data.length > 0) {
-      console.log(`>>> [Supabase] Sucesso no Emergency Fallback: ${emergency.data.length} registros.`);
+      console.log(`>>> [Supabase] Sucesso no Emergency Fallback (v2): ${emergency.data.length} registros.`);
       data = emergency.data;
       error = null;
-    } else if (emergency.error) {
-      // Tenta na tabela antiga também no fallback
+    } else {
       const emergencyOld = await supabase
         .from('inventory_campaigns')
         .select('*')
         .order('start_date', { ascending: false })
-        .limit(10);
+        .limit(20);
       if (!emergencyOld.error && emergencyOld.data) {
+        console.log(`>>> [Supabase] Sucesso no Emergency Fallback (Old): ${emergencyOld.data.length} registros.`);
         data = emergencyOld.data;
         error = null;
       }
@@ -1560,6 +1576,25 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
  * Cria uma nova campanha com resiliência a nomes de colunas
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode === 'INTERNAL';
+
+  if (isInternal) {
+    console.log('>>> [Local] Criando campanha local (Modo Mobile Puro)...');
+    const newCampaign = {
+      ...campaign,
+      id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      created_at: new Date().toISOString()
+    } as InventoryCampaign;
+
+    const cached = localStorage.getItem('inventory_campaigns_cache');
+    const campaigns = cached ? JSON.parse(cached) : [];
+    const updatedCampaigns = [newCampaign, ...campaigns];
+    localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedCampaigns));
+    
+    return newCampaign;
+  }
+
   if (!supabase) return null;
   
   const tenantVal = campaign._tenantid || campaign.tenantid;
@@ -1628,6 +1663,23 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
  * Atualiza o status de uma campanha
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus): Promise<boolean> => {
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode === 'INTERNAL';
+
+  if (isInternal) {
+    console.log('>>> [Local] Atualizando status da campanha local:', campaignId);
+    const cached = localStorage.getItem('inventory_campaigns_cache');
+    if (cached) {
+      const campaigns = JSON.parse(cached) as InventoryCampaign[];
+      const updated = campaigns.map(c => 
+        c.id === campaignId ? { ...c, status, end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : null } : c
+      );
+      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updated));
+      return true;
+    }
+    return false;
+  }
+
   if (!supabase) return false;
   const { error } = await supabase
     .from('inventory_campaigns')
@@ -1648,6 +1700,21 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
  * Exclui uma campanha (apenas para administradores)
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode === 'INTERNAL';
+
+  if (isInternal) {
+    console.log('>>> [Local] Excluindo campanha local:', campaignId);
+    const cached = localStorage.getItem('inventory_campaigns_cache');
+    if (cached) {
+      const campaigns = JSON.parse(cached) as InventoryCampaign[];
+      const updated = campaigns.filter(c => c.id !== campaignId);
+      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updated));
+      return true;
+    }
+    return false;
+  }
+
   if (!supabase) return false;
   const { error } = await supabase
     .from('inventory_campaigns')
@@ -1705,7 +1772,9 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  * Estratégia Local-First: Salva no IndexedDB imediatamente e tenta sincronizar com a nuvem em background
  */
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
-  if (!supabase) return false;
+  try {
+    const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode === 'INTERNAL';
   
   const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
   const unitId = config._unitid || config.unit_id;
@@ -1726,15 +1795,21 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 
   console.log('>>> [Persistence] Salvando GPS Local-First:', unitKey);
 
-  try {
-    // 1. SALVAMENTO LOCAL (Prioridade Máxima para não travar a UI)
-    const localConfigs = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
-    localConfigs[unitKey] = payload;
-    localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
+  // 1. SALVAMENTO LOCAL (Obrigatório em ambos os modos para offline-first)
+  const localConfigs = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+  localConfigs[unitKey] = payload;
+  localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
 
-    // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Não bloqueia o retorno)
-    // Usamos uma promessa que não aguardamos (fire and forget)
-    const syncToCloud = async () => {
+  // Se for modo INTERNO, encerramos aqui (Isolamento Total)
+  if (isInternal) {
+    console.log('>>> [Local] GPS salvo localmente. Modo Mobile Puro ativo.');
+    return true;
+  }
+
+  if (!supabase) return false;
+
+  // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Apenas modo SUPABASE)
+  const syncToCloud = async () => {
       try {
         // Tentativa na tabela FINAL (unit_gps_data)
         // Adicionamos _tenantid e _unitid como colunas de topo para satisfazer políticas de RLS

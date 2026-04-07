@@ -423,7 +423,18 @@ const App: React.FC = () => {
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
+  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_campaigns');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  useEffect(() => {
+    if (campaigns.length > 0) {
+      localStorage.setItem('app_campaigns', JSON.stringify(campaigns));
+    }
+  }, [campaigns]);
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
@@ -1084,7 +1095,12 @@ const App: React.FC = () => {
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = async () => {
     const tenantId = user?._tenantid || user?.tenantid;
-    if (!tenantId) return;
+    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, User: ${user?.email}, Mode: ${databaseMode}`);
+    
+    if (!tenantId) {
+      console.warn('>>> [App] refreshCampaigns abortado: tenantId não encontrado no usuário.');
+      return;
+    }
 
     try {
       // Configurações de GPS sempre são buscadas (local + nuvem se disponível)
@@ -1092,14 +1108,20 @@ const App: React.FC = () => {
       setUnitConfigs(gpsData);
       setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-      // Campanhas só são buscadas na nuvem se não estiver no modo interno puro
-      if (databaseMode !== DatabaseMode.INTERNAL) {
-        console.log(`>>> [App] Atualizando lista de campanhas para tenant: ${tenantId}`);
+      // Campanhas são buscadas na nuvem se houver tenantId, independente do modo, 
+      // pois são entidades globais de controle. No modo interno, servem para ativação.
+      // Adicionada resiliência para manter dados locais se a nuvem falhar.
+      console.log(`>>> [App] Buscando campanhas na nuvem para tenant: ${tenantId}`);
+      try {
         const campaignData = await fetchCampaigns(tenantId);
-        setCampaigns(campaignData);
-        console.log(`>>> [App] ${campaignData.length} campanhas e ${gpsData.length} configs GPS encontradas.`);
-      } else {
-        console.log(`>>> [App] ${gpsData.length} configs GPS encontradas (Modo Interno).`);
+        console.log(`>>> [App] fetchCampaigns retornou ${campaignData?.length || 0} campanhas.`);
+        
+        // Sempre atualiza o estado, mesmo que seja array vazio, para refletir a realidade da nuvem
+        setCampaigns(campaignData || []);
+        
+        console.log(`>>> [App] Sincronização global concluída: ${campaignData?.length || 0} campanhas e ${gpsData.length} configs GPS.`);
+      } catch (err) {
+        console.warn('>>> [App] Falha ao buscar campanhas da nuvem, mantendo locais:', err);
       }
     } catch (err) {
       console.error('>>> [App] Erro crítico ao buscar dados globais:', err);
@@ -1108,6 +1130,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION) {
+      console.log(`>>> [App] useEffect disparando refreshCampaigns para tela: ${screen}`);
       refreshCampaigns();
     }
   }, [screen, user?._tenantid, user?.tenantid, databaseMode]);
@@ -1527,7 +1550,8 @@ const App: React.FC = () => {
           const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
           
           // Sincroniza se houver ativos sujos OU se a config mudou (lastUpdated mudou)
-          const shouldSyncCloud = hasSupabase && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
+          // APENAS se estiver em modo SUPABASE e houver conexão configurada
+          const shouldSyncCloud = hasSupabase && databaseMode === DatabaseMode.SUPABASE && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
           
           if (shouldSyncCloud) {
             setIsSyncing(true);
@@ -1602,7 +1626,7 @@ const App: React.FC = () => {
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || databaseMode === DatabaseMode.INTERNAL) return;
 
     // Função para processar o login a partir de uma sessão
     const processSession = async (session: Session) => {
@@ -3088,7 +3112,11 @@ const App: React.FC = () => {
     // Pre-calculate units with direct campaigns for O(1) lookup
     const unitsWithDirectCampaign = new Set<string>();
     campaigns.forEach(c => {
-      if (c.unit_id) unitsWithDirectCampaign.add(normalizeKey(c.unit_id));
+      const uId = c._unitid || c.unit_id;
+      if (uId) {
+        const norm = normalizeKey(uId);
+        unitsWithDirectCampaign.add(norm);
+      }
     });
 
     // Pre-calculate units with GPS config
@@ -3890,7 +3918,14 @@ const App: React.FC = () => {
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
-              onConfigGPS={() => pushScreen(AppScreen.UNIT_CONFIGURATOR)}
+              onConfigGPS={(u) => {
+                setSelectedUnit(u);
+                pushScreen(AppScreen.UNIT_CONFIGURATOR);
+              }}
+              onCampaigns={(u) => {
+                setSelectedUnit(u);
+                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
+              }}
             />
           )}
           {screen === AppScreen.UNIT_CONFIGURATOR && user && (
@@ -3899,6 +3934,7 @@ const App: React.FC = () => {
               units={unitNames}
               onBack={popScreen}
               onUpdateConfigs={handleUpdateUnitConfigs}
+              initialUnit={selectedUnit}
             />
           )}
           {screen === AppScreen.DASHBOARD && (
@@ -3994,6 +4030,7 @@ const App: React.FC = () => {
               availableUnits={fullCompaniesWithStatus.map(c => c.name)}
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
+              initialUnit={selectedUnit}
             />
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} onBack={popScreen} />}

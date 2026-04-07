@@ -13,7 +13,10 @@ import {
   Loader2,
   Activity,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Tag,
+  MapPin,
+  ChevronDown
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
@@ -27,6 +30,7 @@ interface CampaignManagerProps {
   availableUnits?: string[];
   campaigns?: InventoryCampaign[];
   onRefresh?: () => void;
+  initialUnit?: string | null;
 }
 
 const CampaignManager: React.FC<CampaignManagerProps> = ({ 
@@ -36,17 +40,30 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   currentCampaignId, 
   availableUnits = [],
   campaigns = [],
-  onRefresh
+  onRefresh,
+  initialUnit
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newCampaignDesc, setNewCampaignDesc] = useState('');
-  const [newCampaignUnit, setNewCampaignUnit] = useState<string>('');
+  const [newCampaignUnit, setNewCampaignUnit] = useState<string>(initialUnit || '');
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!onRefresh) return;
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName) return;
@@ -93,7 +110,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       const result = await createCampaign(newCampaign);
       if (result) {
-        if (onRefresh) onRefresh();
+        if (onRefresh) await onRefresh();
         setIsCreating(false);
         setNewCampaignName('');
         setNewCampaignDesc('');
@@ -167,79 +184,129 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-ink text-white px-6 py-4 flex items-center justify-between shadow-lg z-10">
-        <div className="flex items-center gap-4">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Eventos de Inventário" />
-          <div>
-            <h1 className="text-xl font-bold tracking-tight uppercase">Eventos de Inventário</h1>
-            <p className="text-xs opacity-60 font-mono tracking-widest uppercase">Campaign Management System</p>
-          </div>
+      {/* Header Modernizado */}
+      <header className="bg-slate-950 text-white px-6 pt-8 pb-10 flex flex-col gap-8 shadow-2xl z-10 relative overflow-hidden border-b border-white/5">
+        {/* Decoração de Fundo */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-accent/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl -ml-24 -mb-24"></div>
+        
+        <div className="flex items-center justify-between relative z-10">
+          <BackButton onClick={onBack} />
+          {!isCreating && !selectedCampaign && (
+            <button 
+              onClick={() => setIsCreating(true)}
+              className="bg-accent hover:bg-accent/90 text-white px-5 py-3 rounded-2xl transition-all shadow-xl shadow-accent/20 flex items-center gap-2 active:scale-95 group"
+            >
+              <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center group-hover:rotate-90 transition-transform">
+                <Plus className="w-4 h-4" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest">Nova Campanha</span>
+            </button>
+          )}
         </div>
-        {!isCreating && (
-          <button 
-            onClick={() => setIsCreating(true)}
-            className="bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-accent/20 flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Nova Campanha</span>
-          </button>
-        )}
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-1.5 h-6 bg-accent rounded-full"></div>
+            <p className="text-[10px] opacity-50 font-bold tracking-[0.3em] uppercase">
+              Campaign Management System
+            </p>
+          </div>
+          <h1 className="text-4xl font-black tracking-tighter uppercase leading-none">
+            Eventos de <br />
+            <span className="text-accent">Inventário</span>
+          </h1>
+        </div>
       </header>
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Debug Info para Admin */}
+        {(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER') && (
+          <div className="bg-slate-900 text-emerald-400 p-3 rounded-xl font-mono text-[8px] border border-slate-800 shadow-inner mb-2">
+            <div className="flex justify-between border-b border-slate-800 pb-1 mb-1">
+              <span>DEBUG_INFO (ADMIN)</span>
+              <span className="text-slate-500">v1.2</span>
+            </div>
+            <p>TENANT: {user?._tenantid || user?.tenantid || 'N/A'}</p>
+            <p>CAMPAIGNS_COUNT: {campaigns.length}</p>
+            <p>UNIT_ID_MAPPING: {campaigns.map(c => `${c.name.substring(0,5)}:${c._unitid || c.unit_id || 'N/A'}`).join(' | ')}</p>
+          </div>
+        )}
+
         {isCreating ? (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white border border-line rounded-2xl p-6 shadow-xl space-y-4"
+            className="bg-white border border-line rounded-3xl p-8 shadow-2xl space-y-6 relative overflow-hidden"
           >
-            <h2 className="text-lg font-bold uppercase tracking-tight">Nova Campanha</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1 block">Nome da Campanha</label>
-                <input 
-                  type="text"
-                  value={newCampaignName}
-                  onChange={(e) => setNewCampaignName(e.target.value)}
-                  placeholder="EX: INVENTÁRIO GERAL 2024 - FASE 1"
-                  className="w-full p-3 bg-bg border border-line rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/20"
-                />
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-accent"></div>
+            
+            <div className="space-y-1">
+              <h2 className="text-2xl font-black uppercase tracking-tighter text-ink">Nova Campanha</h2>
+              <p className="text-[10px] text-ink-muted uppercase tracking-widest font-bold">Configuração de Evento de Inventário</p>
+            </div>
+
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-ink uppercase tracking-widest ml-1">Nome da Campanha</label>
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-accent">
+                    <Tag size={16} />
+                  </div>
+                  <input 
+                    type="text"
+                    value={newCampaignName}
+                    onChange={(e) => setNewCampaignName(e.target.value)}
+                    placeholder="EX: INVENTÁRIO GERAL 2024"
+                    className="w-full pl-12 pr-4 py-4 bg-bg border border-line rounded-2xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all placeholder:opacity-30"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1 block">Descrição / Objetivo</label>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-ink uppercase tracking-widest ml-1">Descrição / Objetivo</label>
                 <textarea 
                   value={newCampaignDesc}
                   onChange={(e) => setNewCampaignDesc(e.target.value)}
                   placeholder="DESCREVA O ESCOPO DESTA CAMPANHA..."
-                  className="w-full p-3 bg-bg border border-line rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/20 h-24"
+                  className="w-full p-4 bg-bg border border-line rounded-2xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-accent/20 h-32 transition-all placeholder:opacity-30 resize-none"
                 />
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1 block">Unidade Operacional (Opcional)</label>
-                <select 
-                  value={newCampaignUnit}
-                  onChange={(e) => setNewCampaignUnit(e.target.value)}
-                  className="w-full p-3 bg-bg border border-line rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/20 appearance-none"
-                >
-                  <option value="">TODAS AS UNIDADES (GLOBAL)</option>
-                  {availableUnits.map(unit => (
-                    <option key={unit} value={unit}>{unit}</option>
-                  ))}
-                </select>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-ink uppercase tracking-widest ml-1">Unidade Operacional</label>
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-accent">
+                    <MapPin size={16} />
+                  </div>
+                  <select 
+                    value={newCampaignUnit}
+                    onChange={(e) => setNewCampaignUnit(e.target.value)}
+                    className="w-full pl-12 pr-10 py-4 bg-bg border border-line rounded-2xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-accent/20 appearance-none transition-all"
+                  >
+                    <option value="">TODAS AS UNIDADES (GLOBAL)</option>
+                    {availableUnits.map(unit => (
+                      <option key={unit} value={unit}>{unit}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-ink-muted">
+                    <ChevronDown size={16} />
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-3 pt-2">
+
+              <div className="flex gap-4 pt-4">
                 <button 
                   onClick={() => setIsCreating(false)}
-                  className="flex-1 py-3 border border-line rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-bg transition-all"
+                  className="flex-1 py-4 border border-line rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-bg transition-all active:scale-95"
                 >
                   Cancelar
                 </button>
                 <button 
                   onClick={handleCreateCampaign}
                   disabled={!newCampaignName || isSaving}
-                  className="flex-1 py-3 bg-ink text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-30 flex items-center justify-center gap-2 shadow-lg shadow-ink/20"
+                  className="flex-1 py-4 bg-accent text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-accent/90 transition-all disabled:opacity-30 flex items-center justify-center gap-2 shadow-xl shadow-accent/20 active:scale-95"
                 >
                   {isSaving ? (
                     <>
@@ -257,19 +324,31 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="space-y-4"
+            className="space-y-6"
           >
-            <BackButton onClick={() => setSelectedCampaign(null)} label="Voltar" subLabel="Lista de Campanhas" />
+            <div className="flex items-center gap-4 mb-2">
+              <BackButton onClick={() => setSelectedCampaign(null)} />
+              <div className="h-px flex-1 bg-line/50"></div>
+              <span className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Detalhes da Campanha</span>
+            </div>
 
-            <div className="bg-white border border-line rounded-2xl p-6 shadow-sm space-y-6">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h2 className="text-2xl font-bold tracking-tight uppercase">{selectedCampaign.name}</h2>
-                  <p className="text-sm text-ink-muted mt-1">{selectedCampaign.description || 'Sem descrição'}</p>
+            <div className="bg-white border border-line rounded-3xl p-6 shadow-sm space-y-8">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest border ${getStatusColor(selectedCampaign.status)}`}>
+                      {selectedCampaign.status}
+                    </span>
+                    <span className="text-[10px] text-ink-muted font-mono">
+                      Início: {new Date(selectedCampaign.start_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <h2 className="text-3xl font-black tracking-tighter uppercase leading-tight text-ink">{selectedCampaign.name}</h2>
+                  <p className="text-xs text-ink-muted mt-2 font-medium leading-relaxed">{selectedCampaign.description || 'Sem descrição detalhada para esta campanha.'}</p>
                 </div>
-                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${getStatusColor(selectedCampaign.status)}`}>
-                  {selectedCampaign.status}
-                </span>
+                <div className="w-16 h-16 rounded-2xl bg-bg border border-line flex items-center justify-center text-accent shadow-inner">
+                  <BarChart3 className="w-8 h-8" />
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -339,69 +418,89 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
             </div>
           </motion.div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {campaigns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 space-y-4 opacity-40">
-                <BarChart3 className="w-16 h-16" />
-                <p className="text-xs font-bold uppercase tracking-widest">Nenhuma campanha ativa</p>
-                <div className="flex flex-col items-center gap-4">
+              <div className="flex flex-col items-center justify-center py-24 px-8 text-center space-y-6">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-accent/10 rounded-full blur-2xl animate-pulse"></div>
+                  <div className="relative w-24 h-24 bg-white border border-line rounded-3xl flex items-center justify-center text-ink-muted shadow-sm">
+                    <BarChart3 className="w-12 h-12 opacity-20" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-black uppercase tracking-tighter text-ink">Nenhuma campanha ativa</p>
+                  <p className="text-[10px] text-ink-muted uppercase tracking-widest leading-relaxed max-w-[200px] mx-auto">
+                    Inicie um novo evento de inventário para começar a coletar dados.
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-4 w-full max-w-[240px]">
                   <button 
-                    onClick={() => onRefresh && onRefresh()}
-                    className="flex items-center gap-2 py-3 px-6 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-blue-100 transition-all border border-blue-100"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="w-full flex items-center justify-center gap-3 py-4 px-6 bg-white text-ink rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-bg transition-all border border-line shadow-sm disabled:opacity-50 active:scale-95"
                   >
-                    <RefreshCw className="w-4 h-4" /> Atualizar Lista
+                    <RefreshCw className={`w-4 h-4 text-accent ${isRefreshing ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshing ? 'Sincronizando...' : 'Atualizar Lista'}</span>
                   </button>
                   <button 
                     onClick={() => setIsCreating(true)}
-                    className="text-[10px] font-bold text-accent underline uppercase tracking-widest"
+                    className="w-full py-4 bg-accent text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-accent/90 transition-all shadow-xl shadow-accent/20 active:scale-95"
                   >
-                    Criar minha primeira campanha
+                    Criar Primeira Campanha
                   </button>
-                  <div className="text-[8px] text-ink-muted uppercase tracking-widest opacity-50 mt-4 flex flex-col items-center gap-1">
-                    <span>Tenant: {user?._tenantid || user?.tenantid || (user?.tenants && user.tenants.length > 0 ? user.tenants[0] : 'NÃO IDENTIFICADO')}</span>
-                    {Array.isArray(user?.tenants) && user.tenants.length > 1 && (
-                      <span className="text-[6px]">Disponíveis: {user.tenants.join(', ')}</span>
-                    )}
+                </div>
+                <div className="pt-8 text-[8px] text-ink-muted uppercase tracking-widest opacity-50 flex flex-col items-center gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1 h-1 rounded-full bg-accent"></div>
+                    <span>Tenant: {user?._tenantid || user?.tenantid || 'NÃO IDENTIFICADO'}</span>
                   </div>
                 </div>
               </div>
             ) : (
-              campaigns.map(campaign => (
-                <motion.div 
-                  key={campaign.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  onClick={() => handleSelectCampaign(campaign)}
-                  className="bg-white border border-line rounded-2xl p-4 flex items-center justify-between hover:shadow-md transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                      campaign.status === CampaignStatus.ACTIVE ? 'bg-green-50 text-green-600' :
-                      campaign.status === CampaignStatus.CLOSED ? 'bg-blue-50 text-blue-600' :
-                      'bg-gray-50 text-gray-400'
-                    }`}>
-                      <Calendar className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold uppercase tracking-tight text-sm">{campaign.name}</h3>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${getStatusColor(campaign.status)}`}>
-                          {campaign.status}
-                        </span>
-                        {campaign.unit_id && (
-                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200">
-                            {campaign.unit_id}
+              <div className="grid grid-cols-1 gap-4">
+                {campaigns.map(campaign => (
+                  <motion.div 
+                    key={campaign.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    onClick={() => handleSelectCampaign(campaign)}
+                    className="bg-white border border-line rounded-3xl p-5 flex items-center justify-between hover:shadow-xl hover:border-accent/20 transition-all cursor-pointer group relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 left-0 w-1 h-full bg-accent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    
+                    <div className="flex items-center gap-5">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${
+                        campaign.status === CampaignStatus.ACTIVE ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+                        campaign.status === CampaignStatus.CLOSED ? 'bg-blue-50 border-blue-100 text-blue-600' :
+                        'bg-slate-50 border-slate-100 text-slate-400'
+                      }`}>
+                        <Calendar className="w-7 h-7" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <h3 className="font-black uppercase tracking-tighter text-base text-ink group-hover:text-accent transition-colors">{campaign.name}</h3>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-lg border ${getStatusColor(campaign.status)}`}>
+                            {campaign.status}
                           </span>
-                        )}
-                        <span className="text-[10px] text-ink-muted font-mono">
-                          {new Date(campaign.start_date).toLocaleDateString()}
-                        </span>
+                          {(campaign._unitid || campaign.unit_id) && (
+                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg border bg-amber-50 text-amber-700 border-amber-100 text-[8px] font-black uppercase">
+                              <MapPin size={8} />
+                              {campaign._unitid || campaign.unit_id}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-[9px] text-ink-muted font-bold uppercase tracking-tighter ml-1">
+                            <Clock size={10} />
+                            {new Date(campaign.start_date).toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-ink-muted group-hover:text-ink transition-colors" />
-                </motion.div>
-              ))
+                    <div className="w-10 h-10 rounded-full bg-bg flex items-center justify-center text-ink-muted group-hover:bg-accent group-hover:text-white transition-all">
+                      <ChevronRight className="w-5 h-5" />
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
             )}
           </div>
         )}
