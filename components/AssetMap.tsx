@@ -100,9 +100,19 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSelectLocation }) => {
   const [showInfo, setShowInfo] = useState(true);
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
+  const [selectedLocation, setSelectedLocation] = useState<string | 'ALL'>('ALL');
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA'>('AREA');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [zoomLevel, setZoomLevel] = useState(13);
+
+  // Lista de localidades únicas para o filtro
+  const locations = useMemo(() => {
+    const locs = new Set<string>();
+    assets.forEach(a => {
+      if (a.ENDERECO) locs.add(a.ENDERECO);
+    });
+    return Array.from(locs).sort();
+  }, [assets]);
 
   useEffect(() => {
     const handleStatus = () => setIsOffline(!navigator.onLine);
@@ -116,6 +126,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
 
   const ZoomHandler = () => {
     const map = useMap();
+    
     useEffect(() => {
       if (!map) return;
       const onZoom = () => setZoomLevel(map.getZoom());
@@ -124,6 +135,23 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
         map.off('zoomend', onZoom);
       };
     }, [map]);
+
+    // Efeito para auto-zoom ao trocar de localidade
+    useEffect(() => {
+      if (!map || selectedLocation === 'ALL' || filteredAssets.length === 0) return;
+      
+      const points = filteredAssets
+        .filter(a => a._lat && a._lng)
+        .map(a => [a._lat!, a._lng!] as [number, number]);
+        
+      if (points.length > 0) {
+        const bounds = L.latLngBounds(points);
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [100, 100], maxZoom: 18 });
+        }
+      }
+    }, [map, selectedLocation, filteredAssets]);
+
     return null;
   };
 
@@ -135,9 +163,15 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   ];
 
   const filteredAssets = useMemo(() => {
-    if (selectedOrigin === 'ALL') return assets;
-    return assets.filter(a => a._origemTransacao === selectedOrigin);
-  }, [assets, selectedOrigin]);
+    let filtered = assets;
+    if (selectedOrigin !== 'ALL') {
+      filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
+    }
+    if (selectedLocation !== 'ALL') {
+      filtered = filtered.filter(a => a.ENDERECO === selectedLocation);
+    }
+    return filtered;
+  }, [assets, selectedOrigin, selectedLocation]);
 
   // Agrupamento por Localidade para cálculo de Área Ocupada
   const locationGroups = useMemo(() => {
@@ -261,25 +295,45 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           </div>
         </div>
 
-        <div className="pointer-events-auto self-end bg-white/90 backdrop-blur-md border border-border p-1 rounded-2xl shadow-xl flex items-center space-x-1">
-          <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
-            <Filter size={14} className="text-accent" />
-            <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Origem</span>
+        <div className="pointer-events-auto self-end bg-white/90 backdrop-blur-md border border-border p-1 rounded-2xl shadow-xl flex flex-col space-y-1">
+          <div className="flex items-center space-x-1">
+            <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
+              <Filter size={14} className="text-accent" />
+              <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Origem</span>
+            </div>
+            <div className="flex items-center space-x-1 pr-1">
+              {originOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSelectedOrigin(opt.value as TransactionOrigin | 'ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
+                    selectedOrigin === opt.value 
+                      ? 'bg-accent text-white shadow-md' 
+                      : 'text-ink-muted hover:bg-bg-main'
+                  }`}
+                >
+                  {opt.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center space-x-1 pr-1">
-            {originOptions.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setSelectedOrigin(opt.value as TransactionOrigin | 'ALL')}
-                className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
-                  selectedOrigin === opt.value 
-                    ? 'bg-accent text-white shadow-md' 
-                    : 'text-ink-muted hover:bg-bg-main'
-                }`}
-              >
-                {opt.label.split(' ')[0]}
-              </button>
-            ))}
+
+          {/* Novo Filtro de Localidade (ENDERECO) */}
+          <div className="flex items-center space-x-1 border-t border-border/50 pt-1">
+            <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
+              <MapIcon size={14} className="text-emerald-500" />
+              <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Local</span>
+            </div>
+            <select 
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="bg-transparent border-none text-[9px] font-bold text-ink uppercase tracking-widest focus:ring-0 max-w-[200px] cursor-pointer"
+            >
+              <option value="ALL">TODAS AS LOCALIDADES</option>
+              {locations.map(loc => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
