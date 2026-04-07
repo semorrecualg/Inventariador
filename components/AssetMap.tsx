@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, useMap, Marker, Popup, Polygon, Tooltip } from
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
+import * as d3 from 'd3';
 
 // Configuração de ícones customizados para o Leaflet
 const defaultIcon = L.icon({
@@ -140,13 +141,13 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
 
   // Agrupamento por Localidade para cálculo de Área Ocupada
   const locationGroups = useMemo(() => {
-    const groups: Record<string, { points: [number, number][], totalValue: number, assets: Asset[] }> = {};
+    const groups: Record<string, { points: [number, number][], hull: [number, number][] | null, totalValue: number, assets: Asset[] }> = {};
     
     filteredAssets.forEach(a => {
       if (a._lat && a._lng) {
         const loc = a.ENDERECO || 'SEM LOCALIZAÇÃO';
         if (!groups[loc]) {
-          groups[loc] = { points: [], totalValue: 0, assets: [] };
+          groups[loc] = { points: [], hull: null, totalValue: 0, assets: [] };
         }
         groups[loc].points.push([a._lat, a._lng]);
         groups[loc].assets.push(a);
@@ -155,6 +156,18 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
           : (Number(a.VLRAQUISIC) || 0);
         groups[loc].totalValue += (val || 0);
+      }
+    });
+
+    // Calcular Convex Hull para cada grupo
+    Object.keys(groups).forEach(loc => {
+      const group = groups[loc];
+      if (group.points.length >= 3) {
+        // d3.polygonHull espera [[x, y], ...]
+        const hull = d3.polygonHull(group.points);
+        if (hull) {
+          group.hull = hull as [number, number][];
+        }
       }
     });
 
@@ -286,10 +299,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           {heatmapMode !== 'AREA' && <HeatmapLayer points={heatPoints} />}
           <ZoomHandler />
           
-          {/* Visualização de Área Ocupada (Polígonos) */}
+          {/* Visualização de Área Ocupada (Polígonos - Envoltória Convexa) */}
           {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
-            if (data.points.length < 3) {
-              // Se tiver menos de 3 pontos, desenha um círculo ou apenas marcadores
+            if (!data.hull || data.hull.length < 3) {
+              // Se não houver envoltória ou tiver menos de 3 pontos, desenha marcadores individuais
               return data.points.map((p, i) => (
                 <Marker key={`${loc}-${i}`} position={p} icon={pendenteIcon}>
                   <Tooltip permanent direction="top" offset={[0, -20]} className="bg-white/90 border-none shadow-lg rounded-lg px-2 py-1">
@@ -310,18 +323,16 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
               ));
             }
 
-            // Para simplificar sem Turf.js, usamos um polígono que conecta os pontos
-            // Em uma versão real, usaríamos Convex Hull
             return (
               <Polygon 
                 key={loc}
-                positions={data.points}
+                positions={data.hull}
                 pathOptions={{ 
                   color: '#f27d26', 
                   fillColor: '#f27d26', 
-                  fillOpacity: 0.2,
-                  weight: 2,
-                  dashArray: '5, 5'
+                  fillOpacity: 0.25,
+                  weight: 3,
+                  dashArray: 'none'
                 }}
               >
                 <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
