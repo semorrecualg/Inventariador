@@ -288,28 +288,37 @@ const App: React.FC = () => {
   useEffect(() => {
     // Só monitora sessão do Supabase se estivermos em um modo que utilize a nuvem
     if (supabase && databaseMode.startsWith('SUPABASE')) {
-      supabase.auth.getSession().then(({ error }) => {
-        if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
-          console.warn('[Supabase] Sessão inválida detectada. Limpando...');
-          localStorage.removeItem('app_current_user');
-          
-          const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
-          if (!hasReloaded) {
-            sessionStorage.setItem('app_session_error_reloaded', 'true');
-            supabase?.auth.signOut().finally(() => {
-              window.location.reload();
-            });
+      // Adicionado timeout de 5s para evitar travamento em redes instáveis
+      const sessionPromise = supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 5000));
+
+      Promise.race([sessionPromise, timeoutPromise])
+        .then((result) => {
+          const { error } = result as { error: { message: string } | null; data: { session: unknown; user: unknown } };
+          if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
+            console.warn('[Supabase] Sessão inválida detectada. Limpando...');
+            localStorage.removeItem('app_current_user');
+            
+            const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
+            if (!hasReloaded) {
+              sessionStorage.setItem('app_session_error_reloaded', 'true');
+              supabase?.auth.signOut().finally(() => {
+                window.location.reload();
+              });
+            } else {
+              console.error('[Supabase] Loop detectado. Mantendo offline.');
+              setUser(null);
+              setTimeout(() => sessionStorage.removeItem('app_session_error_reloaded'), 5000);
+            }
           } else {
-            console.error('[Supabase] Loop detectado. Mantendo offline.');
-            setUser(null);
-            setTimeout(() => sessionStorage.removeItem('app_session_error_reloaded'), 5000);
+            sessionStorage.removeItem('app_session_error_reloaded');
           }
-        } else {
-          sessionStorage.removeItem('app_session_error_reloaded');
-        }
-      });
+        })
+        .catch(err => {
+          console.warn('[Supabase] Falha ao verificar sessão (Timeout ou Rede):', err);
+        });
     }
-  }, [databaseMode]); // Adicionada dependência para reagir à troca de modo
+  }, [databaseMode]);
 
   useEffect(() => {
     // Debug environment variables
@@ -586,7 +595,12 @@ const App: React.FC = () => {
     if (isSyncing) return;
     
     const mode = explicitMode || databaseMode;
-    if (mode === DatabaseMode.INTERNAL) return;
+    
+    // BLINDAGEM TOTAL: Se o modo for INTERNAL, não permite nenhuma chamada de rede
+    if (mode === DatabaseMode.INTERNAL) {
+      console.log('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
+      return;
+    }
 
     // GUARD: Check if online
     if (!navigator.onLine) {
@@ -1041,9 +1055,15 @@ const App: React.FC = () => {
         }
 
         // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background)
-        if (databaseMode !== DatabaseMode.INTERNAL) {
+        // Adicionado timeout e verificação rigorosa de modo para evitar travamento no splash screen
+        if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine) {
           try {
-            const cloudData = await fetchFullInventory(user?.tenantid);
+            // Promise.race para garantir que o fetch não trave o init por mais de 8s
+            const cloudData = await Promise.race([
+              fetchFullInventory(user?.tenantid),
+              new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
+            ]).catch(() => null);
+
             if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
               const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
               const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
@@ -1935,8 +1955,15 @@ const App: React.FC = () => {
       setModalConfig({
         isOpen: true,
         title: 'Modo Alterado',
-        message: `O sistema agora está operando no modo ${mode}. As bases de dados são 100% independentes.`,
-        type: 'success'
+        message: mode === DatabaseMode.INTERNAL 
+          ? 'O sistema agora está operando em Modo INTERNO (Mobile Puro). Todas as conexões com a nuvem foram suspensas para garantir estabilidade máxima.' 
+          : 'O sistema agora está operando em Modo NUVEM (Supabase). A sincronização automática foi reativada.',
+        type: 'success',
+        onConfirm: () => {
+          // Recarrega a página para garantir que todos os serviços (Supabase, Sync, etc) 
+          // sejam reinicializados com as novas flags de blindagem técnica.
+          window.location.reload();
+        }
       });
     } catch (error) {
       console.error('Erro ao trocar modo de banco de dados:', error);
@@ -4154,8 +4181,12 @@ const App: React.FC = () => {
               <Cloud size={32} className="animate-pulse" />
             </div>
           </div>
-          <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">Sincronizando Base</h3>
-          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">Aguarde, baixando dados da nuvem...</p>
+          <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">
+            {databaseMode === DatabaseMode.INTERNAL ? 'Processando Local' : 'Sincronizando Base'}
+          </h3>
+          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">
+            {databaseMode === DatabaseMode.INTERNAL ? 'Aguarde, alternando modo de dados...' : 'Aguarde, baixando dados da nuvem...'}
+          </p>
         </div>
       )}
 

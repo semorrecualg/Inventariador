@@ -23,11 +23,12 @@ const supabaseAnonKey = CORRECT_KEY;
 const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').replace(/[[]\]/g, '').trim();
 
 // Initialize client only if credentials exist to prevent crash
-const isInternalMode = localStorage.getItem('app_database_mode') === 'INTERNAL';
+// Blindagem Dinâmica: O modo é verificado em tempo real para evitar chamadas fantasmas
+const getDatabaseMode = () => localStorage.getItem('app_database_mode') || 'INTERNAL';
 
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {
-  if (localStorage.getItem('app_database_mode') === 'INTERNAL') return false;
+  if (getDatabaseMode() === 'INTERNAL') return false;
   if (!supabaseUrl || !supabaseAnonKey) return false;
   
   try {
@@ -44,7 +45,8 @@ export const testSupabaseConnection = async () => {
 };
 
 if (supabaseUrl && supabaseAnonKey) {
-  if (!isInternalMode) {
+  const currentMode = getDatabaseMode();
+  if (currentMode !== 'INTERNAL') {
     console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
     console.log(`%c[Supabase] URL: ${supabaseUrl}`, "color: #3ecf8e;");
     console.log(`%c[Supabase] Schema: [${supabaseSchema}]`, "color: #3ecf8e;");
@@ -53,15 +55,17 @@ if (supabaseUrl && supabaseAnonKey) {
   }
 }
 
+// O cliente Supabase é inicializado com persistência desativada se estivermos em modo interno no momento do load
+// No entanto, as funções individuais fazem a blindagem em tempo real
 export const supabase = (supabaseUrl && supabaseAnonKey) 
   ? createClient(supabaseUrl, supabaseAnonKey, {
       db: {
         schema: supabaseSchema
       },
       auth: {
-        autoRefreshToken: !isInternalMode,
-        persistSession: !isInternalMode,
-        detectSessionInUrl: !isInternalMode
+        autoRefreshToken: getDatabaseMode() !== 'INTERNAL',
+        persistSession: getDatabaseMode() !== 'INTERNAL',
+        detectSessionInUrl: getDatabaseMode() !== 'INTERNAL'
       }
     })
   : null;
@@ -144,6 +148,7 @@ export const logAssetChange = async (entry: {
   new_data?: unknown;
   _tenantid?: string;
 }) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase) return;
 
   try {
@@ -171,6 +176,7 @@ export const logAssetChange = async (entry: {
  * Busca todas as localidades (legendas/metadados) do tenant
  */
 export const getLocations = async (tenantid: string) => {
+  if (getDatabaseMode() === 'INTERNAL') return [];
   if (!supabase) return [];
   
   try {
@@ -200,6 +206,7 @@ export const saveLocation = async (location: {
   longitude?: number;
   _tenantid: string;
 }) => {
+  if (getDatabaseMode() === 'INTERNAL') return null;
   if (!supabase) return null;
   
   try {
@@ -221,6 +228,7 @@ export const saveLocation = async (location: {
 };
 
 export const signUp = async (email: string, password: string, username: string, tenantid: string, role: string = 'ADMIN', name?: string, unitid?: string, units?: string[]) => {
+  if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite cadastro na nuvem.");
   if (!supabase) throw new Error("Supabase não configurado.");
   
   // 1. Cria o usuário no Supabase Auth
@@ -296,6 +304,21 @@ export const signUp = async (email: string, password: string, username: string, 
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ensureUserProfile = async (email: string, metadata?: Record<string, any>, userId?: string): Promise<any> => {
+  if (getDatabaseMode() === 'INTERNAL') {
+    const lowerEmail = email.toLowerCase();
+    const is_admin_new = (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br');
+    return {
+      email: lowerEmail,
+      username: lowerEmail.split('@')[0],
+      role: is_admin_new ? 'ADMIN' : 'AUDITOR',
+      is_admin: is_admin_new,
+      isAdmin: is_admin_new,
+      _tenantid: (metadata?._tenantid || '').trim(),
+      _unitid: '',
+      units: [],
+      tenants: []
+    };
+  }
   if (!supabase) throw new Error("Supabase não configurado.");
   
   const lowerEmail = email.toLowerCase();
@@ -429,6 +452,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 };
 
 export const signIn = async (email: string, password: string) => {
+  if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite login na nuvem.");
   if (!supabase) throw new Error("Supabase não configurado.");
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
@@ -444,6 +468,7 @@ export const signIn = async (email: string, password: string) => {
 };
 
 export const signInWithMagicLink = async (email: string) => {
+  if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite login na nuvem.");
   if (!supabase) throw new Error("Supabase não configurado.");
   
   const redirectTo = getAppBaseUrl();
@@ -530,6 +555,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase || !navigator.onLine) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
@@ -603,6 +629,7 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
  * This is used after Protheus authentication
  */
 export const getUserPermissions = async (email: string) => {
+  if (getDatabaseMode() === 'INTERNAL') return { isAdmin: false };
   if (!supabase) return { isAdmin: false };
 
   try {
@@ -631,6 +658,7 @@ export const getUserPermissions = async (email: string) => {
  * Busca o e-mail de um usuário pelo username na tabela user_permissions
  */
 export const getEmailByUsername = async (username: string): Promise<string | null> => {
+  if (getDatabaseMode() === 'INTERNAL') return null;
   if (!supabase) return null;
 
   try {
@@ -666,6 +694,7 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
  * criamos uma instância temporária do cliente.
  */
 export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantid?: string, tenants?: string[], name?: string, unitid?: string, units?: string[]): Promise<ProvisionResult> => {
+  if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite provisionamento na nuvem.");
   console.log(`[Supabase] Provisionando usuário ${email}:`, { role, tenantid, unitid, units });
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
     throw new Error('Dados insuficientes para provisionamento (E-mail ou Senha ausentes).');
@@ -788,6 +817,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
  * Sincroniza a lista de usuários locais com a tabela de permissões no Supabase
  */
 export const syncUsersToCloud = async (users: User[]) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase || !users || users.length === 0) return;
 
   try {
@@ -838,6 +868,7 @@ export const syncUsersToCloud = async (users: User[]) => {
  * Remove um usuário da tabela de permissões na nuvem
  */
 export const deleteUserFromCloud = async (email: string) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase) return;
   
   try {
@@ -860,6 +891,7 @@ export const deleteUserFromCloud = async (email: string) => {
  * Busca todos os usuários da tabela de permissões (apenas para admins)
  */
 export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> => {
+  if (getDatabaseMode() === 'INTERNAL') return [];
   if (!supabase) return [];
 
   try {

@@ -6,8 +6,6 @@ import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import * as d3 from 'd3';
 
-import * as turf from '@turf/turf';
-
 // Configuração de ícones customizados para o Leaflet
 const defaultIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
@@ -91,11 +89,15 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [zoomLevel, setZoomLevel] = useState(13);
 
-  // Lista de localidades únicas para o filtro
+  // Lista de localidades únicas para o filtro (Baseado no local onde foi INVENTARIADO)
   const locations = useMemo(() => {
     const locs = new Set<string>();
     assets.forEach(a => {
-      if (a.ENDERECO) locs.add(a.ENDERECO);
+      // REGRA: Apenas localidades que possuem itens INVENTARIADOS
+      if (a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM') {
+        const loc = a._localMaster || a.ENDERECO;
+        if (loc) locs.add(loc);
+      }
     });
     return Array.from(locs).sort();
   }, [assets]);
@@ -149,23 +151,25 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   ];
 
   const filteredAssets = useMemo(() => {
-    let filtered = assets;
+    // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
+    let filtered = assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    
     if (selectedOrigin !== 'ALL') {
       filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
     }
     if (selectedLocation !== 'ALL') {
-      filtered = filtered.filter(a => a.ENDERECO === selectedLocation);
+      filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
     }
     return filtered;
   }, [assets, selectedOrigin, selectedLocation]);
 
-  // Agrupamento por Localidade para cálculo de Área Ocupada
+  // Agrupamento por Localidade para cálculo de Área Ocupada (Usando local de inventário)
   const locationGroups = useMemo(() => {
     const groups: Record<string, { points: [number, number][], hull: [number, number][] | null, totalValue: number, assets: Asset[] }> = {};
     
     filteredAssets.forEach(a => {
       if (a._lat && a._lng) {
-        const loc = a.ENDERECO || 'SEM LOCALIZAÇÃO';
+        const loc = a._localMaster || a.ENDERECO || 'SEM LOCALIZAÇÃO';
         if (!groups[loc]) {
           groups[loc] = { points: [], hull: null, totalValue: 0, assets: [] };
         }
@@ -219,45 +223,45 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     const validAssets = filteredAssets.filter(a => a._lat && a._lng);
     if (validAssets.length === 0) return [];
 
-    // 1. Encontrar o envelope (bbox) dos pontos
-    const lats = validAssets.map(a => a._lat!);
-    const lngs = validAssets.map(a => a._lng!);
-    const bbox: [number, number, number, number] = [
-      Math.min(...lngs) - 0.001,
-      Math.min(...lats) - 0.001,
-      Math.max(...lngs) + 0.001,
-      Math.max(...lats) + 0.001
-    ];
+    // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
+    // 0.0002 graus é aproximadamente 20 metros
+    const cellSizeDegrees = 0.0002;
+    const bins: Record<string, { count: number, value: number, assets: Asset[], lat: number, lng: number }> = {};
 
-    // 2. Criar a grade (células de ~20 metros)
-    const cellSize = 0.02; // km
-    const grid = turf.squareGrid(bbox, cellSize, { units: 'kilometers' });
+    validAssets.forEach(a => {
+      const latBin = Math.floor(a._lat! / cellSizeDegrees) * cellSizeDegrees;
+      const lngBin = Math.floor(a._lng! / cellSizeDegrees) * cellSizeDegrees;
+      const key = `${latBin.toFixed(6)}|${lngBin.toFixed(6)}`;
 
-    // 3. Contabilizar ativos por célula
-    const cells = grid.features.map(feature => {
-      const poly = feature.geometry;
-      const assetsInCell = validAssets.filter(a => 
-        turf.booleanPointInPolygon(turf.point([a._lng!, a._lat!]), feature)
-      );
+      if (!bins[key]) {
+        bins[key] = { count: 0, value: 0, assets: [], lat: latBin, lng: lngBin };
+      }
+      
+      const bin = bins[key];
+      bin.count++;
+      bin.assets.push(a);
+      
+      const val = typeof a.VLRAQUISIC === 'string' 
+        ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
+        : (Number(a.VLRAQUISIC) || 0);
+      bin.value += (val || 0);
+    });
 
-      if (assetsInCell.length === 0) return null;
-
-      const totalValue = assetsInCell.reduce((acc, a) => {
-        const val = typeof a.VLRAQUISIC === 'string' 
-          ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-          : (Number(a.VLRAQUISIC) || 0);
-        return acc + (val || 0);
-      }, 0);
-
-      return {
-        geometry: poly,
-        count: assetsInCell.length,
-        value: totalValue,
-        assets: assetsInCell
-      };
-    }).filter(Boolean);
-
-    return cells;
+    return Object.values(bins).map(bin => ({
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[
+          [bin.lng, bin.lat],
+          [bin.lng + cellSizeDegrees, bin.lat],
+          [bin.lng + cellSizeDegrees, bin.lat + cellSizeDegrees],
+          [bin.lng, bin.lat + cellSizeDegrees],
+          [bin.lng, bin.lat]
+        ]]
+      },
+      count: bin.count,
+      value: bin.value,
+      assets: bin.assets
+    }));
   }, [filteredAssets, heatmapMode]);
 
   const totalValue = useMemo(() => {
@@ -502,7 +506,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                         </span>
                       </div>
                       <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
-                      <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
+                      <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a._localMaster || a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
                     </div>
                   </Popup>
                 </CircleMarker>
@@ -542,7 +546,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                       </span>
                     </div>
                     <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
-                    <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
+                    <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a._localMaster || a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
                     <div className="mt-2 pt-2 border-t border-border flex justify-between items-center">
                       <span className="text-[8px] text-ink-muted uppercase font-bold">Patrimônio</span>
                       <span className="text-[10px] font-black text-ink">{a.REGISTRO}</span>
