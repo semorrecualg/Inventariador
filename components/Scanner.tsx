@@ -44,10 +44,22 @@ const Scanner: React.FC<ScannerProps> = ({
   const [isFlashing, setIsFlashing] = useState(false);
   const trackRef = useRef<MediaStreamTrack | null>(null);
 
+  const [isTabHidden, setIsTabHidden] = useState(false);
+  const [isInactive, setIsInactive] = useState(false);
+  const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     isMounted.current = true;
+    
+    const handleVisibilityChange = () => {
+      setIsTabHidden(document.hidden);
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       isMounted.current = false;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
       // Garantir que o track pare ao desmontar para economizar bateria
       if (trackRef.current) {
         trackRef.current.stop();
@@ -55,6 +67,28 @@ const Scanner: React.FC<ScannerProps> = ({
       }
     };
   }, []);
+
+  const resetInactivityTimeout = useCallback(() => {
+    if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
+    if (isInactive) setIsInactive(false);
+    
+    // Se estiver em modo de economia, o timeout é mais curto (1 min vs 3 min)
+    inactivityTimeoutRef.current = setTimeout(() => {
+      if (isMounted.current) setIsInactive(true);
+    }, batterySaver ? 60000 : 180000);
+  }, [batterySaver, isInactive]);
+
+  // Reset timeout em interações
+  useEffect(() => {
+    const handleInteraction = () => resetInactivityTimeout();
+    window.addEventListener('touchstart', handleInteraction);
+    window.addEventListener('mousedown', handleInteraction);
+    resetInactivityTimeout();
+    return () => {
+      window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('mousedown', handleInteraction);
+    };
+  }, [resetInactivityTimeout]);
 
   const playBeep = () => {
     try {
@@ -146,12 +180,20 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: batterySaver ? 5 : 10,
+      fps: batterySaver ? 4 : 8, // Reduzido ligeiramente para diminuir carga de CPU
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 350, height: 150 } 
         : { width: 280, height: 280 },
       formatsToSupport: formats,
-      aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778, // Ajusta conforme orientação
+      aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
+      // Otimização de Resolução: 720p é o ideal para leitura sem aquecer demais. 
+      // 1080p+ em navegadores mobile causa processamento excessivo.
+      videoConstraints: {
+        facingMode: "environment",
+        width: { ideal: batterySaver ? 640 : 1280 },
+        height: { ideal: batterySaver ? 480 : 720 },
+        frameRate: { ideal: batterySaver ? 5 : 10 }
+      }
     };
 
     try {
@@ -172,6 +214,7 @@ const Scanner: React.FC<ScannerProps> = ({
 
       const onScanSuccess = (decodedText: string) => {
         if (isMounted.current) {
+          resetInactivityTimeout();
           playBeep();
           setIsFlashing(true);
           setShowSuccess(true);
@@ -257,7 +300,7 @@ const Scanner: React.FC<ScannerProps> = ({
   }, [mode, onScan, batterySaver, currentCameraIndex]);
 
   useEffect(() => {
-    if (!isPaused) {
+    if (!isPaused && !isTabHidden && !isInactive) {
       startScanner();
     } else {
       stopScanner();
@@ -265,7 +308,7 @@ const Scanner: React.FC<ScannerProps> = ({
     return () => {
       stopScanner();
     };
-  }, [startScanner, stopScanner, isPaused]);
+  }, [startScanner, stopScanner, isPaused, isTabHidden, isInactive]);
 
   const switchCamera = async () => {
     if (availableCameras.length < 2) return;
@@ -302,6 +345,25 @@ const Scanner: React.FC<ScannerProps> = ({
 
   const scannerContent = (
     <div className={`${isInline ? 'relative w-full h-64 rounded-3xl' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-300`}>
+      {/* Inactivity Overlay */}
+      {isInactive && !isPaused && (
+        <div className="absolute inset-0 z-[110] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mb-4 border border-amber-500/30">
+            <RefreshCw size={32} className="text-amber-500" />
+          </div>
+          <h3 className="text-white font-black uppercase tracking-tighter text-lg mb-2">Scanner em Repouso</h3>
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">
+            O scanner foi pausado para economizar bateria e evitar aquecimento.
+          </p>
+          <button 
+            onClick={resetInactivityTimeout}
+            className="px-8 py-3 bg-amber-500 text-black rounded-2xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all shadow-xl shadow-amber-500/20"
+          >
+            Retomar Leitura
+          </button>
+        </div>
+      )}
+
       {/* Loading State */}
       {isLoading && !error && !isPaused && (
         <div className="absolute inset-0 z-[100] bg-black flex flex-col items-center justify-center">
@@ -374,6 +436,13 @@ const Scanner: React.FC<ScannerProps> = ({
 
         {/* Centro: Modo de Leitura */}
         <div className="flex-1 flex justify-center space-x-2">
+          {batterySaver && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500/20 backdrop-blur-md rounded-full border border-amber-500/30 flex items-center space-x-2 animate-pulse">
+              <ShieldCheck size={12} className="text-amber-500" />
+              <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Modo Econômico Ativo</span>
+            </div>
+          )}
+
           {onModeChange && (
             <button 
               onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}

@@ -456,12 +456,12 @@ const App: React.FC = () => {
   }, [inventory]);
 
   useEffect(() => {
-    if (user?.tenantid) {
+    if (user?.tenantid && databaseMode.startsWith('SUPABASE')) {
       fetchUnitConfigs(user.tenantid).then(configs => {
         setInventory(prev => ({ ...prev, unitConfigs: configs }));
       });
     }
-  }, [user?.tenantid]);
+  }, [user?.tenantid, databaseMode]);
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;

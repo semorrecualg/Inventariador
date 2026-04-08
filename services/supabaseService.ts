@@ -23,24 +23,34 @@ const supabaseAnonKey = CORRECT_KEY;
 const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').replace(/[[]\]/g, '').trim();
 
 // Initialize client only if credentials exist to prevent crash
-if (supabaseUrl && supabaseAnonKey) {
-  console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
-  console.log(`%c[Supabase] URL: ${supabaseUrl}`, "color: #3ecf8e;");
-  console.log(`%c[Supabase] Schema: [${supabaseSchema}]`, "color: #3ecf8e;");
+const isInternalMode = localStorage.getItem('app_database_mode') === 'INTERNAL';
+
+// Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
+export const testSupabaseConnection = async () => {
+  if (localStorage.getItem('app_database_mode') === 'INTERNAL') return false;
+  if (!supabaseUrl || !supabaseAnonKey) return false;
   
-  // Teste de conexão expandido (REST e AUTH)
-  const testConnection = async () => {
-    try {
-      const restTest = await fetch(`${supabaseUrl}/rest/v1/`, { headers: { 'apikey': supabaseAnonKey } });
-      console.log(`%c[Supabase] Conectividade REST: ${restTest.status === 200 ? 'OK' : 'ERRO ' + restTest.status}`, restTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
-      
-      const authTest = await fetch(`${supabaseUrl}/auth/v1/health`, { headers: { 'apikey': supabaseAnonKey } });
-      console.log(`%c[Supabase] Conectividade AUTH: ${authTest.status === 200 ? 'OK' : 'ERRO ' + authTest.status}`, authTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
-    } catch (err) {
-      console.error('[Supabase] Falha crítica de conectividade:', err);
-    }
-  };
-  testConnection();
+  try {
+    const restTest = await fetch(`${supabaseUrl}/rest/v1/`, { headers: { 'apikey': supabaseAnonKey } });
+    console.log(`%c[Supabase] Conectividade REST: ${restTest.status === 200 ? 'OK' : 'ERRO ' + restTest.status}`, restTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
+    
+    const authTest = await fetch(`${supabaseUrl}/auth/v1/health`, { headers: { 'apikey': supabaseAnonKey } });
+    console.log(`%c[Supabase] Conectividade AUTH: ${authTest.status === 200 ? 'OK' : 'ERRO ' + authTest.status}`, authTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
+    return true;
+  } catch (err) {
+    console.error('[Supabase] Falha crítica de conectividade:', err);
+    return false;
+  }
+};
+
+if (supabaseUrl && supabaseAnonKey) {
+  if (!isInternalMode) {
+    console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
+    console.log(`%c[Supabase] URL: ${supabaseUrl}`, "color: #3ecf8e;");
+    console.log(`%c[Supabase] Schema: [${supabaseSchema}]`, "color: #3ecf8e;");
+  } else {
+    console.log(`%c[Supabase] Modo INTERNO detectado. Conexões com a nuvem suspensas para economia de dados e estabilidade.`, "color: #f59e0b; font-weight: bold;");
+  }
 }
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
@@ -49,9 +59,9 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
         schema: supabaseSchema
       },
       auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true
+        autoRefreshToken: !isInternalMode,
+        persistSession: !isInternalMode,
+        detectSessionInUrl: !isInternalMode
       }
     })
   : null;
@@ -100,7 +110,7 @@ export const logAuditEvent = async (entry: {
   _tenantid?: string;
   origin?: string;
 }) => {
-  if (!supabase) return;
+  if (!supabase || localStorage.getItem('app_database_mode') === 'INTERNAL') return;
 
   try {
     // Sanitiza dados para evitar erros de estrutura circular

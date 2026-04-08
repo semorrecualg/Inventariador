@@ -50,6 +50,13 @@ export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
  * Processa a fila de sincronização
  */
 export const processSyncQueue = async (onProgress?: (pendingCount: number) => void): Promise<void> => {
+  // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
+  const currentMode = localStorage.getItem('app_database_mode');
+  if (currentMode === 'INTERNAL') {
+    console.log('[Sync] Sincronização suspensa: Modo INTERNO ativo.');
+    return;
+  }
+
   if (!navigator.onLine) return;
 
   const items = await getPendingSyncItems();
