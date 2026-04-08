@@ -1110,7 +1110,7 @@ const App: React.FC = () => {
   }, []);
 
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
-  const refreshCampaigns = async () => {
+  const refreshCampaigns = useCallback(async () => {
     const tenantId = user?._tenantid || user?.tenantid;
     console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, User: ${user?.email}, Mode: ${databaseMode}`);
     
@@ -1143,7 +1143,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('>>> [App] Erro crítico ao buscar dados globais:', err);
     }
-  };
+  }, [user?._tenantid, user?.tenantid, user?.email, databaseMode]);
 
   useEffect(() => {
     if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION) {

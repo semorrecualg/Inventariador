@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { UnitConfig, User } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
+import { getCurrentLocation } from '../utils/gpsUtils';
 import BackButton from './BackButton';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -70,6 +71,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [mapType, setMapType] = useState<'street' | 'satellite'>('street');
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
@@ -80,10 +82,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   }, [user.tenantid]);
 
   useEffect(() => {
-    if (initialUnit && units.includes(initialUnit)) {
+    if (initialUnit && units.includes(initialUnit) && selectedUnit !== initialUnit) {
       handleSelectUnit(initialUnit);
     }
-  }, [initialUnit, units, loading]); // loading is a dependency to ensure configs are loaded before selecting
+  }, [initialUnit, units, loading, selectedUnit]); // loading is a dependency to ensure configs are loaded before selecting
 
   useEffect(() => {
     if (onUpdateConfigs && configs.length > 0) {
@@ -128,6 +130,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSelectUnit = (unit: string) => {
+    if (selectedUnit === unit) return;
     setSelectedUnit(unit);
     const existing = configs.find(c => 
       c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase()
@@ -148,28 +151,41 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setMessage(null);
   };
 
+  // Sincroniza o centro do mapa quando as coordenadas mudam manualmente
+  useEffect(() => {
+    if (currentConfig.lat && currentConfig.lng) {
+      const lat = Number(currentConfig.lat);
+      const lng = Number(currentConfig.lng);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        setMapCenter(prev => {
+          // Só atualiza se houver mudança real para evitar loop de renderização
+          if (prev[0] === lat && prev[1] === lng) return prev;
+          return [lat, lng];
+        });
+      }
+    }
+  }, [currentConfig.lat, currentConfig.lng]);
+
   const handleMapClick = (lat: number, lng: number) => {
     if (!selectedUnit) return;
     setCurrentConfig(prev => ({ ...prev, lat, lng }));
   };
 
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setMessage({ text: 'Geolocalização não suportada pelo navegador.', type: 'error' });
-      return;
+  const handleUseCurrentLocation = async () => {
+    setLocating(true);
+    setMessage(null);
+    try {
+      const location = await getCurrentLocation(true);
+      setCurrentConfig(prev => ({ ...prev, lat: location.lat, lng: location.lng }));
+      setMapCenter([location.lat, location.lng]);
+      setMessage({ text: 'Localização atual capturada com sucesso.', type: 'success' });
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('Erro ao obter localização:', error);
+      setMessage({ text: error.message || 'Não foi possível obter sua localização atual.', type: 'error' });
+    } finally {
+      setLocating(false);
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setCurrentConfig(prev => ({ ...prev, lat: latitude, lng: longitude }));
-        setMapCenter([latitude, longitude]);
-      },
-      (error) => {
-        console.error('Erro ao obter localização:', error);
-        setMessage({ text: 'Não foi possível obter sua localização atual.', type: 'error' });
-      }
-    );
   };
 
   const handleSave = async () => {
@@ -238,7 +254,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Sidebar: Unit List */}
-        <div className="w-full md:w-80 bg-white border-r border-border flex flex-col overflow-hidden">
+        <div className={`w-full md:w-80 bg-white border-r border-border flex flex-col overflow-hidden ${selectedUnit ? 'hidden md:flex' : 'flex'}`}>
           <div className="p-4 border-b border-border bg-bg-main/50">
             <h2 className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-2">Unidades Operacionais</h2>
             <div className="relative">
@@ -293,7 +309,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         </div>
 
         {/* Main Content: Map & Config */}
-        <div className="flex-1 flex flex-col bg-bg-main relative">
+        <div className={`flex-1 flex flex-col bg-bg-main relative ${!selectedUnit ? 'hidden md:flex' : 'flex'}`}>
           {!selectedUnit ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
               <div className="w-20 h-20 bg-white border border-border rounded-3xl flex items-center justify-center text-ink-muted shadow-sm">
@@ -344,6 +360,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 {/* Map Overlay Controls */}
                 <div className="absolute top-4 left-4 right-4 z-[1000] flex flex-col space-y-2 pointer-events-none">
                   <div className="flex flex-col md:flex-row gap-2 pointer-events-auto">
+                    <button 
+                      onClick={() => setSelectedUnit(null)}
+                      className="md:hidden p-3 bg-white border border-border rounded-xl shadow-lg text-ink active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0"
+                    >
+                      <ChevronRight size={18} className="rotate-180" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Lista</span>
+                    </button>
+
                     <form 
                       onSubmit={handleSearchLocation}
                       className="flex-1 flex items-center bg-white border border-border rounded-xl shadow-lg overflow-hidden"
@@ -369,11 +393,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
                     <button 
                       onClick={handleUseCurrentLocation}
-                      className="p-3 bg-white border border-border rounded-xl shadow-lg text-accent active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0"
+                      disabled={locating}
+                      className="p-3 bg-white border border-border rounded-xl shadow-lg text-accent active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0 disabled:opacity-50"
                       title="Usar minha localização atual"
                     >
-                      <Target size={18} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Minha Posição</span>
+                      {locating ? <Loader2 size={18} className="animate-spin" /> : <Target size={18} />}
+                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">
+                        {locating ? 'Localizando...' : 'Minha Posição'}
+                      </span>
                     </button>
 
                     <button 
@@ -410,18 +437,22 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                       <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Latitude</label>
                       <input 
                         type="number" 
+                        step="any"
                         value={currentConfig.lat || ''} 
-                        readOnly
-                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono"
+                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, lat: parseFloat(e.target.value) }))}
+                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono focus:ring-2 focus:ring-accent/20 outline-none"
+                        placeholder="-0.0000"
                       />
                     </div>
                     <div>
                       <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Longitude</label>
                       <input 
                         type="number" 
+                        step="any"
                         value={currentConfig.lng || ''} 
-                        readOnly
-                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono"
+                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, lng: parseFloat(e.target.value) }))}
+                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono focus:ring-2 focus:ring-accent/20 outline-none"
+                        placeholder="-0.0000"
                       />
                     </div>
                     <div className="col-span-2 md:col-span-1">
