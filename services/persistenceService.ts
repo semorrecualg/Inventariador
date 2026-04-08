@@ -2,6 +2,7 @@ import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
+import { localDb } from './localDbService';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -144,6 +145,21 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       localforage.setItem(keys.config, encryptedConfig),
       localforage.setItem(keys.assets, encryptedAssets)
     ]);
+
+    // Mirroring in Dexie for extra robustness (SQL-like storage)
+    try {
+      if (mode === DatabaseMode.INTERNAL) {
+        await localDb.transaction('rw', localDb.assets, localDb.campaigns, async () => {
+          // Clear and bulk add for assets
+          await localDb.assets.clear();
+          await localDb.assets.bulkAdd(assets);
+        });
+        console.log('>>> [Persistence] Espelhamento Dexie concluído.');
+      }
+    } catch (dexieErr) {
+      console.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
+    }
+
     console.log('>>> [Persistence] Gravado com sucesso no IndexedDB.');
 
     // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se estiver em modo SUPABASE
@@ -175,7 +191,23 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       localforage.getItem<Uint8Array | string>(keys.config)
     ]);
 
-    if (!encryptedConfig && !encryptedAssets) return null;
+    if (!encryptedConfig && !encryptedAssets) {
+      // Tenta recuperar do espelhamento Dexie se o localforage sumiu
+      if (mode === DatabaseMode.INTERNAL) {
+        console.log('>>> [Persistence] Localforage vazio. Tentando recuperar do Dexie...');
+        const dexieAssets = await localDb.assets.toArray();
+        if (dexieAssets.length > 0) {
+          console.log(`>>> [Persistence] Recuperados ${dexieAssets.length} ativos do Dexie.`);
+          return {
+            assets: dexieAssets,
+            databaseMode: mode,
+            status: DatabaseStatus.LOADED,
+            lastUpdated: new Date().toISOString()
+          } as InventoryState;
+        }
+      }
+      return null;
+    }
 
     // Decriptografamos os dados carregados
     try {

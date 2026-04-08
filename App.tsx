@@ -60,6 +60,8 @@ import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
+import { requestPersistentStorage } from './services/localDbService';
+
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
 const MAX_SYNC_QUEUE_SIZE = 100; // Limite de segurança para fila de sincronização
@@ -919,6 +921,9 @@ const App: React.FC = () => {
   // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
+      // Solicita persistência durável para evitar perda de dados em limpeza de cache
+      await requestPersistentStorage();
+      
       console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
       let savedInventory: InventoryState | null = null;
       try {

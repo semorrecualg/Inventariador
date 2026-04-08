@@ -1,10 +1,11 @@
 
 import { createClient } from '@supabase/supabase-js';
 import imageCompression from 'browser-image-compression';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import { sanitizeForSupabase } from './utils';
+import { localDb } from './localDbService';
 
 export interface ProvisionResult {
   user?: unknown;
@@ -114,7 +115,24 @@ export const logAuditEvent = async (entry: {
   _tenantid?: string;
   origin?: string;
 }) => {
-  if (!supabase || localStorage.getItem('app_database_mode') === 'INTERNAL') return;
+  const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
+
+  // Se for modo interno, salva no Dexie
+  if (isInternal) {
+    try {
+      await localDb.auditLogs.add({
+        ...entry,
+        user: entry.user_email,
+        timestamp: new Date().toISOString()
+      } as AuditLogEntry);
+      console.log('>>> [Persistence] Log de auditoria salvo localmente (Dexie).');
+    } catch (dexieErr) {
+      console.warn('>>> [Persistence] Falha ao salvar log no Dexie:', dexieErr);
+    }
+    return;
+  }
+
+  if (!supabase) return;
 
   try {
     // Sanitiza dados para evitar erros de estrutura circular
@@ -148,7 +166,25 @@ export const logAssetChange = async (entry: {
   new_data?: unknown;
   _tenantid?: string;
 }) => {
-  if (getDatabaseMode() === 'INTERNAL') return;
+  const isInternal = getDatabaseMode() === 'INTERNAL';
+
+  // Se for modo interno, salva no Dexie
+  if (isInternal) {
+    try {
+      await localDb.auditLogs.add({
+        ...entry,
+        user: entry.user_email,
+        record_id: entry.asset_id,
+        table_name: 'assets',
+        timestamp: new Date().toISOString()
+      } as AuditLogEntry);
+      console.log('>>> [Persistence] Log de ativo salvo localmente (Dexie).');
+    } catch (dexieErr) {
+      console.warn('>>> [Persistence] Falha ao salvar log de ativo no Dexie:', dexieErr);
+    }
+    return;
+  }
+
   if (!supabase) return;
 
   try {
@@ -1842,6 +1878,18 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   localConfigs[unitKey] = payload;
   localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
 
+  // Mirroring in Dexie for durability
+  try {
+    await localDb.unitConfigs.put({
+      ...payload,
+      unit_id: unitId,
+      tenant_id: tenantId
+    } as UnitConfig);
+    console.log('>>> [Persistence] GPS espelhado no Dexie.');
+  } catch (dexieErr) {
+    console.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
+  }
+
   // Se for modo INTERNO, encerramos aqui (Isolamento Total)
   if (isInternal) {
     console.log('>>> [Local] GPS salvo localmente. Modo Mobile Puro ativo.');
@@ -1906,6 +1954,20 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
     // 1. Carrega do LocalStorage (Sempre disponível)
     const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+    
+    // Se o localStorage estiver vazio, tenta recuperar do Dexie
+    if (Object.keys(localData).length === 0) {
+      console.log('>>> [Persistence] LocalStorage de GPS vazio. Tentando Dexie...');
+      const dexieConfigs = await localDb.unitConfigs.toArray();
+      if (dexieConfigs.length > 0) {
+        dexieConfigs.forEach(c => {
+          const key = `${c.tenant_id}_${c.unit_id}`.replace(/\s+/g, '_');
+          localData[key] = c;
+        });
+        localStorage.setItem('local_unit_configs', JSON.stringify(localData));
+      }
+    }
+
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
       if (config.tenant_id === tenantid) configs[config.unit_id] = config;

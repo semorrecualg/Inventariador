@@ -15,6 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
+import { localDb } from '../services/localDbService';
 import { safeStringify } from '../services/utils';
 
 interface AuditLogsProps {
@@ -50,9 +51,9 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
 
   useEffect(() => {
     const loadLogs = async () => {
-      if (databaseMode === DatabaseMode.SUPABASE && user?.tenantid) {
-        setLoading(true);
-        try {
+      setLoading(true);
+      try {
+        if (databaseMode === DatabaseMode.SUPABASE && user?.tenantid) {
           const data = logType === 'SYSTEM' 
             ? await fetchAuditLogs(user.tenantid)
             : await fetchAssetLogs(user.tenantid);
@@ -68,12 +69,14 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
           }));
 
           setLogs(normalizedData as unknown as AuditLogDB[]);
-        } catch (error) {
-          console.error('Erro ao carregar logs:', error);
-        } finally {
-          setLoading(false);
+        } else if (databaseMode === DatabaseMode.INTERNAL) {
+          // Carrega logs locais do Dexie
+          const localLogs = await localDb.auditLogs.reverse().limit(100).toArray();
+          setLogs(localLogs as unknown as AuditLogDB[]);
         }
-      } else {
+      } catch (error) {
+        console.error('Erro ao carregar logs:', error);
+      } finally {
         setLoading(false);
       }
     };
