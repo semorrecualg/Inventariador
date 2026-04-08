@@ -321,6 +321,15 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
               <span>Área</span>
             </button>
             <button
+              onClick={() => setHeatmapMode('VALUE')}
+              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+                heatmapMode === 'VALUE' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <Activity size={12} />
+              <span>Valor</span>
+            </button>
+            <button
               onClick={() => setHeatmapMode('DENSITY')}
               className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
                 heatmapMode === 'DENSITY' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
@@ -408,6 +417,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
             const intensity = cell.count / maxCount;
             const color = d3.interpolateYlOrRd(intensity);
 
+            const conferidos = cell.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
+            const divergencias = cell.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
+
             return (
               <Polygon
                 key={`grid-${i}`}
@@ -424,8 +436,16 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                     <span className="text-[10px] font-black uppercase tracking-widest mb-1">Quadrante Técnico</span>
                     <div className="flex flex-col space-y-1">
                       <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-white/60 uppercase">Densidade:</span>
-                        <span className="text-[8px] font-bold text-white uppercase">{cell.count} Ativos</span>
+                        <span className="text-[8px] font-bold text-white/60 uppercase">Ativos:</span>
+                        <span className="text-[8px] font-bold text-white uppercase">{cell.count}</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-emerald-400/60 uppercase">Conferidos:</span>
+                        <span className="text-[8px] font-bold text-emerald-400 uppercase">{conferidos}</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-rose-400/60 uppercase">Divergências:</span>
+                        <span className="text-[8px] font-bold text-rose-400 uppercase">{divergencias}</span>
                       </div>
                       <div className="flex justify-between space-x-4">
                         <span className="text-[8px] font-bold text-white/60 uppercase">Valor Total:</span>
@@ -442,6 +462,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           
           {/* Visualização de Área Ocupada (Polígonos - Envoltória Convexa) */}
           {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
+            const conferidos = data.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
+            const divergencias = data.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
+
             const polygon = (data.hull && data.hull.length >= 3) ? (
               <Polygon 
                 key={`poly-${loc}`}
@@ -457,11 +480,25 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                 <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black uppercase tracking-widest mb-1">{loc}</span>
-                    <div className="flex items-center justify-between space-x-4">
-                      <span className="text-[8px] font-bold text-white/60 uppercase">Ativos: {data.assets.length}</span>
-                      <span className="text-[8px] font-bold text-accent uppercase">
-                        {data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
+                    <div className="flex flex-col space-y-1">
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-white/60 uppercase">Ativos:</span>
+                        <span className="text-[8px] font-bold text-white uppercase">{data.assets.length}</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-emerald-400/60 uppercase">Conferidos:</span>
+                        <span className="text-[8px] font-bold text-emerald-400 uppercase">{conferidos}</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-rose-400/60 uppercase">Divergências:</span>
+                        <span className="text-[8px] font-bold text-rose-400 uppercase">{divergencias}</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-white/60 uppercase">Valor:</span>
+                        <span className="text-[8px] font-bold text-accent uppercase">
+                          {data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </Tooltip>

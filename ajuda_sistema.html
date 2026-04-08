@@ -343,7 +343,13 @@
                         <li><strong>Baixar Dados da Nuvem:</strong> Realiza um download direto e forçado dos dados do Supabase, útil para auditorias de integridade ou recuperação de desastres.</li>
                     </ul>
 
-                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">B. Importação e Exportação</h4>
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">B. Controle de Geolocalização (GPS)</h4>
+                    <ul>
+                        <li><strong>Simular GPS (Desktop):</strong> Ativa um provedor simulado (Mock Provider). Use apenas para testes em escritório ou suporte técnico. Em campo, deve estar <strong>OFF</strong> para garantir a validade jurídica da auditoria.</li>
+                        <li><strong>Resetar GPS / Limpar Cache:</strong> Força o sistema a buscar uma nova coordenada do sensor, eliminando posições "travadas" no cache.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">C. Importação e Exportação</h4>
                     <ul>
                         <li><strong>Carga Expert:</strong> Ferramenta de importação massiva. Aceita arquivos Excel (.xlsx) e CSV. O sistema processa automaticamente as colunas conforme o protocolo GBR v24, eliminando duplicidades e itens baixados irrelevantes.</li>
                         <li><strong>Baixar Base de Dados (XLS):</strong> Exporta o estado atual do inventário (incluindo fotos e coordenadas GPS, se disponíveis) para um arquivo Excel formatado para auditoria.</li>

@@ -12,7 +12,8 @@ import {
   Loader2,
   ChevronRight,
   Info,
-  Layers
+  Layers,
+  HelpCircle
 } from 'lucide-react';
 import { UnitConfig, User } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
@@ -189,55 +190,77 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSave = async () => {
-    if (!selectedUnit || !currentConfig.lat || !currentConfig.lng) return;
+    // Validação robusta: Latitude e Longitude podem ser 0 (Equador/Greenwich)
+    const lat = currentConfig.lat !== undefined && currentConfig.lat !== null ? Number(currentConfig.lat) : NaN;
+    const lng = currentConfig.lng !== undefined && currentConfig.lng !== null ? Number(currentConfig.lng) : NaN;
+
+    if (!selectedUnit || isNaN(lat) || isNaN(lng)) {
+      setMessage({ text: 'COORDENADAS INVÁLIDAS. CLIQUE NO MAPA OU USE "MINHA POSIÇÃO".', type: 'error' });
+      return;
+    }
 
     setSaving(true);
+    setMessage(null);
+
     const configToSave: UnitConfig = {
-      id: currentConfig.id, // Preserve ID if it exists
-      _tenantid: user._tenantid || user.tenantid,
+      id: currentConfig.id,
+      _tenantid: user._tenantid || user.tenantid || 'CICOPAL',
       _unitid: selectedUnit,
-      tenant_id: user._tenantid || user.tenantid,
+      tenant_id: user._tenantid || user.tenantid || 'CICOPAL',
       unit_id: selectedUnit,
-      lat: Number(currentConfig.lat),
-      lng: Number(currentConfig.lng),
+      lat: lat,
+      lng: lng,
       radius_meters: currentConfig.radius_meters || 500,
       is_active: true,
-      updated_by: user.email
+      updated_by: user.email,
+      updated_at: new Date().toISOString()
     };
 
-    console.log('Saving Unit Config:', configToSave);
+    console.log('>>> [UnitConfigurator] Iniciando gravação:', configToSave);
+
     try {
       const result = await saveUnitConfig(configToSave);
+      
       if (result === true) {
-        setMessage({ text: 'CONFIGURAÇÃO SALVA COM SUCESSO!', type: 'success' });
-        // Update local configs state immediately to reflect "Configurado" in the list
+        console.log('>>> [UnitConfigurator] Gravação concluída com sucesso.');
+        setMessage({ text: 'CONFIGURAÇÃO GRAVADA COM SUCESSO!', type: 'success' });
+        
+        // Atualiza a lista local para refletir o status "Configurado" imediatamente
         setConfigs(prev => {
           const newConfigs = [...prev];
-          const idx = newConfigs.findIndex(c => c.unit_id?.trim().toUpperCase() === selectedUnit.trim().toUpperCase());
+          const idx = newConfigs.findIndex(c => 
+            c.unit_id?.trim().toUpperCase() === selectedUnit.trim().toUpperCase()
+          );
           if (idx >= 0) {
-            newConfigs[idx] = configToSave;
+            newConfigs[idx] = { ...newConfigs[idx], ...configToSave };
           } else {
             newConfigs.push(configToSave);
           }
           return newConfigs;
         });
+
+        // Mantém o estado atual sincronizado
+        setCurrentConfig(prev => ({ ...prev, ...configToSave }));
+
+        // Notifica o App se necessário
+        if (onUpdateConfigs) {
+          onUpdateConfigs([...configs]);
+        }
       } else {
-        const errorMsg = typeof result === 'string' ? result : 'Erro desconhecido ao salvar';
+        const errorMsg = typeof result === 'string' ? result : 'Falha na comunicação com o banco';
+        console.error('>>> [UnitConfigurator] Erro ao salvar:', errorMsg);
         setMessage({ 
-          text: `Falha na Gravação: ${errorMsg}. Verifique se o Schema possui permissões de escrita.`, 
+          text: `ERRO AO GRAVAR: ${errorMsg}. VERIFIQUE A CONEXÃO OU PERMISSÕES.`, 
           type: 'error' 
         });
       }
     } catch (err: unknown) {
       const error = err as Error;
-      console.error('[UnitConfigurator] Erro ao salvar:', error);
-      const errorMsg = error.message || 'Erro inesperado';
-      setMessage({ 
-        text: `Erro Crítico: ${errorMsg}`, 
-        type: 'error' 
-      });
+      console.error('>>> [UnitConfigurator] Erro crítico no handleSave:', error);
+      setMessage({ text: `ERRO CRÍTICO: ${error.message || 'Falha interna'}`, type: 'error' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -474,11 +497,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
                   <button 
                     onClick={handleSave}
-                    disabled={saving || !currentConfig.lat}
-                    className="w-full md:w-auto px-8 py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center space-x-2"
+                    disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
+                    className="w-full md:w-auto px-8 py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-between space-x-4"
                   >
-                    {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    <span>Salvar Configuração</span>
+                    <div className="flex items-center space-x-2">
+                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      <span>Salvar Configuração</span>
+                    </div>
+                    <HelpCircle size={18} className="opacity-70" />
                   </button>
                 </div>
 

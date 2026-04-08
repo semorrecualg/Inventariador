@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { HelpCircle, X, Info, Sparkles, ShieldCheck, Zap, Palette } from 'lucide-react';
+import { HelpCircle, X, Info, Sparkles, ShieldCheck, Zap, Palette, MapPin } from 'lucide-react';
 import { AppScreen } from '../types';
 
 interface FloatingHelpProps {
@@ -24,7 +24,7 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
       case AppScreen.MAIN_MENU:
         return [
           { icon: <Sparkles size={14} />, text: "O 'POP Interativo' contém o manual completo do sistema." },
-          { icon: <Info size={14} />, text: "Configure seus campos personalizados no Painel Administrativo." }
+          { icon: <MapPin size={14} />, text: "Use 'Simular GPS' apenas para testes em Desktop." }
         ];
       case AppScreen.INVENTORY:
         return [
