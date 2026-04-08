@@ -17,6 +17,7 @@
     "@google/genai": "^1.47.0",
     "@supabase/supabase-js": "^2.48.1",
     "@tailwindcss/vite": "^4.2.1",
+    "@turf/turf": "^7.3.4",
     "@types/d3": "^7.4.3",
     "@types/react-window": "^1.8.8",
     "@vis.gl/react-google-maps": "^1.7.1",

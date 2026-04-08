@@ -1,30 +1,16 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, Marker, Popup, Polygon, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Popup, Polygon, Tooltip, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import * as d3 from 'd3';
 
+import * as turf from '@turf/turf';
+
 // Configuração de ícones customizados para o Leaflet
 const defaultIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
-
-const conferidoIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
-
-const pendenteIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -58,8 +44,8 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
     }
 
     const heatLayer = L.heatLayer(points as L.LatLngExpression[], {
-      radius: 30,
-      blur: 20,
+      radius: 15,
+      blur: 5,
       maxZoom: 18,
       gradient: {
         0.2: '#3b82f6', // blue-500
@@ -101,7 +87,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   const [showInfo, setShowInfo] = useState(true);
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string | 'ALL'>('ALL');
-  const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA'>('AREA');
+  const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA' | 'GRID'>('AREA');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [zoomLevel, setZoomLevel] = useState(13);
 
@@ -227,6 +213,53 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     return [];
   }, [filteredAssets, heatmapMode]);
 
+  const gridData = useMemo(() => {
+    if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
+
+    const validAssets = filteredAssets.filter(a => a._lat && a._lng);
+    if (validAssets.length === 0) return [];
+
+    // 1. Encontrar o envelope (bbox) dos pontos
+    const lats = validAssets.map(a => a._lat!);
+    const lngs = validAssets.map(a => a._lng!);
+    const bbox: [number, number, number, number] = [
+      Math.min(...lngs) - 0.001,
+      Math.min(...lats) - 0.001,
+      Math.max(...lngs) + 0.001,
+      Math.max(...lats) + 0.001
+    ];
+
+    // 2. Criar a grade (células de ~20 metros)
+    const cellSize = 0.02; // km
+    const grid = turf.squareGrid(bbox, cellSize, { units: 'kilometers' });
+
+    // 3. Contabilizar ativos por célula
+    const cells = grid.features.map(feature => {
+      const poly = feature.geometry;
+      const assetsInCell = validAssets.filter(a => 
+        turf.booleanPointInPolygon(turf.point([a._lng!, a._lat!]), feature)
+      );
+
+      if (assetsInCell.length === 0) return null;
+
+      const totalValue = assetsInCell.reduce((acc, a) => {
+        const val = typeof a.VLRAQUISIC === 'string' 
+          ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
+          : (Number(a.VLRAQUISIC) || 0);
+        return acc + (val || 0);
+      }, 0);
+
+      return {
+        geometry: poly,
+        count: assetsInCell.length,
+        value: totalValue,
+        assets: assetsInCell
+      };
+    }).filter(Boolean);
+
+    return cells;
+  }, [filteredAssets, heatmapMode]);
+
   const totalValue = useMemo(() => {
     return filteredAssets.reduce((acc, a) => {
       const val = typeof a.VLRAQUISIC === 'string' 
@@ -266,12 +299,21 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           {/* Seletor de Métrica */}
           <div className="pointer-events-auto bg-slate-900 border border-white/10 p-1 rounded-2xl shadow-2xl flex items-center">
             <button
+              onClick={() => setHeatmapMode('GRID')}
+              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+                heatmapMode === 'GRID' ? 'bg-emerald-500 text-white shadow-lg' : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <Box size={12} />
+              <span>Grade</span>
+            </button>
+            <button
               onClick={() => setHeatmapMode('AREA')}
               className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
                 heatmapMode === 'AREA' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
               }`}
             >
-              <Box size={12} />
+              <MapIcon size={12} />
               <span>Área</span>
             </button>
             <button
@@ -350,41 +392,60 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
-          {heatmapMode !== 'AREA' && <HeatmapLayer points={heatPoints} />}
+          {heatmapMode !== 'AREA' && heatmapMode !== 'GRID' && <HeatmapLayer points={heatPoints} />}
           <ZoomHandler />
+
+          {/* Visualização em Grade (Nível 2) */}
+          {heatmapMode === 'GRID' && gridData.map((cell, i) => {
+            if (!cell) return null;
+            
+            // Escala de cor baseada na densidade (count)
+            const maxCount = Math.max(...gridData.map(c => c?.count || 1));
+            const intensity = cell.count / maxCount;
+            const color = d3.interpolateYlOrRd(intensity);
+
+            return (
+              <Polygon
+                key={`grid-${i}`}
+                positions={cell.geometry.coordinates[0].map(coord => [coord[1], coord[0]] as [number, number])}
+                pathOptions={{
+                  color: color,
+                  fillColor: color,
+                  fillOpacity: 0.6,
+                  weight: 1
+                }}
+              >
+                <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase tracking-widest mb-1">Quadrante Técnico</span>
+                    <div className="flex flex-col space-y-1">
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-white/60 uppercase">Densidade:</span>
+                        <span className="text-[8px] font-bold text-white uppercase">{cell.count} Ativos</span>
+                      </div>
+                      <div className="flex justify-between space-x-4">
+                        <span className="text-[8px] font-bold text-white/60 uppercase">Valor Total:</span>
+                        <span className="text-[8px] font-bold text-accent uppercase">
+                          {cell.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </Tooltip>
+              </Polygon>
+            );
+          })}
           
           {/* Visualização de Área Ocupada (Polígonos - Envoltória Convexa) */}
           {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
-            if (!data.hull || data.hull.length < 3) {
-              // Se não houver envoltória ou tiver menos de 3 pontos, desenha marcadores individuais
-              return data.points.map((p, i) => (
-                <Marker key={`${loc}-${i}`} position={p} icon={pendenteIcon}>
-                  <Tooltip permanent direction="top" offset={[0, -20]} className="bg-white/90 border-none shadow-lg rounded-lg px-2 py-1">
-                    <span className="text-[8px] font-black text-slate-900 uppercase">{loc}</span>
-                  </Tooltip>
-                  <Popup className="custom-popup">
-                    <div className="p-2 flex flex-col space-y-2">
-                      <span className="text-[10px] font-bold uppercase text-slate-900">{loc}</span>
-                      <button 
-                        onClick={() => onSelectLocation?.(loc)}
-                        className="bg-accent text-white px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest hover:bg-accent/80 transition-all"
-                      >
-                        Iniciar Inventário
-                      </button>
-                    </div>
-                  </Popup>
-                </Marker>
-              ));
-            }
-
-            return (
+            const polygon = (data.hull && data.hull.length >= 3) ? (
               <Polygon 
-                key={loc}
+                key={`poly-${loc}`}
                 positions={data.hull}
                 pathOptions={{ 
                   color: '#f27d26', 
                   fillColor: '#f27d26', 
-                  fillOpacity: 0.25,
+                  fillOpacity: 0.15,
                   weight: 3,
                   dashArray: 'none'
                 }}
@@ -416,19 +477,61 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                   </div>
                 </Popup>
               </Polygon>
+            ) : null;
+
+            const points = data.assets.map((a, i) => {
+              const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+              return (
+                <CircleMarker
+                  key={`point-${loc}-${a.id || i}`}
+                  center={[a._lat!, a._lng!]}
+                  radius={zoomLevel > 15 ? 6 : 4}
+                  pathOptions={{
+                    fillColor: isConferido ? '#10b981' : '#3498db',
+                    color: '#ffffff',
+                    weight: 2,
+                    fillOpacity: 0.9
+                  }}
+                >
+                  <Popup className="custom-popup">
+                    <div className="p-2 min-w-[180px]">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-accent uppercase tracking-widest">{a.ETIQUETA || 'S/E'}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase ${isConferido ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {isConferido ? 'Conferido' : 'Pendente'}
+                        </span>
+                      </div>
+                      <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
+                      <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              );
+            });
+
+            return (
+              <React.Fragment key={loc}>
+                {polygon}
+                {points}
+              </React.Fragment>
             );
           })}
 
-          {/* Marcadores Individuais */}
-          {zoomLevel >= 16 && filteredAssets.filter(a => a._lat && a._lng).map(a => {
+          {/* Marcadores Individuais (Modo Calor/Valor) */}
+          {heatmapMode !== 'AREA' && zoomLevel >= 16 && filteredAssets.filter(a => a._lat && a._lng).map(a => {
             const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            const icon = isConferido ? conferidoIcon : pendenteIcon;
             
             return (
-              <Marker 
-                key={a.id} 
-                position={[a._lat!, a._lng!]} 
-                icon={icon}
+              <CircleMarker 
+                key={`ind-${a.id}`} 
+                center={[a._lat!, a._lng!]} 
+                radius={6}
+                pathOptions={{
+                  fillColor: isConferido ? '#10b981' : '#3498db',
+                  color: '#ffffff',
+                  weight: 2,
+                  fillOpacity: 0.9
+                }}
               >
                 <Popup className="custom-popup">
                   <div className="p-2 min-w-[180px]">
@@ -446,7 +549,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                     </div>
                   </div>
                 </Popup>
-              </Marker>
+              </CircleMarker>
             );
           })}
         </MapContainer>
@@ -455,7 +558,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           <div className="absolute bottom-8 left-4 right-4 z-[1000] animate-slideUp">
             <div className="bg-white/90 backdrop-blur-md border border-white/20 rounded-[2rem] p-6 shadow-2xl relative overflow-hidden">
               <div className={`absolute top-0 left-0 w-full h-1.5 ${
-                heatmapMode === 'VALUE' ? 'bg-accent' : heatmapMode === 'AREA' ? 'bg-emerald-500' : 'bg-blue-500'
+                heatmapMode === 'VALUE' ? 'bg-accent' : 
+                heatmapMode === 'AREA' ? 'bg-emerald-500' : 
+                heatmapMode === 'GRID' ? 'bg-emerald-600' :
+                'bg-blue-500'
               }`} />
               <button 
                 onClick={() => setShowInfo(false)}
@@ -468,16 +574,19 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
                   heatmapMode === 'VALUE' ? 'bg-accent-soft text-accent' : 
                   heatmapMode === 'AREA' ? 'bg-emerald-100 text-emerald-600' :
+                  heatmapMode === 'GRID' ? 'bg-emerald-100 text-emerald-700' :
                   'bg-blue-100 text-blue-600'
                 }`}>
                   {heatmapMode === 'VALUE' ? <Activity size={16} /> : 
                    heatmapMode === 'AREA' ? <MapIcon size={16} /> :
+                   heatmapMode === 'GRID' ? <Box size={16} /> :
                    <Layers size={16} />}
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-ink uppercase tracking-widest">
                     {heatmapMode === 'VALUE' ? 'Concentração Financeira' : 
                      heatmapMode === 'AREA' ? 'Área Ocupada por Localidade' :
+                     heatmapMode === 'GRID' ? 'Grade de Precisão (Binning)' :
                      'Densidade de Ativos'}
                   </h3>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">
@@ -491,6 +600,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                   ? 'O calor representa o valor acumulado dos ativos. Áreas vermelhas indicam maior concentração de capital imobilizado.'
                   : heatmapMode === 'AREA'
                   ? 'Visualização dos polígonos de ocupação baseados na dispersão física dos ativos inventariados por endereço.'
+                  : heatmapMode === 'GRID'
+                  ? 'Grade estatística de 20m x 20m. Cores quentes indicam alta densidade de ativos por quadrante, eliminando borrões.'
                   : 'O calor representa a quantidade de ativos por m². Áreas vermelhas indicam maior volume de itens físicos.'}
               </p>
               

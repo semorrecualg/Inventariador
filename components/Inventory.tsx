@@ -487,13 +487,10 @@ const Inventory: React.FC<InventoryProps> = ({
     isModalOpenRef.current = !!(scannedAsset || scannedResult || duplicateAsset || isManualEntryOpen);
   }, [scannedAsset, scannedResult, duplicateAsset, isManualEntryOpen]);
 
-  // Auto-close duplicate asset modal after 1 second to avoid user interaction
+  // Auto-close duplicate asset modal removed per user request to allow manual interaction
   useEffect(() => {
     if (duplicateAsset) {
-      const timer = setTimeout(() => {
-        setDuplicateAsset(null);
-      }, 1000);
-      return () => clearTimeout(timer);
+      // Timer removed to allow user to see the item and decide next action
     }
   }, [duplicateAsset]);
 
@@ -1111,10 +1108,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       </div>
                     </div>
                     
-                    {/* Barra de progresso para auto-fechamento */}
-                    <div className="absolute bottom-0 left-0 h-1.5 w-full bg-bg-main overflow-hidden">
-                      <div className={`h-full animate-progress ${isSameLocation ? 'bg-success' : 'bg-warning'}`} style={{ animationDuration: '1s' }} />
-                    </div>
+                    {/* Barra de progresso para auto-fechamento removida */}
                   </React.Fragment>
                 );
               })()}
@@ -1173,6 +1167,47 @@ const Inventory: React.FC<InventoryProps> = ({
                       const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
                       const currentLocKey = normalizeKey(selectedLocation || '');
                       
+                      let updatedAsset: Asset;
+
+                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                        updatedAsset = { 
+                          ...scannedAsset, 
+                          UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                          _conferido: true,
+                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        };
+                      } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
+                        updatedAsset = {
+                          ...scannedAsset,
+                          _conferido: true,
+                          TAG_INVENTARIO: TagInventario.ADOTADO,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        };
+                      } else {
+                        updatedAsset = {
+                          ...scannedAsset,
+                          _conferido: true,
+                          _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        };
+                      }
+
+                      onUpdateAsset(updatedAsset);
+                      setScannedAsset(null);
+                      onSelectAsset(updatedAsset); // Abre detalhes para foto
+                    }} 
+                    className="flex-1 py-4 bg-emerald-500 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
+                  >
+                    <Camera size={14} className="mb-1" />
+                    <span>Confirmar + Foto</span>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                      const currentCompKey = normalizeKey(selectedUnit || '');
+                      const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                      const currentLocKey = normalizeKey(selectedLocation || '');
+                      
                       if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                         // Caso seja de outra empresa, adota como externo
                         onUpdateAsset({ 
@@ -1200,9 +1235,10 @@ const Inventory: React.FC<InventoryProps> = ({
                       }
                       setScannedAsset(null);
                     }} 
-                    className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
                   >
-                    Confirmar
+                    <Check size={14} className="mb-1" />
+                    <span>Confirmar</span>
                   </button>
                 </div>
               </div>
