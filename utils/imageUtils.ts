@@ -5,10 +5,7 @@ import imageCompression from 'browser-image-compression';
  * Usa browser-image-compression para melhor suporte a orientação EXIF e performance.
  */
 export const compressImage = async (
-  file: File | Blob,
-  maxWidth: number = 1024,
-  maxHeight: number = 1024,
-  quality: number = 0.6
+  file: File | Blob
 ): Promise<Blob> => {
   try {
     // Verifica se é uma imagem
@@ -17,10 +14,10 @@ export const compressImage = async (
     }
 
     const options = {
-      maxSizeMB: 0.15, // Alvo de 150KB
-      maxWidthOrHeight: Math.max(maxWidth, maxHeight),
+      maxSizeMB: 0.2, // Perfil WhatsApp: ~200KB (Equilíbrio entre qualidade e storage)
+      maxWidthOrHeight: 1600, // Resolução padrão WhatsApp para fotos nítidas
       useWebWorker: true,
-      initialQuality: quality,
+      initialQuality: 0.8, // Começa com qualidade alta e reduz se necessário
       fileType: 'image/jpeg'
     };
     

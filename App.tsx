@@ -51,7 +51,7 @@ import UnitConfigurator from './components/UnitConfigurator';
 
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -457,6 +457,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [integrityFailed, setIntegrityFailed] = useState(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
@@ -936,6 +937,10 @@ const App: React.FC = () => {
         //   await syncFromCloud();
         //   return;
         // }
+
+        if (saved && (saved as any)._integrity_failed) {
+          setIntegrityFailed(true);
+        }
 
         if (saved && saved.assets && saved.assets.length > 0) {
           // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
@@ -3465,7 +3470,20 @@ const App: React.FC = () => {
         )}
         
         <div className="flex-1 relative overflow-hidden z-[500]">
-          {showRecoveryToast && (
+          {integrityFailed && (
+        <div className="fixed top-20 left-4 right-4 z-[100] bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-white/20 animate-bounce flex items-center space-x-3">
+          <AlertTriangle className="flex-shrink-0" size={24} />
+          <div className="flex-1">
+            <p className="text-xs font-black uppercase tracking-widest">Alerta de Integridade</p>
+            <p className="text-[10px] opacity-90 font-medium">Dados locais podem estar corrompidos ou foram alterados fora do App. Verifique seu inventário.</p>
+          </div>
+          <button onClick={() => setIntegrityFailed(false)} className="p-1 hover:bg-white/10 rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
+      )}
+
+      {showRecoveryToast && (
             <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs">
               <ShieldCheck size={20} className="shrink-0" />
               <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
@@ -4030,6 +4048,7 @@ const App: React.FC = () => {
             <AssetControlModule 
               username={user?.username || ''}
               tenantid={user?.tenantid || ''}
+              databaseMode={databaseMode}
               onBack={() => {
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');

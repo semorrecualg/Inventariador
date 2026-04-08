@@ -111,6 +111,58 @@ export const assetControlService = {
     if (error) throw error;
   },
 
+  // Normalização de Unidades Operacionais
+  async normalizeUnits(tenantid: string): Promise<{ discovered: number, created: number }> {
+    if (!supabase) throw new Error("Supabase não configurado.");
+
+    // 1. Buscar todas as unidades únicas presentes nos ativos
+    const { data: assetUnits, error: assetError } = await supabase
+      .from('assets')
+      .select('UNIDADE_OPERACIONAL')
+      .eq('_tenantid', tenantid)
+      .not('UNIDADE_OPERACIONAL', 'is', null);
+
+    if (assetError) throw assetError;
+
+    const uniqueUnitsFromAssets = Array.from(new Set(assetUnits.map(a => a.UNIDADE_OPERACIONAL?.trim()).filter(Boolean)));
+
+    // 2. Buscar unidades já configuradas
+    const { data: existingConfigs, error: configError } = await supabase
+      .from('unit_configs')
+      .select('_unitid')
+      .eq('_tenantid', tenantid);
+
+    if (configError) throw configError;
+
+    const existingUnitNames = new Set(existingConfigs.map(c => c._unitid?.trim()));
+
+    // 3. Identificar unidades não configuradas
+    const unitsToCreate = uniqueUnitsFromAssets.filter(u => !existingUnitNames.has(u));
+
+    if (unitsToCreate.length === 0) return { discovered: uniqueUnitsFromAssets.length, created: 0 };
+
+    // 4. Criar configurações básicas para as novas unidades
+    const newConfigs = unitsToCreate.map(unit => ({
+      _tenantid: tenantid,
+      _unitid: unit,
+      tenant_id: tenantid,
+      unit_id: unit,
+      lat: -15.7942, // Default Brasília
+      lng: -47.8822,
+      radius_meters: 500,
+      is_active: true,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error: insertError } = await supabase
+      .from('unit_configs')
+      .insert(newConfigs);
+
+    if (insertError) throw insertError;
+
+    return { discovered: uniqueUnitsFromAssets.length, created: unitsToCreate.length };
+  },
+
   async getNCMClassifierByCode(ncmCode: string, tenantid: string | string[]): Promise<NCMClassifier | null> {
     if (!supabase) throw new Error("Supabase não configurado.");
     let query = supabase.from('ncm_classifiers').select('*').eq('ncm_code', ncmCode);

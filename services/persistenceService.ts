@@ -3,6 +3,7 @@ import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb } from './localDbService';
+import { generateChecksum } from './utils';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -131,7 +132,16 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     // 1. Salva localmente primeiro (Offline-First) com Blindagem Técnica (Criptografia)
     const config = { ...data } as Record<string, unknown>;
     const assets = data.assets;
+    
+    // Remove campos de estado da UI e assets para o hash da config
     delete config.assets;
+    delete config._integrity_failed;
+    delete config._integrity_hash;
+
+    // 1.1 Cálculo de Checksum (Integridade de Dados - Auditoria)
+    console.log('>>> [Persistence] Gerando Checksum de integridade...');
+    const integrityHash = await generateChecksum({ config, assets });
+    config._integrity_hash = integrityHash;
 
     console.log(`>>> [Persistence] Criptografando ${assets.length} ativos e configurações...`);
     // Criptografamos os dados antes de salvar no IndexedDB
@@ -212,12 +222,31 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     // Decriptografamos os dados carregados
     try {
       const [assets, config] = await Promise.all([
-        encryptedAssets ? encryption.decrypt(encryptedAssets) : Promise.resolve([]),
-        encryptedConfig ? encryption.decrypt(encryptedConfig) : Promise.resolve({})
+        encryptedAssets ? (encryption.decrypt(encryptedAssets) as Promise<Asset[]>) : Promise.resolve([]),
+        encryptedConfig ? (encryption.decrypt(encryptedConfig) as Promise<Record<string, unknown>>) : Promise.resolve({})
       ]);
 
+      // 1.2 Validação de Integridade (Checksum)
+      const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
+      if (storedHash) {
+        const configToVerify = { ...config } as Record<string, unknown>;
+        // Remove flags que não devem compor o hash original
+        delete configToVerify._integrity_hash;
+        delete configToVerify._integrity_failed;
+        
+        const currentHash = await generateChecksum({ config: configToVerify, assets });
+        
+        if (storedHash !== currentHash) {
+          console.error('%c>>> [Integrity] ALERTA: Falha na validação de integridade! O arquivo pode ter sido alterado externamente ou corrompido.', "color: #ef4444; font-weight: bold;");
+          // Marcamos o estado para que a UI possa alertar o usuário
+          (config as Record<string, unknown>)._integrity_failed = true;
+        } else {
+          console.log('%c>>> [Integrity] Validação de integridade SHA-256: OK', "color: #3ecf8e;");
+        }
+      }
+
       return {
-        ...(config || {}),
+        ...(config as Record<string, unknown> || {}),
         assets: assets || [],
         databaseMode: mode // Garante que o modo carregado é o correto
       } as InventoryState;

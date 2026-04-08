@@ -1,11 +1,11 @@
 
 import { createClient } from '@supabase/supabase-js';
-import imageCompression from 'browser-image-compression';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
+import { compressImage } from '../utils/imageUtils';
 
 export interface ProvisionResult {
   user?: unknown;
@@ -1353,16 +1353,8 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
     // Só comprime se for uma imagem e tiver tamanho considerável
     if (file instanceof File || file instanceof Blob) {
       try {
-        const options = {
-          maxSizeMB: 0.15, // Perfil WhatsApp: ~150KB (Máxima escalabilidade)
-          maxWidthOrHeight: 1024, // Resolução otimizada para mobile
-          useWebWorker: true,
-          initialQuality: 0.6,
-          fileType: 'image/jpeg'
-        };
-        
         console.log(`[Storage] Aplicando Perfil WhatsApp (${(file.size / 1024 / 1024).toFixed(2)}MB)...`);
-        fileToUpload = await imageCompression(file as File, options);
+        fileToUpload = await compressImage(file);
         console.log(`[Storage] Imagem otimizada para ${(fileToUpload.size / 1024).toFixed(2)}KB`);
       } catch (compressionError) {
         console.warn('Erro na compressão, enviando original:', compressionError);

@@ -13,47 +13,74 @@ import {
   DollarSign,
   Calendar,
   PieChart,
-  CheckCircle2
+  CheckCircle2,
+  Building2,
+  Edit3,
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
-import { Asset } from '../types';
+import { Asset, UnitConfig } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../services/supabaseService';
 import { assetControlService } from '../services/assetControlService';
-import { AssetGroup, ChartOfAccount, AccountType, AccountNature, AccountClassification, DepreciationMethod, NCMClassifier } from '../types';
+import { AssetGroup, ChartOfAccount, AccountType, AccountNature, AccountClassification, DepreciationMethod, NCMClassifier, DatabaseMode, User, UserRole } from '../types';
+import { localDb } from '../services/localDbService';
+import { calculateDepreciation } from '../services/depreciationService';
 import BackButton from './BackButton';
 import AssetGroupsTable from './AssetGroupsTable';
 import ChartOfAccountsTable from './ChartOfAccountsTable';
 import NCMClassifierTable from './NCMClassifierTable';
+import AssetLedger from './AssetLedger';
 import BaseModal from './BaseModal';
+import UnitConfigurator from './UnitConfigurator';
 
 interface AssetControlModuleProps {
   onBack: () => void;
   username: string;
   tenantid: string;
+  databaseMode: DatabaseMode;
 }
 
-type SubModule = 'DASHBOARD' | 'ASSETS' | 'MOVEMENTS' | 'DEPRECIATION' | 'CATEGORIES' | 'REPORTS';
+type SubModule = 'DASHBOARD' | 'ASSETS' | 'UNITS' | 'MOVEMENTS' | 'DEPRECIATION' | 'CATEGORIES' | 'REPORTS';
 
-const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantid }) => {
+const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantid, databaseMode }) => {
   const [activeSubModule, setActiveSubModule] = useState<SubModule>('DASHBOARD');
   const [configTab, setConfigTab] = useState<'ACCOUNTS' | 'GROUPS' | 'NCM'>('ACCOUNTS');
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [assetGroups, setAssetGroups] = useState<AssetGroup[]>([]);
   const [ncmClassifiers, setNcmClassifiers] = useState<NCMClassifier[]>([]);
   const [chartOfAccounts, setChartOfAccounts] = useState<ChartOfAccount[]>([]);
+  const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [isNewAssetModalOpen, setIsNewAssetModalOpen] = useState(false);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [newAssetForm, setNewAssetForm] = useState<Partial<Asset>>({
     _status_contabil: 'ATIVO',
     _data_aquisicao: new Date().toISOString().split('T')[0],
     _data_inicio_depreciacao: new Date().toISOString().split('T')[0],
   });
   const stats = useMemo(() => {
-    const totalValue = assets.reduce((acc, curr) => acc + (Number(curr._valor_aquisicao) || Number(curr.VLRAQUISIC) || 0), 0);
-    const totalDepreciated = assets.reduce((acc, curr) => acc + (Number(curr._depreciacao_acumulada) || 0), 0);
-    const residualValue = assets.reduce((acc, curr) => acc + (Number(curr._valor_residual) || 0), 0);
-    const activeCount = assets.filter(a => a._status_contabil !== 'BAIXADO').length;
-    const writeOffCount = assets.filter(a => a._status_contabil === 'BAIXADO').length;
+    let totalValue = 0;
+    let totalDepreciated = 0;
+    let residualValue = 0;
+    let activeCount = 0;
+    let writeOffCount = 0;
+
+    assets.forEach(asset => {
+      const v0 = Number(asset._valor_aquisicao) || Number(asset.VLRAQUISIC) || 0;
+      totalValue += v0;
+      
+      const depr = calculateDepreciation(asset);
+      totalDepreciated += depr.accumulatedDepreciation;
+      residualValue += depr.netBookValue;
+
+      if (asset._status_contabil === 'BAIXADO') {
+        writeOffCount++;
+      } else {
+        activeCount++;
+      }
+    });
 
     return {
       totalValue,
@@ -69,7 +96,32 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     fetchAssetGroups();
     fetchNCMClassifiers();
     fetchChartOfAccounts();
-  }, [tenantid]);
+    fetchUnits();
+  }, [tenantid, databaseMode]);
+
+  // Auto-normalização se a base de unidades estiver vazia mas houver ativos
+  useEffect(() => {
+    if (!loading && assets.length > 0 && unitConfigs.length === 0 && databaseMode === DatabaseMode.SUPABASE) {
+      console.log('>>> [AssetControl] Detectada base de unidades vazia com ativos presentes. Sugerindo normalização...');
+      // Poderíamos disparar automaticamente, mas vamos deixar o botão em destaque no Dashboard
+    }
+  }, [assets, unitConfigs, loading, databaseMode]);
+
+  const fetchUnits = async () => {
+    try {
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        const data = await localDb.unitConfigs.toArray();
+        setUnitConfigs(data);
+      } else {
+        if (!supabase) return;
+        const { data, error } = await supabase.from('unit_configs').select('*').eq('_tenantid', tenantid);
+        if (error) throw error;
+        setUnitConfigs(data || []);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar unidades:', err);
+    }
+  };
 
   const fetchChartOfAccounts = async () => {
     try {
@@ -81,20 +133,39 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   };
 
   const fetchAssets = async () => {
-    if (!supabase) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('assets')
-        .select('*')
-        .eq('_tenantid', tenantid);
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        console.log('>>> [AssetControl] Carregando ativos da base LOCAL (Dexie)...');
+        const localAssets = await localDb.assets.toArray();
+        setAssets(localAssets);
+      } else {
+        if (!supabase) return;
+        console.log('>>> [AssetControl] Carregando ativos da base CLOUD (Supabase)...');
+        const { data, error } = await supabase
+          .from('assets')
+          .select('*')
+          .eq('_tenantid', tenantid);
 
-      if (error) throw error;
-      
-      const loadedAssets = data || [];
-      setAssets(loadedAssets);
+        if (error) throw error;
+        setAssets(data || []);
+      }
     } catch (err) {
       console.error('Erro ao carregar ativos contábeis:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNormalizeUnits = async () => {
+    try {
+      setLoading(true);
+      const result = await assetControlService.normalizeUnits(tenantid);
+      alert(`Normalização concluída! ${result.discovered} unidades encontradas na base de ativos, ${result.created} novas configurações criadas.`);
+      fetchUnits();
+    } catch (err) {
+      console.error('Erro ao normalizar unidades:', err);
+      alert('Erro ao normalizar unidades: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoading(false);
     }
@@ -264,7 +335,6 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   };
 
   const handleSaveNewAsset = async () => {
-    if (!supabase) return;
     if (!newAssetForm.ETIQUETA || !newAssetForm.DESCRICAODOATIVO || !newAssetForm._valor_aquisicao) {
       alert('Preencha os campos obrigatórios (Etiqueta, Descrição e Valor)');
       return;
@@ -276,16 +346,38 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         ...newAssetForm,
         _tenantid: tenantid,
         _valor_residual: newAssetForm._valor_residual || 0,
-        _depreciacao_acumulada: 0,
-      };
+        _depreciacao_acumulada: newAssetForm._depreciacao_acumulada || 0,
+        _status_contabil: newAssetForm._status_contabil || 'ATIVO',
+      } as Asset;
 
-      const { error } = await supabase
-        .from('assets')
-        .insert(assetToSave);
-
-      if (error) throw error;
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        if (editingAsset) {
+          await localDb.assets.update(editingAsset.id, assetToSave);
+        } else {
+          await localDb.assets.add({
+            ...assetToSave,
+            id: crypto.randomUUID(),
+            _sync_status: 'PENDING'
+          });
+        }
+      } else {
+        if (!supabase) return;
+        if (editingAsset) {
+          const { error } = await supabase
+            .from('assets')
+            .update(assetToSave)
+            .eq('id', editingAsset.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('assets')
+            .insert(assetToSave);
+          if (error) throw error;
+        }
+      }
 
       setIsNewAssetModalOpen(false);
+      setEditingAsset(null);
       setNewAssetForm({
         _status_contabil: 'ATIVO',
         _data_aquisicao: new Date().toISOString().split('T')[0],
@@ -293,7 +385,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       });
       fetchAssets();
     } catch (err) {
-      console.error('Erro ao salvar novo ativo:', err);
+      console.error('Erro ao salvar ativo:', err);
       alert('Erro ao salvar ativo. Verifique os dados.');
     } finally {
       setLoading(false);
@@ -302,6 +394,85 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const renderDashboard = () => (
     <div className="space-y-6">
+      {/* Alerta de Normalização */}
+      {!loading && assets.length > 0 && unitConfigs.length === 0 && (
+        <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-indigo-900">Base de Unidades Desatualizada</p>
+              <p className="text-xs text-indigo-700">Detectamos unidades nos ativos que não estão configuradas. Deseja normalizar agora?</p>
+            </div>
+          </div>
+          <button 
+            onClick={handleNormalizeUnits}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg"
+          >
+            Normalizar Agora
+          </button>
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <button 
+          onClick={() => setActiveSubModule('ASSETS')}
+          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-200 transition-all text-left group"
+        >
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:scale-110 transition-transform">
+            <PlusCircle className="w-6 h-6" />
+          </div>
+          <div>
+            <h4 className="font-bold text-slate-800 text-sm">Gerir Ativos</h4>
+            <p className="text-[10px] text-slate-400 uppercase font-bold">Inclusão e Alteração</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => setActiveSubModule('UNITS')}
+          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-blue-200 transition-all text-left group"
+        >
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl group-hover:scale-110 transition-transform">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <div>
+            <h4 className="font-bold text-slate-800 text-sm">Unidades Operacionais</h4>
+            <p className="text-[10px] text-slate-400 uppercase font-bold">Cadastro de Filiais</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => {
+            setActiveSubModule('CATEGORIES');
+            setConfigTab('ACCOUNTS');
+          }}
+          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-amber-200 transition-all text-left group"
+        >
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl group-hover:scale-110 transition-transform">
+            <Settings className="w-6 h-6" />
+          </div>
+          <div>
+            <h4 className="font-bold text-slate-800 text-sm">Plano de Contas</h4>
+            <p className="text-[10px] text-slate-400 uppercase font-bold">Gestão de Contas</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={handleNormalizeUnits}
+          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-all text-left group"
+        >
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:scale-110 transition-transform">
+            <History className="w-6 h-6" />
+          </div>
+          <div>
+            <h4 className="font-bold text-slate-800 text-sm">Normalizar Base</h4>
+            <p className="text-[10px] text-slate-400 uppercase font-bold">Sincronizar Unidades</p>
+          </div>
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
@@ -376,94 +547,143 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     </div>
   );
 
-  const renderAssetList = () => (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-      <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
-        <div className="relative flex-1 min-w-[300px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input 
-            type="text" 
-            placeholder="Buscar por etiqueta, descrição ou conta..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 transition-all"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="p-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-            <Filter className="w-5 h-5" />
-          </button>
-          <button className="p-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-            <Download className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => setIsNewAssetModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-sm"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Novo Ativo</span>
-          </button>
-        </div>
-      </div>
+  const renderAssetList = () => {
+    if (selectedAsset) {
+      return <AssetLedger asset={selectedAsset} onBack={() => setSelectedAsset(null)} />;
+    }
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-50/50">
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ativo</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Conta / CC</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Aquisição</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Vlr. Aquisição</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Depr. Acum.</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Vlr. Residual</th>
-              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {assets.length > 0 ? (
-              assets.map((asset) => (
-                <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
-                  <td className="px-6 py-4">
-                    <div className="font-medium text-slate-800">{asset.ETIQUETA || 'S/E'}</div>
-                    <div className="text-xs text-slate-500 truncate max-w-[200px]">{asset.DESCRICAODOATIVO}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-slate-700">{asset._conta_contabil || asset.CONTACONTABIL || '-'}</div>
-                    <div className="text-xs text-slate-400">{asset._centro_custo || asset.CENTRODECUSTO || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.DATAAQUISIC || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium text-slate-800">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-rose-600">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._depreciacao_acumulada || 0))}
-                  </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-emerald-600">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_residual || (Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0) - Number(asset._depreciacao_acumulada || 0))))}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                      asset._status_contabil === 'ATIVO' ? 'bg-emerald-100 text-emerald-700' :
-                      asset._status_contabil === 'BAIXADO' ? 'bg-rose-100 text-rose-700' :
-                      'bg-slate-100 text-slate-700'
-                    }`}>
-                      {asset._status_contabil || 'ATIVO'}
-                    </span>
-                  </td>
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+            <div className="relative flex-1 min-w-[300px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Buscar por etiqueta, descrição ou conta..."
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 transition-all"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="p-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
+                <Filter className="w-5 h-5" />
+              </button>
+              <button className="p-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
+                <Download className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => {
+                  setEditingAsset(null);
+                  setNewAssetForm({
+                    _status_contabil: 'ATIVO',
+                    _data_aquisicao: new Date().toISOString().split('T')[0],
+                    _data_inicio_depreciacao: new Date().toISOString().split('T')[0],
+                  });
+                  setIsNewAssetModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-sm"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Novo Ativo</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ativo</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Conta / CC</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Aquisição</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Vlr. Aquisição</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Depr. Acum.</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Vlr. Residual</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Ações</th>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-slate-400 italic">
-                  Nenhum ativo contábil encontrado.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {assets.length > 0 ? (
+                  assets.map((asset) => {
+                    const depr = calculateDepreciation(asset);
+                    return (
+                      <tr 
+                        key={asset.id} 
+                        className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
+                      >
+                        <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
+                          <div className="font-medium text-slate-800">{asset.ETIQUETA || 'S/E'}</div>
+                          <div className="text-xs text-slate-500 truncate max-w-[200px]">{asset.DESCRICAODOATIVO}</div>
+                        </td>
+                        <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
+                          <div className="text-sm text-slate-700">{asset._unidade_operacional || asset.UNIDADE_OPERACIONAL || '-'}</div>
+                          <div className="text-xs text-slate-400">{asset._centro_custo || asset.CENTRODECUSTO || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
+                          <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.DATAAQUISIC || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium text-slate-800" onClick={() => setSelectedAsset(asset)}>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-rose-600" onClick={() => setSelectedAsset(asset)}>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(depr.accumulatedDepreciation)}
+                        </td>
+                        <td className="px-6 py-4 text-sm font-semibold text-emerald-600" onClick={() => setSelectedAsset(asset)}>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(depr.netBookValue)}
+                        </td>
+                        <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
+                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                            asset._status_contabil === 'ATIVO' ? 'bg-emerald-100 text-emerald-700' :
+                            asset._status_contabil === 'BAIXADO' ? 'bg-rose-100 text-rose-700' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {asset._status_contabil || 'ATIVO'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingAsset(asset);
+                                setNewAssetForm(asset);
+                                setIsNewAssetModalOpen(true);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm('Excluir este ativo?')) {
+                                  // Lógica de exclusão
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-400 italic">
+                      Nenhum ativo contábil encontrado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
@@ -507,6 +727,16 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
           </button>
 
           <button 
+            onClick={() => setActiveSubModule('UNITS')}
+            className={`flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all ${
+              activeSubModule === 'UNITS' ? 'bg-emerald-50 text-emerald-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Building2 className="w-4 h-4 md:w-5 md:h-5" />
+            <span>Unidades</span>
+          </button>
+
+          <button 
             onClick={() => setActiveSubModule('MOVEMENTS')}
             className={`flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all ${
               activeSubModule === 'MOVEMENTS' ? 'bg-emerald-50 text-emerald-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
@@ -533,7 +763,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
             }`}
           >
             <Settings className="w-4 h-4 md:w-5 md:h-5" />
-            <span>Config</span>
+            <span>Config. Contábil</span>
           </button>
         </nav>
 
@@ -582,6 +812,15 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
               >
                 {activeSubModule === 'DASHBOARD' && renderDashboard()}
                 {activeSubModule === 'ASSETS' && renderAssetList()}
+                {activeSubModule === 'UNITS' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                    <UnitConfigurator 
+                      user={{ username, _tenantid: tenantid, tenantid, email: username, role: UserRole.ADMIN } as User}
+                      units={unitConfigs.map(u => u._unitid)}
+                      onBack={() => setActiveSubModule('DASHBOARD')} 
+                    />
+                  </div>
+                )}
                 {activeSubModule === 'CATEGORIES' && (
                   <div className="space-y-6">
                     {/* Tabs para Configuração */}
@@ -769,7 +1008,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                   </div>
                 )}
 
-                {activeSubModule !== 'DASHBOARD' && activeSubModule !== 'ASSETS' && activeSubModule !== 'CATEGORIES' && activeSubModule !== 'REPORTS' && (
+                {activeSubModule !== 'DASHBOARD' && activeSubModule !== 'ASSETS' && activeSubModule !== 'UNITS' && activeSubModule !== 'CATEGORIES' && activeSubModule !== 'REPORTS' && (
                   <div className="flex flex-col items-center justify-center h-[60vh] text-slate-400">
                     <div className="p-6 bg-slate-100 rounded-full mb-4">
                       <History className="w-12 h-12" />
@@ -786,12 +1025,12 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         </div>
       </main>
 
-      {/* Modal de Novo Ativo */}
+      {/* Modal de Novo/Editar Ativo */}
       <BaseModal 
         isOpen={isNewAssetModalOpen} 
         onClose={() => setIsNewAssetModalOpen(false)}
-        title="Cadastrar Novo Ativo Imobilizado"
-        maxWidth="max-w-2xl"
+        title={editingAsset ? "Editar Ativo Imobilizado" : "Cadastrar Novo Ativo Imobilizado"}
+        maxWidth="max-w-4xl"
       >
         <div className="space-y-6 p-1">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -846,11 +1085,39 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                   type="number"
                   value={newAssetForm._valor_aquisicao || ''}
                   onChange={(e) => setNewAssetForm({...newAssetForm, _valor_aquisicao: Number(e.target.value)})}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none font-bold"
+                  placeholder="0,00"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase">Valor Residual</label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  type="number"
+                  value={newAssetForm._valor_residual || ''}
+                  onChange={(e) => setNewAssetForm({...newAssetForm, _valor_residual: Number(e.target.value)})}
                   className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   placeholder="0,00"
                 />
               </div>
             </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase">Status Contábil</label>
+              <select 
+                value={newAssetForm._status_contabil || 'ATIVO'}
+                onChange={(e) => setNewAssetForm({...newAssetForm, _status_contabil: e.target.value as 'ATIVO' | 'BAIXADO' | 'VENDIDO'})}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              >
+                <option value="ATIVO">ATIVO</option>
+                <option value="BAIXADO">BAIXADO</option>
+                <option value="VENDIDO">VENDIDO</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 uppercase">Data Aquisição</label>
               <input 
@@ -868,6 +1135,35 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                 onChange={(e) => setNewAssetForm({...newAssetForm, _data_inicio_depreciacao: e.target.value})}
                 className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase">Conta Contábil</label>
+              <select 
+                value={newAssetForm._conta_contabil || ''}
+                onChange={(e) => setNewAssetForm({...newAssetForm, _conta_contabil: e.target.value})}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              >
+                <option value="">Selecione uma conta...</option>
+                {chartOfAccounts.filter(a => a.type === AccountType.ANALYTICAL).map(acc => (
+                  <option key={acc.id} value={acc.code}>{acc.code} - {acc.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase">Unidade Operacional</label>
+              <select 
+                value={newAssetForm._unidade_operacional || ''}
+                onChange={(e) => setNewAssetForm({...newAssetForm, _unidade_operacional: e.target.value})}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              >
+                <option value="">Selecione uma unidade...</option>
+                {unitConfigs.map(u => (
+                  <option key={u.id} value={u._unitid}>{u._unitid}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -892,19 +1188,19 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4">
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <button 
               onClick={() => setIsNewAssetModalOpen(false)}
-              className="px-6 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl transition-all"
+              className="px-6 py-2 text-slate-500 font-bold text-xs uppercase hover:bg-slate-100 rounded-xl transition-all"
             >
               Cancelar
             </button>
             <button 
               onClick={handleSaveNewAsset}
-              className="flex items-center gap-2 px-8 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200"
+              className="flex items-center gap-2 px-8 py-2 bg-emerald-600 text-white rounded-xl font-bold text-xs uppercase hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Salvar Ativo</span>
+              <span>{editingAsset ? "Salvar Alterações" : "Cadastrar Ativo"}</span>
             </button>
           </div>
         </div>

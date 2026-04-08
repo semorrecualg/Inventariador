@@ -40,3 +40,19 @@ export const sanitizeForSupabase = (obj: unknown): unknown => {
     return { error: "Failed to sanitize object", details: String(err) };
   }
 };
+
+/**
+ * Gera um Checksum (Hash SHA-256) de um objeto para validação de integridade.
+ */
+export const generateChecksum = async (data: unknown): Promise<string> => {
+  try {
+    const jsonString = safeStringify(data);
+    const msgUint8 = new TextEncoder().encode(jsonString);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (err) {
+    console.error('[Integrity] Erro ao gerar checksum:', err);
+    return 'checksum_error';
+  }
+};

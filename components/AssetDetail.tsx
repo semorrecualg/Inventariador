@@ -469,8 +469,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         await deleteAssetPhoto(workingAsset._photoUrl);
       }
 
-      // Comprime a imagem antes de subir (Perfil WhatsApp: ~1024px e ~150KB)
-      const compressedBlob = await compressImage(file, 1024, 1024, 0.6);
+      // Comprime a imagem antes de subir (Perfil WhatsApp: ~1600px e ~200KB)
+      const compressedBlob = await compressImage(file);
       
       // Salva localmente para persistência offline e modo INTERNO
       await saveLocalPhoto(String(workingAsset.id), compressedBlob as Blob);
