@@ -938,7 +938,7 @@ const App: React.FC = () => {
         //   return;
         // }
 
-        if (saved && (saved as any)._integrity_failed) {
+        if (saved && (saved as InventoryState & { _integrity_failed?: boolean })._integrity_failed) {
           setIntegrityFailed(true);
         }
 
@@ -1079,9 +1079,11 @@ const App: React.FC = () => {
               const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
               
               const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
+              const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
 
               // Se a base local estiver vazia e houver dados na nuvem, sincroniza AUTOMATICAMENTE
-              if (isLocalEmpty && cloudData.assets && cloudData.assets.length > 0) {
+              // Mas apenas se não tivermos acabado de limpar a base (para evitar loop de recuperação)
+              if (isLocalEmpty && cloudData.assets && cloudData.assets.length > 0 && !justCleared) {
                 console.log('Base local vazia detectada. Sincronizando automaticamente com a nuvem...');
                 const newState: InventoryState = {
                   ...inventory,
@@ -1886,6 +1888,7 @@ const App: React.FC = () => {
       }
 
       // 3. Atualiza o estado local
+      sessionStorage.setItem('app_just_cleared_data', 'true');
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
       const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.UNIDADE_OPERACIONAL || '').toUpperCase().trim()));
       
@@ -2965,6 +2968,7 @@ const App: React.FC = () => {
       }
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
+      sessionStorage.setItem('app_just_cleared_data', 'true');
       if (selectedUnit) {
         const normalizedSel = selectedUnit.toUpperCase().trim();
         const remainingAssets = inventory.assets.filter(a => (a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
@@ -3707,6 +3711,7 @@ const App: React.FC = () => {
                         
                         // Marcamos que acabamos de carregar dados para evitar auto-sync imediato que poderia limpar a base
                         sessionStorage.setItem('app_just_loaded_data', 'true');
+                        sessionStorage.removeItem('app_just_cleared_data');
                       } catch (err) {
                         console.error('>>> [DatabaseLoader] Erro ao sincronizar com a nuvem:', err);
                         setSyncError('Erro no upload total');

@@ -1249,11 +1249,10 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
           query = query.eq('_unitid', normalized);
         }
       } else {
-        // Se não houver empresa específica, garante que não deletamos tudo acidentalmente se não houver tenantid
-        // Removido o filtro de ID fixo que causava erro de bigint/uuid
+        // Se não houver empresa específica, e houver tenantid, filtramos por ele
+        // Se não houver nem empresa nem tenantid, e for um admin global, permitimos a limpeza total
         if (!tenantid) {
-          console.warn('[Supabase] Tentativa de limpeza global sem tenantid. Abortando por segurança.');
-          return;
+          console.log('[Supabase] Limpeza global solicitada sem tenantid específico.');
         }
       }
     } catch (e) {

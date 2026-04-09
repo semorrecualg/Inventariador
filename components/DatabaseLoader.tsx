@@ -49,6 +49,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   excludedAccounts = []
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
+  const [isActivating, setIsActivating] = useState(false);
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
@@ -317,6 +318,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     rawExtractedAssetsRef.current = filteredAssets; 
     setStep('SUMMARY');
+  };
+
+  const handleActivateSystem = async () => {
+    console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
+    if (rawExtractedAssetsRef.current.length > 0) {
+      setIsActivating(true);
+      try {
+        await onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary?.companies || {}).sort());
+      } catch (err) {
+        console.error('>>> [DatabaseLoader] Erro ao ativar sistema:', err);
+        setIsActivating(false);
+      }
+    } else {
+      console.warn('>>> [DatabaseLoader] Tentativa de ativar sistema sem ativos.');
+    }
   };
 
   const toggleCompany = (name: string) => {
@@ -677,11 +693,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </div>
             </div>
 
-            <button onClick={() => {
-              console.log('>>> [DatabaseLoader] Botão ATIVAR SISTEMA clicado.');
-              onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary.companies).sort());
-            }} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3">
-              <span>ATIVAR SISTEMA</span> <ArrowRight size={18} />
+            <button 
+              onClick={handleActivateSystem}
+              disabled={isActivating}
+              className={`w-full py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-md active:scale-95 transition-all flex items-center justify-center space-x-3 ${isActivating ? 'bg-slate-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            >
+              {isActivating ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>PROCESSANDO...</span>
+                </>
+              ) : (
+                <>
+                  <span>ATIVAR SISTEMA</span> <ArrowRight size={18} />
+                </>
+              )}
             </button>
           </div>
         )}
