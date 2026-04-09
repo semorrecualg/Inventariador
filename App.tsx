@@ -38,7 +38,7 @@ import AssetMap from './components/AssetMap';
 import ActiveSearch from './components/ActiveSearch';
 import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
-import TrustOnboarding from './components/TrustOnboarding';
+// import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
 import CampaignManager from './components/CampaignManager';
 import FloatingHelp from './components/FloatingHelp';
@@ -51,7 +51,7 @@ import UnitConfigurator from './components/UnitConfigurator';
 
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -194,7 +194,7 @@ const App: React.FC = () => {
     userRef.current = user;
   }, [user]);
 
-  const [hasAcceptedTerms, setHasAcceptedTerms] = useState<boolean>(() => {
+  const [hasAcceptedTerms] = useState<boolean>(() => {
     return localStorage.getItem('app_accepted_terms') === 'true';
   });
 
@@ -1201,24 +1201,20 @@ const App: React.FC = () => {
 
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
 
-    // 1. If no user, must be at LOGIN or REGISTER
-    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER) {
+    // 1. If no user, must be at LOGIN, REGISTER or ONBOARDING
+    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER && currentScreen !== AppScreen.ONBOARDING) {
       setHistory([AppScreen.LOGIN]);
       return;
     }
 
-    // 1.5 If user is logged in but on LOGIN/REGISTER/ONBOARDING, go to appropriate screen
-    if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER || currentScreen === AppScreen.ONBOARDING)) {
+    // 1.5 If user is logged in but on LOGIN or REGISTER, go to appropriate screen
+    if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
       const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || user.email.toLowerCase() === ADMIN_EMAIL;
       setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
       return;
     }
 
-    // 1.6 If on ONBOARDING screen but no user, must go to LOGIN
-    if (!user && currentScreen === AppScreen.ONBOARDING) {
-      setHistory([AppScreen.LOGIN]);
-      return;
-    }
+    // 1.6 Removido redirecionamento forçado do ONBOARDING para permitir visualização manual
 
     // 2. If ASSET_DETAIL but no assets selected, go back
     if (currentScreen === AppScreen.ASSET_DETAIL && selectedAssets.length === 0) {
@@ -3404,24 +3400,8 @@ const App: React.FC = () => {
     );
   }
 
-  if (!hasAcceptedTerms) {
-    console.log("Rendering TrustOnboarding overlay - hasAcceptedTerms is false");
-    return (
-      <ErrorBoundary>
-        <TrustOnboarding 
-          onAccept={() => {
-            console.log("TrustOnboarding onAccept called in App.tsx - setting hasAcceptedTerms to true");
-            setHasAcceptedTerms(true);
-            localStorage.setItem('app_accepted_terms', 'true');
-          }} 
-          onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
-        />
-      </ErrorBoundary>
-    );
-  }
-
-  // O Onboarding automático foi removido a pedido do usuário para evitar loops e travamentos.
-  // O acesso agora é estritamente manual via botão de ajuda (FloatingHelp).
+  // O Onboarding e os Termos agora são estritamente manuais via botão de ajuda (FloatingHelp).
+  // Isso evita que o app fique travado na abertura para usuários que já conhecem o sistema.
 
   return (
     <ErrorBoundary>
@@ -3435,32 +3415,28 @@ const App: React.FC = () => {
                  </div>
                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria</p>
                </div>
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-1">
                   <div 
-                    className={`px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 transition-colors ${isSafeMode ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`} 
-                    title={isSafeMode ? "Banco de Dados Protegido (Criptografia AES-256)" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md transition-all ${isSafeMode ? 'text-emerald-500/60' : 'text-red-500/60'}`} 
+                    title={isSafeMode ? "Banco de Dados Protegido" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
                   >
-                    <ShieldCheck size={10} className={isSafeMode ? "text-emerald-600" : "text-red-600"} />
-                    <span className={`text-[7px] font-black uppercase tracking-widest ${isSafeMode ? "text-emerald-600" : "text-red-600"}`}>
-                      {isSafeMode ? 'SAFE' : 'RISK'}
-                    </span>
+                    <ShieldCheck size={10} />
+                    <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
-                  <div className="px-1.5 py-0.5 rounded-lg bg-blue-50 border border-blue-100 shadow-sm">
-                    <span className="text-[7px] font-bold text-blue-600 uppercase tracking-[0.1em]">v24.50.2 PRO</span>
+                  <div className="px-1.5 py-0.5 text-blue-500/60">
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">v24.50.2</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
-                    className="px-1.5 py-0.5 rounded-lg border shadow-sm flex items-center space-x-1 cursor-pointer hover:scale-105 active:scale-95 transition-all bg-indigo-50 border-indigo-100"
-                    title="Abrir Assistente de IA"
+                    className="px-1.5 py-0.5 flex items-center space-x-1 cursor-pointer hover:text-indigo-500 transition-all text-indigo-500/60"
                   >
-                    <span className="text-[7px] font-black uppercase tracking-widest text-indigo-600">
-                      DEV
-                    </span>
+                    <Activity size={10} />
+                    <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-1.5 py-0.5 rounded-lg bg-purple-50 border border-purple-100 shadow-sm flex items-center space-x-1">
-                      <Sparkles size={8} className="text-purple-600" />
-                      <span className="text-[7px] font-black text-purple-600 uppercase tracking-widest">AI READY</span>
+                    <div className="px-1.5 py-0.5 flex items-center space-x-1 text-purple-500/60">
+                      <Sparkles size={8} />
+                      <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
                     </div>
                   )}
                 </div>

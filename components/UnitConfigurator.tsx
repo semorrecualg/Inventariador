@@ -2,23 +2,23 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
 import { 
-  MapPin, 
   Save, 
-  Navigation, 
   Target, 
   Search, 
   AlertCircle, 
   CheckCircle2, 
   Loader2,
   ChevronRight,
-  Info,
   Layers,
-  HelpCircle
+  ArrowLeft,
+  ChevronUp,
+  ChevronDown,
+  Map as MapIcon
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { UnitConfig, User } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { getCurrentLocation } from '../utils/gpsUtils';
-import BackButton from './BackButton';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -77,6 +77,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const [mapType, setMapType] = useState<'street' | 'satellite'>('street');
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
+  const [isSheetExpanded, setIsSheetExpanded] = useState(false);
+  const [unitSearchTerm, setUnitSearchTerm] = useState('');
 
   useEffect(() => {
     loadConfigs();
@@ -86,7 +88,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     if (initialUnit && units.includes(initialUnit) && selectedUnit !== initialUnit) {
       handleSelectUnit(initialUnit);
     }
-  }, [initialUnit, units, loading, selectedUnit]); // loading is a dependency to ensure configs are loaded before selecting
+  }, [initialUnit, units, loading, selectedUnit]);
 
   useEffect(() => {
     if (onUpdateConfigs && configs.length > 0) {
@@ -131,7 +133,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSelectUnit = (unit: string) => {
-    if (selectedUnit === unit) return;
     setSelectedUnit(unit);
     const existing = configs.find(c => 
       c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase()
@@ -150,16 +151,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       });
     }
     setMessage(null);
+    setIsSheetExpanded(false); // Recolhe o sheet ao selecionar
   };
 
-  // Sincroniza o centro do mapa quando as coordenadas mudam manualmente
   useEffect(() => {
     if (currentConfig.lat && currentConfig.lng) {
       const lat = Number(currentConfig.lat);
       const lng = Number(currentConfig.lng);
       if (!isNaN(lat) && !isNaN(lng)) {
         setMapCenter(prev => {
-          // Só atualiza se houver mudança real para evitar loop de renderização
           if (prev[0] === lat && prev[1] === lng) return prev;
           return [lat, lng];
         });
@@ -168,7 +168,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   }, [currentConfig.lat, currentConfig.lng]);
 
   const handleMapClick = (lat: number, lng: number) => {
-    if (!selectedUnit) return;
+    if (!selectedUnit) {
+      setIsSheetExpanded(true); // Se não houver unidade, abre o sheet para selecionar
+      return;
+    }
     setCurrentConfig(prev => ({ ...prev, lat, lng }));
   };
 
@@ -190,7 +193,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSave = async () => {
-    // Validação robusta: Latitude e Longitude podem ser 0 (Equador/Greenwich)
     const lat = currentConfig.lat !== undefined && currentConfig.lat !== null ? Number(currentConfig.lat) : NaN;
     const lng = currentConfig.lng !== undefined && currentConfig.lng !== null ? Number(currentConfig.lng) : NaN;
 
@@ -216,16 +218,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       updated_at: new Date().toISOString()
     };
 
-    console.log('>>> [UnitConfigurator] Iniciando gravação:', configToSave);
-
     try {
       const result = await saveUnitConfig(configToSave);
-      
       if (result === true) {
-        console.log('>>> [UnitConfigurator] Gravação concluída com sucesso.');
         setMessage({ text: 'CONFIGURAÇÃO GRAVADA COM SUCESSO!', type: 'success' });
-        
-        // Atualiza a lista local para refletir o status "Configurado" imediatamente
         setConfigs(prev => {
           const newConfigs = [...prev];
           const idx = newConfigs.findIndex(c => 
@@ -238,289 +234,311 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           }
           return newConfigs;
         });
-
-        // Mantém o estado atual sincronizado
         setCurrentConfig(prev => ({ ...prev, ...configToSave }));
-
-        // Notifica o App se necessário
-        if (onUpdateConfigs) {
-          onUpdateConfigs([...configs]);
-        }
+        if (onUpdateConfigs) onUpdateConfigs([...configs]);
+        setTimeout(() => setIsSheetExpanded(false), 2000);
       } else {
         const errorMsg = typeof result === 'string' ? result : 'Falha na comunicação com o banco';
-        console.error('>>> [UnitConfigurator] Erro ao salvar:', errorMsg);
-        setMessage({ 
-          text: `ERRO AO GRAVAR: ${errorMsg}. VERIFIQUE A CONEXÃO OU PERMISSÕES.`, 
-          type: 'error' 
-        });
+        setMessage({ text: `ERRO AO GRAVAR: ${errorMsg}`, type: 'error' });
       }
     } catch (err: unknown) {
       const error = err as Error;
-      console.error('>>> [UnitConfigurator] Erro crítico no handleSave:', error);
       setMessage({ text: `ERRO CRÍTICO: ${error.message || 'Falha interna'}`, type: 'error' });
     } finally {
       setSaving(false);
     }
   };
 
+  const filteredUnits = units.filter(u => 
+    u.toLowerCase().includes(unitSearchTerm.toLowerCase())
+  );
+
   return (
-    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
-      {/* Header */}
-      <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Configuração de Unidades" />
-        </div>
-        <div className="w-10 h-10 bg-accent-soft border border-accent/10 rounded-xl flex items-center justify-center text-accent shadow-sm">
-          <Navigation size={20} />
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Sidebar: Unit List */}
-        <div className={`w-full md:w-80 bg-white border-r border-border flex flex-col overflow-hidden ${selectedUnit ? 'hidden md:flex' : 'flex'}`}>
-          <div className="p-4 border-b border-border bg-bg-main/50">
-            <h2 className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-2">Unidades Operacionais</h2>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" size={14} />
-              <input 
-                type="text" 
-                placeholder="Buscar unidade..." 
-                className="w-full pl-9 pr-4 py-2 bg-white border border-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-accent/20"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2 space-y-1 no-scrollbar">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center py-10 space-y-3">
-                <Loader2 className="animate-spin text-accent" size={24} />
-                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Carregando unidades...</p>
-              </div>
-            ) : (
-              units.map((unit) => {
-                const isConfigured = configs.some(c => 
-                  c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase()
-                );
-                const isSelected = selectedUnit === unit;
-                return (
-                  <button
-                    key={unit}
-                    onClick={() => handleSelectUnit(unit)}
-                    className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${
-                      isSelected 
-                        ? 'bg-accent text-white shadow-md' 
-                        : 'hover:bg-bg-main text-ink border border-transparent hover:border-border'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isSelected ? 'bg-white/20' : 'bg-bg-main border border-border'}`}>
-                        <Target size={16} className={isSelected ? 'text-white' : 'text-ink-muted'} />
-                      </div>
-                      <div className="text-left">
-                        <p className={`text-[10px] font-bold uppercase tracking-tight ${isSelected ? 'text-white' : 'text-ink'}`}>{unit}</p>
-                        <p className={`text-[8px] font-bold uppercase tracking-widest ${isSelected ? 'text-white/70' : 'text-ink-muted'}`}>
-                          {isConfigured ? 'Configurado' : 'Pendente'}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight size={14} className={isSelected ? 'text-white/50' : 'text-ink-muted'} />
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Main Content: Map & Config */}
-        <div className={`flex-1 flex flex-col bg-bg-main relative ${!selectedUnit ? 'hidden md:flex' : 'flex'}`}>
-          {!selectedUnit ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
-              <div className="w-20 h-20 bg-white border border-border rounded-3xl flex items-center justify-center text-ink-muted shadow-sm">
-                <MapPin size={40} />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-ink uppercase tracking-tight">Selecione uma Unidade</h3>
-                <p className="text-[10px] text-ink-muted uppercase tracking-widest mt-2 max-w-xs leading-relaxed">
-                  Escolha uma unidade operacional na lista lateral para definir as coordenadas GPS da Âncora de Auditoria.
-                </p>
-              </div>
-            </div>
+    <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
+      {/* Background Map */}
+      <div className="absolute inset-0 z-0">
+        <MapContainer 
+          center={mapCenter} 
+          zoom={15} 
+          zoomControl={false}
+          style={{ height: '100%', width: '100%' }}
+          className="z-0"
+        >
+          {mapType === 'street' ? (
+            <TileLayer
+              attribution='&copy; OpenStreetMap'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
           ) : (
+            <TileLayer
+              attribution='Tiles &copy; Esri'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            />
+          )}
+          <MapController center={mapCenter} />
+          <MapEvents onClick={handleMapClick} />
+          {currentConfig.lat && currentConfig.lng && (
             <>
-              {/* Map Area */}
-              <div className="flex-1 relative z-10">
-                <MapContainer 
-                  center={mapCenter} 
-                  zoom={15} 
-                  style={{ height: '100%', width: '100%' }}
-                  className="z-0"
-                >
-                  {mapType === 'street' ? (
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-                  ) : (
-                    <TileLayer
-                      attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-                      url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                    />
-                  )}
-                  <MapController center={mapCenter} />
-                  <MapEvents onClick={handleMapClick} />
-                  {currentConfig.lat && currentConfig.lng && (
-                    <>
-                      <Marker position={[currentConfig.lat, currentConfig.lng]} />
-                      <Circle 
-                        center={[currentConfig.lat, currentConfig.lng]} 
-                        radius={currentConfig.radius_meters || 500}
-                        pathOptions={{ color: '#F27D26', fillColor: '#F27D26', fillOpacity: 0.2 }}
-                      />
-                    </>
-                  )}
-                </MapContainer>
-
-                {/* Map Overlay Controls */}
-                <div className="absolute top-4 left-4 right-4 z-[1000] flex flex-col space-y-2 pointer-events-none">
-                  <div className="flex flex-col md:flex-row gap-2 pointer-events-auto">
-                    <button 
-                      onClick={() => setSelectedUnit(null)}
-                      className="md:hidden p-3 bg-white border border-border rounded-xl shadow-lg text-ink active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0"
-                    >
-                      <ChevronRight size={18} className="rotate-180" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">Lista</span>
-                    </button>
-
-                    <form 
-                      onSubmit={handleSearchLocation}
-                      className="flex-1 flex items-center bg-white border border-border rounded-xl shadow-lg overflow-hidden"
-                    >
-                      <div className="pl-3 text-ink-muted">
-                        <Search size={16} />
-                      </div>
-                      <input 
-                        type="text" 
-                        placeholder="Buscar cidade ou endereço..." 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="flex-1 px-3 py-2.5 text-xs focus:outline-none"
-                      />
-                      <button 
-                        type="submit"
-                        disabled={searching}
-                        className="px-4 py-2.5 bg-accent text-white font-bold text-[10px] uppercase tracking-widest hover:bg-accent-dark transition-colors disabled:opacity-50"
-                      >
-                        {searching ? <Loader2 size={14} className="animate-spin" /> : 'Buscar'}
-                      </button>
-                    </form>
-
-                    <button 
-                      onClick={handleUseCurrentLocation}
-                      disabled={locating}
-                      className="p-3 bg-white border border-border rounded-xl shadow-lg text-accent active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0 disabled:opacity-50"
-                      title="Usar minha localização atual"
-                    >
-                      {locating ? <Loader2 size={18} className="animate-spin" /> : <Target size={18} />}
-                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">
-                        {locating ? 'Localizando...' : 'Minha Posição'}
-                      </span>
-                    </button>
-
-                    <button 
-                      onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
-                      className={`p-3 border rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-2 shrink-0 ${
-                        mapType === 'satellite' ? 'bg-accent text-white border-accent' : 'bg-white text-ink-muted border-border'
-                      }`}
-                      title="Alternar visão Satélite"
-                    >
-                      <Layers size={18} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest pr-1">
-                        {mapType === 'street' ? 'Satélite' : 'Mapa'}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Map Legend/Info */}
-                <div className="absolute bottom-4 left-4 z-[1000] bg-white/90 backdrop-blur-sm border border-border p-3 rounded-xl shadow-lg max-w-[200px]">
-                  <div className="flex items-start space-x-2">
-                    <Info size={14} className="text-accent mt-0.5 shrink-0" />
-                    <p className="text-[8px] font-bold text-ink-muted uppercase tracking-tight leading-relaxed">
-                      Clique no mapa para definir o centro da unidade operacional. O círculo laranja representa o raio de tolerância para o auditor.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Config Panel */}
-              <div className="bg-white border-t border-border p-4 shadow-2xl z-20">
-                <div className="flex flex-col md:flex-row md:items-end gap-4">
-                  <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Latitude</label>
-                      <input 
-                        type="number" 
-                        step="any"
-                        value={currentConfig.lat || ''} 
-                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, lat: parseFloat(e.target.value) }))}
-                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono focus:ring-2 focus:ring-accent/20 outline-none"
-                        placeholder="-0.0000"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Longitude</label>
-                      <input 
-                        type="number" 
-                        step="any"
-                        value={currentConfig.lng || ''} 
-                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, lng: parseFloat(e.target.value) }))}
-                        className="w-full p-3 bg-bg-main border border-border rounded-xl text-xs font-mono focus:ring-2 focus:ring-accent/20 outline-none"
-                        placeholder="-0.0000"
-                      />
-                    </div>
-                    <div className="col-span-2 md:col-span-1">
-                      <label className="block text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Raio de Tolerância (Metros)</label>
-                      <div className="flex items-center space-x-3">
-                        <input 
-                          type="range" 
-                          min="50" 
-                          max="2000" 
-                          step="50"
-                          value={currentConfig.radius_meters || 500}
-                          onChange={(e) => setCurrentConfig(prev => ({ ...prev, radius_meters: parseInt(e.target.value) }))}
-                          className="flex-1 accent-accent"
-                        />
-                        <span className="text-xs font-bold text-ink w-12 text-right">{currentConfig.radius_meters}m</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={handleSave}
-                    disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
-                    className="w-full md:w-auto px-8 py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-between space-x-4"
-                  >
-                    <div className="flex items-center space-x-2">
-                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                      <span>Salvar Configuração</span>
-                    </div>
-                    <HelpCircle size={18} className="opacity-70" />
-                  </button>
-                </div>
-
-                {message && (
-                  <div className={`mt-4 p-3 rounded-xl flex items-center space-x-3 border ${
-                    message.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'
-                  }`}>
-                    {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                    <p className="text-[10px] font-bold uppercase tracking-widest">{message.text}</p>
-                  </div>
-                )}
-              </div>
+              <Marker position={[currentConfig.lat, currentConfig.lng]} />
+              <Circle 
+                center={[currentConfig.lat, currentConfig.lng]} 
+                radius={currentConfig.radius_meters || 500}
+                pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15, weight: 2 }}
+              />
             </>
           )}
+        </MapContainer>
+      </div>
+
+      {/* Floating Header */}
+      <div className="absolute top-4 left-0 right-0 z-50 px-4 pointer-events-none">
+        <div className="max-w-xl mx-auto">
+          {/* Navigation & Search Row */}
+          <div className="flex items-center space-x-3 pointer-events-auto">
+            <button 
+              onClick={onBack}
+              className="w-12 h-12 bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center text-slate-800 shadow-xl active:scale-95 transition-all"
+            >
+              <ArrowLeft size={22} />
+            </button>
+            <form 
+              onSubmit={handleSearchLocation}
+              className="flex-1 flex items-center bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl overflow-hidden h-12"
+            >
+              <div className="pl-4 text-slate-400">
+                <Search size={18} />
+              </div>
+              <input 
+                type="text" 
+                placeholder="BUSCAR CIDADE OU ENDEREÇO..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+                className="flex-1 px-3 bg-transparent text-[11px] font-bold uppercase tracking-tight text-slate-800 focus:outline-none placeholder:text-slate-400"
+              />
+              <button 
+                type="submit"
+                disabled={searching}
+                className="h-full px-5 bg-blue-600 text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {searching ? <Loader2 size={16} className="animate-spin" /> : 'BUSCAR'}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
+
+      {/* Floating Action Buttons (Bottom Right) */}
+      <div className="absolute bottom-32 right-4 z-40 flex flex-col space-y-3">
+        <button 
+          onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
+          className={`w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border ${
+            mapType === 'satellite' 
+              ? 'bg-blue-600 text-white border-blue-400' 
+              : 'bg-white/90 backdrop-blur-md text-slate-700 border-white/20'
+          }`}
+        >
+          <Layers size={20} />
+        </button>
+        <button 
+          onClick={handleUseCurrentLocation}
+          disabled={locating}
+          className="w-12 h-12 bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl flex flex-col items-center justify-center text-blue-600 active:scale-90 transition-all disabled:opacity-50"
+        >
+          {locating ? <Loader2 size={20} className="animate-spin" /> : <Target size={20} />}
+        </button>
+      </div>
+
+      {/* Bottom Sheet Panel */}
+      <motion.div 
+        initial={false}
+        animate={{ height: isSheetExpanded ? 'auto' : '100px' }}
+        className="absolute bottom-0 left-0 right-0 z-50 bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 flex flex-col overflow-hidden"
+      >
+        {/* Handle Bar */}
+        <div 
+          className="w-full py-3 flex justify-center cursor-pointer active:bg-slate-50 transition-colors"
+          onClick={() => setIsSheetExpanded(!isSheetExpanded)}
+        >
+          <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+        </div>
+
+        <div className="px-6 pb-8">
+          {/* Collapsed View Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${selectedUnit ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'}`} />
+                <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest">
+                  {selectedUnit ? selectedUnit : 'SELECIONE UMA UNIDADE'}
+                </h3>
+              </div>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight mt-1 truncate max-w-[200px]">
+                {selectedUnit ? 'ÂNCORA DE AUDITORIA CONFIGURADA' : 'AGUARDANDO SELEÇÃO NA LISTA'}
+              </p>
+            </div>
+            <button 
+              onClick={() => setIsSheetExpanded(!isSheetExpanded)}
+              className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400"
+            >
+              {isSheetExpanded ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+            </button>
+          </div>
+
+          {/* Expanded Content */}
+          <AnimatePresence>
+            {isSheetExpanded && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="space-y-6"
+              >
+                {!selectedUnit ? (
+                  /* Unit Selection List */
+                  <div className="space-y-4">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                      <input 
+                        type="text" 
+                        placeholder="BUSCAR UNIDADE..." 
+                        value={unitSearchTerm}
+                        onChange={(e) => setUnitSearchTerm(e.target.value.toUpperCase())}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-bold uppercase focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto pr-1 space-y-2 no-scrollbar">
+                      {filteredUnits.map((unit) => {
+                        const isConfigured = configs.some(c => c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase());
+                        return (
+                          <button
+                            key={unit}
+                            onClick={() => handleSelectUnit(unit)}
+                            className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-blue-50 rounded-2xl transition-all border border-transparent hover:border-blue-100 group"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 shadow-sm">
+                                <MapIcon size={18} />
+                              </div>
+                              <div className="text-left">
+                                <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight">{unit}</p>
+                                <p className={`text-[8px] font-bold uppercase tracking-widest mt-0.5 ${isConfigured ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                  {isConfigured ? '✓ CONFIGURADO' : 'PENDENTE'}
+                                </p>
+                              </div>
+                            </div>
+                            <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  /* Configuration Form */
+                  <div className="space-y-6">
+                    {/* Lat/Lng Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            step="any"
+                            value={currentConfig.lat || ''} 
+                            onChange={(e) => setCurrentConfig(prev => ({ ...prev, lat: parseFloat(e.target.value) }))}
+                            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                            placeholder="-0.0000"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Longitude</label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            step="any"
+                            value={currentConfig.lng || ''} 
+                            onChange={(e) => setCurrentConfig(prev => ({ ...prev, lng: parseFloat(e.target.value) }))}
+                            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                            placeholder="-0.0000"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Radius Slider */}
+                    <div className="space-y-3 bg-slate-50 p-5 rounded-[24px] border border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Raio de Tolerância</label>
+                        <span className="text-xs font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                          {currentConfig.radius_meters}m
+                        </span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="50" 
+                        max="2000" 
+                        step="50"
+                        value={currentConfig.radius_meters || 500}
+                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, radius_meters: parseInt(e.target.value) }))}
+                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                      <div className="flex justify-between text-[8px] font-bold text-slate-300 uppercase tracking-widest">
+                        <span>50m</span>
+                        <span>1000m</span>
+                        <span>2000m</span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col space-y-3">
+                      <button 
+                        onClick={handleSave}
+                        disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
+                        className="w-full py-5 bg-blue-600 text-white rounded-[24px] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center space-x-3"
+                      >
+                        {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                        <span>Salvar Configuração</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => setSelectedUnit(null)}
+                        className="w-full py-4 bg-white text-slate-400 rounded-[20px] font-bold uppercase text-[9px] tracking-widest border border-slate-100 active:scale-[0.98] transition-all"
+                      >
+                        Trocar Unidade
+                      </button>
+                    </div>
+
+                    {message && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className={`p-4 rounded-2xl flex items-center space-x-3 border ${
+                          message.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'
+                        }`}
+                      >
+                        {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+                        <p className="text-[10px] font-black uppercase tracking-tight">{message.text}</p>
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Collapsed View Footer Button (Only when collapsed and unit selected) */}
+          {!isSheetExpanded && selectedUnit && (
+            <button 
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-2"
+            >
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+              <span>Confirmar Local</span>
+            </button>
+          )}
+        </div>
+      </motion.div>
     </div>
   );
 };

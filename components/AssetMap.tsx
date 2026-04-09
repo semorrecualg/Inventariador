@@ -5,6 +5,7 @@ import L from 'leaflet';
 import 'leaflet.heat';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import * as d3 from 'd3';
+import { motion, AnimatePresence } from 'motion/react';
 
 // Configuração de ícones customizados para o Leaflet
 const defaultIcon = L.icon({
@@ -16,8 +17,7 @@ const defaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = defaultIcon;
-import BackButton from './BackButton';
-import { Layers, Info, X, Filter, Activity, WifiOff, Database, Map as MapIcon, Box, Cloud } from 'lucide-react';
+import { Layers, Info, X, Filter, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -86,7 +86,6 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string | 'ALL'>('ALL');
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA' | 'GRID'>('AREA');
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [zoomLevel, setZoomLevel] = useState(13);
 
   // Lista de localidades únicas para o filtro (Baseado no local onde foi INVENTARIADO)
@@ -103,13 +102,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   }, [assets]);
 
   useEffect(() => {
-    const handleStatus = () => setIsOffline(!navigator.onLine);
-    window.addEventListener('online', handleStatus);
-    window.addEventListener('offline', handleStatus);
-    return () => {
-      window.removeEventListener('online', handleStatus);
-      window.removeEventListener('offline', handleStatus);
-    };
+    // Monitoramento de status online/offline removido pois não está sendo usado no novo design
   }, []);
 
   const ZoomHandler = () => {
@@ -282,118 +275,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   }, [filteredAssets]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-bg-main overflow-hidden relative">
-      {/* Header com Filtros */}
-      <div className="absolute top-12 left-4 right-4 z-[1000] flex flex-col space-y-3 pointer-events-none">
-        <div className="flex items-center justify-between">
-          <div className="pointer-events-auto">
-            <BackButton onClick={onBack} label="Voltar" subLabel="Mapeamento Geográfico" />
-          </div>
-
-          {isOffline && (
-            <div className="pointer-events-auto bg-amber-500/90 backdrop-blur-md border border-amber-400/50 px-4 py-2 rounded-2xl shadow-xl flex items-center space-x-2 animate-pulse">
-              <WifiOff size={14} className="text-white" />
-              <div className="flex flex-col">
-                <span className="text-[8px] font-black text-white uppercase tracking-widest leading-none">Modo Offline</span>
-                <span className="text-[7px] font-bold text-white/80 uppercase tracking-widest leading-none">Dados Locais Ativos</span>
-              </div>
-            </div>
-          )}
-
-          {/* Seletor de Métrica */}
-          <div className="pointer-events-auto bg-slate-900 border border-white/10 p-1 rounded-2xl shadow-2xl flex items-center">
-            <button
-              onClick={() => setHeatmapMode('GRID')}
-              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-                heatmapMode === 'GRID' ? 'bg-emerald-500 text-white shadow-lg' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              <Box size={12} />
-              <span>Grade</span>
-            </button>
-            <button
-              onClick={() => setHeatmapMode('AREA')}
-              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-                heatmapMode === 'AREA' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              <MapIcon size={12} />
-              <span>Área</span>
-            </button>
-            <button
-              onClick={() => setHeatmapMode('VALUE')}
-              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-                heatmapMode === 'VALUE' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              <Activity size={12} />
-              <span>Valor</span>
-            </button>
-            <button
-              onClick={() => setHeatmapMode('DENSITY')}
-              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-                heatmapMode === 'DENSITY' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              <Layers size={12} />
-              <span>Calor</span>
-            </button>
-            <button
-              onClick={() => setHeatmapMode('VALUE')}
-              className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-                heatmapMode === 'VALUE' ? 'bg-accent text-white shadow-lg' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              <Activity size={12} />
-              <span>Valor</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="pointer-events-auto self-end bg-white/90 backdrop-blur-md border border-border p-1 rounded-2xl shadow-xl flex flex-col space-y-1">
-          <div className="flex items-center space-x-1">
-            <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
-              <Filter size={14} className="text-accent" />
-              <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Origem</span>
-            </div>
-            <div className="flex items-center space-x-1 pr-1">
-              {originOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setSelectedOrigin(opt.value as TransactionOrigin | 'ALL')}
-                  className={`px-3 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
-                    selectedOrigin === opt.value 
-                      ? 'bg-accent text-white shadow-md' 
-                      : 'text-ink-muted hover:bg-bg-main'
-                  }`}
-                >
-                  {opt.label.split(' ')[0]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Novo Filtro de Localidade (ENDERECO) */}
-          <div className="flex items-center space-x-1 border-t border-border/50 pt-1">
-            <div className="px-3 py-1.5 flex items-center space-x-2 border-r border-border mr-1">
-              <MapIcon size={14} className="text-emerald-500" />
-              <span className="text-[10px] font-bold text-ink uppercase tracking-widest">Local</span>
-            </div>
-            <select 
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              className="bg-transparent border-none text-[9px] font-bold text-ink uppercase tracking-widest focus:ring-0 max-w-[200px] cursor-pointer"
-            >
-              <option value="ALL">TODAS AS LOCALIDADES</option>
-              {locations.map(loc => (
-                <option key={loc} value={loc}>{loc}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 relative z-0">
+    <div className="flex flex-col h-[100dvh] bg-white overflow-hidden relative">
+      {/* Mapa Fullscreen */}
+      <div className="absolute inset-0 z-0">
         <MapContainer 
           center={initialCenter} 
           zoom={13} 
@@ -408,15 +292,12 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           {heatmapMode !== 'AREA' && heatmapMode !== 'GRID' && <HeatmapLayer points={heatPoints} />}
           <ZoomHandler />
 
-          {/* Visualização em Grade (Nível 2) */}
+          {/* Visualização em Grade */}
           {heatmapMode === 'GRID' && gridData.map((cell, i) => {
             if (!cell) return null;
-            
-            // Escala de cor baseada na densidade (count)
             const maxCount = Math.max(...gridData.map(c => c?.count || 1));
             const intensity = cell.count / maxCount;
             const color = d3.interpolateYlOrRd(intensity);
-
             const conferidos = cell.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
             const divergencias = cell.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
 
@@ -460,7 +341,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
             );
           })}
           
-          {/* Visualização de Área Ocupada (Polígonos - Envoltória Convexa) */}
+          {/* Visualização de Área Ocupada */}
           {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
             const conferidos = data.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
             const divergencias = data.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
@@ -470,8 +351,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                 key={`poly-${loc}`}
                 positions={data.hull}
                 pathOptions={{ 
-                  color: '#f27d26', 
-                  fillColor: '#f27d26', 
+                  color: '#3b82f6', 
+                  fillColor: '#3b82f6', 
                   fillOpacity: 0.15,
                   weight: 3,
                   dashArray: 'none'
@@ -528,7 +409,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                   center={[a._lat!, a._lng!]}
                   radius={zoomLevel > 15 ? 6 : 4}
                   pathOptions={{
-                    fillColor: isConferido ? '#10b981' : '#3498db',
+                    fillColor: isConferido ? '#10b981' : '#3b82f6',
                     color: '#ffffff',
                     weight: 2,
                     fillOpacity: 0.9
@@ -557,140 +438,180 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
               </React.Fragment>
             );
           })}
-
-          {/* Marcadores Individuais (Modo Calor/Valor) */}
-          {heatmapMode !== 'AREA' && zoomLevel >= 16 && filteredAssets.filter(a => a._lat && a._lng).map(a => {
-            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            
-            return (
-              <CircleMarker 
-                key={`ind-${a.id}`} 
-                center={[a._lat!, a._lng!]} 
-                radius={6}
-                pathOptions={{
-                  fillColor: isConferido ? '#10b981' : '#3498db',
-                  color: '#ffffff',
-                  weight: 2,
-                  fillOpacity: 0.9
-                }}
-              >
-                <Popup className="custom-popup">
-                  <div className="p-2 min-w-[180px]">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-black text-accent uppercase tracking-widest">{a.ETIQUETA || 'S/E'}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase ${isConferido ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {isConferido ? 'Conferido' : 'Pendente'}
-                      </span>
-                    </div>
-                    <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
-                    <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a._localMaster || a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
-                    <div className="mt-2 pt-2 border-t border-border flex justify-between items-center">
-                      <span className="text-[8px] text-ink-muted uppercase font-bold">Patrimônio</span>
-                      <span className="text-[10px] font-black text-ink">{a.REGISTRO}</span>
-                    </div>
-                  </div>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
         </MapContainer>
+      </div>
 
+      {/* Botão Voltar Flutuante */}
+      <div className="absolute top-16 left-6 z-[1001]">
+        <button 
+          onClick={onBack}
+          className="w-12 h-12 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-slate-900 border border-slate-100 active:scale-90 transition-all"
+        >
+          <ArrowLeft size={20} />
+        </button>
+      </div>
+
+      {/* Seletor de Modo Flutuante (Topo Direita) */}
+      <div className="absolute top-16 right-6 z-[1001] flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-2xl shadow-2xl border border-white/10">
+        <button
+          onClick={() => setHeatmapMode('GRID')}
+          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+            heatmapMode === 'GRID' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
+          }`}
+        >
+          <Box size={14} />
+          <span>Grade</span>
+        </button>
+        <button
+          onClick={() => setHeatmapMode('AREA')}
+          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+            heatmapMode === 'AREA' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
+          }`}
+        >
+          <MapIcon size={14} />
+          <span>Área</span>
+        </button>
+        <button
+          onClick={() => setHeatmapMode('VALUE')}
+          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
+            heatmapMode === 'VALUE' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
+          }`}
+        >
+          <Activity size={14} />
+          <span>Valor</span>
+        </button>
+      </div>
+
+      {/* Filtros Flutuantes (Abaixo do Back) */}
+      <div className="absolute top-32 left-6 right-6 z-[1001] flex flex-col space-y-2 pointer-events-none">
+        <div className="pointer-events-auto bg-white/90 backdrop-blur-md border border-slate-100 p-1.5 rounded-2xl shadow-xl flex items-center justify-between">
+          <div className="flex items-center space-x-2 px-3 border-r border-slate-100">
+            <Filter size={16} className="text-blue-600" />
+            <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Filtros</span>
+          </div>
+          <div className="flex-1 flex items-center px-3 space-x-4">
+            <select 
+              value={selectedOrigin}
+              onChange={(e) => setSelectedOrigin(e.target.value as TransactionOrigin | 'ALL')}
+              className="bg-transparent border-none text-[10px] font-black text-slate-600 uppercase tracking-widest focus:ring-0 cursor-pointer"
+            >
+              {originOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <div className="h-4 w-px bg-slate-100" />
+            <select 
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="bg-transparent border-none text-[10px] font-black text-slate-600 uppercase tracking-widest focus:ring-0 cursor-pointer max-w-[150px]"
+            >
+              <option value="ALL">TODAS AS LOCALIDADES</option>
+              {locations.map(loc => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Painel de Informações (Bottom Sheet Style) */}
+      <AnimatePresence>
         {showInfo && (
-          <div className="absolute bottom-8 left-4 right-4 z-[1000] animate-slideUp">
-            <div className="bg-white/90 backdrop-blur-md border border-white/20 rounded-[2rem] p-6 shadow-2xl relative overflow-hidden">
-              <div className={`absolute top-0 left-0 w-full h-1.5 ${
-                heatmapMode === 'VALUE' ? 'bg-accent' : 
+          <motion.div 
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            className="absolute bottom-0 left-0 right-0 z-[1002] p-4 pointer-events-none"
+          >
+            <div className="pointer-events-auto bg-white/95 backdrop-blur-xl border-t border-slate-100 rounded-t-[2.5rem] p-8 shadow-[0_-20px_50px_rgba(0,0,0,0.1)] relative">
+              <div className={`absolute top-0 left-0 w-full h-1.5 rounded-t-full ${
+                heatmapMode === 'VALUE' ? 'bg-blue-600' : 
                 heatmapMode === 'AREA' ? 'bg-emerald-500' : 
-                heatmapMode === 'GRID' ? 'bg-emerald-600' :
                 'bg-blue-500'
               }`} />
+              
               <button 
                 onClick={() => setShowInfo(false)}
-                className="absolute top-4 right-4 p-2 text-ink-muted hover:text-accent transition-colors"
+                className="absolute top-6 right-6 p-2 text-slate-300 hover:text-slate-900 transition-colors"
               >
-                <X size={16} />
+                <X size={20} />
               </button>
-              
-              <div className="flex items-center space-x-3 mb-3">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                  heatmapMode === 'VALUE' ? 'bg-accent-soft text-accent' : 
-                  heatmapMode === 'AREA' ? 'bg-emerald-100 text-emerald-600' :
-                  heatmapMode === 'GRID' ? 'bg-emerald-100 text-emerald-700' :
-                  'bg-blue-100 text-blue-600'
+
+              <div className="flex items-center space-x-4 mb-6">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                  heatmapMode === 'VALUE' ? 'bg-blue-50 text-blue-600' : 
+                  heatmapMode === 'AREA' ? 'bg-emerald-50 text-emerald-600' :
+                  'bg-blue-50 text-blue-600'
                 }`}>
-                  {heatmapMode === 'VALUE' ? <Activity size={16} /> : 
-                   heatmapMode === 'AREA' ? <MapIcon size={16} /> :
-                   heatmapMode === 'GRID' ? <Box size={16} /> :
-                   <Layers size={16} />}
+                  {heatmapMode === 'VALUE' ? <Activity size={24} /> : 
+                   heatmapMode === 'AREA' ? <MapIcon size={24} /> :
+                   <Layers size={24} />}
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                     {heatmapMode === 'VALUE' ? 'Concentração Financeira' : 
                      heatmapMode === 'AREA' ? 'Área Ocupada por Localidade' :
-                     heatmapMode === 'GRID' ? 'Grade de Precisão (Binning)' :
                      'Densidade de Ativos'}
                   </h3>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">
-                    {selectedOrigin === 'ALL' ? 'Visão Global' : `Origem: ${selectedOrigin}`}
-                  </p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Visão Global de Auditoria</p>
                 </div>
               </div>
-              
-              <p className="text-[10px] text-ink-muted leading-relaxed mb-4">
+
+              <p className="text-xs text-slate-500 leading-relaxed mb-8 font-medium">
                 {heatmapMode === 'VALUE' 
                   ? 'O calor representa o valor acumulado dos ativos. Áreas vermelhas indicam maior concentração de capital imobilizado.'
                   : heatmapMode === 'AREA'
                   ? 'Visualização dos polígonos de ocupação baseados na dispersão física dos ativos inventariados por endereço.'
-                  : heatmapMode === 'GRID'
-                  ? 'Grade estatística de 20m x 20m. Cores quentes indicam alta densidade de ativos por quadrante, eliminando borrões.'
                   : 'O calor representa a quantidade de ativos por m². Áreas vermelhas indicam maior volume de itens físicos.'}
               </p>
-              
-              <div className="flex items-center justify-between pt-4 border-t border-border/50">
-                <div className="flex flex-col">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Ativos no Mapa</span>
-                  <span className="text-lg font-bold text-ink tracking-tighter">{filteredAssets.filter(a => a._lat && a._lng).length}</span>
-                </div>
-                
-                {databaseMode === DatabaseMode.INTERNAL ? (
-                  <div className="flex items-center space-x-1 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
-                    <Database size={10} className="text-amber-600" />
-                    <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Banco Local</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-1 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
-                    <Cloud size={10} className="text-emerald-600" />
-                    <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest">Nuvem Real-time</span>
-                  </div>
-                )}
 
-                <div className="flex flex-col text-center">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Valor Total</span>
-                  <span className="text-lg font-bold text-accent tracking-tighter">
-                    {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <div className="grid grid-cols-3 gap-6 pt-6 border-t border-slate-50">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ativos</span>
+                  <span className="text-2xl font-black text-slate-900 tracking-tighter">
+                    {filteredAssets.filter(a => a._lat && a._lng).length}
                   </span>
                 </div>
-
+                <div className="flex flex-col text-center">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Valor Total</span>
+                  <span className="text-2xl font-black text-blue-600 tracking-tighter">
+                    {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                  </span>
+                </div>
                 <div className="flex flex-col text-right">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Localidades</span>
-                  <span className="text-lg font-bold text-emerald-600 tracking-tighter">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Locais</span>
+                  <span className="text-2xl font-black text-emerald-600 tracking-tighter">
                     {Object.keys(locationGroups).length}
                   </span>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {!showInfo && (
-          <button 
-            onClick={() => setShowInfo(true)}
-            className="absolute bottom-8 right-4 z-[1000] w-12 h-12 bg-white border border-border rounded-2xl flex items-center justify-center text-accent shadow-lg active:scale-90 transition-all"
-          >
-            <Info size={20} />
-          </button>
+              <div className="mt-8 flex items-center justify-center">
+                {databaseMode === DatabaseMode.INTERNAL ? (
+                  <div className="flex items-center space-x-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100">
+                    <Database size={14} className="text-amber-600" />
+                    <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Banco Local Ativo</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-100">
+                    <Cloud size={14} className="text-emerald-600" />
+                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Nuvem Real-time</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
+
+      {!showInfo && (
+        <button 
+          onClick={() => setShowInfo(true)}
+          className="absolute bottom-8 right-6 z-[1001] w-14 h-14 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-blue-600 border border-slate-100 active:scale-90 transition-all"
+        >
+          <Info size={24} />
+        </button>
+      )}
     </div>
   );
 };

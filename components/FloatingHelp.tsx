@@ -53,9 +53,13 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
           onClick={() => setIsOpen(!isOpen)}
-          className={`w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all ${isOpen ? 'bg-ink text-white' : 'bg-accent text-white animate-pulse-soft'}`}
+          className={`w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all backdrop-blur-xl border ${
+            isOpen 
+              ? 'bg-white/20 border-white/30 text-white' 
+              : 'bg-[#007AFF]/80 border-white/20 text-white animate-pulse-soft'
+          }`}
         >
-          {isOpen ? <X size={24} /> : <HelpCircle size={24} />}
+          {isOpen ? <X size={28} /> : <HelpCircle size={28} />}
         </motion.button>
 
         <AnimatePresence>
@@ -64,39 +68,41 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
               initial={{ opacity: 0, scale: 0.8, y: 20, x: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
               exit={{ opacity: 0, scale: 0.8, y: 20, x: 20 }}
-              className="absolute bottom-16 right-0 z-[998] w-72 bg-white/90 backdrop-blur-xl border border-border rounded-[2rem] shadow-2xl p-6 overflow-hidden"
+              className="absolute bottom-20 right-0 z-[998] w-80 bg-[#1c1c1e]/90 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-8 overflow-hidden"
             >
-              <div className="absolute top-0 left-0 w-full h-1 bg-accent/10" />
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-[#007AFF]/50" />
               
-              <div className="flex items-center space-x-2 mb-4">
-                <Sparkles className="text-accent" size={18} />
-                <h3 className="text-[10px] font-black text-ink uppercase tracking-[0.2em]">Dicas de Governança</h3>
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="w-8 h-8 rounded-xl bg-[#007AFF]/20 flex items-center justify-center">
+                  <Sparkles className="text-[#007AFF]" size={18} />
+                </div>
+                <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Dicas de Governança</h3>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {tips.map((tip, i) => (
                   <motion.div 
                     key={i}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.1 }}
-                    className="flex items-start space-x-3"
+                    className="flex items-start space-x-4"
                   >
-                    <div className="mt-0.5 text-accent">{tip.icon}</div>
-                    <p className="text-[11px] text-ink-muted leading-relaxed">{tip.text}</p>
+                    <div className="mt-1 text-[#007AFF]/60">{tip.icon}</div>
+                    <p className="text-[12px] text-white/60 leading-relaxed font-medium">{tip.text}</p>
                   </motion.div>
                 ))}
               </div>
 
-              <div className="mt-6 pt-4 border-t border-border flex flex-col space-y-3">
+              <div className="mt-8 pt-6 border-t border-white/5 flex flex-col space-y-4">
                 <button 
                   onClick={() => {
                     onOpenOnboarding();
                     setIsOpen(false);
                   }}
-                  className="w-full py-3 bg-accent/10 text-accent rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent hover:text-white transition-all flex items-center justify-center space-x-2"
+                  className="w-full py-4 bg-[#007AFF] text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-[#007AFF]/90 transition-all flex items-center justify-center space-x-3 shadow-lg shadow-[#007AFF]/20"
                 >
-                  <Zap size={12} />
+                  <Zap size={14} />
                   <span>Ver Onboarding Completo</span>
                 </button>
 
@@ -105,9 +111,9 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
                     onOpenPalette();
                     setIsOpen(false);
                   }}
-                  className="w-full py-3 bg-bg-main border border-border text-ink-muted rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-accent hover:text-accent transition-all flex items-center justify-center space-x-2"
+                  className="w-full py-4 bg-white/5 border border-white/10 text-white/70 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center space-x-3"
                 >
-                  <Palette size={12} />
+                  <Palette size={14} />
                   <span>Guia de Cores</span>
                 </button>
 
@@ -116,7 +122,7 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
                     onCloseOnboarding();
                     setIsOpen(false);
                   }}
-                  className="text-[9px] font-bold text-ink-muted uppercase tracking-widest hover:text-accent transition-colors text-center"
+                  className="text-[10px] font-black text-white/20 uppercase tracking-widest hover:text-[#007AFF] transition-colors text-center mt-2"
                 >
                   Não mostrar dicas novamente
                 </button>
