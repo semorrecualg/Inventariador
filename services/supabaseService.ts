@@ -1526,7 +1526,7 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
  * Busca todas as campanhas de um tenant com resiliência total
  */
 export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
-  const mode = localStorage.getItem('app_database_mode');
+  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
@@ -1645,7 +1645,7 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
  * Cria uma nova campanha com resiliência a nomes de colunas
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
-  const mode = localStorage.getItem('app_database_mode');
+  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {

@@ -12,7 +12,8 @@ import {
   HelpCircle,
   RefreshCw,
   Download,
-  Cloud
+  Cloud,
+  Calendar
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
@@ -39,6 +40,8 @@ interface DatabaseLoaderProps {
   isSyncing?: boolean;
   syncProgress?: { current: number; total: number } | null;
   excludedAccounts?: string[];
+  campaigns?: import('../types').InventoryCampaign[];
+  user?: import('../types').User | null;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
@@ -46,7 +49,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   onDataLoaded, 
   isSyncing, 
   syncProgress,
-  excludedAccounts = []
+  excludedAccounts = [],
+  campaigns = [],
+  user
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
@@ -668,6 +673,17 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest block mb-1">Divergência Baixa</span>
                     <span className="text-lg font-bold text-red-600">{summary.divergentBaixaCount}</span>
                   </div>
+                  <div className="col-span-2 bg-purple-50 p-4 rounded-xl border border-purple-100 shadow-inner flex items-center justify-between">
+                    <div>
+                      <span className="text-[9px] font-bold text-purple-400 uppercase tracking-widest block mb-1">Status da Campanha</span>
+                      <span className="text-sm font-black text-purple-700 uppercase tracking-tight">
+                        {campaigns && campaigns.length > 0 ? 'CAMPANHA ATIVA NO COLETOR' : 'NENHUMA CAMPANHA ATIVA'}
+                      </span>
+                    </div>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${campaigns && campaigns.length > 0 ? 'bg-purple-600 text-white animate-pulse' : 'bg-purple-200 text-purple-400'}`}>
+                      <Calendar size={18} />
+                    </div>
+                  </div>
                </div>
 
                <div className="mt-6 pt-6 border-t border-slate-100">
@@ -687,9 +703,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center text-amber-600 shrink-0">
                 <CheckCircle2 size={18} />
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="text-[11px] font-bold text-amber-900 uppercase tracking-tight">Pronto para Ativação</p>
                 <p className="text-[10px] text-amber-700 mt-0.5">A base foi validada e está pronta para ser sincronizada com a nuvem.</p>
+                <div className="mt-2 pt-2 border-t border-amber-200/50 flex items-center justify-between">
+                  <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Tenant: {user?._tenantid || user?.tenantid || 'CICOPAL'}</span>
+                  <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Modo: {localStorage.getItem('app_database_mode') || 'MOBILE PURO'}</span>
+                </div>
               </div>
             </div>
 

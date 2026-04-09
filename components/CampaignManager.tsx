@@ -108,15 +108,28 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         start_date: new Date().toISOString()
       };
 
+      console.log('[CampaignManager] Chamando createCampaign...');
       const result = await createCampaign(newCampaign);
+      console.log('[CampaignManager] Resultado de createCampaign:', result);
+      
       if (result) {
-        if (onRefresh) await onRefresh();
+        if (onRefresh) {
+          console.log('[CampaignManager] Chamando onRefresh (refreshCampaigns)...');
+          try {
+            await onRefresh();
+            console.log('[CampaignManager] onRefresh concluído com sucesso.');
+          } catch (refreshErr) {
+            console.error('[CampaignManager] Erro ao atualizar campanhas:', refreshErr);
+          }
+        }
         setIsCreating(false);
         setNewCampaignName('');
         setNewCampaignDesc('');
         setNewCampaignUnit('');
         setSuccessMessage('CAMPANHA CRIADA COM SUCESSO!');
         setTimeout(() => setSuccessMessage(null), 5000);
+      } else {
+        console.warn('[CampaignManager] createCampaign retornou nulo.');
       }
     } catch (err: unknown) {
       console.error('Erro ao criar campanha:', err);

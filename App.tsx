@@ -434,14 +434,14 @@ const App: React.FC = () => {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
     try {
-      const saved = localStorage.getItem('app_campaigns');
+      const saved = localStorage.getItem('inventory_campaigns_cache');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
 
   useEffect(() => {
     if (campaigns.length > 0) {
-      localStorage.setItem('app_campaigns', JSON.stringify(campaigns));
+      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(campaigns));
     }
   }, [campaigns]);
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
@@ -3658,6 +3658,8 @@ const App: React.FC = () => {
                 isSyncing={isSyncing}
                 syncProgress={syncProgress}
                 excludedAccounts={inventory.excludedAccounts}
+                campaigns={campaigns}
+                user={user}
                 onDataLoaded={async (a, c) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
                   console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}`);
@@ -3673,12 +3675,13 @@ const App: React.FC = () => {
                   // Mostra tela de sincronização imediatamente se for admin
                   const shouldSync = isAdmin && databaseMode !== DatabaseMode.INTERNAL && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
                   if (shouldSync) {
+                    console.log('>>> [DatabaseLoader] Sincronização necessária. Ativando isSyncing...');
                     setIsSyncing(true);
                     setSyncProgress({ current: 0, total: a.length });
                   }
 
                   try {
-                    console.log('>>> [DatabaseLoader] Salvando inventário localmente...');
+                    console.log('>>> [DatabaseLoader] Salvando inventário localmente (Dexie/LocalStorage)...');
                     setInventory(newInventory); 
                     await saveInventory(newInventory);
                     console.log('>>> [DatabaseLoader] Inventário local salvo com sucesso.');
@@ -3687,29 +3690,25 @@ const App: React.FC = () => {
                       console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
                       try {
                         const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-                        // Mesmo para admins globais, se houver um tenantid no perfil, usamos ele como alvo da carga
                         const forcedTenantId = user?.tenantid || (isGlobalAdmin ? undefined : 'default');
                         
-                        // Limpa a nuvem antes de subir a nova base para garantir espelhamento
-                        // Passamos o tenantId para garantir que só limpamos os dados deste cliente
+                        console.log(`>>> [DatabaseLoader] Limpando nuvem para Tenant: ${forcedTenantId || 'GLOBAL'}...`);
                         await clearCloudInventory(undefined, forcedTenantId);
                         
-                        // Sincroniza todos os ativos (o syncAssetsToCloud agora lida com lotes internamente)
                         console.log(`>>> [DatabaseLoader] Enviando ${a.length} ativos para a nuvem...`);
                         await syncAssetsToCloud(a, forcedTenantId);
                         setSyncProgress({ current: a.length, total: a.length });
 
-                        // Sincroniza a config (que contém o lastUpdated)
                         const configToSync = { ...newInventory };
                         // @ts-expect-error - assets is removed for sync
                         delete configToSync.assets;
+                        console.log('>>> [DatabaseLoader] Sincronizando configurações...');
                         await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId);
                         
                         setLastSyncTime(new Date().toISOString());
                         setSyncError(null);
                         console.log('>>> [DatabaseLoader] Sincronização concluída com sucesso.');
                         
-                        // Marcamos que acabamos de carregar dados para evitar auto-sync imediato que poderia limpar a base
                         sessionStorage.setItem('app_just_loaded_data', 'true');
                         sessionStorage.removeItem('app_just_cleared_data');
                       } catch (err) {
@@ -3721,13 +3720,12 @@ const App: React.FC = () => {
                       }
                     }
                     
-                    console.log('>>> [DatabaseLoader] Finalizando carga e navegando para UNIT_SELECTION');
+                    console.log('>>> [DatabaseLoader] Finalizando carga. Navegando para UNIT_SELECTION...');
                     setStartWithDataMenu(false);
                     pushScreen(AppScreen.UNIT_SELECTION); 
                   } catch (error) {
                     console.error('>>> [DatabaseLoader] Erro crítico na ativação:', error);
                     setIsSyncing(false);
-                    // Opcional: mostrar um erro para o usuário
                   }
                 }} 
               />
