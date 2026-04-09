@@ -17,7 +17,7 @@ const defaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = defaultIcon;
-import { Layers, Info, X, Filter, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft } from 'lucide-react';
+import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2 } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -82,11 +82,20 @@ const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points
 };
 
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSelectLocation }) => {
-  const [showInfo, setShowInfo] = useState(true);
+  const [showInfo, setShowInfo] = useState(false);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string | 'ALL'>('ALL');
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA' | 'GRID'>('AREA');
   const [zoomLevel, setZoomLevel] = useState(13);
+
+  // Contagem de filtros ativos
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (selectedOrigin !== 'ALL') count++;
+    if (selectedLocation !== 'ALL') count++;
+    return count;
+  }, [selectedOrigin, selectedLocation]);
 
   // Lista de localidades únicas para o filtro (Baseado no local onde foi INVENTARIADO)
   const locations = useMemo(() => {
@@ -275,8 +284,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   }, [filteredAssets]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-white overflow-hidden relative">
-      {/* Mapa Fullscreen */}
+    <div className="flex flex-col h-[100dvh] bg-[#0F172A] overflow-hidden relative font-sans">
+      {/* Mapa Fullscreen (Camada 0) */}
       <div className="absolute inset-0 z-0">
         <MapContainer 
           center={initialCenter} 
@@ -441,78 +450,181 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
         </MapContainer>
       </div>
 
-      {/* Botão Voltar Flutuante */}
-      <div className="absolute top-16 left-6 z-[1001]">
-        <button 
-          onClick={onBack}
-          className="w-12 h-12 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-slate-900 border border-slate-100 active:scale-90 transition-all"
-        >
-          <ArrowLeft size={20} />
-        </button>
-      </div>
-
-      {/* Seletor de Modo Flutuante (Topo Direita) */}
-      <div className="absolute top-16 right-6 z-[1001] flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-2xl shadow-2xl border border-white/10">
-        <button
-          onClick={() => setHeatmapMode('GRID')}
-          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-            heatmapMode === 'GRID' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-          }`}
-        >
-          <Box size={14} />
-          <span>Grade</span>
-        </button>
-        <button
-          onClick={() => setHeatmapMode('AREA')}
-          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-            heatmapMode === 'AREA' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-          }`}
-        >
-          <MapIcon size={14} />
-          <span>Área</span>
-        </button>
-        <button
-          onClick={() => setHeatmapMode('VALUE')}
-          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${
-            heatmapMode === 'VALUE' ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'
-          }`}
-        >
-          <Activity size={14} />
-          <span>Valor</span>
-        </button>
-      </div>
-
-      {/* Filtros Flutuantes (Abaixo do Back) */}
-      <div className="absolute top-32 left-6 right-6 z-[1001] flex flex-col space-y-2 pointer-events-none">
-        <div className="pointer-events-auto bg-white/90 backdrop-blur-md border border-slate-100 p-1.5 rounded-2xl shadow-xl flex items-center justify-between">
-          <div className="flex items-center space-x-2 px-3 border-r border-slate-100">
-            <Filter size={16} className="text-blue-600" />
-            <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Filtros</span>
+      {/* Header & Navegação (Stripe Style) */}
+      <div className="absolute top-0 left-0 right-0 z-[1001] px-6 pt-6 pb-6 bg-gradient-to-b from-[#0F172A]/80 to-transparent pointer-events-none">
+        <div className="flex items-center justify-between pointer-events-auto">
+          <div className="flex items-center space-x-4">
+            <button 
+              onClick={onBack}
+              className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center text-white border border-white/10 active:scale-90 transition-all shadow-lg"
+            >
+              <ArrowLeft size={18} strokeWidth={2} />
+            </button>
+            <div className="flex flex-col">
+              <h1 className="text-sm font-medium text-white/90 tracking-tight">Auditoria</h1>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  <ShieldCheck size={10} className="text-emerald-400" />
+                  <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Safe</span>
+                </div>
+                <span className="text-[8px] font-medium text-white/40 uppercase tracking-widest">v24.50.2</span>
+              </div>
+            </div>
           </div>
-          <div className="flex-1 flex items-center px-3 space-x-4">
-            <select 
-              value={selectedOrigin}
-              onChange={(e) => setSelectedOrigin(e.target.value as TransactionOrigin | 'ALL')}
-              className="bg-transparent border-none text-[10px] font-black text-slate-600 uppercase tracking-widest focus:ring-0 cursor-pointer"
-            >
-              {originOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <div className="h-4 w-px bg-slate-100" />
-            <select 
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              className="bg-transparent border-none text-[10px] font-black text-slate-600 uppercase tracking-widest focus:ring-0 cursor-pointer max-w-[150px]"
-            >
-              <option value="ALL">TODAS AS LOCALIDADES</option>
-              {locations.map(loc => (
-                <option key={loc} value={loc}>{loc}</option>
-              ))}
-            </select>
+
+          {/* Segmented Control (CALOR, GRADE, ÁREA, VALOR) */}
+          <div className="bg-[#1E293B]/90 backdrop-blur-md p-1 rounded-xl shadow-2xl border border-white/5 flex items-center ml-2">
+            {[
+              { id: 'DENSITY', label: 'Calor', icon: Flame },
+              { id: 'GRID', label: 'Grade', icon: Box },
+              { id: 'AREA', label: 'Área', icon: MapIcon },
+              { id: 'VALUE', label: 'Valor', icon: Activity }
+            ].map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => setHeatmapMode(mode.id as 'DENSITY' | 'VALUE' | 'AREA' | 'GRID')}
+                className={`px-3 sm:px-4 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex items-center space-x-2 ${
+                  heatmapMode === mode.id 
+                    ? 'bg-white text-[#0F172A] shadow-md scale-[1.02]' 
+                    : 'text-white/40 hover:text-white/70'
+                }`}
+              >
+                <mode.icon size={12} strokeWidth={1.5} />
+                <span className="hidden md:inline">{mode.label}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
+
+      {/* Botão de Filtros Flutuante (Ilha) */}
+      <div className="absolute top-32 left-6 z-[1001]">
+        <button 
+          onClick={() => setIsFilterModalOpen(true)}
+          className="bg-white/10 backdrop-blur-md border border-white/10 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center space-x-3 active:scale-95 transition-all group"
+        >
+          <div className="relative">
+            <SlidersHorizontal size={16} className="text-[#3B82F6] group-hover:rotate-12 transition-transform" />
+            {activeFiltersCount > 0 && (
+              <div className="absolute -top-2 -right-2 w-4 h-4 bg-[#3B82F6] rounded-full flex items-center justify-center border-2 border-[#0F172A]">
+                <span className="text-[8px] font-black text-white">{activeFiltersCount}</span>
+              </div>
+            )}
+          </div>
+          <span className="text-[10px] font-bold text-white uppercase tracking-widest">Filtros</span>
+          <ChevronDown size={12} className="text-white/40" />
+        </button>
+      </div>
+
+      {/* Botão de Informações (Canto Inferior Direito) */}
+      <div className="absolute bottom-10 right-6 z-[1001] flex flex-col space-y-3">
+        {!showInfo && (
+          <button 
+            onClick={() => setShowInfo(true)}
+            className="w-12 h-12 bg-[#3B82F6] rounded-2xl shadow-2xl flex items-center justify-center text-white active:scale-90 transition-all hover:bg-[#2563EB]"
+          >
+            <Info size={22} strokeWidth={1.5} />
+          </button>
+        )}
+      </div>
+
+      {/* Modal de Filtros (Glassmorphism) */}
+      <AnimatePresence>
+        {isFilterModalOpen && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsFilterModalOpen(false)}
+              className="absolute inset-0 bg-[#0F172A]/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-sm bg-[#1E293B]/95 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-[#3B82F6]" />
+              
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-[#3B82F6]/10 rounded-xl flex items-center justify-center text-[#3B82F6]">
+                    <SlidersHorizontal size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-white uppercase tracking-widest">Filtros de Mapa</h2>
+                    <p className="text-[10px] text-white/40 font-medium uppercase tracking-widest">Refine sua auditoria</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsFilterModalOpen(false)}
+                  className="p-2 text-white/20 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <label className="text-[9px] font-black text-white/40 uppercase tracking-widest ml-1">Origem da Transação</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {originOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setSelectedOrigin(opt.value as TransactionOrigin | 'ALL')}
+                        className={`px-4 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all text-left flex items-center justify-between ${
+                          selectedOrigin === opt.value 
+                            ? 'bg-[#3B82F6] text-white shadow-lg' 
+                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {selectedOrigin === opt.value && <CheckCircle2 size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[9px] font-black text-white/40 uppercase tracking-widest ml-1">Localidade Específica</label>
+                  <div className="relative">
+                    <select 
+                      value={selectedLocation}
+                      onChange={(e) => setSelectedLocation(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-[10px] font-bold text-white uppercase tracking-widest focus:ring-2 focus:ring-[#3B82F6] focus:border-transparent appearance-none cursor-pointer"
+                    >
+                      <option value="ALL" className="bg-[#1E293B]">TODAS AS LOCALIDADES</option>
+                      {locations.map(loc => (
+                        <option key={loc} value={loc} className="bg-[#1E293B]">{loc}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-10 flex items-center space-x-3">
+                <button 
+                  onClick={() => {
+                    setSelectedOrigin('ALL');
+                    setSelectedLocation('ALL');
+                  }}
+                  className="flex-1 py-4 bg-white/5 text-white/60 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all"
+                >
+                  Limpar
+                </button>
+                <button 
+                  onClick={() => setIsFilterModalOpen(false)}
+                  className="flex-[2] py-4 bg-[#3B82F6] text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-[#3B82F6]/20 active:scale-95 transition-all"
+                >
+                  Aplicar Filtros
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Painel de Informações (Bottom Sheet Style) */}
       <AnimatePresence>
@@ -523,95 +635,96 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
             exit={{ y: '100%' }}
             className="absolute bottom-0 left-0 right-0 z-[1002] p-4 pointer-events-none"
           >
-            <div className="pointer-events-auto bg-white/95 backdrop-blur-xl border-t border-slate-100 rounded-t-[2.5rem] p-8 shadow-[0_-20px_50px_rgba(0,0,0,0.1)] relative">
-              <div className={`absolute top-0 left-0 w-full h-1.5 rounded-t-full ${
-                heatmapMode === 'VALUE' ? 'bg-blue-600' : 
+            <div className="pointer-events-auto bg-[#0F172A] backdrop-blur-xl border border-slate-800 rounded-xl p-6 pb-10 shadow-2xl relative overflow-hidden">
+              {/* Glow Effect sutil */}
+              <div className="absolute -top-12 -left-12 w-32 h-32 bg-[#3B82F6]/5 blur-[60px] rounded-full" />
+              
+              <div className={`absolute top-0 left-0 w-full h-1 ${
+                heatmapMode === 'VALUE' ? 'bg-[#3B82F6]' : 
                 heatmapMode === 'AREA' ? 'bg-emerald-500' : 
+                heatmapMode === 'DENSITY' ? 'bg-orange-500' :
                 'bg-blue-500'
               }`} />
               
               <button 
                 onClick={() => setShowInfo(false)}
-                className="absolute top-6 right-6 p-2 text-slate-300 hover:text-slate-900 transition-colors"
+                className="absolute top-4 right-4 p-1.5 text-slate-600 hover:text-white transition-colors"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
 
-              <div className="flex items-center space-x-4 mb-6">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                  heatmapMode === 'VALUE' ? 'bg-blue-50 text-blue-600' : 
-                  heatmapMode === 'AREA' ? 'bg-emerald-50 text-emerald-600' :
-                  'bg-blue-50 text-blue-600'
+              <div className="flex items-center space-x-3 mb-4">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  heatmapMode === 'VALUE' ? 'bg-[#3B82F6]/20 text-[#3B82F6]' : 
+                  heatmapMode === 'AREA' ? 'bg-emerald-500/20 text-emerald-400' :
+                  heatmapMode === 'DENSITY' ? 'bg-orange-500/20 text-orange-400' :
+                  'bg-blue-500/20 text-blue-400'
                 }`}>
-                  {heatmapMode === 'VALUE' ? <Activity size={24} /> : 
-                   heatmapMode === 'AREA' ? <MapIcon size={24} /> :
-                   <Layers size={24} />}
+                  {heatmapMode === 'VALUE' ? <Activity size={20} strokeWidth={2} /> : 
+                   heatmapMode === 'AREA' ? <MapIcon size={20} strokeWidth={2} /> :
+                   heatmapMode === 'DENSITY' ? <Flame size={20} strokeWidth={2} /> :
+                   <Layers size={20} strokeWidth={2} />}
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-semibold text-white tracking-tight leading-none">
                     {heatmapMode === 'VALUE' ? 'Concentração Financeira' : 
                      heatmapMode === 'AREA' ? 'Área Ocupada por Localidade' :
+                     heatmapMode === 'DENSITY' ? 'Mapa de Calor (Densidade)' :
                      'Densidade de Ativos'}
                   </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Visão Global de Auditoria</p>
+                  <p className="text-xs text-slate-500 mt-1">Visão Global de Auditoria</p>
                 </div>
               </div>
 
-              <p className="text-xs text-slate-500 leading-relaxed mb-8 font-medium">
-                {heatmapMode === 'VALUE' 
-                  ? 'O calor representa o valor acumulado dos ativos. Áreas vermelhas indicam maior concentração de capital imobilizado.'
-                  : heatmapMode === 'AREA'
-                  ? 'Visualização dos polígonos de ocupação baseados na dispersão física dos ativos inventariados por endereço.'
-                  : 'O calor representa a quantidade de ativos por m². Áreas vermelhas indicam maior volume de itens físicos.'}
-              </p>
-
-              <div className="grid grid-cols-3 gap-6 pt-6 border-t border-slate-50">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ativos</span>
-                  <span className="text-2xl font-black text-slate-900 tracking-tighter">
+              <div className="flex flex-row gap-3 mb-6">
+                <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-1 flex flex-col">
+                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Ativos</span>
+                  <span className="text-xl font-bold text-white">
                     {filteredAssets.filter(a => a._lat && a._lng).length}
                   </span>
                 </div>
-                <div className="flex flex-col text-center">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Valor Total</span>
-                  <span className="text-2xl font-black text-blue-600 tracking-tighter">
+                <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-[1.5] flex flex-col">
+                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Valor Total</span>
+                  <span className="text-xl font-bold text-[#3B82F6]">
                     {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
                   </span>
                 </div>
-                <div className="flex flex-col text-right">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Locais</span>
-                  <span className="text-2xl font-black text-emerald-600 tracking-tighter">
+                <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-1 flex flex-col">
+                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Locais</span>
+                  <span className="text-xl font-bold text-emerald-400">
                     {Object.keys(locationGroups).length}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-8 flex items-center justify-center">
-                {databaseMode === DatabaseMode.INTERNAL ? (
-                  <div className="flex items-center space-x-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100">
-                    <Database size={14} className="text-amber-600" />
-                    <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Banco Local Ativo</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-2 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-100">
-                    <Cloud size={14} className="text-emerald-600" />
-                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Nuvem Real-time</span>
-                  </div>
-                )}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                <p className="text-xs text-slate-500 leading-tight opacity-70 max-w-[70%]">
+                  {heatmapMode === 'VALUE' 
+                    ? 'Calor representa o valor acumulado. Áreas vermelhas indicam concentração de capital.'
+                    : heatmapMode === 'AREA'
+                    ? 'Polígonos de ocupação baseados na dispersão física dos ativos.'
+                    : heatmapMode === 'DENSITY'
+                    ? 'Densidade física de ativos por m². Áreas quentes indicam maior volume.'
+                    : 'Quantidade de ativos por m².'}
+                </p>
+                <div className="flex items-center space-x-2">
+                  {databaseMode === DatabaseMode.INTERNAL ? (
+                    <div className="flex items-center space-x-1.5 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                      <Database size={12} className="text-amber-500" />
+                      <span className="text-[9px] font-bold text-amber-500 uppercase">Local</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1.5 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                      <Cloud size={12} className="text-emerald-500" />
+                      <span className="text-[9px] font-bold text-emerald-500 uppercase">Nuvem</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {!showInfo && (
-        <button 
-          onClick={() => setShowInfo(true)}
-          className="absolute bottom-8 right-6 z-[1001] w-14 h-14 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-blue-600 border border-slate-100 active:scale-90 transition-all"
-        >
-          <Info size={24} />
-        </button>
-      )}
     </div>
   );
 };
