@@ -89,6 +89,7 @@ interface MainMenuProps {
   onResetGPS?: () => void;
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
+  onCheckIntegrity?: () => Promise<{ success: boolean; message: string }>;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -138,7 +139,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateExcludedAccounts,
   onResetGPS,
   onToggleGpsBypass,
-  isGpsBypassed = false
+  isGpsBypassed = false,
+  onCheckIntegrity
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -153,6 +155,25 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isSecurityPinOpen, setIsSecurityPinOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
+  const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
+
+  const handleCheckIntegrity = async () => {
+    if (!onCheckIntegrity) return;
+    setIsCheckingIntegrity(true);
+    try {
+      const result = await onCheckIntegrity();
+      showModal(
+        result.success ? "Integridade Confirmada" : "Falha de Integridade",
+        result.message,
+        result.success ? "success" : "error"
+      );
+    } catch (err) {
+      showModal("Erro", "Falha ao realizar verificação de integridade.", "error");
+    } finally {
+      setIsCheckingIntegrity(false);
+    }
+  };
+
   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com" || user?.email.toLowerCase() === "semorr@gmail.com.br";
   const hasData = inventoryInfo.totalDatabase > 0;
 
@@ -518,6 +539,20 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              <button 
+                onClick={handleCheckIntegrity}
+                disabled={isCheckingIntegrity}
+                className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm disabled:opacity-50"
+              >
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100">
+                  {isCheckingIntegrity ? <RefreshCw size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Integridade</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Validar Checksum SHA-256</p>
+                </div>
+              </button>
+
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.CAMPAIGN_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Calendar size={16} /></div>
                 <div className="flex-1">
@@ -614,20 +649,23 @@ const MainMenu: React.FC<MainMenuProps> = ({
       )}
 
       {isPreferencesMenuOpen && (
-        <div className="fixed inset-0 z-[10000] bg-slate-50/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
-          <div className="fixed top-8 left-6 z-[10001]">
-            <BackButton onClick={() => setIsPreferencesMenuOpen(false)} label="Voltar" />
+        <div className="fixed inset-0 z-[10000] bg-slate-50 flex flex-col animate-fadeIn">
+          {/* Top App Bar - Material 3 Style */}
+          <div className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-3 flex items-center sticky top-0 z-[10001]">
+            <button 
+              onClick={() => setIsPreferencesMenuOpen(false)}
+              className="p-2 -ml-2 text-slate-600 active:bg-slate-100 rounded-full transition-colors mr-3"
+            >
+              <ChevronRight size={24} className="rotate-180" />
+            </button>
+            <div>
+              <h1 className="text-base font-semibold text-slate-900 leading-tight">Ajustes de Campo</h1>
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Preferências do Auditor</p>
+            </div>
           </div>
-          <div className="w-full max-w-sm space-y-3">
-              <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-slate-200 shadow-lg overflow-hidden p-3 text-slate-400">
-                  <SlidersHorizontal size={32} />
-                </div>
-                <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Ajustes de Campo</h2>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-1.5">Preferências do Auditor</p>
-              </div>
-            
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar">
+            <div className="w-full max-w-sm mx-auto space-y-4">
               {/* AUTO CONFERENCIA */}
               <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">

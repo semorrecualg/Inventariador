@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
-import { generateUUID } from '../services/supabaseService';
+import { generateUUID, logAuditEvent } from '../services/supabaseService';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import BackButton from './BackButton';
 import Modal from './Modal';
@@ -42,6 +42,7 @@ interface DatabaseLoaderProps {
   excludedAccounts?: string[];
   campaigns?: import('../types').InventoryCampaign[];
   user?: import('../types').User | null;
+  databaseMode?: import('../types').DatabaseMode;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
@@ -330,6 +331,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     if (rawExtractedAssetsRef.current.length > 0) {
       setIsActivating(true);
       try {
+        // Log de Auditoria: Carga Expert
+        await logAuditEvent({
+          user_email: user?.email || 'ADMIN',
+          action: 'CARGA_EXPERT',
+          details: `Carga de ${rawExtractedAssetsRef.current.length} ativos realizada via planilha.`,
+          _tenantid: user?.tenantid || 'GLOBAL'
+        });
+
         await onDataLoaded(rawExtractedAssetsRef.current, Object.keys(summary?.companies || {}).sort());
       } catch (err) {
         console.error('>>> [DatabaseLoader] Erro ao ativar sistema:', err);

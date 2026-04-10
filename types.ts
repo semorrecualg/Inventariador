@@ -34,7 +34,12 @@ export enum TransactionOrigin {
 export interface AuditLogEntry {
   timestamp: string;
   user: string;
+  user_email?: string; // Para compatibilidade com Supabase
   action: string;
+  table_name?: string;
+  record_id?: string;
+  old_data?: unknown;
+  new_data?: unknown;
   details?: string;
   _tenantid?: string;
   tenantid?: string; // Deprecated

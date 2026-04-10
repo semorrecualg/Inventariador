@@ -56,7 +56,7 @@ import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Spar
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange, fetchUnitConfigs, fetchCampaigns } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
@@ -538,6 +538,13 @@ const App: React.FC = () => {
 
   const handleDownloadUnit = useCallback(async (unitName: string) => {
     if (isSyncing) return;
+    
+    // No modo INTERNO, o download é irrelevante pois os dados já estão locais
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      console.log('>>> [Download] Modo Mobile Puro detectado. Download ignorado.');
+      return;
+    }
+
     if (!navigator.onLine) {
       setModalConfig({
         isOpen: true,
@@ -1937,6 +1944,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCheckIntegrity = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      console.log('>>> [Integrity] Iniciando verificação manual...');
+      const loaded = await loadInventory(databaseMode);
+      
+      if (!loaded) {
+        return { success: false, message: "Não foi possível carregar os dados para verificação." };
+      }
+
+      if (loaded._integrity_failed) {
+        return { 
+          success: false, 
+          message: "ALERTA: A integridade dos dados foi comprometida! O checksum SHA-256 atual não corresponde ao gravado. Isso pode indicar corrupção de dados ou alteração externa não autorizada." 
+        };
+      }
+
+      return { 
+        success: true, 
+        message: `Integridade verificada com sucesso! Todos os ${loaded.assets.length} ativos correspondem ao checksum SHA-256 gravado no último salvamento.` 
+      };
+    } catch (error) {
+      console.error('Erro ao verificar integridade:', error);
+      return { success: false, message: "Erro técnico durante a verificação de integridade." };
+    }
+  };
+
   const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
     setIsSyncing(true);
     try {
@@ -2253,30 +2286,6 @@ const App: React.FC = () => {
     
     // Salva incrementalmente no banco local (SQLite-like) imediatamente
     saveAssetIncremental(assetWithHistory);
-    
-    // Log de Auditoria na Nuvem (se estiver em modo Supabase)
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      logAuditEvent({
-        user_email: user?.email || 'unknown',
-        action: isNew ? 'INSERT' : 'UPDATE',
-        table_name: 'assets',
-        record_id: String(updatedAsset.id),
-        new_data: assetWithHistory,
-        details: auditEntry.details,
-        _tenantid: user?._tenantid || user?.tenantid,
-        origin: updatedAsset._origemTransacao
-      });
-
-      // Log robusto na tabela asset_logs
-      logAssetChange({
-        asset_id: String(updatedAsset.id),
-        user_email: user?.email || 'unknown',
-        action: isNew ? 'CREATE' : 'UPDATE',
-        old_data: existing,
-        new_data: assetWithHistory,
-        _tenantid: user?._tenantid || user?.tenantid
-      });
-    }
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
@@ -2519,25 +2528,6 @@ const App: React.FC = () => {
     if (databaseMode === DatabaseMode.SUPABASE) {
       try {
         await syncAssetsToCloud([deletedAsset], user?.tenantid);
-        
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'DELETE',
-          table_name: 'assets',
-          record_id: String(assetId),
-          new_data: deletedAsset,
-          details: 'Soft Delete executado',
-          _tenantid: user?._tenantid || user?.tenantid
-        });
-
-        logAssetChange({
-          asset_id: String(assetId),
-          user_email: user?.email || 'unknown',
-          action: 'DELETE',
-          old_data: assetToDelete,
-          new_data: deletedAsset,
-          _tenantid: user?._tenantid || user?.tenantid
-        });
       } catch (err) {
         console.error('Erro ao sincronizar exclusão com Supabase:', err);
       }
@@ -2610,29 +2600,6 @@ const App: React.FC = () => {
           };
           updates._history = [...(updates._history || []), historyEntry];
           
-          // Log de Auditoria na Nuvem para cada item (se estiver em modo Supabase)
-          if (databaseMode === DatabaseMode.SUPABASE) {
-            logAuditEvent({
-              user_email: user?.email || 'unknown',
-              action: 'BULK_UPDATE',
-              table_name: 'assets',
-              record_id: String(a.id),
-              new_data: updates,
-              details: historyEntry.details,
-              _tenantid: user?._tenantid || user?.tenantid || '',
-              origin: origin
-            });
-
-            logAssetChange({
-              asset_id: String(a.id),
-              user_email: user?.email || 'unknown',
-              action: 'UPDATE',
-              old_data: a,
-              new_data: updates,
-              _tenantid: user?._tenantid || user?.tenantid || ''
-            });
-          }
-
           // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
           const targetLoc = isReconciliationWorkflow
             ? (a.ENDERECO || "")
@@ -3424,26 +3391,26 @@ const App: React.FC = () => {
                  </div>
                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria</p>
                </div>
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center space-x-1.5">
                   <div 
-                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md transition-all ${isSafeMode ? 'text-emerald-500/60' : 'text-red-500/60'}`} 
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`} 
                     title={isSafeMode ? "Banco de Dados Protegido" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
                   >
                     <ShieldCheck size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
-                  <div className="px-1.5 py-0.5 text-blue-500/60">
+                  <div className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 rounded-md text-blue-600">
                     <span className="text-[7px] font-bold uppercase tracking-[0.1em]">v24.50.2</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
-                    className="px-1.5 py-0.5 flex items-center space-x-1 cursor-pointer hover:text-indigo-500 transition-all text-indigo-500/60"
+                    className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded-md flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
                   >
                     <Activity size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-1.5 py-0.5 flex items-center space-x-1 text-purple-500/60">
+                    <div className="px-1.5 py-0.5 bg-purple-50 border border-purple-100 rounded-md flex items-center space-x-1 text-purple-600">
                       <Sparkles size={8} />
                       <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
                     </div>
@@ -3645,24 +3612,29 @@ const App: React.FC = () => {
                 excludedAccounts={inventory.excludedAccounts}
                 campaigns={campaigns}
                 user={user}
+                databaseMode={databaseMode}
                 onDataLoaded={async (a, c) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
-                  console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}`);
+                  console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}, Modo: ${databaseMode}`);
                   
                   const newInventory = { 
                     ...inventory, 
                     assets: a, 
                     companies: c, 
                     lastUpdated: new Date().toISOString(), 
-                    status: DatabaseStatus.LOADED 
+                    status: DatabaseStatus.LOADED,
+                    databaseMode: databaseMode // Garante que o modo atual seja preservado
                   };
                   
-                  // Mostra tela de sincronização imediatamente se for admin
+                  // Mostra tela de sincronização imediatamente se for admin e NÃO estiver no modo INTERNO
                   const shouldSync = isAdmin && databaseMode !== DatabaseMode.INTERNAL && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+                  
                   if (shouldSync) {
                     console.log('>>> [DatabaseLoader] Sincronização necessária. Ativando isSyncing...');
                     setIsSyncing(true);
                     setSyncProgress({ current: 0, total: a.length });
+                  } else {
+                    console.log('>>> [DatabaseLoader] Sincronização ignorada (Modo INTERNO ou Supabase não configurado).');
                   }
 
                   try {
@@ -3878,6 +3850,7 @@ const App: React.FC = () => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL}
+              databaseMode={databaseMode}
               units={fullCompaniesWithStatus
                 .filter(c => {
                   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;

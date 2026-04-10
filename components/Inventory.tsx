@@ -35,7 +35,6 @@ import {
   Database,
   Keyboard,
   Calendar,
-  User as UserIcon,
   Mic,
   ShieldAlert,
   Activity,
@@ -201,8 +200,6 @@ const AssetCard = React.memo(({
     return baseColors;
   }, [visualStatus, isBaixado, isConferido, asset._is_divergent_baixa]);
 
-  const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
-
   const fullDescription = [
     asset.QT || '1',
     asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
@@ -213,8 +210,7 @@ const AssetCard = React.memo(({
 
   return (
     <div 
-      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card active:scale-[0.99] shadow-sm ${colors.bg} ${colors.border} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
-      style={{ borderLeftColor: colors.hex }}
+      className={`mb-3 p-4 border border-slate-100 rounded-2xl relative overflow-hidden transition-all active:scale-[0.99] shadow-sm ${colors.bg} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       onClick={() => {
         if (isBatchMode) {
           if (!isConferido) onToggleSelect(String(asset.id));
@@ -223,126 +219,65 @@ const AssetCard = React.memo(({
         }
       }}
     >
-      <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${colors.badge}`}>
-        {isBatchMode ? (
-          isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
-        ) : (
-          colors.icon && <colors.icon size={10} strokeWidth={3} />
-        )}
-        <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
-      </div>
-      
-      <div className="pt-4 pr-8 flex flex-col space-y-1.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Patrimônio:</span>
-            <span className={`text-lg font-bold font-mono tracking-tight ${colors.text}`}>
-              {formatEtiqueta(asset.ETIQUETA)}
-            </span>
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex flex-col">
+          <div className="flex items-center space-x-2 mb-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio</span>
             {(asset._photoUrl || hasLocalPhoto) && (
-              <div className="bg-accent/10 p-1 rounded-lg animate-pulse">
-                <Camera size={12} className="text-accent" />
-              </div>
+              <Camera size={12} className="text-accent" />
             )}
           </div>
-          {isBatch && (
-            <div className="px-2 py-1 bg-warning rounded-lg flex items-center space-x-1 shadow-md">
-              <Zap size={10} className="text-white fill-white" />
-              <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
-            </div>
-          )}
+          <span className={`text-xl font-bold font-mono tracking-tight ${colors.text}`}>
+            {formatEtiqueta(asset.ETIQUETA)}
+          </span>
         </div>
 
-        <p className="text-[11px] font-medium text-ink-muted uppercase leading-tight tracking-tight line-clamp-2">
-          {fullDescription}
-        </p>
-
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {asset._dataLeitura && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-ink text-white border border-border flex items-center divide-x divide-border">
-              <div className="flex items-center space-x-1 pr-2">
-                <Calendar size={10} className="text-accent" />
-                <span>{formatReadingTime(asset._dataLeitura)}</span>
-              </div>
-              {asset._auditor && (
-                <div className="flex items-center space-x-1 pl-2">
-                  <UserIcon size={10} className="text-success" />
-                  <span className="text-ink-muted">{asset._auditor}</span>
-                </div>
-              )}
-            </div>
+        <div className={`px-2 py-1 rounded-lg text-[8px] font-bold uppercase flex items-center space-x-1 shadow-sm ${colors.badge}`}>
+          {isBatchMode ? (
+            isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
+          ) : (
+            colors.icon && <colors.icon size={10} strokeWidth={3} />
           )}
-          {isBaixado && (
-            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-danger text-white border border-danger/20">
-              BAIXADO
-            </span>
-          )}
-          {asset._is_divergent_baixa && (
-            <span className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-red-600 text-white border border-red-700 animate-pulse">
-              DIVERGÊNCIA BAIXA
-            </span>
-          )}
-          {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
-            <span key={index} className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm ${index === 0 ? 'bg-accent-soft text-accent border border-accent/20' : index === 1 ? 'bg-warning/10 text-warning border border-warning/20' : 'bg-purple-100 text-purple-600 border border-purple-200'}`}>
-              {String(tag)}
-            </span>
-          ))}
-          {(asset._lat || asset._lng) && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-slate-100 text-slate-600 border border-slate-200 flex items-center space-x-1">
-              <MapPin size={8} />
-              <span>{asset._lat?.toFixed(4)}, {asset._lng?.toFixed(4)}</span>
-            </div>
-          )}
+          <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
         </div>
+      </div>
 
-        {asset.DE_PARA === 'COM ALTERAÇÃO' && (
-          <div className="mt-2 pt-2 border-t border-border/50">
-            <div className="flex items-center space-x-2 bg-accent-soft/50 p-2 rounded-xl border border-accent/10">
-              <div className="flex-1">
-                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Localização DE/PARA:</p>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-[8px] font-bold text-danger uppercase italic">DE: {asset.ENDERECO || '---'}</span>
-                  <span className="text-[8px] font-bold text-accent uppercase">PARA: {asset._localMaster || '---'}</span>
-                </div>
-              </div>
-            </div>
+      <p className="text-xs font-medium text-slate-600 uppercase leading-snug tracking-tight line-clamp-2 mb-3">
+        {fullDescription}
+      </p>
+
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        {asset._dataLeitura && (
+          <div className="px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 flex items-center space-x-1.5">
+            <Calendar size={10} />
+            <span>{formatReadingTime(asset._dataLeitura)}</span>
           </div>
         )}
-
-        {asset._camposAlterados && asset._camposAlterados.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
-            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Outras Alterações:</p>
-            {asset._camposAlterados.filter(f => f !== 'ENDERECO').slice(0, 5).map(field => (
-              <div key={field} className="flex flex-col bg-bg-main/50 p-1 rounded-md border border-border/30">
-                <div className="flex items-center justify-between">
-                  <span className="text-[7px] font-bold text-ink-muted uppercase">{String(field)}</span>
-                  <span className="text-[8px] font-bold text-success uppercase">PARA: {String(asset[field] || '---')}</span>
-                </div>
-                {asset._valoresOriginais?.[field] !== undefined && (
-                  <span className="text-[7px] text-danger font-bold uppercase italic mt-0.5">DE: {String(asset._valoresOriginais[field] || '---')}</span>
-                )}
-              </div>
-            ))}
-            {asset._camposAlterados.length > 10 && (
-              <p className="text-[7px] text-ink-muted font-bold uppercase tracking-widest">+ {asset._camposAlterados.length - 10} campos alterados</p>
-            )}
-          </div>
+        {isBaixado && (
+          <span className="px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider bg-red-100 text-red-600">
+            BAIXADO
+          </span>
         )}
+        {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
+          <span key={index} className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${index === 0 ? 'bg-blue-100 text-blue-600' : index === 1 ? 'bg-amber-100 text-amber-600' : 'bg-purple-100 text-purple-600'}`}>
+            {String(tag)}
+          </span>
+        ))}
       </div>
 
       {!isConferido && !isBatchMode && (
         <button 
           ref={confirmButtonRef}
           onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
-          className={`absolute bottom-3 right-3 w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg active:scale-90 transition-all ${colors.btn} shadow-accent/10`}
+          className="absolute bottom-4 right-4 w-12 h-12 rounded-full bg-accent text-white shadow-lg shadow-accent/30 flex items-center justify-center active:scale-90 transition-all"
         >
-          <Check size={20} strokeWidth={3} />
+          <Check size={24} strokeWidth={3} />
         </button>
       )}
 
       {isConferido && !isBatchMode && (
-        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isBaixado ? 'bg-danger' : 'bg-success'} text-white rounded-lg flex items-center justify-center shadow-md`}>
-          <Check size={16} strokeWidth={3} />
+        <div className={`absolute bottom-4 right-4 w-10 h-10 ${isBaixado ? 'bg-red-500' : 'bg-emerald-500'} text-white rounded-full flex items-center justify-center shadow-lg`}>
+          <Check size={20} strokeWidth={3} />
         </div>
       )}
     </div>
@@ -1444,165 +1379,159 @@ const Inventory: React.FC<InventoryProps> = ({
         </React.Fragment>
       ) : (
         <React.Fragment>
-          <div className="px-3 py-1.5 bg-white border-b border-border shadow-sm z-20">
-            <div className="flex flex-col space-y-1.5 mb-1">
-              {/* Row 1: Action Buttons & SAFE Status */}
-              <div className="flex items-center justify-between space-x-2">
-                <BackButton 
-                  onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
-                  label="Voltar"
-                  subLabel="Seleção de Local"
-                />
-                
-                <div className="flex items-center space-x-2">
-                  {currentCampaignId && (
-                    <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">
-                      <Activity size={10} className="text-accent animate-pulse" />
-                      <span className="text-[8px] font-black text-accent uppercase tracking-widest">Evento Ativo</span>
-                    </div>
-                  )}
-                  {isGpsAvailable !== undefined && (
-                    <div className={`flex items-center space-x-1 px-2 py-1 rounded-lg border shadow-sm transition-all ${isGpsAvailable ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : isGpsAvailable === false ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-                      <MapPin size={12} className={isGpsAvailable ? 'animate-pulse' : ''} />
-                      <span className="text-[8px] font-black uppercase tracking-widest">
-                        {isGpsAvailable ? 'GPS OK' : isGpsAvailable === false ? 'GPS OFF' : 'GPS ?'}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex items-center space-x-2">
-                  {isBatchMode && (
-                    <button 
-                      onClick={toggleSelectAll} 
-                      className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent border-accent text-white' : 'bg-white border-border text-ink-muted'}`}
-                    >
-                      {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Todos</span>
-                    </button>
-                  )}
-                  
-                  {activeFilter === 'checked' && (
-                    <button 
-                      onClick={onOpenSignature}
-                      className="p-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl active:scale-95 transition-all flex items-center space-x-2 shadow-sm"
-                      title="Finalizar e Assinar Inventário"
-                    >
-                      <FileText size={16} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">Finalizar</span>
-                    </button>
-                  )}
-                  
-                  {activeFilter === 'pending' && !isBatchMode && (
-                    <button 
-                      onClick={onOpenConsultation}
-                      className="p-2.5 bg-accent-soft text-accent rounded-xl border border-accent/10 shadow-sm active:scale-95 transition-all"
-                      title="Consultar Item na Base"
-                    >
-                      <Database size={20} strokeWidth={2.5} />
-                    </button>
-                  )}
-                  
-                  <div className="flex p-0.5 bg-bg-main rounded-xl border border-border shadow-inner">
-                    <button 
-                      onClick={() => {
-                        if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
-                          setShowNumericKeypad(!showNumericKeypad);
-                        } else {
-                          onUpdateSearchMode(InventorySearchMode.MANUAL);
-                          setIsSearchVisible(true);
-                          setIsScannerOpen(false);
-                          setShowNumericKeypad(true);
-                        }
-                      }} 
-                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
-                    >
-                      <Keyboard size={20} strokeWidth={searchMode === InventorySearchMode.MANUAL ? 3 : 2} />
-                    </button>
-                    <button 
-                      onClick={() => {
-                        onUpdateSearchMode(InventorySearchMode.SCANNER);
-                        setIsSearchVisible(false);
-                        setIsScannerOpen(true);
-                      }} 
-                      className={`p-2.5 rounded-lg transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
-                    >
-                      <Camera size={20} strokeWidth={searchMode === InventorySearchMode.SCANNER ? 3 : 2} />
-                    </button>
-                  </div>
-
-                </div>
+          {/* Top App Bar - Material 3 Style */}
+          <div className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-2 flex items-center justify-between sticky top-0 z-50">
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
+                className="p-2 -ml-2 text-slate-600 active:bg-slate-100 rounded-full transition-colors"
+              >
+                <ChevronRight size={24} className="rotate-180" />
+              </button>
+              <div>
+                <h1 className="text-base font-semibold text-slate-900 leading-tight">Auditoria</h1>
+                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Seleção de Local</p>
               </div>
             </div>
 
-            {/* Row 2: Location Field & Counters */}
-            <div className="mt-1.5 space-y-1.5">
-              <div className="w-full px-3 py-1.5 bg-bg-main border border-border rounded-xl flex items-center space-x-3 text-ink-muted shadow-sm">
-                <MapPin size={14} className="text-accent shrink-0" />
-                <span className="text-[10px] font-bold uppercase italic tracking-tight flex-1 text-left leading-tight">
-                  {selectedLocation}
-                </span>
-              </div>
+            <div className="flex items-center space-x-1">
+              {isBatchMode && (
+                <button 
+                  onClick={toggleSelectAll} 
+                  className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white' : 'text-slate-600'}`}
+                  title="Selecionar Todos"
+                >
+                  {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
+                </button>
+              )}
 
-              {/* Telemetria Badge (Shadcn/ui style) */}
-              <div className="flex items-center justify-between px-1">
-                <div className="flex items-center space-x-2">
-                  <div className={`flex items-center space-x-1.5 px-2 py-1 rounded-lg border shadow-sm ${deviceMetrics.temp > 42 ? 'bg-red-50 border-red-200 text-red-600' : 'bg-emerald-50 border-emerald-200 text-emerald-600'}`}>
-                    <Activity size={10} className={deviceMetrics.temp > 42 ? 'animate-pulse' : ''} />
-                    <span className="text-[8px] font-black uppercase tracking-widest">{deviceMetrics.temp.toFixed(1)}°C</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-slate-600 shadow-sm">
-                    <Zap size={10} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-amber-500'} />
-                    <span className="text-[8px] font-black uppercase tracking-widest">{deviceMetrics.battery}%</span>
-                  </div>
+              {activeFilter === 'checked' && (
+                <button 
+                  onClick={onOpenSignature}
+                  className="w-10 h-10 flex items-center justify-center text-accent active:bg-accent/10 rounded-full transition-colors"
+                  title="Finalizar e Assinar"
+                >
+                  <FileText size={20} />
+                </button>
+              )}
+
+              {isGpsAvailable !== undefined && (
+                <div className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${isGpsAvailable ? 'text-emerald-500' : 'text-slate-300'}`}>
+                  <MapPin size={20} className={isGpsAvailable ? 'animate-pulse' : ''} />
                 </div>
+              )}
+              
+              <button 
+                onClick={onOpenConsultation}
+                className="w-10 h-10 flex items-center justify-center text-slate-600 active:bg-slate-100 rounded-full transition-colors"
+                title="Consultar Item na Base"
+              >
+                <Database size={20} />
+              </button>
 
-                <button 
-                  onClick={() => setTorch(prev => prev === 'on' ? 'off' : 'on')}
-                  className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg border shadow-sm transition-all active:scale-95 ${torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white border-border text-ink-muted'}`}
-                >
-                  <Zap size={10} className={torch === 'on' ? 'fill-white' : ''} />
-                  <span className="text-[8px] font-black uppercase tracking-widest">{torch === 'on' ? 'Lanterna ON' : 'Lanterna OFF'}</span>
-                </button>
-              </div>
-            </div>
+              <button 
+                onClick={() => {
+                  if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
+                    setShowNumericKeypad(!showNumericKeypad);
+                  } else {
+                    onUpdateSearchMode(InventorySearchMode.MANUAL);
+                    setIsSearchVisible(true);
+                    setIsScannerOpen(false);
+                    setShowNumericKeypad(true);
+                  }
+                }} 
+                className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent/10 text-accent' : 'text-slate-600'}`}
+              >
+                <Keyboard size={20} />
+              </button>
 
-            {isSearchVisible && (
-              <div className="relative mb-3 animate-fadeIn">
-                <input 
-                  ref={searchInputRef} 
-                  type="text" 
-                  readOnly
-                  inputMode="none"
-                  onFocus={() => setShowNumericKeypad(true)}
-                  value={displayValue} 
-                  className="w-full bg-bg-main border border-border pl-4 pr-12 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
-                  placeholder="DIGITE ETIQUETA..." 
-                />
-                <button 
-                  onClick={triggerSmartOCR}
-                  className="absolute right-12 top-1/2 -translate-y-1/2 p-2 text-ink-muted hover:text-accent active:scale-90 transition-all"
-                  title="Busca por Foto (OCR)"
-                >
-                  <Camera size={20} />
-                </button>
-                <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted active:text-ink"><X size={20} /></button>
-                
-                <input 
-                  type="file" 
-                  ref={ocrInputRef} 
-                  className="hidden" 
-                  accept="image/*" 
-                  capture="environment"
-                  onChange={handleSmartOCR}
-                />
-              </div>
-            )}
-
-            <div className="flex space-x-1.5">
-              <button onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'pending' ? 'bg-ink text-white border-ink shadow-sm' : 'text-ink-muted border-border'}`}>Pendentes</button>
-              <button onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} className={`flex-1 py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${activeFilter === 'checked' ? 'bg-accent text-white border-accent shadow-sm' : 'text-ink-muted border-border'}`}>Inventariado</button>
+              <button 
+                onClick={() => {
+                  onUpdateSearchMode(InventorySearchMode.SCANNER);
+                  setIsSearchVisible(false);
+                  setIsScannerOpen(true);
+                }} 
+                className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent/10 text-accent' : 'text-slate-600'}`}
+              >
+                <Camera size={20} />
+              </button>
             </div>
           </div>
-        </div>
+
+          <div className="bg-white px-4 pt-2 pb-3 shadow-sm border-b border-slate-50">
+            <div className="space-y-2">
+              {/* Location & Sensors Row */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 flex-1 min-w-0 mr-2">
+                  <MapPin size={12} className="text-accent shrink-0" />
+                  <span className="text-[10px] font-bold text-slate-700 truncate uppercase">
+                    {selectedLocation}
+                  </span>
+                </div>
+                
+                <div className="flex items-center space-x-1.5 shrink-0">
+                  <div className="flex items-center space-x-1 px-2 py-1 bg-slate-50 border border-slate-100 rounded-full">
+                    <Activity size={10} className={deviceMetrics.temp > 42 ? 'text-red-500 animate-pulse' : 'text-emerald-500'} />
+                    <span className="text-[9px] font-bold text-slate-600">{deviceMetrics.temp.toFixed(1)}°</span>
+                  </div>
+                  <div className="flex items-center space-x-1 px-2 py-1 bg-slate-50 border border-slate-100 rounded-full">
+                    <Zap size={10} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-amber-500'} />
+                    <span className="text-[9px] font-bold text-slate-600">{deviceMetrics.battery}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {isSearchVisible && (
+                <div className="relative mb-3 animate-fadeIn">
+                  <input 
+                    ref={searchInputRef} 
+                    type="text" 
+                    readOnly
+                    inputMode="none"
+                    onFocus={() => setShowNumericKeypad(true)}
+                    value={displayValue} 
+                    className="w-full bg-bg-main border border-border pl-4 pr-12 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
+                    placeholder="DIGITE ETIQUETA..." 
+                  />
+                  <button 
+                    onClick={triggerSmartOCR}
+                    className="absolute right-12 top-1/2 -translate-y-1/2 p-2 text-ink-muted hover:text-accent active:scale-90 transition-all"
+                    title="Busca por Foto (OCR)"
+                  >
+                    <Camera size={20} />
+                  </button>
+                  <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted active:text-ink"><X size={20} /></button>
+                  
+                  <input 
+                    type="file" 
+                    ref={ocrInputRef} 
+                    className="hidden" 
+                    accept="image/*" 
+                    capture="environment"
+                    onChange={handleSmartOCR}
+                  />
+                </div>
+              )}
+
+              {/* Material 3 Tabs */}
+              <div className="flex border-b border-slate-100">
+                <button 
+                  onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} 
+                  className={`flex-1 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${activeFilter === 'pending' ? 'text-accent' : 'text-slate-400'}`}
+                >
+                  Pendentes
+                  {activeFilter === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
+                </button>
+                <button 
+                  onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} 
+                  className={`flex-1 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${activeFilter === 'checked' ? 'text-accent' : 'text-slate-400'}`}
+                >
+                  Inventariado
+                  {activeFilter === 'checked' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
+                </button>
+              </div>
+            </div>
+          </div>
 
         <div 
           className="flex-1 overflow-hidden bg-bg-main relative"
@@ -1700,6 +1629,9 @@ const Inventory: React.FC<InventoryProps> = ({
                   }
                 }}
                 atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
+                components={{
+                  Footer: () => <div className="h-28" />
+                }}
                 itemContent={(index, asset) => (
                   <div className="px-4 pt-1.5">
                     <AssetCard 

@@ -17,7 +17,9 @@ import {
   Building2,
   Edit3,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Printer,
+  FileText
 } from 'lucide-react';
 import { Asset, UnitConfig } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -33,6 +35,9 @@ import NCMClassifierTable from './NCMClassifierTable';
 import AssetLedger from './AssetLedger';
 import BaseModal from './BaseModal';
 import UnitConfigurator from './UnitConfigurator';
+import ImpairmentTestModal from './ImpairmentTestModal';
+import AssetUnitizeModal from './AssetUnitizeModal';
+import { Layers, ShieldCheck } from 'lucide-react';
 
 interface AssetControlModuleProps {
   onBack: () => void;
@@ -55,6 +60,8 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const [loading, setLoading] = useState(true);
   const [isNewAssetModalOpen, setIsNewAssetModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
+  const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
   const [newAssetForm, setNewAssetForm] = useState<Partial<Asset>>({
     _status_contabil: 'ATIVO',
     _data_aquisicao: new Date().toISOString().split('T')[0],
@@ -392,6 +399,125 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     }
   };
 
+  const handleImpairmentSave = async (updatedAsset: Asset) => {
+    setLoading(true);
+    try {
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        await localDb.assets.update(updatedAsset.id, updatedAsset);
+      } else {
+        if (!supabase) return;
+        const { error } = await supabase
+          .from('assets')
+          .update(updatedAsset)
+          .eq('id', updatedAsset.id);
+        if (error) throw error;
+      }
+      fetchAssets();
+    } catch (err) {
+      console.error('Erro ao salvar impairment:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnitizeConfirm = async (numberOfUnits: number, percentages?: number[]) => {
+    if (!selectedAsset) return;
+    setLoading(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const valueFields = [
+        '_valor_aquisicao',
+        '_valor_residual',
+        '_depreciacao_acumulada',
+        '_perda_impairment',
+        '_valor_recuperavel',
+      ];
+
+      const calculateSplit = (total: number, units: number, index: number, pcts?: number[]) => {
+        if (pcts) {
+          const pct = pcts[index] / 100;
+          const val = Math.round(total * pct * 100) / 100;
+          if (index === units - 1) {
+            let sumPrevious = 0;
+            for (let j = 0; j < units - 1; j++) {
+              sumPrevious += Math.round(total * (pcts[j] / 100) * 100) / 100;
+            }
+            return Math.round((total - sumPrevious) * 100) / 100;
+          }
+          return val;
+        }
+        const baseValue = Math.floor((total / units) * 100) / 100;
+        if (index === units - 1) {
+          return Math.round((total - (baseValue * (units - 1))) * 100) / 100;
+        }
+        return baseValue;
+      };
+
+      const updatedParent: Asset = {
+        ...selectedAsset,
+        _is_unitized: true,
+        _status_contabil: 'BAIXADO',
+        _history: [
+          ...(selectedAsset._history || []),
+          {
+            timestamp,
+            user: username,
+            action: 'UNITARIZAÇÃO CONTÁBIL',
+            details: `Ativo desmembrado em ${numberOfUnits} unidades para controle individual.`
+          }
+        ]
+      };
+
+      const newAssets: Asset[] = [];
+      for (let i = 0; i < numberOfUnits; i++) {
+        const child: Asset = {
+          ...selectedAsset,
+          id: crypto.randomUUID(),
+          _parent_id: selectedAsset.id,
+          ETIQUETA: `${selectedAsset.ETIQUETA}.${i + 1}`,
+          _isNew: true,
+          _history: [
+            {
+              timestamp,
+              user: username,
+              action: 'CRIAÇÃO POR UNITARIZAÇÃO',
+              details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${selectedAsset.ETIQUETA}.`
+            }
+          ]
+        };
+
+        valueFields.forEach(field => {
+          const totalValue = Number(selectedAsset[field] || 0);
+          if (totalValue > 0) {
+            child[field] = calculateSplit(totalValue, numberOfUnits, i, percentages);
+          }
+        });
+
+        newAssets.push(child);
+      }
+
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        await localDb.assets.update(selectedAsset.id, updatedParent);
+        await localDb.assets.bulkAdd(newAssets);
+      } else {
+        if (!supabase) return;
+        const { error: parentError } = await supabase.from('assets').update(updatedParent).eq('id', selectedAsset.id);
+        if (parentError) throw parentError;
+        const { error: childrenError } = await supabase.from('assets').insert(newAssets);
+        if (childrenError) throw childrenError;
+      }
+
+      setSelectedAsset(null);
+      fetchAssets();
+      alert('Unitarização contábil concluída com sucesso!');
+    } catch (err) {
+      console.error('Erro na unitarização:', err);
+      alert('Erro ao processar unitarização.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderDashboard = () => (
     <div className="space-y-6">
       {/* Alerta de Normalização */}
@@ -460,15 +586,15 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         </button>
 
         <button 
-          onClick={handleNormalizeUnits}
-          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-all text-left group"
+          onClick={() => setActiveSubModule('REPORTS')}
+          className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-rose-200 transition-all text-left group"
         >
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:scale-110 transition-transform">
-            <History className="w-6 h-6" />
+          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl group-hover:scale-110 transition-transform">
+            <FileText className="w-6 h-6" />
           </div>
           <div>
-            <h4 className="font-bold text-slate-800 text-sm">Normalizar Base</h4>
-            <p className="text-[10px] text-slate-400 uppercase font-bold">Sincronizar Unidades</p>
+            <h4 className="font-bold text-slate-800 text-sm">Relatórios</h4>
+            <p className="text-[10px] text-slate-400 uppercase font-bold">CPC 27 & Impairment</p>
           </div>
         </button>
       </div>
@@ -515,13 +641,13 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
-            <div className="p-2 bg-amber-50 rounded-lg">
-              <Package className="w-6 h-6 text-amber-600" />
+            <div className="p-2 bg-emerald-50 rounded-lg">
+              <ShieldCheck className="w-6 h-6 text-emerald-600" />
             </div>
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ativos Ativos</span>
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Conformidade CPC 27</span>
           </div>
-          <div className="text-2xl font-bold text-slate-800">{stats.activeCount}</div>
-          <div className="mt-2 text-xs text-slate-500">Itens em operação</div>
+          <div className="text-2xl font-bold text-slate-800">100%</div>
+          <div className="mt-2 text-xs text-emerald-600 font-bold uppercase tracking-tighter">Base Auditada</div>
         </div>
       </div>
 
@@ -546,6 +672,134 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       </div>
     </div>
   );
+
+  const renderReports = () => {
+    const impairmentAssets = assets.filter(a => Number(a._perda_impairment || 0) > 0);
+    const unitizedAssets = assets.filter(a => a._is_unitized);
+    
+    const formatCurrency = (val: number) => 
+      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+
+    return (
+      <div className="space-y-8 animate-fadeIn">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Centro de Relatórios</h2>
+            <p className="text-[10px] text-slate-400 uppercase font-black tracking-[0.2em]">Auditoria e Conformidade Contábil</p>
+          </div>
+          <button 
+            onClick={() => setActiveSubModule('DASHBOARD')}
+            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all"
+          >
+            Voltar ao Dashboard
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total de Ativos</p>
+            <p className="text-2xl font-black text-slate-900">{assets.length}</p>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Perda por Impairment</p>
+            <p className="text-2xl font-black text-rose-600">
+              {formatCurrency(assets.reduce((acc, a) => acc + Number(a._perda_impairment || 0), 0))}
+            </p>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Ativos Unitarizados</p>
+            <p className="text-2xl font-black text-emerald-600">{unitizedAssets.length}</p>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Ativos com Perda por Impairment (CPC 01)</h3>
+              <button className="p-2 hover:bg-slate-200 rounded-lg transition-colors">
+                <Printer className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Etiqueta</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">VCL</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Recuperável</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Perda</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {impairmentAssets.length > 0 ? impairmentAssets.map(asset => {
+                    const v0 = Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0);
+                    const depr = Number(asset._depreciacao_acumulada || 0);
+                    const vcl = v0 - depr;
+                    return (
+                      <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.ETIQUETA}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.DESCRICAODOATIVO}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-900 text-right">{formatCurrency(vcl)}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-blue-600 text-right">{formatCurrency(Number(asset._valor_recuperavel || 0))}</td>
+                        <td className="px-6 py-4 text-xs font-black text-rose-600 text-right">{formatCurrency(Number(asset._perda_impairment || 0))}</td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-xs font-bold text-slate-400 uppercase tracking-widest">Nenhuma perda registrada</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Histórico de Unitarização (CPC 27)</h3>
+              <button className="p-2 hover:bg-slate-200 rounded-lg transition-colors">
+                <Printer className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Etiqueta Original</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Valor Total</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Filhos</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {unitizedAssets.length > 0 ? unitizedAssets.map(asset => {
+                    const childrenCount = assets.filter(a => a._parent_id === asset.id).length;
+                    return (
+                      <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.ETIQUETA}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.DESCRICAODOATIVO}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-900 text-right">{formatCurrency(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}</td>
+                        <td className="px-6 py-4 text-xs font-black text-emerald-600 text-center">{childrenCount}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="px-2 py-1 bg-slate-100 text-slate-500 text-[9px] font-black rounded-lg uppercase">Unitarizado</span>
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-xs font-bold text-slate-400 uppercase tracking-widest">Nenhuma unitarização realizada</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderAssetList = () => {
     if (selectedAsset) {
@@ -643,6 +897,28 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAsset(asset);
+                                setIsUnitizeModalOpen(true);
+                              }}
+                              title="Unitarizar"
+                              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                            >
+                              <Layers className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAsset(asset);
+                                setIsImpairmentModalOpen(true);
+                              }}
+                              title="Teste de Impairment"
+                              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                            >
+                              <TrendingDown className="w-4 h-4" />
+                            </button>
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -765,6 +1041,16 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
             <Settings className="w-4 h-4 md:w-5 md:h-5" />
             <span>Config. Contábil</span>
           </button>
+
+          <button 
+            onClick={() => setActiveSubModule('REPORTS')}
+            className={`flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all ${
+              activeSubModule === 'REPORTS' ? 'bg-emerald-50 text-emerald-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <FileText className="w-4 h-4 md:w-5 md:h-5" />
+            <span>Relatórios</span>
+          </button>
         </nav>
 
         <div className="hidden md:block p-4 border-t border-slate-100">
@@ -812,6 +1098,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
               >
                 {activeSubModule === 'DASHBOARD' && renderDashboard()}
                 {activeSubModule === 'ASSETS' && renderAssetList()}
+                {activeSubModule === 'REPORTS' && renderReports()}
                 {activeSubModule === 'UNITS' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
                     <UnitConfigurator 
@@ -1024,6 +1311,31 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
           )}
         </div>
       </main>
+
+      {/* Modais Disruptivos */}
+      {selectedAsset && isImpairmentModalOpen && (
+        <ImpairmentTestModal 
+          isOpen={isImpairmentModalOpen}
+          onClose={() => {
+            setIsImpairmentModalOpen(false);
+            setSelectedAsset(null);
+          }}
+          asset={selectedAsset}
+          onSave={handleImpairmentSave}
+        />
+      )}
+
+      {selectedAsset && isUnitizeModalOpen && (
+        <AssetUnitizeModal 
+          isOpen={isUnitizeModalOpen}
+          onClose={() => {
+            setIsUnitizeModalOpen(false);
+            setSelectedAsset(null);
+          }}
+          asset={selectedAsset}
+          onConfirm={handleUnitizeConfirm}
+        />
+      )}
 
       {/* Modal de Novo/Editar Ativo */}
       <BaseModal 

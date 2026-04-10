@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
+import { DatabaseMode } from '../types';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -36,9 +37,10 @@ interface UnitSelectorProps {
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   isAdmin?: boolean;
+  databaseMode?: DatabaseMode;
 }
 
-const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, isSyncing, isAdmin }) => {
+const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, isSyncing, isAdmin, databaseMode }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
@@ -105,7 +107,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
           <div className="flex items-center space-x-2">
-            {onSync && (
+            {onSync && databaseMode !== DatabaseMode.INTERNAL && (
               <button 
                 onClick={onSync}
                 disabled={isSyncing}
@@ -211,7 +213,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                     </div>
                     
                     <div className="flex items-center space-x-2 relative z-10">
-                      {unit.hasData && onDownload && (
+                      {unit.hasData && onDownload && databaseMode !== DatabaseMode.INTERNAL && (
                         <button
                           onClick={(e) => handleDownload(e, unit.name)}
                           disabled={isDownloading || unit.isDownloaded}
