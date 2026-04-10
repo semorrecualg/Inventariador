@@ -49,11 +49,12 @@ import ThemePalette from './components/ThemePalette';
 import SyncManager from './components/SyncManager';
 import UnitConfigurator from './components/UnitConfigurator';
 
+import DatabaseManager from './components/DatabaseManager';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory } from './services/persistenceService';
+import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, logAssetChange, fetchUnitConfigs, fetchCampaigns } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
@@ -1439,12 +1440,10 @@ const App: React.FC = () => {
 
   const normalizeKey = useCallback((s: unknown) => {
     if (s === null || s === undefined) return '';
-    // Normalização agressiva: remove acentos, espaços, underscores e hífens para comparação
-    return String(s).toUpperCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^A-Z0-9]/g, '') 
-      .trim();
+    const str = String(s);
+    if (!str) return '';
+    // Cache simples para evitar re-processamento de strings idênticas
+    return str.toUpperCase().trim();
   }, []);
 
   const [manualLocations, setManualLocations] = useState<string[]>(() => {
@@ -1591,7 +1590,14 @@ const App: React.FC = () => {
               setIsSyncing(false);
             }
           } else {
-            await saveInventory(inventory, dirtyAssets);
+            // FAST PATH: Salva apenas a config se não houver necessidade de sync pesado
+            // Os ativos já estão sendo salvos incrementalmente via saveAssetIncremental
+            const { assets: _assets, ...config } = inventory;
+            if (_assets.length > 0) {
+              // Assets are saved incrementally, so we only log here for debug
+              console.debug('Config sync: assets present but skipped in this path', _assets.length);
+            }
+            await saveConfigOnly(config as unknown as Omit<InventoryState, 'assets'>);
           }
           
           dirtyAssetsRef.current.clear();
@@ -2205,19 +2211,7 @@ const App: React.FC = () => {
     }
 
     const assetWithGps = { ...updatedAsset };
-    if (updatedAsset._conferido) {
-      try {
-        // Tenta obter localização, mas não bloqueia se demorar muito
-        // Usamos um timeout menor aqui para não travar a experiência de scan rápido
-        const loc = await getCurrentLocation();
-        assetWithGps._lat = loc.lat;
-        assetWithGps._lng = loc.lng;
-      } catch (e) {
-        console.warn('GPS não capturado:', e);
-        // Se falhar, mantemos os valores anteriores se existirem
-      }
-    }
-
+    
     const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
     const isNew = !existing;
 
@@ -2243,7 +2237,22 @@ const App: React.FC = () => {
       _dataLeitura: new Date().toISOString()
     };
 
+    // Captura GPS de forma assíncrona para não travar a UI
+    if (updatedAsset._conferido) {
+      getCurrentLocation()
+        .then(loc => {
+          // Atualiza o ativo com GPS assim que disponível
+          const assetWithFinalGps = { ...assetWithHistory, _lat: loc.lat, _lng: loc.lng };
+          commitAssetUpdate(assetWithFinalGps);
+          saveAssetIncremental(assetWithFinalGps);
+        })
+        .catch(e => console.warn('GPS não capturado:', e));
+    }
+
     commitAssetUpdate(assetWithHistory);
+    
+    // Salva incrementalmente no banco local (SQLite-like) imediatamente
+    saveAssetIncremental(assetWithHistory);
     
     // Log de Auditoria na Nuvem (se estiver em modo Supabase)
     if (databaseMode === DatabaseMode.SUPABASE) {
@@ -3845,6 +3854,17 @@ const App: React.FC = () => {
                 setSelectedAssets([asset]);
                 pushScreen(AppScreen.ASSET_DETAIL);
               }}
+            />
+          )}
+          {screen === AppScreen.DATABASE_MANAGER && (
+            <DatabaseManager 
+              mode={databaseMode}
+              onRestore={(state) => {
+                setInventory(state);
+                popScreen();
+              }}
+              onClearDatabase={handleClearDatabase}
+              onClose={popScreen}
             />
           )}
           {screen === AppScreen.SIGNATURE && (

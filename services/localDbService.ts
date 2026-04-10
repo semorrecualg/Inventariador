@@ -15,8 +15,8 @@ export class LocalDatabase extends Dexie {
     // Schema do Banco de Dados
     // O primeiro campo é a chave primária. Campos com ++ são auto-incremento.
     // Campos após o primeiro são indexados para busca rápida.
-    this.version(1).stores({
-      assets: 'id, ETIQUETA, REGISTRO, _localMaster, _conferido, _tenantid',
+    this.version(2).stores({
+      assets: 'id, ETIQUETA, REGISTRO, _localMaster, _conferido, _tenantid, _unitid, _campaignId',
       unitConfigs: 'unit_id, tenant_id',
       campaigns: 'id, status, tenant_id',
       auditLogs: '++id, timestamp, user_email, action'

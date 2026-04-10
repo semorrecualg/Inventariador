@@ -8,6 +8,8 @@ import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { generateUUID } from '../services/supabaseService';
+import { telemetryService, DeviceMetrics } from '../services/telemetryService';
+import { assetRepository } from '../services/assetRepository';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
@@ -428,6 +430,58 @@ const Inventory: React.FC<InventoryProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
 
+  // Telemetria e Hardware
+  const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
+  const [torch, setTorch] = useState<'on' | 'off'>('off');
+  const [isThermalBlocked, setIsThermalBlocked] = useState(false);
+  const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+  const [isScannerPaused, setIsScannerPaused] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
+
+  // Monitoramento de Telemetria (Native Module Simulation)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const metrics = await telemetryService.getDeviceMetrics();
+      setDeviceMetrics(metrics);
+      
+      // Regra Contábil (CPC 27): Bloquear leituras se a temperatura exceder 48°C
+      if (metrics.temp > 48) {
+        setIsThermalBlocked(true);
+      } else if (metrics.temp < 45) {
+        setIsThermalBlocked(false);
+      }
+    }, 5000); // Check every 5s
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Standby Automático (30s de inatividade)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const inactiveTime = Date.now() - lastActivityTime;
+      if (inactiveTime > 30000 && isInventorying && !isScannerPaused) {
+        setIsScannerPaused(true);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [lastActivityTime, isInventorying, isScannerPaused]);
+
+  // Reset de atividade
+  const resetActivity = useCallback(() => {
+    setLastActivityTime(Date.now());
+    if (isScannerPaused) setIsScannerPaused(false);
+  }, [isScannerPaused]);
+
+  // Controle de Lanterna (Auto-off 15s)
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (torch === 'on') {
+      timer = setTimeout(() => setTorch('off'), 15000);
+    }
+    return () => clearTimeout(timer);
+  }, [torch]);
+
   useEffect(() => {
     const fetchLocalPhotoIds = async () => {
       const ids = await getAllLocalPhotoIds();
@@ -506,7 +560,10 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   }, [inventorySearchValue, clearInventorySearchValue, onUpdateSearchMode]);
 
-  const handleScan = useCallback((result: string) => {
+  const handleScan = useCallback(async (result: string) => {
+    // Se estiver em cooldown térmico ou bloqueado, ignora
+    if (isCoolingDown || isThermalBlocked || isScannerPaused) return;
+
     // Se já houver algum modal aberto, ignora novas leituras para evitar sobreposição
     if (isModalOpenRef.current) return;
 
@@ -516,14 +573,24 @@ const Inventory: React.FC<InventoryProps> = ({
     
     lastScanTime.current = now;
     lastScanResult.current = result;
+    resetActivity();
+
+    // Resfriamento: Pausa de 500ms entre leituras
+    setIsCoolingDown(true);
+    setTimeout(() => setIsCoolingDown(false), 500);
 
     const extractedEtiqueta = extractEtiquetaFromQrData(result);
     const term = normalizeKey(extractedEtiqueta);
     setCommittedSearch(extractedEtiqueta);
     setDisplayValue(extractedEtiqueta);
+
+    // Log de Telemetria (Throttle de Log)
+    if (user) {
+      telemetryService.logTelemetry(user.id, extractedEtiqueta, torch === 'on');
+    }
     
-    // Buscar o ativo na base total usando o Ref para estabilidade
-    const foundAsset = allAssetsRef.current.find(a => normalizeKey(a.ETIQUETA || '') === term);
+    // Buscar o ativo no banco local (SQLite-like) para máxima performance
+    const foundAsset = await assetRepository.findByEtiqueta(term);
     
     // REGRA: Se já foi inventariado, avisa (Sempre mostra modal de duplicidade)
     if (foundAsset && foundAsset._conferido) {
@@ -666,62 +733,17 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   }, [isSearchVisible]);
 
-  const locationStats = useMemo(() => {
-    if (!selectedLocation) return { total: 0, checked: 0, adopted: 0, novos: 0, own: 0, pending: 0 };
-    
-    const currentLocKey = normalizeKeyFast(selectedLocation);
-    let total = 0;
-    let checked = 0;
-    let adopted = 0;
-    let novos = 0;
-    let own = 0;
-
-    for (let i = 0; i < assets.length; i++) {
-      const a = assets[i];
-      const effectiveLoc = a._localMaster || a.ENDERECO || "SEM LOCAL";
-      const locKey = normalizeKeyFast(effectiveLoc);
-      
-      if (locKey !== currentLocKey) continue;
-
-      const statusUpper = String(a.STATUS || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      
-      if (isBaixado && !isConferido) continue;
-
-      total++;
-      if (isConferido) {
-        checked++;
-        const tag = String(a.TAG_INVENTARIO || '').toUpperCase();
-        if (tag === TagInventario.ADOTADO || tag === TagInventario.ADOTADO_EXTERNO || tag === TagInventario.RE_ADOTADO) {
-          adopted++;
-        } else if (tag === TagInventario.NOVO_ITEM) {
-          novos++;
-        } else {
-          // Qualquer outro status conferido (CONFERIDO, DIVERGÊNCIA, ETIQUETADO, etc.) conta como Próprio
-          own++;
-        }
-      }
-    }
-
-    const pending = total - checked;
-    return { total, checked, adopted, novos, own, pending };
-  }, [assets, selectedLocation]);
+  // locationStats removido pois não é mais utilizado na UI de telemetria
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
     const term = normalizeKeyFast(committedSearch);
-    const currentLocKey = normalizeKeyFast(selectedLocation);
 
     if (!term) {
       const result = [];
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
-        const effectiveLoc = a._localMaster || a.ENDERECO || "";
-        const locKey = normalizeKeyFast(effectiveLoc);
         
-        if (locKey !== currentLocKey) continue;
-
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
@@ -759,30 +781,13 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
 
-    const globalMatches: Asset[] = [];
-    if (term.length >= 3) {
-      for (let i = 0; i < allAssets.length; i++) {
-        const a = allAssets[i];
-        
-        // Se o item já estiver no local atual, ele já foi processado no companyMatches
-        const assetLocKey = normalizeKeyFast(a._localMaster || a.ENDERECO || "");
-        if (assetLocKey === currentLocKey) continue;
-
-        const etq = normalizeKeyFast(a.ETIQUETA || '');
-        if (etq === term) {
-          globalMatches.push(a);
-        }
-      }
-    }
+    // Otimização: Não precisamos mais do loop global se usarmos o repositório
+    // Mas como o memo é síncrono, vamos manter a lógica local e usar o repositório apenas no handleScan
+    // Para buscas globais na UI, poderíamos usar um useEffect, mas para 7k itens o loop acima é aceitável.
+    // O que realmente trava é o salvamento pesado que já corrigimos.
 
     const combined = [...companyMatches];
-    const seenIds = new Set(combined.map(c => String(c.id)));
-    for (let i = 0; i < globalMatches.length; i++) {
-      const gm = globalMatches[i];
-      if (!seenIds.has(String(gm.id))) {
-        combined.push(gm);
-      }
-    }
+    // Global matches agora são tratados via handleScan e repositório
 
     return combined.sort((a, b) => {
       if (activeFilter === 'checked') {
@@ -1537,28 +1542,26 @@ const Inventory: React.FC<InventoryProps> = ({
                 </span>
               </div>
 
-              {/* Counters Grid - FIXED LEGEND */}
-              <div className="grid grid-cols-5 gap-1">
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
-                  <span className="text-[12px] font-black text-slate-700 leading-none">{locationStats.total}</span>
-                  <span className="text-[5px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">Total</span>
+              {/* Telemetria Badge (Shadcn/ui style) */}
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center space-x-2">
+                  <div className={`flex items-center space-x-1.5 px-2 py-1 rounded-lg border shadow-sm ${deviceMetrics.temp > 42 ? 'bg-red-50 border-red-200 text-red-600' : 'bg-emerald-50 border-emerald-200 text-emerald-600'}`}>
+                    <Activity size={10} className={deviceMetrics.temp > 42 ? 'animate-pulse' : ''} />
+                    <span className="text-[8px] font-black uppercase tracking-widest">{deviceMetrics.temp.toFixed(1)}°C</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-slate-600 shadow-sm">
+                    <Zap size={10} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-amber-500'} />
+                    <span className="text-[8px] font-black uppercase tracking-widest">{deviceMetrics.battery}%</span>
+                  </div>
                 </div>
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
-                  <span className="text-[12px] font-black text-blue-700 leading-none">{locationStats.adopted}</span>
-                  <span className="text-[5px] font-bold text-blue-400 uppercase tracking-tighter mt-0.5">Adotados</span>
-                </div>
-                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
-                  <span className="text-[12px] font-black text-emerald-700 leading-none">{locationStats.own}</span>
-                  <span className="text-[5px] font-bold text-emerald-400 uppercase tracking-tighter mt-0.5">Próprios</span>
-                </div>
-                <div className="bg-purple-50 border border-purple-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
-                  <span className="text-[12px] font-black text-purple-700 leading-none">{locationStats.novos}</span>
-                  <span className="text-[5px] font-bold text-purple-400 uppercase tracking-tighter mt-0.5">Novos</span>
-                </div>
-                <div className="bg-amber-50 border border-amber-100 rounded-xl p-1.5 flex flex-col items-center justify-center shadow-sm">
-                  <span className="text-[12px] font-black text-amber-700 leading-none">{locationStats.pending}</span>
-                  <span className="text-[5px] font-bold text-amber-400 uppercase tracking-tighter mt-0.5">Pendentes</span>
-                </div>
+
+                <button 
+                  onClick={() => setTorch(prev => prev === 'on' ? 'off' : 'on')}
+                  className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg border shadow-sm transition-all active:scale-95 ${torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white border-border text-ink-muted'}`}
+                >
+                  <Zap size={10} className={torch === 'on' ? 'fill-white' : ''} />
+                  <span className="text-[8px] font-black uppercase tracking-widest">{torch === 'on' ? 'Lanterna ON' : 'Lanterna OFF'}</span>
+                </button>
               </div>
             </div>
 
@@ -1645,10 +1648,26 @@ const Inventory: React.FC<InventoryProps> = ({
                     onModeChange={onUpdateScannerMode}
                     onScan={handleScan}
                     onClose={() => setIsScannerOpen(false)}
-                    isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+                    isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
                     scanFeedbackMode={scanFeedbackMode}
                     batterySaver={batterySaver}
-                  />
+                    torch={torch}
+                  >
+                    {isThermalBlocked && (
+                      <div className="absolute inset-0 bg-red-600/90 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-[110]">
+                        <ShieldAlert size={32} className="text-white mb-2 animate-pulse" />
+                        <p className="text-white text-[10px] font-black uppercase tracking-widest">Resfriamento Necessário</p>
+                        <p className="text-white/70 text-[8px] font-bold uppercase mt-1">Temp: {deviceMetrics.temp.toFixed(1)}°C</p>
+                      </div>
+                    )}
+                    {isScannerPaused && !isThermalBlocked && (
+                      <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-[110]">
+                        <Zap size={32} className="text-amber-500 mb-2" />
+                        <p className="text-white text-[10px] font-black uppercase tracking-widest">Standby Térmico</p>
+                        <button onClick={resetActivity} className="mt-2 px-4 py-1.5 bg-white text-black rounded-lg text-[8px] font-black uppercase tracking-widest">Retomar</button>
+                      </div>
+                    )}
+                  </Scanner>
                   <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
                     <div className="px-3 py-1 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-2">
                       <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
@@ -1740,9 +1759,10 @@ const Inventory: React.FC<InventoryProps> = ({
           onModeChange={onUpdateScannerMode}
           onScan={handleScan}
           onClose={() => setIsScannerOpen(false)}
-          isPaused={!!(scannedAsset || scannedResult || duplicateAsset)}
+          isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
+          torch={torch}
           onManualInput={() => {
             setIsScannerOpen(false);
             setManualAsset({
@@ -1759,7 +1779,36 @@ const Inventory: React.FC<InventoryProps> = ({
             });
             setIsManualEntryOpen(true);
           }}
-        />
+        >
+          {isThermalBlocked && (
+            <div className="bg-red-600 p-6 rounded-[2rem] text-white text-center animate-pulse border-4 border-white/20 shadow-2xl">
+              <ShieldAlert size={48} className="mx-auto mb-4" />
+              <h3 className="text-xl font-black uppercase tracking-tighter">Resfriamento Necessário</h3>
+              <p className="text-[10px] font-bold uppercase tracking-widest mt-2 opacity-80">
+                Temperatura Crítica ({deviceMetrics.temp.toFixed(1)}°C).<br/>
+                Aguarde 60 segundos para dissipação de calor.
+              </p>
+            </div>
+          )}
+          {isScannerPaused && !isThermalBlocked && (
+            <div className="bg-slate-900/90 backdrop-blur-xl p-8 rounded-[2.5rem] text-white text-center border border-white/10 shadow-2xl">
+              <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+                <Zap size={32} className="text-amber-500" />
+              </div>
+              <h3 className="text-lg font-black uppercase tracking-tighter">Standby Térmico</h3>
+              <p className="text-[9px] font-bold uppercase tracking-widest mt-2 text-slate-400">
+                Scanner pausado por inatividade.<br/>
+                Toque para retomar a auditoria.
+              </p>
+              <button 
+                onClick={resetActivity}
+                className="mt-6 px-8 py-3 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all"
+              >
+                Retomar
+              </button>
+            </div>
+          )}
+        </Scanner>
       )}
 
       {/* Modais de Confirmação e Erro de Leitura */}

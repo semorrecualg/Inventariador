@@ -123,6 +123,34 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
   });
 };
 
+/**
+ * Salva um único ativo de forma incremental no Dexie (SQLite-like)
+ * Isso evita o congelamento da UI ao processar milhares de itens.
+ */
+/**
+ * Salva apenas as configurações (metadata) para evitar processamento pesado de ativos.
+ */
+export const saveConfigOnly = async (data: Omit<InventoryState, 'assets'>): Promise<void> => {
+  try {
+    const mode = data.databaseMode || DatabaseMode.INTERNAL;
+    const keys = getInventoryKeys(mode);
+    const encryptedConfig = await encryption.encrypt(data);
+    await localforage.setItem(keys.config, encryptedConfig);
+    console.log('>>> [Persistence] Configurações salvas (Fast Path).');
+  } catch (error) {
+    console.error('Erro ao salvar configurações:', error);
+  }
+};
+
+export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
+  try {
+    await localDb.assets.put(asset);
+    console.log(`>>> [Persistence] Ativo ${asset.ETIQUETA} salvo incrementalmente.`);
+  } catch (error) {
+    console.error('Erro no salvamento incremental:', error);
+  }
+};
+
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false): Promise<void> => {
   try {
     const mode = data.databaseMode || DatabaseMode.INTERNAL;

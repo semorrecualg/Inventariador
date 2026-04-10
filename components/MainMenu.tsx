@@ -947,6 +947,20 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </div>
 
+              <button 
+                onClick={() => { setIsDataMenuOpen(false); onNavigate(AppScreen.DATABASE_MANAGER); }} 
+                className="w-full flex items-center p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl active:scale-[0.98] transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-indigo-500/20">
+                  <Database size={20} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-indigo-400 uppercase tracking-tight">Gestor de Banco Local</h4>
+                  <p className="text-[8px] font-bold text-indigo-400/60 uppercase tracking-widest mt-0.5">Carga Inicial (JSON/CSV) & Persistência</p>
+                </div>
+                <ChevronRight size={14} className="text-indigo-400/40" />
+              </button>
+
               {databaseMode !== DatabaseMode.INTERNAL && (
                 <button 
                   onClick={onSyncCloud} 

@@ -16,6 +16,7 @@ interface ScannerProps {
   children?: React.ReactNode;
   scanFeedbackMode?: ScanFeedbackMode;
   batterySaver?: boolean;
+  torch?: 'on' | 'off';
 }
 
 const Scanner: React.FC<ScannerProps> = ({ 
@@ -28,7 +29,8 @@ const Scanner: React.FC<ScannerProps> = ({
   isPaused = false,
   children,
   scanFeedbackMode = ScanFeedbackMode.BOTH,
-  batterySaver = false
+  batterySaver = false,
+  torch = 'off'
 }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -180,7 +182,7 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: batterySaver ? 4 : 8, // Reduzido ligeiramente para diminuir carga de CPU
+      fps: 5, // Redução drástica conforme solicitado (frameProcessorFps: 5)
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 350, height: 150 } 
         : { width: 280, height: 280 },
@@ -309,6 +311,23 @@ const Scanner: React.FC<ScannerProps> = ({
       stopScanner();
     };
   }, [startScanner, stopScanner, isPaused, isTabHidden, isInactive]);
+
+  useEffect(() => {
+    const applyTorch = async () => {
+      if (!trackRef.current) return;
+      try {
+        const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
+        if (capabilities.torch) {
+          await trackRef.current.applyConstraints({
+            advanced: [{ torch: torch === 'on' }]
+          } as MediaTrackConstraints);
+        }
+      } catch (e) {
+        console.warn("Torch control failed", e);
+      }
+    };
+    applyTorch();
+  }, [torch]);
 
   const switchCamera = async () => {
     if (availableCameras.length < 2) return;
