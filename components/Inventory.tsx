@@ -520,8 +520,8 @@ const Inventory: React.FC<InventoryProps> = ({
     setDisplayValue(extractedEtiqueta);
 
     // Log de Telemetria (Throttle de Log)
-    if (user) {
-      telemetryService.logTelemetry(user.id, extractedEtiqueta, torch === 'on');
+    if (user && extractedEtiqueta) {
+      telemetryService.logTelemetry(user.id || 'unknown', extractedEtiqueta || null, torch === 'on');
     }
     
     // Buscar o ativo no banco local (SQLite-like) para máxima performance

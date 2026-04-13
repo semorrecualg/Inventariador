@@ -19,16 +19,13 @@ class TelemetryService {
   async getDeviceMetrics(): Promise<DeviceMetrics> {
     try {
       // Simulação do NativeModule Android
-      // @ts-expect-error - Simulação de ambiente nativo
       if ((window as unknown as { ThermalModule?: { getDeviceMetrics: () => Promise<DeviceMetrics> } }).ThermalModule) {
-        // @ts-expect-error - Simulação de ambiente nativo
         return await (window as unknown as { ThermalModule: { getDeviceMetrics: () => Promise<DeviceMetrics> } }).ThermalModule.getDeviceMetrics();
       }
 
       // Fallback Web API
       let batteryLevel = 100;
       if ('getBattery' in navigator) {
-        // @ts-expect-error - Battery API experimental
         const battery = await (navigator as unknown as { getBattery: () => Promise<{ level: number }> }).getBattery();
         batteryLevel = Math.round(battery.level * 100);
       }
@@ -72,6 +69,7 @@ class TelemetryService {
   }
 
   private async persistLog(userId: string, tag: string | null, metrics: DeviceMetrics, torchActive: boolean) {
+    if (!supabase) return;
     try {
       const { error } = await supabase
         .from('log_inventario_termico')

@@ -348,6 +348,7 @@ export interface InventoryState {
   isFieldMode?: boolean; // Modo de Campo (Offline Forçado)
   downloadedUnits?: string[]; // Lista de unidades baixadas para uso offline
   unitConfigs?: UnitConfig[]; // Configurações de geofencing por unidade
+  _integrity_failed?: boolean; // Flag de falha de integridade SHA-256
 }
 
 export interface SyncQueueItem {

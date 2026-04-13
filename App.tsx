@@ -231,6 +231,15 @@ const App: React.FC = () => {
     return localStorage.getItem('app_field_mode') === 'true';
   });
 
+  const showModal = (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+    });
+  };
+
   // Monitor de Sincronização Offline
   useEffect(() => {
     // No modo INTERNO (Mobile Puro), não monitoramos fila de sincronização com a nuvem
@@ -1894,6 +1903,15 @@ const App: React.FC = () => {
         } catch (syncErr) {
           console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
         }
+
+        // Log de Auditoria na Nuvem
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'DELETE',
+          table_name: 'assets',
+          details: `Limpeza em massa de banco de dados (Unidades: ${companiesToClear.join(', ')})`,
+          _tenantid: user?._tenantid || user?.tenantid
+        });
       }
 
       // 3. Atualiza o estado local
@@ -1980,6 +1998,15 @@ const App: React.FC = () => {
       // 2. Troca o modo no localStorage e no estado de controle
       setDatabaseMode(mode);
       localStorage.setItem('app_database_mode', mode);
+
+      // Log de Auditoria
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'UPDATE',
+        table_name: 'config',
+        details: `Alteração do modo de banco de dados para: ${mode}`,
+        _tenantid: user?._tenantid || user?.tenantid
+      });
 
       // 3. Tenta carregar o estado do novo modo do IndexedDB
       console.log(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
@@ -2528,6 +2555,17 @@ const App: React.FC = () => {
     if (databaseMode === DatabaseMode.SUPABASE) {
       try {
         await syncAssetsToCloud([deletedAsset], user?.tenantid);
+        
+        // Log de Auditoria Global
+        await logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'DELETE',
+          table_name: 'assets',
+          record_id: assetId,
+          old_data: assetToDelete,
+          details: `Exclusão lógica do ativo: ${assetToDelete.ETIQUETA} - ${assetToDelete.DESCRICAODOATIVO}`,
+          _tenantid: user?.tenantid
+        });
       } catch (err) {
         console.error('Erro ao sincronizar exclusão com Supabase:', err);
       }
@@ -2763,6 +2801,14 @@ const App: React.FC = () => {
   const handleBackup = async () => {
     const success = await backupInventory(databaseMode);
     if (success) {
+      // Log de Auditoria
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'EXPORT',
+        details: 'Backup manual do sistema realizado.',
+        _tenantid: user?._tenantid || user?.tenantid
+      });
+
       setModalConfig({
         isOpen: true,
         title: 'Backup Concluído',
@@ -3549,6 +3595,7 @@ const App: React.FC = () => {
               onRestore={handleRestore}
               onClearDatabase={handleClearDatabase} 
               onClearMultipleUnits={handleClearMultipleCompanies}
+              showModal={showModal}
               user={user} 
               units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
               databaseMode={databaseMode}
@@ -3601,6 +3648,7 @@ const App: React.FC = () => {
               onResetGPS={handleResetGPS}
               onToggleGpsBypass={handleToggleGpsBypass}
               isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
+              onCheckIntegrity={handleCheckIntegrity}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (

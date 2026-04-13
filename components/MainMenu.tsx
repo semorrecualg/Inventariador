@@ -90,6 +90,7 @@ interface MainMenuProps {
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
   onCheckIntegrity?: () => Promise<{ success: boolean; message: string }>;
+  showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm') => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -140,7 +141,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onResetGPS,
   onToggleGpsBypass,
   isGpsBypassed = false,
-  onCheckIntegrity
+  onCheckIntegrity,
+  showModal
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -167,7 +169,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         result.message,
         result.success ? "success" : "error"
       );
-    } catch (err) {
+    } catch {
       showModal("Erro", "Falha ao realizar verificação de integridade.", "error");
     } finally {
       setIsCheckingIntegrity(false);
@@ -1157,7 +1159,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
               }} className="w-full flex items-center p-4 bg-red-500/10 border border-red-500/20 rounded-2xl active:scale-[0.98] transition-all text-left">
                 <div className="w-10 h-10 bg-red-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-red-500/20"><Trash2 size={20} /></div>
                 <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">Limpeza Total (Local + Nuvem)</h4>
+                  <h4 className="text-[13px] font-bold text-red-500 uppercase tracking-tight">
+                    {databaseMode === DatabaseMode.INTERNAL ? 'Limpeza Total (Local)' : 'Limpeza Total (Local + Nuvem)'}
+                  </h4>
                   <p className="text-[8px] font-bold text-red-400/60 uppercase tracking-widest mt-0.5 italic">Requer PIN de Segurança</p>
                 </div>
               </button>
@@ -1175,7 +1179,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
           onClearDatabase();
         }}
         title="Limpeza Total do Sistema"
-        message="ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário TANTO LOCALMENTE QUANTO NA NUVEM (Supabase). Recomenda-se gerar um BACKUP antes. Deseja continuar?"
+        message={databaseMode === DatabaseMode.INTERNAL 
+          ? "ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário LOCALMENTE. Recomenda-se gerar um BACKUP antes. Deseja continuar?"
+          : "ATENÇÃO: Esta ação irá APAGAR PERMANENTEMENTE todos os ativos e o progresso do inventário TANTO LOCALMENTE QUANTO NA NUVEM (Supabase). Recomenda-se gerar um BACKUP antes. Deseja continuar?"
+        }
         type="confirm"
         confirmText="Sim, Apagar Tudo"
         cancelText="Cancelar"

@@ -71,6 +71,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
         if (localUser) {
           localStorage.setItem('app_current_user', safeStringify(localUser));
+          
+          // Log de Auditoria
+          logAuditEvent({
+            user_email: localUser.email,
+            action: 'LOGIN',
+            details: 'Login efetuado via Biometria (Local)',
+            _tenantid: localUser._tenantid || localUser.tenantid
+          });
+
           onLogin(localUser);
         } else {
           setError("Usuário biométrico não encontrado no banco local.");

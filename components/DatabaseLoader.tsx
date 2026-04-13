@@ -16,7 +16,7 @@ import {
   Calendar
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Asset } from '../types';
+import { Asset, DatabaseMode } from '../types';
 import { generateUUID, logAuditEvent } from '../services/supabaseService';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import BackButton from './BackButton';
@@ -52,7 +52,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   syncProgress,
   excludedAccounts = [],
   campaigns = [],
-  user
+  user,
+  databaseMode
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
@@ -714,7 +715,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </div>
               <div className="flex-1">
                 <p className="text-[11px] font-bold text-amber-900 uppercase tracking-tight">Pronto para Ativação</p>
-                <p className="text-[10px] text-amber-700 mt-0.5">A base foi validada e está pronta para ser sincronizada com a nuvem.</p>
+                <p className="text-[10px] text-amber-700 mt-0.5">
+                  {databaseMode === DatabaseMode.INTERNAL 
+                    ? 'A base foi validada e será ativada localmente (100% Offline).' 
+                    : 'A base foi validada e está pronta para ser sincronizada com a nuvem.'}
+                </p>
                 <div className="mt-2 pt-2 border-t border-amber-200/50 flex items-center justify-between">
                   <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Tenant: {user?._tenantid || user?.tenantid || 'CICOPAL'}</span>
                   <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Modo: {localStorage.getItem('app_database_mode') || 'MOBILE PURO'}</span>

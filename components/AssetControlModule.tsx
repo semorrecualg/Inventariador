@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { Asset, UnitConfig } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../services/supabaseService';
+import { supabase, logAuditEvent } from '../services/supabaseService';
 import { assetControlService } from '../services/assetControlService';
 import { AssetGroup, ChartOfAccount, AccountType, AccountNature, AccountClassification, DepreciationMethod, NCMClassifier, DatabaseMode, User, UserRole } from '../types';
 import { localDb } from '../services/localDbService';
@@ -199,6 +199,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleSaveChartOfAccount = async (acc: Partial<ChartOfAccount>) => {
     try {
       await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantid });
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: acc.id ? 'UPDATE' : 'INSERT',
+        table_name: 'chart_of_accounts',
+        record_id: String(acc.id || acc.code),
+        new_data: acc,
+        details: `${acc.id ? 'Atualização' : 'Criação'} de conta contábil: ${acc.code} - ${acc.name}`,
+        _tenantid: tenantid
+      });
+
       fetchChartOfAccounts();
     } catch (err) {
       console.error('Erro ao salvar conta:', err);
@@ -208,7 +220,20 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleDeleteChartOfAccount = async (id: string) => {
     if (!window.confirm('Tem certeza que deseja excluir esta conta?')) return;
     try {
+      const accToDelete = chartOfAccounts.find(a => a.id === id);
       await assetControlService.deleteChartOfAccount(id);
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: 'DELETE',
+        table_name: 'chart_of_accounts',
+        record_id: id,
+        old_data: accToDelete,
+        details: `Exclusão de conta contábil: ${accToDelete?.code} - ${accToDelete?.name}`,
+        _tenantid: tenantid
+      });
+
       fetchChartOfAccounts();
     } catch (err) {
       console.error('Erro ao excluir conta:', err);
@@ -242,6 +267,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleSaveAssetGroup = async (group: Partial<AssetGroup>) => {
     try {
       await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantid });
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: group.id ? 'UPDATE' : 'INSERT',
+        table_name: 'asset_groups',
+        record_id: String(group.id || group.group_code),
+        new_data: group,
+        details: `${group.id ? 'Atualização' : 'Criação'} de grupo de ativos: ${group.group_code} - ${group.name}`,
+        _tenantid: tenantid
+      });
+
       fetchAssetGroups();
     } catch (err) {
       console.error('Erro ao salvar grupo:', err);
@@ -251,7 +288,20 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleDeleteAssetGroup = async (id: string) => {
     if (!window.confirm('Tem certeza que deseja excluir este grupo?')) return;
     try {
+      const groupToDelete = assetGroups.find(g => g.id === id);
       await assetControlService.deleteAssetGroup(id);
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: 'DELETE',
+        table_name: 'asset_groups',
+        record_id: id,
+        old_data: groupToDelete,
+        details: `Exclusão de grupo de ativos: ${groupToDelete?.group_code} - ${groupToDelete?.name}`,
+        _tenantid: tenantid
+      });
+
       fetchAssetGroups();
     } catch (err) {
       console.error('Erro ao excluir grupo:', err);
@@ -284,6 +334,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleSaveNCMClassifier = async (cls: Partial<NCMClassifier>) => {
     try {
       await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantid });
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: cls.id ? 'UPDATE' : 'INSERT',
+        table_name: 'ncm_classifiers',
+        record_id: String(cls.id || cls.ncm_code),
+        new_data: cls,
+        details: `${cls.id ? 'Atualização' : 'Criação'} de classificador NCM: ${cls.ncm_code} - ${cls.description}`,
+        _tenantid: tenantid
+      });
+
       fetchNCMClassifiers();
     } catch (err) {
       console.error('Erro ao salvar classificador NCM:', err);
@@ -293,7 +355,20 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleDeleteNCMClassifier = async (id: string) => {
     if (!window.confirm('Tem certeza que deseja excluir este classificador?')) return;
     try {
+      const clsToDelete = ncmClassifiers.find(c => c.id === id);
       await assetControlService.deleteNCMClassifier(id);
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: 'DELETE',
+        table_name: 'ncm_classifiers',
+        record_id: id,
+        old_data: clsToDelete,
+        details: `Exclusão de classificador NCM: ${clsToDelete?.ncm_code} - ${clsToDelete?.description}`,
+        _tenantid: tenantid
+      });
+
       fetchNCMClassifiers();
     } catch (err) {
       console.error('Erro ao excluir classificador NCM:', err);
@@ -384,6 +459,19 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       }
 
       setIsNewAssetModalOpen(false);
+      
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: editingAsset ? 'UPDATE' : 'INSERT',
+        table_name: 'assets',
+        record_id: String(editingAsset?.id || assetToSave.id),
+        old_data: editingAsset,
+        new_data: assetToSave,
+        details: `${editingAsset ? 'Atualização' : 'Criação'} manual de ativo imobilizado: ${assetToSave.ETIQUETA}`,
+        _tenantid: tenantid
+      });
+
       setEditingAsset(null);
       setNewAssetForm({
         _status_contabil: 'ATIVO',
@@ -412,6 +500,19 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
           .eq('id', updatedAsset.id);
         if (error) throw error;
       }
+
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: 'IMPAIRMENT',
+        table_name: 'assets',
+        record_id: String(updatedAsset.id),
+        old_data: selectedAsset,
+        new_data: updatedAsset,
+        details: `Teste de recuperabilidade realizado. Perda: ${updatedAsset._perda_impairment}`,
+        _tenantid: tenantid
+      });
+
       fetchAssets();
     } catch (err) {
       console.error('Erro ao salvar impairment:', err);
@@ -506,6 +607,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         const { error: childrenError } = await supabase.from('assets').insert(newAssets);
         if (childrenError) throw childrenError;
       }
+
+      // Log de Auditoria
+      await logAuditEvent({
+        user_email: username,
+        action: 'UNITARIZAÇÃO',
+        table_name: 'assets',
+        record_id: String(selectedAsset.id),
+        old_data: selectedAsset,
+        new_data: { parent: updatedParent, children: newAssets.length },
+        details: `Ativo desmembrado em ${numberOfUnits} unidades.`,
+        _tenantid: tenantid
+      });
 
       setSelectedAsset(null);
       fetchAssets();

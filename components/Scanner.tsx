@@ -320,7 +320,7 @@ const Scanner: React.FC<ScannerProps> = ({
         if (capabilities.torch) {
           await trackRef.current.applyConstraints({
             advanced: [{ torch: torch === 'on' }]
-          } as MediaTrackConstraints);
+          } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         }
       } catch (e) {
         console.warn("Torch control failed", e);
