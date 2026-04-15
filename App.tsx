@@ -2331,6 +2331,10 @@ const App: React.FC = () => {
 
     // Captura GPS de forma assíncrona para não travar a UI
     if (updatedAsset._conferido) {
+      // REGRA DE FLUIDEZ MOBILE: Commit imediato para a UI não travar esperando o GPS
+      commitAssetUpdate(assetWithHistory);
+      saveAssetIncremental(assetWithHistory);
+
       getCurrentLocation()
         .then(loc => {
           console.log(`>>> [GPS] Localização capturada: ${loc.lat}, ${loc.lng}`);

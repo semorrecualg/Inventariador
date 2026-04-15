@@ -37,26 +37,45 @@ export const QR_FIELD_ORDER = [
 export const extractEtiquetaFromQrData = (data: string): string => {
   if (!data) return '';
   
-  const lines = data.split('\n').map(l => l.trim()).filter(l => l !== '');
+  // 1. Limpeza inicial e normalização
+  const raw = data.trim();
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  
   if (lines.length === 0) return '';
 
-  // 1. Tenta encontrar o prefixo "ATIVO:" (compatibilidade)
-  for (const line of lines) {
-    if (line.toUpperCase().startsWith('ATIVO:')) {
-      const parts = line.split(':');
-      if (parts.length > 1) return parts[1].trim();
-    }
+  // 2. Se for uma única linha, pode ser apenas a etiqueta direta
+  if (lines.length === 1) {
+    // Remove prefixos comuns se existirem (ex: "ETIQUETA: 001234" -> "001234")
+    return lines[0].replace(/^(ETIQUETA|PLAQUETA|ATIVO|ID|TAG):?\s*/i, '').trim();
   }
 
-  // 2. Tenta encontrar uma linha que tenha exatamente 6 dígitos (padrão de etiqueta)
-  for (const line of lines) {
-    if (/^\d{6}$/.test(line)) {
-      return line;
-    }
+  // 3. Se houver múltiplas linhas, procurar por labels conhecidos
+  // Prioridade 1: "ETIQUETA:" ou "PLAQUETA:"
+  const etqLine = lines.find(l => /^(ETIQUETA|PLAQUETA):/i.test(l));
+  if (etqLine) {
+    const parts = etqLine.split(':');
+    if (parts.length > 1) return parts[1].trim();
   }
 
-  // 3. Se não encontrar padrão, assume que a etiqueta é o que estiver na posição 
-  // que costuma ser a ETIQUETA (3ª linha se Empresa/Status estiverem presentes)
-  // Mas por segurança, se nada for achado, retorna a primeira linha.
-  return lines[0];
+  // Prioridade 2: "ATIVO:" (comum em alguns sistemas)
+  const ativoLine = lines.find(l => /^ATIVO:/i.test(l));
+  if (ativoLine) {
+    const parts = ativoLine.split(':');
+    if (parts.length > 1) return parts[1].trim();
+  }
+
+  // Prioridade 3: Procurar por um padrão de 6 dígitos (comum para etiquetas)
+  const sixDigitMatch = raw.match(/\b\d{6}\b/);
+  if (sixDigitMatch) {
+    return sixDigitMatch[0];
+  }
+
+  // 4. Fallback: Usar a ordem oficial se houver exatamente o número de campos esperado
+  if (lines.length === QR_FIELD_ORDER.length) {
+    const etqIndex = QR_FIELD_ORDER.indexOf('ETIQUETA');
+    if (etqIndex !== -1) return lines[etqIndex];
+  }
+
+  // 5. Último recurso: Retornar a primeira linha limpa, removendo possíveis labels genéricos
+  return lines[0].replace(/^[A-Z\s]+:?\s*/i, '').trim();
 };

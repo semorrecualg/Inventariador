@@ -26,6 +26,7 @@ import {
   FilePlus2,
   FileText,
   Camera,
+  Keyboard,
   Loader2,
   Database,
   Mic,
@@ -1387,11 +1388,26 @@ const Inventory: React.FC<InventoryProps> = ({
 
               <button 
                 onClick={() => {
+                  onUpdateSearchMode(InventorySearchMode.MANUAL);
+                  setIsScannerOpen(false);
+                  setIsSearchVisible(true);
+                  // Pequeno delay para garantir que o input existe antes de focar
+                  setTimeout(() => searchInputRef.current?.focus(), 100);
+                }} 
+                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
+                title="Busca por Teclado"
+              >
+                <Keyboard size={20} />
+              </button>
+
+              <button 
+                onClick={() => {
                   onUpdateSearchMode(InventorySearchMode.SCANNER);
                   setIsSearchVisible(false);
                   setIsScannerOpen(true);
                 }} 
                 className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
+                title="Busca por Câmera"
               >
                 <Camera size={20} />
               </button>
@@ -1529,7 +1545,12 @@ const Inventory: React.FC<InventoryProps> = ({
                     mode={scannerMode}
                     onModeChange={onUpdateScannerMode}
                     onScan={handleScan}
-                    onClose={() => setIsScannerOpen(false)}
+                    onClose={() => {
+                      setIsScannerOpen(false);
+                      onUpdateSearchMode(InventorySearchMode.MANUAL);
+                      setIsSearchVisible(true);
+                      setTimeout(() => searchInputRef.current?.focus(), 100);
+                    }}
                     isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
                     scanFeedbackMode={scanFeedbackMode}
                     batterySaver={batterySaver}
@@ -1643,7 +1664,12 @@ const Inventory: React.FC<InventoryProps> = ({
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
           onScan={handleScan}
-          onClose={() => setIsScannerOpen(false)}
+          onClose={() => {
+            setIsScannerOpen(false);
+            onUpdateSearchMode(InventorySearchMode.MANUAL);
+            setIsSearchVisible(true);
+            setTimeout(() => searchInputRef.current?.focus(), 100);
+          }}
           isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}

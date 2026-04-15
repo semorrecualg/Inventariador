@@ -319,13 +319,17 @@ const Scanner: React.FC<ScannerProps> = ({
       if (!trackRef.current) return;
       try {
         const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
+        console.log(">>> [Scanner] Camera capabilities:", capabilities);
+        
         if (capabilities.torch) {
           await trackRef.current.applyConstraints({
             advanced: [{ torch: torch === 'on' }]
           } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        } else {
+          console.warn(">>> [Scanner] Torch not supported on this track");
         }
       } catch (e) {
-        console.warn("Torch control failed", e);
+        console.warn(">>> [Scanner] Torch control failed:", e);
       }
     };
     applyTorch();
@@ -445,7 +449,7 @@ const Scanner: React.FC<ScannerProps> = ({
       <div className={`absolute ${isInline ? 'top-4' : 'top-8'} left-0 right-0 px-6 flex items-center justify-between pointer-events-none z-50 transition-opacity duration-300 ${isPaused ? 'opacity-20' : 'opacity-100'}`}>
         {/* Lado Esquerdo: Fechar */}
         <div className="flex-1 flex justify-start">
-          {!isInline && (
+          {onClose && (
             <button 
               onClick={onClose}
               className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
