@@ -9,9 +9,16 @@ interface FloatingHelpProps {
   onCloseOnboarding: () => void;
   onOpenOnboarding: () => void;
   onOpenPalette: () => void;
+  onOpenAIAssistant: () => void;
 }
 
-const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboarding, onOpenOnboarding, onOpenPalette }) => {
+const FloatingHelp: React.FC<FloatingHelpProps> = ({ 
+  currentScreen, 
+  onCloseOnboarding, 
+  onOpenOnboarding, 
+  onOpenPalette,
+  onOpenAIAssistant
+}) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const getTips = (screen: AppScreen) => {
@@ -95,6 +102,17 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({ currentScreen, onCloseOnboa
               </div>
 
               <div className="mt-8 pt-6 border-t border-white/5 flex flex-col space-y-4">
+                <button 
+                  onClick={() => {
+                    onOpenAIAssistant();
+                    setIsOpen(false);
+                  }}
+                  className="w-full py-4 bg-gradient-to-r from-[#4F46E5] to-[#2563EB] text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center space-x-3 shadow-lg shadow-blue-500/20"
+                >
+                  <Sparkles size={14} />
+                  <span>Assistente IA</span>
+                </button>
+
                 <button 
                   onClick={() => {
                     onOpenOnboarding();

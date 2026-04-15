@@ -11,64 +11,6 @@ interface RegisterProps {
   databaseMode: DatabaseMode;
 }
 
-// Ícone SVG Customizado para Ativo Imobilizado
-const AssetIcon = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    xmlns="http://www.w3.org/2000/svg" 
-    className={className}
-  >
-    <path 
-      d="M2 22H22" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-    />
-    <path 
-      d="M17 22V7L12 2L7 7V22" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinejoin="round" 
-    />
-    <path 
-      d="M7 12H17" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-    />
-    <path 
-      d="M7 17H17" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-    />
-    <rect 
-      x="13" 
-      y="13" 
-      width="8" 
-      height="6" 
-      rx="1" 
-      fill="white" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M15 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M17 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-    <path 
-      d="M19 15V17" 
-      stroke="currentColor" 
-      strokeWidth="1" 
-    />
-  </svg>
-);
-
 // Register Component
 const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
   const [username, setUsername] = useState('');
@@ -143,13 +85,6 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
     <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
       {/* Header compactado consistente com o Login */}
       <div className="mb-3 text-center">
-        <div className="relative w-24 h-24 mx-auto mb-2">
-          {/* Ícone SVG Customizado de Ativo Imobilizado */}
-          <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
-          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft">
-            <AssetIcon className="w-14 h-14 text-accent" />
-          </div>
-        </div>
         <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
           SISTEMA <span className="text-accent">AUDITORIA</span>
         </h1>

@@ -37,6 +37,7 @@ import BaseModal from './BaseModal';
 import UnitConfigurator from './UnitConfigurator';
 import ImpairmentTestModal from './ImpairmentTestModal';
 import AssetUnitizeModal from './AssetUnitizeModal';
+import { getCurrentLocation } from '../utils/gpsUtils';
 import { Layers, ShieldCheck } from 'lucide-react';
 
 interface AssetControlModuleProps {
@@ -424,8 +425,19 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
     setLoading(true);
     try {
+      // Captura GPS no momento do salvamento para inventário
+      let gpsData = {};
+      try {
+        const loc = await getCurrentLocation(true);
+        gpsData = { _lat: loc.lat, _lng: loc.lng };
+        console.log('>>> [GPS] Localização capturada para o ativo:', gpsData);
+      } catch (gpsErr) {
+        console.warn('>>> [GPS] Falha ao capturar localização, salvando sem coordenadas:', gpsErr);
+      }
+
       const assetToSave = {
         ...newAssetForm,
+        ...gpsData,
         _tenantid: tenantid,
         _valor_residual: newAssetForm._valor_residual || 0,
         _depreciacao_acumulada: newAssetForm._depreciacao_acumulada || 0,
@@ -434,7 +446,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       if (databaseMode === DatabaseMode.INTERNAL) {
         if (editingAsset) {
-          await localDb.assets.update(editingAsset.id, assetToSave);
+          await localDb.assets.update(String(editingAsset.id), assetToSave);
         } else {
           await localDb.assets.add({
             ...assetToSave,
@@ -491,7 +503,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
-        await localDb.assets.update(updatedAsset.id, updatedAsset);
+        await localDb.assets.update(String(updatedAsset.id), updatedAsset);
       } else {
         if (!supabase) return;
         const { error } = await supabase
@@ -598,7 +610,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       }
 
       if (databaseMode === DatabaseMode.INTERNAL) {
-        await localDb.assets.update(selectedAsset.id, updatedParent);
+        await localDb.assets.update(String(selectedAsset.id), updatedParent);
         await localDb.assets.bulkAdd(newAssets);
       } else {
         if (!supabase) return;

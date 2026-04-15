@@ -1510,6 +1510,55 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
 };
 
 /**
+ * Busca um ativo globalmente no Supabase (em qualquer unidade/localização)
+ */
+export const findAssetGlobally = async (etiqueta: string, tenantid: string): Promise<Asset | null> => {
+  if (!supabase) return null;
+  
+  const term = etiqueta.trim().toUpperCase();
+  console.log(`>>> [Supabase] Busca Global Iniciada: ${term} (Tenant: ${tenantid})`);
+  
+  const { data, error } = await supabase
+    .from('assets')
+    .select('*')
+    .eq('_tenantid', tenantid)
+    .eq('ETIQUETA', term)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Erro na busca global Supabase:', error);
+    return null;
+  }
+
+  return data as Asset | null;
+};
+
+/**
+ * Exclui uma campanha
+ */
+export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+  const isInternal = mode === 'INTERNAL';
+
+  if (isInternal) {
+    const cached = localStorage.getItem('inventory_campaigns_cache');
+    if (!cached) return false;
+    const campaigns = JSON.parse(cached) as InventoryCampaign[];
+    const filtered = campaigns.filter(c => c.id !== campaignId);
+    localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
+    return true;
+  }
+
+  if (!supabase) return false;
+  
+  // Tenta excluir em ambas as tabelas possíveis
+  const { error: err1 } = await supabase.from('campaigns_v2').delete().eq('id', campaignId);
+  const { error: err2 } = await supabase.from('inventory_campaigns').delete().eq('id', campaignId);
+  
+  return !err1 || !err2;
+};
+
+/**
  * Atualiza apenas a URL da foto de um ativo na nuvem
  */
 export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, tenantid: string) => {
@@ -1760,38 +1809,6 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   
   if (error) {
     console.error('Erro ao atualizar status da campanha:', error);
-    return false;
-  }
-  return true;
-};
-
-/**
- * Exclui uma campanha (apenas para administradores)
- */
-export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode');
-  const isInternal = mode === 'INTERNAL';
-
-  if (isInternal) {
-    console.log('>>> [Local] Excluindo campanha local:', campaignId);
-    const cached = localStorage.getItem('inventory_campaigns_cache');
-    if (cached) {
-      const campaigns = JSON.parse(cached) as InventoryCampaign[];
-      const updated = campaigns.filter(c => c.id !== campaignId);
-      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updated));
-      return true;
-    }
-    return false;
-  }
-
-  if (!supabase) return false;
-  const { error } = await supabase
-    .from('inventory_campaigns')
-    .delete()
-    .eq('id', campaignId);
-  
-  if (error) {
-    console.error('Erro ao excluir campanha:', error);
     return false;
   }
   return true;

@@ -3,12 +3,13 @@
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig } from './types';
 
 // Extend Window interface for pushScreen
 declare global {
   interface Window {
     pushScreen?: (s: AppScreen) => void;
+    clickResetTimeout?: ReturnType<typeof setTimeout>;
   }
 }
 import Modal from './components/Modal';
@@ -48,11 +49,13 @@ import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
 import SyncManager from './components/SyncManager';
 import UnitConfigurator from './components/UnitConfigurator';
+import StressTestManager from './components/StressTestManager';
 
+import { sqliteService } from './services/sqliteService';
 import DatabaseManager from './components/DatabaseManager';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -95,19 +98,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
       return (
         <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center">
           <div className="w-20 h-20 bg-white border border-border rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10 overflow-hidden p-1">
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="w-full h-full object-contain"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const logoFallback = document.createElement('img');
-                logoFallback.src = 'https://picsum.photos/seed/gbr/200/200';
-                logoFallback.className = 'w-full h-full object-contain';
-                e.currentTarget.parentElement?.appendChild(logoFallback);
-              }}
-            />
+            <AlertCircle className="text-red-500" size={40} />
           </div>
           <h1 className="text-2xl font-bold text-ink mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
           <p className="text-sm text-ink-muted mb-8 max-w-xs">
@@ -211,17 +202,7 @@ const App: React.FC = () => {
     return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
   });
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
-  const [modalConfig, setModalConfig] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    type: 'info' | 'error' | 'success' | 'confirm' | 'warning';
-    onConfirm?: () => void;
-    onCancel?: () => void;
-    showCancel?: boolean;
-    confirmText?: string;
-    cancelText?: string;
-  }>({
+  const [modalConfig, setModalConfig] = useState<ModalConfig>({
     isOpen: false,
     title: '',
     message: '',
@@ -333,6 +314,9 @@ const App: React.FC = () => {
   }, [databaseMode]);
 
   useEffect(() => {
+    // Inicializa SQLite Nativo (Simulado via WASM para Web)
+    sqliteService.init().catch(err => console.error("[DBA] Erro ao inicializar SQLite:", err));
+
     // Debug environment variables
     const env = import.meta.env.VITE_ENVIRONMENT || 'development';
     const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -369,7 +353,7 @@ const App: React.FC = () => {
       
       // Se detectar debugger ou scripts maliciosos, forçamos logout por segurança
       if (threats.includes('DEBUGGER_DETECTED') || threats.includes('SUSPICIOUS_SCRIPTS')) {
-        setModalConfig(prev => {
+        setModalConfig((prev: ModalConfig) => {
           if (prev.isOpen && prev.title === 'Violação de Segurança Detectada') return prev;
           return {
             isOpen: true,
@@ -484,6 +468,31 @@ const App: React.FC = () => {
       });
     }
   }, [user?.tenantid, databaseMode]);
+
+  // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
+  useEffect(() => {
+    if (inventory.assets.length > 0 && inventory.unitConfigs && inventory.unitConfigs.length > 0) {
+      let hasRepaired = false;
+      const repairedAssets = inventory.assets.map(a => {
+        const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+        if (isConferido && (!a._lat || !a._lng)) {
+          const unitId = a.UNIDADE || a._unidade;
+          const config = inventory.unitConfigs?.find(c => c.unit_id === unitId);
+          if (config && config.lat && config.lng) {
+            hasRepaired = true;
+            return { ...a, _lat: config.lat, _lng: config.lng };
+          }
+        }
+        return a;
+      });
+
+      if (hasRepaired) {
+        console.log('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
+        setInventory(prev => ({ ...prev, assets: repairedAssets }));
+        saveInventory({ ...inventory, assets: repairedAssets });
+      }
+    }
+  }, [inventory.assets.length, inventory.unitConfigs?.length]);
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -675,25 +684,66 @@ const App: React.FC = () => {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
-          const assets = cloudData.assets || [];
+          const cloudAssets = cloudData.assets || [];
           
           // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais, 
           // e não foi um erro de rede, pode ser um problema de tenantid.
           // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
-          if (assets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
+          if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
             console.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
             return prev;
           }
 
-          const extractedCompanies = Array.from(new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+          // MERGE: Preserva alterações locais que ainda não foram sincronizadas
+          const mergedAssets = [...cloudAssets];
+          const dirtyIds = Array.from(dirtyAssetsRef.current);
+          
+          if (dirtyIds.length > 0) {
+            console.log(`>>> [Sync] Mesclando ${dirtyIds.length} alterações locais pendentes no pull da nuvem.`);
+            dirtyIds.forEach(id => {
+              const localDirty = prev.assets.find(a => String(a.id) === id);
+              if (localDirty) {
+                const index = mergedAssets.findIndex(a => String(a.id) === id);
+                if (index !== -1) {
+                  const cloudAsset = mergedAssets[index];
+                  
+                  // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
+                  const isConflict = cloudAsset._conferido && 
+                                   cloudAsset._auditor && 
+                                   cloudAsset._auditor !== (user?.email || 'unknown') &&
+                                   cloudAsset._dataLeitura !== localDirty._dataLeitura;
+
+                  if (isConflict) {
+                    console.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.ETIQUETA}.`);
+                    logAuditEvent({
+                      user_email: user?.email || 'system',
+                      action: 'SYNC_CONFLICT',
+                      record_id: String(id),
+                      table_name: 'assets',
+                      old_data: cloudAsset,
+                      new_data: localDirty,
+                      details: `Conflito de sincronização: Item conferido na nuvem por ${cloudAsset._auditor} em ${cloudAsset._dataLeitura}. Prevalecendo alteração local do auditor atual.`,
+                      _tenantid: user?._tenantid || user?.tenantid
+                    });
+                  }
+
+                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
+                } else {
+                  mergedAssets.push(localDirty);
+                }
+              }
+            });
+          }
+
+          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
             ...prev,
             ...cloudData.config,
-            assets: assets.length > 0 ? assets : prev.assets, // Mantém local se nuvem estiver vazia
+            assets: mergedAssets.length > 0 ? mergedAssets : prev.assets,
             companies: finalCompanies.length > 0 ? finalCompanies : prev.companies,
-            status: (assets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
+            status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
@@ -703,7 +753,7 @@ const App: React.FC = () => {
             logAuditEvent({
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
-              details: `Sincronização de ${assets.length} ativos da nuvem para o local.`,
+              details: `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`,
               _tenantid: user?._tenantid || user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
             });
           }
@@ -1218,8 +1268,8 @@ const App: React.FC = () => {
 
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
 
-    // 1. If no user, must be at LOGIN, REGISTER or ONBOARDING
-    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER && currentScreen !== AppScreen.ONBOARDING) {
+    // 1. If no user, must be at LOGIN, REGISTER or ONBOARDING or STRESS_TEST
+    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER && currentScreen !== AppScreen.ONBOARDING && currentScreen !== AppScreen.STRESS_TEST) {
       setHistory([AppScreen.LOGIN]);
       return;
     }
@@ -1631,7 +1681,7 @@ const App: React.FC = () => {
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { console.warn("Storage cap reached"); }
-    }, 10000);
+    }, 3000); // Reduzido de 10s para 3s para maior segurança de dados
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
 
@@ -2083,24 +2133,6 @@ const App: React.FC = () => {
     }
   };
 
-  const [isGpsAvailable, setIsGpsAvailable] = useState<boolean | null>(null);
-
-  // Verifica disponibilidade de GPS no início
-  useEffect(() => {
-    if ('geolocation' in navigator) {
-      navigator.permissions.query({ name: 'geolocation' }).then(result => {
-        setIsGpsAvailable(result.state === 'granted');
-        result.onchange = () => {
-          setIsGpsAvailable(result.state === 'granted');
-        };
-      }).catch(() => {
-        setIsGpsAvailable(null);
-      });
-    } else {
-      setIsGpsAvailable(false);
-    }
-  }, []);
-
   const popScreen = useCallback(() => {
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
@@ -2301,18 +2333,38 @@ const App: React.FC = () => {
     if (updatedAsset._conferido) {
       getCurrentLocation()
         .then(loc => {
+          console.log(`>>> [GPS] Localização capturada: ${loc.lat}, ${loc.lng}`);
           // Atualiza o ativo com GPS assim que disponível
           const assetWithFinalGps = { ...assetWithHistory, _lat: loc.lat, _lng: loc.lng };
+          
+          // Adiciona à lista de sujos para garantir que o GPS seja enviado no próximo sync
+          dirtyAssetsRef.current.add(String(assetWithFinalGps.id));
+          
           commitAssetUpdate(assetWithFinalGps);
           saveAssetIncremental(assetWithFinalGps);
         })
-        .catch(e => console.warn('GPS não capturado:', e));
-    }
+        .catch(e => {
+          console.warn('>>> [GPS] Falha na captura em tempo real:', e);
+          
+          // REGRA DE RESILIÊNCIA: Se o GPS do dispositivo falhar, usamos a ÂNCORA da unidade como fallback
+          // Isso garante que o Mapa de Calor e a rastreabilidade tenham ao menos a posição da Unidade.
+          let assetWithFallback = assetWithHistory;
+          if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
+            console.log(`>>> [GPS] Aplicando ÂNCORA da unidade (${selectedUnit}) como fallback.`);
+            assetWithFallback = {
+              ...assetWithHistory,
+              _lat: currentUnitConfig.lat,
+              _lng: currentUnitConfig.lng
+            };
+          }
 
-    commitAssetUpdate(assetWithHistory);
-    
-    // Salva incrementalmente no banco local (SQLite-like) imediatamente
-    saveAssetIncremental(assetWithHistory);
+          commitAssetUpdate(assetWithFallback);
+          saveAssetIncremental(assetWithFallback);
+        });
+    } else {
+      commitAssetUpdate(assetWithHistory);
+      saveAssetIncremental(assetWithHistory);
+    }
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
@@ -3429,44 +3481,45 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <div className="w-full h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
         {showCompanyHeader && (
-          <div className="bg-white border-b border-slate-200 shadow-sm z-[200]">
-            <div className="px-3 py-1 flex items-center justify-between space-x-3">
-               <div className="flex items-center space-x-2">
-                 <div className="w-6 h-6 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
-                   <Building2 size={12} />
+          <div className="bg-white border-b border-slate-100 z-[200]">
+            <div className="px-5 py-3 flex items-center justify-between">
+               <div className="flex flex-col">
+                 <div className="flex items-center space-x-2">
+                   <div className="w-5 h-5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0">
+                     <Building2 size={10} />
+                   </div>
+                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria Inteligente</p>
                  </div>
-                 <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Auditoria</p>
+                 <h2 className="text-xs font-bold text-[#64748B] uppercase tracking-tight mt-1">
+                   {selectedUnit}
+                 </h2>
                </div>
-                <div className="flex items-center space-x-1.5">
+               
+               <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
                   <div 
-                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`} 
+                    className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`} 
                     title={isSafeMode ? "Banco de Dados Protegido" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
                   >
                     <ShieldCheck size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
-                  <div className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 rounded-md text-blue-600">
+                  <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
                     <span className="text-[7px] font-bold uppercase tracking-[0.1em]">v24.50.2</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
-                    className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded-md flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
+                    className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
                   >
                     <Activity size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-1.5 py-0.5 bg-purple-50 border border-purple-100 rounded-md flex items-center space-x-1 text-purple-600">
+                    <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
                       <Sparkles size={8} />
                       <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
                     </div>
                   )}
-                </div>
-            </div>
-            <div className="px-3 pb-1.5 pt-0.5 border-t border-slate-50">
-               <h2 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-tight">
-                 {selectedUnit}
-               </h2>
+               </div>
             </div>
           </div>
         )}
@@ -3491,12 +3544,20 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
             </div>
           )}
+          {screen === AppScreen.STRESS_TEST && (
+            <StressTestManager 
+              onBack={() => setHistory([AppScreen.LOGIN])} 
+              onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
+            />
+          )}
           {screen === AppScreen.LOGIN && (
             <Login 
               users={users} 
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
+              onUpdateScreen={(s) => setHistory([s])}
+              onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
               onLogin={async (u) => { 
                 setUser(u); 
                 localStorage.setItem('app_current_user', safeStringify(u));
@@ -3649,6 +3710,8 @@ const App: React.FC = () => {
               onToggleGpsBypass={handleToggleGpsBypass}
               isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
               onCheckIntegrity={handleCheckIntegrity}
+              isAIAssistantOpen={isAIAssistantOpen}
+              setIsAIAssistantOpen={setIsAIAssistantOpen}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -3750,7 +3813,6 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.INVENTORY && (
             <GPSComplianceGuard 
-              onGpsStatusChange={setIsGpsAvailable} 
               userRole={user?.role} 
               unitConfig={currentUnitConfig}
               isFieldMode={isFieldMode}
@@ -3778,7 +3840,6 @@ const App: React.FC = () => {
                   allAssets={inventory.assets} 
                   onBack={popScreen} 
                   onUpdateAsset={updateAsset} 
-                  isGpsAvailable={isGpsAvailable}
                   onBulkUpdateAssets={bulkUpdateAssets} 
                   onSelectAsset={handleSelectAsset} 
                   selectedLocation={inventoryLocation} 
@@ -3812,7 +3873,6 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.LABELING && (
             <GPSComplianceGuard 
-              onGpsStatusChange={setIsGpsAvailable} 
               userRole={user?.role}
               isFieldMode={isFieldMode}
             >
@@ -4095,7 +4155,7 @@ const App: React.FC = () => {
               initialUnit={selectedUnit}
             />
           )}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} onBack={popScreen} />}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={popScreen} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
@@ -4125,6 +4185,7 @@ const App: React.FC = () => {
             pushScreen(AppScreen.ONBOARDING);
           }}
           onOpenPalette={() => setIsPaletteOpen(true)}
+          onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
         />
 
         <PrivacyCenter 
@@ -4182,11 +4243,11 @@ const App: React.FC = () => {
         isOpen={modalConfig.isOpen}
         onClose={() => {
           if (modalConfig.onCancel) modalConfig.onCancel();
-          setModalConfig(prev => ({ ...prev, isOpen: false }));
+          setModalConfig((prev: ModalConfig) => ({ ...prev, isOpen: false }));
         }}
         onConfirm={() => {
           if (modalConfig.onConfirm) modalConfig.onConfirm();
-          setModalConfig(prev => ({ ...prev, isOpen: false }));
+          setModalConfig((prev: ModalConfig) => ({ ...prev, isOpen: false }));
         }}
         title={modalConfig.title}
         message={modalConfig.message}

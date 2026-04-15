@@ -1,6 +1,6 @@
 
-import React, { useMemo, useState } from 'react';
-import { Asset } from '../types';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Asset, InventoryCampaign } from '../types';
 import BackButton from './BackButton';
 import { 
   ChevronLeft, 
@@ -10,15 +10,36 @@ import {
   CheckCircle2, 
   Clock, 
   BarChart3,
+  Sparkles,
+  AlertTriangle,
+  Lightbulb,
+  Target
 } from 'lucide-react';
+import { generateInventoryInsights, ProgressInsight } from '../services/geminiService';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface GlobalPerformanceProps {
   assets: Asset[];
+  campaigns: InventoryCampaign[];
   onBack: () => void;
 }
 
-const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack }) => {
+const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, campaigns, onBack }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [insights, setInsights] = useState<ProgressInsight | null>(null);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+
+  useEffect(() => {
+    const fetchInsights = async () => {
+      if (assets.length === 0 || campaigns.length === 0) return;
+      setIsLoadingInsights(true);
+      const data = await generateInventoryInsights(campaigns, assets);
+      setInsights(data);
+      setIsLoadingInsights(false);
+    };
+
+    fetchInsights();
+  }, [assets.length, campaigns.length]);
 
   const { readingsByDate, stats } = useMemo(() => {
     const groups: Record<string, number> = {};
@@ -118,6 +139,94 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* AI Insights Section */}
+        <AnimatePresence mode="wait">
+          {(isLoadingInsights || insights) && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-ai-start/5 to-ai-end/5">
+                <h2 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center space-x-2">
+                  <Sparkles size={16} className="text-ai-start" />
+                  <span>Insights Proativos (IA)</span>
+                </h2>
+                {isLoadingInsights && (
+                  <div className="flex space-x-1">
+                    <motion.div animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1 h-1 bg-ai-start rounded-full" />
+                    <motion.div animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1 h-1 bg-ai-start rounded-full" />
+                    <motion.div animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1 h-1 bg-ai-start rounded-full" />
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 space-y-6">
+                {isLoadingInsights ? (
+                  <div className="space-y-4">
+                    <div className="h-4 bg-slate-100 rounded-full w-3/4 animate-pulse" />
+                    <div className="h-4 bg-slate-100 rounded-full w-1/2 animate-pulse" />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="h-20 bg-slate-50 rounded-2xl animate-pulse" />
+                      <div className="h-20 bg-slate-50 rounded-2xl animate-pulse" />
+                    </div>
+                  </div>
+                ) : insights && (
+                  <>
+                    <p className="text-sm text-slate-600 leading-relaxed font-medium italic">
+                      &quot;{insights.summary}&quot;
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className={`p-4 rounded-2xl border ${
+                        insights.riskLevel === 'HIGH' ? 'bg-red-50 border-red-100 text-red-700' :
+                        insights.riskLevel === 'MEDIUM' ? 'bg-amber-50 border-amber-100 text-amber-700' :
+                        'bg-emerald-50 border-emerald-100 text-emerald-700'
+                      }`}>
+                        <div className="flex items-center space-x-2 mb-2 opacity-80">
+                          <AlertTriangle size={14} />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Nível de Risco</span>
+                        </div>
+                        <p className="text-lg font-black tracking-tight">{insights.riskLevel}</p>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 text-blue-700">
+                        <div className="flex items-center space-x-2 mb-2 opacity-80">
+                          <Target size={14} />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Áreas Críticas</span>
+                        </div>
+                        <p className="text-xs font-bold truncate">{insights.criticalAreas.join(', ') || 'Nenhuma'}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center space-x-2">
+                        <Lightbulb size={12} />
+                        <span>Recomendações Estratégicas</span>
+                      </h4>
+                      <ul className="space-y-2">
+                        {insights.recommendations.map((rec, i) => (
+                          <motion.li 
+                            key={i}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.1 }}
+                            className="flex items-start space-x-3 text-xs text-slate-600"
+                          >
+                            <div className="mt-1 w-1.5 h-1.5 rounded-full bg-ai-start shrink-0" />
+                            <span>{rec}</span>
+                          </motion.li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Calendário */}
         <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">

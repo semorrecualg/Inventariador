@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck } from 'lucide-react';
+import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, Flashlight } from 'lucide-react';
 import { ScannerMode, ScanFeedbackMode } from '../types';
 
 interface ScannerProps {
@@ -17,6 +17,7 @@ interface ScannerProps {
   scanFeedbackMode?: ScanFeedbackMode;
   batterySaver?: boolean;
   torch?: 'on' | 'off';
+  onTorchToggle?: () => void;
 }
 
 const Scanner: React.FC<ScannerProps> = ({ 
@@ -30,7 +31,8 @@ const Scanner: React.FC<ScannerProps> = ({
   children,
   scanFeedbackMode = ScanFeedbackMode.BOTH,
   batterySaver = false,
-  torch = 'off'
+  torch = 'off',
+  onTorchToggle
 }) => {
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -490,6 +492,17 @@ const Scanner: React.FC<ScannerProps> = ({
 
         {/* Lado Direito: Zoom & Troca de Câmera */}
         <div className="flex-1 flex justify-end items-center space-x-2 pointer-events-auto">
+          {onTorchToggle && (
+            <button 
+              onClick={onTorchToggle}
+              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border shadow-xl ${
+                torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white/10 border-white/10 text-white'
+              }`}
+              title="Alternar Lanterna"
+            >
+              <Flashlight size={20} className={torch === 'on' ? 'animate-pulse' : ''} />
+            </button>
+          )}
           {availableCameras.length > 1 && !isInline && (
             <button 
               onClick={switchCamera}

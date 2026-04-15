@@ -77,9 +77,9 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
     }
 
     const options: PositionOptions = {
-      enableHighAccuracy: false,
-      timeout: 15000,
-      maximumAge: 60000
+      enableHighAccuracy: true,
+      timeout: 20000, // Aumentado para 20s para desktops/redes lentas
+      maximumAge: 30000 // Cache de 30s
     };
 
     const success = (position: GeolocationPosition) => {
@@ -90,15 +90,16 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
       };
       lastLocation = newLoc;
       lastTimestamp = Date.now();
+      console.log(`>>> [GPS] Localização capturada com sucesso: ${newLoc.lat}, ${newLoc.lng} (Precisão: ${newLoc.accuracy}m)`);
       resolve(newLoc);
     };
 
     const error = (err: GeolocationPositionError) => {
-      // Se falhou com alta precisão, tenta novamente com baixa precisão
+      // Se falhou com alta precisão, tenta novamente com baixa precisão imediatamente
       if (options.enableHighAccuracy) {
-        console.warn('Falha na alta precisão, tentando baixa precisão...');
+        console.warn('>>> [GPS] Falha na alta precisão, tentando baixa precisão...', err.message);
         options.enableHighAccuracy = false;
-        options.timeout = 5000; // Mais 5s para baixa precisão
+        options.timeout = 10000; // Mais 10s para baixa precisão
         navigator.geolocation.getCurrentPosition(success, finalError, options);
       } else {
         finalError(err);

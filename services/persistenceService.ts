@@ -168,7 +168,8 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
 
     // 1.1 Cálculo de Checksum (Integridade de Dados - Auditoria)
     console.log('>>> [Persistence] Gerando Checksum de integridade...');
-    const integrityHash = await generateChecksum({ config, assets });
+    // Focamos o checksum apenas nos ativos para evitar falhas por mudanças em metadados voláteis
+    const integrityHash = await generateChecksum(assets);
     config._integrity_hash = integrityHash;
 
     console.log(`>>> [Persistence] Criptografando ${assets.length} ativos e configurações...`);
@@ -257,12 +258,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       // 1.2 Validação de Integridade (Checksum)
       const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
       if (storedHash) {
-        const configToVerify = { ...config } as Record<string, unknown>;
-        // Remove flags que não devem compor o hash original
-        delete configToVerify._integrity_hash;
-        delete configToVerify._integrity_failed;
-        
-        const currentHash = await generateChecksum({ config: configToVerify, assets });
+        const currentHash = await generateChecksum(assets);
         
         if (storedHash !== currentHash) {
           console.error('%c>>> [Integrity] ALERTA: Falha na validação de integridade! O arquivo pode ter sido alterado externamente ou corrompido.', "color: #ef4444; font-weight: bold;");

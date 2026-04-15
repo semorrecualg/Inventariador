@@ -83,6 +83,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       countAtivos: 0,
       countBaixados: 0,
       criticalDivergence: 0,
+      syncConflicts24h: 0,
       totalValue: 0,
       depreciatedValue: 0,
       residualValue: 0,
@@ -92,6 +93,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
     const statusMap: Record<string, number> = {};
     const unitMap: Record<string, { total: number; conferido: number }> = {};
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
 
     const filteredAssets = filterByCampaign && currentCampaignId 
       ? assets.filter(a => a._campaignId === currentCampaignId)
@@ -99,6 +102,19 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
     for (let i = 0; i < filteredAssets.length; i++) {
       const a = filteredAssets[i];
+      
+      // Count Sync Conflicts in last 24h
+      if (a._history && Array.isArray(a._history)) {
+        a._history.forEach(h => {
+          if (h.action === 'SYNC_CONFLICT') {
+            const logDate = new Date(h.timestamp);
+            if (logDate >= oneDayAgo) {
+              s.syncConflicts24h++;
+            }
+          }
+        });
+      }
+
       const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
@@ -172,6 +188,22 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 10);
 
     return s;
+  }, [assets]);
+
+  const auditActivityData = useMemo(() => {
+    const userCounts: Record<string, number> = {};
+    assets.forEach(a => {
+      if (a._history && Array.isArray(a._history)) {
+        a._history.forEach(h => {
+          const userName = h.user || 'Desconhecido';
+          userCounts[userName] = (userCounts[userName] || 0) + 1;
+        });
+      }
+    });
+    return Object.entries(userCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
   }, [assets]);
 
   const recentActivity = useMemo(() => {
@@ -311,6 +343,12 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           )}
         </div>
         <div className="flex items-center space-x-2">
+          {stats.syncConflicts24h > 0 && (
+            <div className="flex items-center space-x-1 bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/20 animate-pulse">
+              <ShieldAlert size={10} className="text-rose-500" />
+              <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest">{stats.syncConflicts24h} Conflitos</span>
+            </div>
+          )}
           <button 
             onClick={() => exportFilteredData(() => true, 'CONSOLIDADO_GERAL')}
             className="p-2 bg-bg-main border border-border rounded-xl text-ink-muted hover:text-accent transition-colors"
@@ -450,6 +488,27 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
                     </Pie>
                     <Tooltip />
                   </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Audit Activity Chart */}
+            <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-2">
+                  <History size={18} className="text-accent" />
+                  <h3 className="text-[10px] font-bold text-ink uppercase tracking-widest">Atividade por Usuário</h3>
+                </div>
+              </div>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={auditActivityData} layout="vertical" margin={{ left: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 8 }} width={80} />
+                    <Tooltip />
+                    <Bar dataKey="count" name="Alterações" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>

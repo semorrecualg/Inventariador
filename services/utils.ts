@@ -2,11 +2,27 @@
 /**
  * Helper para serialização segura de objetos complexos/circulares
  * Evita erros de "Converting circular structure to JSON"
+ * Adicionada ordenação de chaves para garantir estabilidade de Checksum
  */
 export const safeStringify = (obj: unknown, indent = 0): string => {
   try {
     const cache = new Set();
-    return JSON.stringify(obj, (_key, value) => {
+    
+    // Função para ordenar chaves recursivamente
+    const sortKeys = (data: unknown): unknown => {
+      if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+        return data;
+      }
+      const obj = data as Record<string, unknown>;
+      return Object.keys(obj).sort().reduce((acc: Record<string, unknown>, key: string) => {
+        acc[key] = sortKeys(obj[key]);
+        return acc;
+      }, {});
+    };
+
+    const sortedObj = sortKeys(obj);
+
+    return JSON.stringify(sortedObj, (_key, value) => {
       // Evita serializar elementos DOM ou FiberNodes que causam erros circulares
       if (typeof value === 'object' && value !== null) {
         if (cache.has(value)) {

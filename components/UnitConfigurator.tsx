@@ -109,7 +109,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     setSearching(true);
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       const data = await response.json();
 
       if (data && data.length > 0) {
@@ -124,9 +130,11 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       } else {
         setMessage({ text: 'Localização não encontrada.', type: 'error' });
       }
-    } catch (err) {
-      console.error('Erro na busca de localização:', err);
-      setMessage({ text: 'Erro ao buscar localização.', type: 'error' });
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('Erro na busca de localização:', error);
+      const errorMsg = error.name === 'AbortError' ? 'Tempo esgotado na busca.' : 'Erro ao buscar localização.';
+      setMessage({ text: errorMsg, type: 'error' });
     } finally {
       setSearching(false);
     }

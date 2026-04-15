@@ -1,11 +1,12 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint, ShieldAlert } from 'lucide-react';
 import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername, signInWithMagicLink } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
-import { User, DatabaseMode, UserRole, AppScreen } from '../types';
+import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { safeStringify } from '../services/utils';
+import { localDb } from '../services/localDbService';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -13,15 +14,18 @@ interface LoginProps {
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   onOpenPrivacyCenter: () => void;
+  onUpdateScreen: (screen: AppScreen) => void;
+  onShowModal: (config: Partial<ModalConfig>) => void;
 }
 
 // Login Component
-const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter, onUpdateScreen, onShowModal }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [clickCount, setClickCount] = useState(0);
 
   // Reset loading state when database mode changes to prevent "stuck" UI
   React.useEffect(() => {
@@ -163,18 +167,43 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
   };
 
   const handleClearSession = async () => {
-    try {
-      setIsLoading(true);
-      if (supabase) {
-        await supabase.auth.signOut();
+    onShowModal({
+      title: 'Limpar Sessão e Cache',
+      message: 'Isso limpará logs e configurações temporárias para resolver travamentos, mas preservará o inventário principal. Deseja continuar?',
+      type: 'confirm',
+      showCancel: true,
+      confirmText: 'Sim, Limpar',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        try {
+          setIsLoading(true);
+          if (supabase) {
+            await supabase.auth.signOut();
+          }
+          
+          // Limpeza Seletiva (Truncate de tabelas temporárias/logs)
+          await Promise.all([
+            localDb.auditLogs.clear(),
+            localDb.unitConfigs.clear()
+          ]);
+
+          // Remove apenas chaves de estado, preservando o banco de ativos se possível
+          const keysToKeep = ['app_database_mode', 'inventory_assets_v24_internal_secure', 'inventory_assets_v24_supabase_secure'];
+          const allKeys = Object.keys(localStorage);
+          allKeys.forEach(key => {
+            if (!keysToKeep.some(k => key.includes(k))) {
+              localStorage.removeItem(key);
+            }
+          });
+
+          sessionStorage.clear();
+          window.location.reload();
+        } catch (err) {
+          console.error('Erro ao limpar sessão:', err);
+          window.location.reload();
+        }
       }
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    } catch (err) {
-      console.error('Erro ao limpar sessão:', err);
-      window.location.reload();
-    }
+    });
   };
 
   const handleMagicLink = async () => {
@@ -381,17 +410,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     switch (databaseMode) {
       case DatabaseMode.SUPABASE:
         return {
-          userLabel: "Username ou E-mail",
-          userPlaceholder: "SEU USUÁRIO OU E-MAIL",
-          passLabel: "Senha Cloud",
+          userLabel: "Username ou e-mail",
+          userPlaceholder: "Digite seu usuário ou e-mail",
+          passLabel: "Senha cloud",
           passPlaceholder: "••••••••",
           accentColor: "text-accent",
           focusColor: "focus:border-accent"
         };
       default:
         return {
-          userLabel: "Usuário / E-mail",
-          userPlaceholder: "DIGITE SEU USUÁRIO OU E-MAIL",
+          userLabel: "Usuário ou e-mail",
+          userPlaceholder: "Digite seu usuário ou e-mail",
           passLabel: "Senha",
           passPlaceholder: "••••••••",
           accentColor: "text-accent",
@@ -401,6 +430,39 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
   };
 
   const config = getFieldConfig();
+
+  const handleTitleClick = () => {
+    const newCount = clickCount + 1;
+    
+    // Feedback visual
+    const titleElement = document.getElementById('login-title');
+    if (titleElement) {
+      titleElement.style.transform = `scale(${1 + (newCount * 0.05)})`;
+      titleElement.style.color = newCount >= 3 ? '#f59e0b' : '';
+      setTimeout(() => {
+        const el = document.getElementById('login-title');
+        if (el) {
+          el.style.transform = '';
+          if (newCount < 5) el.style.color = '';
+        }
+      }, 200);
+    }
+
+    if (newCount >= 5) {
+      onUpdateScreen(AppScreen.STRESS_TEST);
+      setClickCount(0);
+    } else {
+      setClickCount(newCount);
+    }
+    
+    // Reset count after 3 seconds of inactivity
+    if (window.clickResetTimeout) clearTimeout(window.clickResetTimeout);
+    window.clickResetTimeout = setTimeout(() => {
+      setClickCount(0);
+      const el = document.getElementById('login-title');
+      if (el) el.style.color = '';
+    }, 3000);
+  };
 
   return (
     <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
@@ -413,28 +475,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           </span>
         </div>
         
-        <div className="relative w-24 h-24 mx-auto mb-2">
-          {/* Logo AI AUDITPRO */}
-          <div className="absolute inset-0 bg-accent rounded-3xl shadow-xl transform -rotate-3 opacity-20"></div>
-          <div className="absolute inset-0 bg-white rounded-3xl shadow-lg flex items-center justify-center transform rotate-3 transition-transform hover:rotate-0 overflow-hidden border border-accent-soft p-1">
-            <img 
-              src="/logo.png" 
-              alt="AI AUDITPRO Logo" 
-              className="w-full h-full object-contain"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement?.classList.add('bg-accent-soft');
-                const logoFallback = document.createElement('img');
-                logoFallback.src = 'https://picsum.photos/seed/gbr/200/200';
-                logoFallback.className = 'w-full h-full object-contain';
-                e.currentTarget.parentElement?.appendChild(logoFallback);
-              }}
-            />
-          </div>
-          <div className="absolute -bottom-1 -right-1 bg-accent w-4 h-4 rounded-full border-2 border-white shadow-sm"></div>
-        </div>
-        <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
+        <h1 
+          id="login-title"
+          onClick={handleTitleClick}
+          className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
+        >
           SISTEMA <span className="text-accent">AUDITORIA</span>
         </h1>
         <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
@@ -442,99 +487,75 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         </p>
       </div>
 
-      <div className="mb-3 max-w-sm mx-auto w-full">
-        <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] mb-2 ml-1">Modalidade de Acesso</p>
-        <div className="flex p-1 bg-accent-soft rounded-2xl border border-accent/10">
+      <div className="mb-4 max-w-sm mx-auto w-full">
+        <p className="text-[9px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2.5 ml-1">Modalidade de Acesso</p>
+        <div className="flex p-1.5 bg-slate-100/50 rounded-2xl border border-slate-200/60 shadow-inner backdrop-blur-sm">
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
+            className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-lg shadow-accent/5 border border-accent/10' : 'text-slate-400 hover:text-slate-600'}`}
           >
-            <Server size={12} />
+            <Server size={14} />
             <span>Mobile Puro</span>
           </button>
           <button 
             onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-            className={`flex-1 py-2.5 rounded-xl text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-sm' : 'text-ink-muted'}`}
+            className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-lg shadow-accent/5 border border-accent/10' : 'text-slate-400 hover:text-slate-600'}`}
           >
-            <Cloud size={12} />
+            <Cloud size={14} />
             <span>Cloud Sync</span>
           </button>
         </div>
 
         {databaseMode === DatabaseMode.INTERNAL && users.length <= 1 && (
-          <div className="mt-2 p-2 bg-amber-50 border border-amber-100 rounded-xl animate-pulse">
-            <p className="text-[7px] font-black text-amber-700 uppercase tracking-tighter leading-tight text-center">
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-2xl animate-pulse">
+            <p className="text-[8px] font-black text-amber-700 uppercase tracking-tight leading-tight text-center">
               ⚠️ Cache limpo detectado. No modo &quot;Mobile Puro&quot;, apenas o administrador padrão está disponível. 
               Use &quot;Cloud Sync&quot; para restaurar seu acesso e baixar os dados.
             </p>
           </div>
         )}
-        
-        {/* Botão de Emergência para Limpar Cache */}
-        <button 
-          type="button"
-          onClick={() => {
-            if (window.confirm('Isso vai limpar todo o cache do navegador e deslogar você. Deseja continuar?')) {
-              localStorage.clear();
-              sessionStorage.clear();
-              // Tenta desregistrar service workers
-              if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(registrations => {
-                  for (const registration of registrations) {
-                    registration.unregister();
-                  }
-                });
-              }
-              window.location.reload();
-            }
-          }}
-          className="w-full mt-2 py-1.5 border border-red-200 bg-red-50 text-red-600 rounded-xl text-[7px] font-black uppercase tracking-[0.2em] hover:bg-red-100 transition-colors flex items-center justify-center space-x-2"
-        >
-          <RefreshCw size={10} className="animate-spin-slow" />
-          <span>Forçar Limpeza de Cache (Emergência)</span>
-        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
         {error && (
-          <div className="bg-red-50 border border-red-100 text-red-600 p-2.5 rounded-xl text-[9px] font-bold uppercase flex items-center mb-3 tracking-widest shadow-sm">
-            <AlertCircle size={14} className="mr-2 shrink-0" />
-            {error}
+          <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
+            <AlertCircle size={16} className="mr-3 shrink-0" />
+            <span className="flex-1">{error}</span>
           </div>
         )}
         
-        <div className="space-y-1">
-          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] ml-1">{config.userLabel}</label>
-          <div className="relative">
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-black text-ink-muted uppercase tracking-widest ml-1">{config.userLabel}</label>
+          <div className="relative group">
             <input 
               type="text" 
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className={`w-full pl-10 pr-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm`}
+              className={`w-full pl-11 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm hover:shadow-md text-sm focus:ring-2 focus:ring-accent/10`}
               placeholder={config.userPlaceholder}
             />
-            <UserCircle className="absolute left-3.5 top-1/2 -translate-y-1/2 text-accent/30" size={18} />
+            <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-accent transition-colors" size={20} />
           </div>
         </div>
         
-        <div className="space-y-1 animate-fadeIn">
-          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] ml-1">{config.passLabel}</label>
-          <div className="relative">
+        <div className="space-y-1.5 animate-fadeIn">
+          <label className="block text-[10px] font-black text-ink-muted uppercase tracking-widest ml-1">{config.passLabel}</label>
+          <div className="relative group">
             <input 
               type={showPassword ? "text" : "password"} 
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={`w-full px-4 py-3 rounded-xl border border-accent/10 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm text-sm pr-12`}
+              className={`w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm hover:shadow-md text-sm pr-12 focus:ring-2 focus:ring-accent/10`}
               placeholder={config.passPlaceholder}
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-accent/40 hover:text-accent transition-colors"
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 text-slate-300 hover:text-accent transition-colors"
             >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
         </div>
@@ -542,11 +563,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         <button 
           type="submit"
           disabled={isLoading || isMagicLinkLoading}
-          className="w-full bg-accent text-white font-bold py-3.5 rounded-xl shadow-md active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
+          className="w-full bg-accent text-white font-black py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-[0.98] hover:bg-accent-dark transition-all mt-6 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
             <>
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={16} className="animate-spin" />
               <span>Autenticando...</span>
             </>
           ) : (
@@ -704,18 +725,31 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           )}
         </div>
         
-        <div className="pt-3 border-t border-accent/10">
-          <p className="text-[8px] font-bold text-accent uppercase tracking-[0.3em]">
+        <div className="pt-4 border-t border-accent/10">
+          <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.4em]">
             AUDITORIA INTELIGENTE
           </p>
-          <button 
-            onClick={onOpenPrivacyCenter}
-            className="mt-2 text-[8px] font-bold text-ink-muted uppercase tracking-widest hover:text-accent transition-colors flex items-center justify-center mx-auto space-x-1"
-          >
-            <ShieldCheck size={10} />
-            <span>Privacidade e Segurança</span>
-          </button>
-          <p className="text-[7px] text-slate-400 mt-1 font-mono opacity-40">
+          <div className="flex flex-col items-center space-y-3 mt-4">
+            <button 
+              onClick={onOpenPrivacyCenter}
+              className="text-[9px] font-black text-slate-500 uppercase tracking-widest hover:text-accent transition-colors flex items-center justify-center space-x-1.5"
+            >
+              <ShieldCheck size={12} />
+              <span>Privacidade e Segurança</span>
+            </button>
+            
+            {/* Botão de Emergência - Movido para local discreto e com lógica seletiva */}
+            <button
+              type="button"
+              onClick={handleClearSession}
+              className="text-[8px] font-black text-red-500 hover:text-red-700 uppercase tracking-widest flex items-center justify-center gap-2 transition-colors opacity-80 hover:opacity-100"
+              title="Use se o login estiver travado ou se mudou de projeto"
+            >
+              <ShieldAlert className="w-3 h-3" />
+              Limpar Sessão e Cache (Recuperação)
+            </button>
+          </div>
+          <p className="text-[7px] text-slate-500 mt-4 font-mono break-all px-4">
             URL: {getAppBaseUrl()}
           </p>
         </div>

@@ -244,6 +244,18 @@ export interface DepreciationHistory {
   _tenantid: string;
 }
 
+export interface ModalConfig {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error' | 'confirm';
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  showCancel?: boolean;
+  confirmText?: string;
+  cancelText?: string;
+}
+
 export enum AppScreen {
   LOGIN = 'LOGIN',
   REGISTER = 'REGISTER',
@@ -276,7 +288,8 @@ export enum AppScreen {
   SYNC_MANAGER = 'SYNC_MANAGER',
   SOFT_DELETE_REPORT = 'SOFT_DELETE_REPORT',
   IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT',
-  UNIT_CONFIGURATOR = 'UNIT_CONFIGURATOR'
+  UNIT_CONFIGURATOR = 'UNIT_CONFIGURATOR',
+  STRESS_TEST = 'STRESS_TEST'
 }
 
 export enum AppModule {

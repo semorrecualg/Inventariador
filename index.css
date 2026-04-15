@@ -2,24 +2,26 @@
 @import "leaflet/dist/leaflet.css";
 
 @theme {
-  --color-bg-main: var(--bg-main, #F8FAFC);
+  --color-bg-main: #F8FAFC;
   --color-surface: #FFFFFF;
-  --color-ink: var(--ink, #0F172A);
-  --color-ink-muted: var(--ink-muted, #64748B);
-  --color-accent: var(--accent, #0284C7);
-  --color-accent-soft: var(--accent-soft, #F1F5F9);
+  --color-ink: #1E293B;
+  --color-ink-muted: #64748B;
+  --color-accent: #2563EB;
+  --color-accent-soft: #F1F5F9;
   --color-border: #E2E8F0;
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
+  --color-ai-start: #4F46E5;
+  --color-ai-end: #2563EB;
 
   /* Palette for Phases and Modules */
-  --color-phase-welcome: #0284C7;
+  --color-phase-welcome: #2563EB;
   --color-phase-internal: #3B82F6;
   --color-phase-supabase: #10B981;
   --color-phase-data: #F59E0B;
-  --color-mod-inventory: #0284C7;
-  --color-mod-control: #EA580C;
+  --color-mod-inventory: #2563EB;
+  --color-mod-control: #2563EB;
 
   /* TagInventario Colors */
   --color-tag-pending: #64748B;
@@ -40,36 +42,32 @@
 }
 
 :root {
-  /* Default / Interno (Vibrant Blue) */
   --accent: #2563EB;
-  --accent-soft: #EFF6FF;
+  --accent-soft: #F1F5F9;
   --bg-main: #F8FAFC;
-  --ink: #0F172A;
-  --ink-muted: #475569;
+  --ink: #1E293B;
+  --ink-muted: #64748B;
 }
 
 .theme-supabase {
-  /* Supabase (Vibrant Emerald) */
   --accent: #10B981;
   --accent-soft: #ECFDF5;
-  --bg-main: #F0FDF4;
-  --ink: #064E3B;
-  --ink-muted: #059669;
+  --bg-main: #F8FAFC;
+  --ink: #1E293B;
+  --ink-muted: #64748B;
 }
 
 .theme-protheus {
-  /* Protheus (Vibrant Indigo) */
   --accent: #6366F1;
   --accent-soft: #EEF2FF;
-  --bg-main: #F5F7FF;
-  --ink: #1E1B4B;
-  --ink-muted: #4F46E5;
+  --bg-main: #F8FAFC;
+  --ink: #1E293B;
+  --ink-muted: #64748B;
 }
 
 .theme-internal {
-  /* Interno (Vibrant Blue) */
-  --accent: #3B82F6;
-  --accent-soft: #EFF6FF;
+  --accent: #2563EB;
+  --accent-soft: #F1F5F9;
   --bg-main: #F8FAFC;
   --ink: #1E293B;
   --ink-muted: #64748B;
@@ -78,7 +76,6 @@
 }
 
 .theme-dark {
-  /* Dark Mode (OLED Optimized) */
   --accent: #38BDF8;
   --accent-soft: #0F172A;
   --bg-main: #000000;
@@ -91,7 +88,6 @@
 @layer base {
   body {
     @apply bg-bg-main text-ink font-sans overflow-hidden h-[100dvh] w-screen fixed;
-    background-image: radial-gradient(circle at 50% 0%, var(--accent-soft) 0%, transparent 70%);
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
@@ -117,11 +113,19 @@
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
   .modern-card {
-    @apply bg-surface border border-border rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all;
+    @apply bg-surface border-none rounded-2xl shadow-[0_2px_15px_rgba(0,0,0,0.05)] transition-all;
   }
 
   .btn-primary {
-    @apply bg-accent text-white rounded-2xl font-bold transition-all active:scale-95 active:opacity-90 shadow-lg shadow-accent/20 hover:shadow-xl hover:shadow-accent/30;
+    @apply bg-accent text-white rounded-2xl font-bold transition-all active:scale-95 active:opacity-90;
+  }
+
+  .ai-gradient {
+    @apply bg-gradient-to-r from-ai-start to-ai-end text-white;
+  }
+
+  .glass-effect {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20;
   }
 }
 
@@ -171,3 +175,10 @@
 .font-data {
   font-family: 'JetBrains Mono', monospace;
 }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.animate-shake { animation: shake 0.2s ease-in-out 0s 2; }

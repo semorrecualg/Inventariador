@@ -13,10 +13,11 @@ import {
   RefreshCw,
   ChevronDown,
   X,
-  ArrowLeft
+  ArrowLeft,
+  Trash2
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus } from '../types';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats } from '../services/supabaseService';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign } from '../services/supabaseService';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -50,6 +51,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [statsLoading, setStatsLoading] = useState(false);
   const [isDebugExpanded, setIsDebugExpanded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleRefresh = async () => {
     if (!onRefresh) return;
@@ -90,9 +92,38 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setNewCampaignUnit('');
         setSuccessMessage('Campanha criada com sucesso');
         setTimeout(() => setSuccessMessage(null), 3000);
+      } else {
+        setErrorMessage('Erro ao criar campanha');
+        setTimeout(() => setErrorMessage(null), 3000);
       }
     } catch (err) {
       console.error('Erro ao criar campanha:', err);
+      setErrorMessage('Erro técnico ao criar campanha');
+      setTimeout(() => setErrorMessage(null), 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCampaign = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta campanha? Esta ação não pode ser desfeita.')) return;
+    
+    setIsSaving(true);
+    try {
+      const success = await deleteCampaign(id);
+      if (success) {
+        setSuccessMessage('Campanha excluída');
+        setTimeout(() => setSuccessMessage(null), 3000);
+        setSelectedCampaign(null);
+        if (onRefresh) onRefresh();
+      } else {
+        setErrorMessage('Erro ao excluir campanha');
+        setTimeout(() => setErrorMessage(null), 3000);
+      }
+    } catch (err) {
+      console.error('Erro ao excluir:', err);
+      setErrorMessage('Erro técnico ao excluir');
+      setTimeout(() => setErrorMessage(null), 3000);
     } finally {
       setIsSaving(false);
     }
@@ -265,6 +296,17 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     Arquivar
                   </button>
                 </div>
+
+                {(user?.isAdmin || user?.role === 'ADMIN' || user?.email?.toLowerCase() === 'semorr@gmail.com') && (
+                  <button 
+                    onClick={() => handleDeleteCampaign(selectedCampaign.id)}
+                    disabled={isSaving}
+                    className="w-full py-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 font-bold text-xs hover:bg-rose-500/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+                    Excluir Campanha
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -414,6 +456,19 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
             <div className="bg-emerald-500 text-white px-6 py-3 rounded-xl shadow-xl flex items-center justify-center gap-3 border border-white/20">
               <CheckCircle2 size={16} />
               <span className="text-xs font-bold uppercase tracking-widest">{successMessage}</span>
+            </div>
+          </motion.div>
+        )}
+        {errorMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-24 left-6 right-6 z-50 pointer-events-none"
+          >
+            <div className="bg-rose-500 text-white px-6 py-3 rounded-xl shadow-xl flex items-center justify-center gap-3 border border-white/20">
+              <X size={16} />
+              <span className="text-xs font-bold uppercase tracking-widest">{errorMessage}</span>
             </div>
           </motion.div>
         )}

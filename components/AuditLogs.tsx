@@ -157,7 +157,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
 
   const actions = useMemo(() => {
     const baseActions = logType === 'SYSTEM' 
-      ? ['ALL', 'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'EXPORT', 'BULK_UPDATE', 'CARGA_EXPERT', 'SYNC_PUSH', 'SYNC_PULL', 'RESTORE', 'DOWNLOAD']
+      ? ['ALL', 'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'EXPORT', 'BULK_UPDATE', 'CARGA_EXPERT', 'SYNC_PUSH', 'SYNC_PULL', 'SYNC_CONFLICT', 'RESTORE', 'DOWNLOAD']
       : ['ALL', 'CREATE', 'UPDATE', 'DELETE', 'IMPAIRMENT', 'UNITARIZAÇÃO', 'ACQUISITION', 'TRANSFER', 'SALE', 'WRITE_OFF'];
     
     // Adiciona ações que existem nos logs mas não estão na lista base

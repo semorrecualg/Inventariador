@@ -20,7 +20,6 @@ import {
   SlidersHorizontal,
   Tag,
   QrCode,
-  ScanLine,
   Vibrate,
   Volume2,
   Battery,
@@ -40,6 +39,9 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
+
+import AIInsightCard from './AIInsightCard';
+import AIChatModal from './AIChatModal';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen) => void;
@@ -90,7 +92,9 @@ interface MainMenuProps {
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
   onCheckIntegrity?: () => Promise<{ success: boolean; message: string }>;
-  showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm') => void;
+  showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
+  isAIAssistantOpen: boolean;
+  setIsAIAssistantOpen: (val: boolean) => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -107,7 +111,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   autoConfirmOnScan, 
   onUpdateAutoConfirm, 
   isFullscreen, 
-  onToggleFullscreen,
   scanFeedbackMode,
   onUpdateScanFeedbackMode,
   initialDataMenuOpen = false,
@@ -120,7 +123,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateBatterySaver,
   onSyncCloud,
   isSyncing = false,
-  lastSyncTime,
   syncError,
   hasSupabase = false,
   protheusIntegrationEnabled,
@@ -132,7 +134,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateMandatoryPhotoOnDivergence,
   mandatoryPhotoOnNewItem,
   onUpdateMandatoryPhotoOnNewItem,
-  pendingPhotosCount = 0,
   syncQueueLength = 0,
   deletedAssetsCount = 0,
   impairmentAssetsCount = 0,
@@ -142,7 +143,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onToggleGpsBypass,
   isGpsBypassed = false,
   onCheckIntegrity,
-  showModal
+  showModal,
+  isAIAssistantOpen,
+  setIsAIAssistantOpen
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -184,9 +187,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
     setIsSecurityPinOpen(true);
   };
 
-  // Protocolo de Governança v25.00: Identificação de Ambiente
-  const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && window.innerWidth < 1024;
-
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
       <SecurityPinModal 
@@ -196,303 +196,206 @@ const MainMenu: React.FC<MainMenuProps> = ({
         title="Confirmação de Segurança"
         description="Esta operação exige autenticação adicional com seu PIN de segurança."
       />
-      {/* TOP STATUS BAR */}
-      <div className="px-5 pt-8 pb-2 bg-white flex items-center justify-between z-30">
-        <div className="flex items-center space-x-2">
-          <div className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center">
-            <Database size={12} className="text-slate-400" />
+      {/* TOP STATUS BAR - REDESIGNED */}
+      <div className="px-6 pt-10 pb-4 bg-white flex items-center justify-between z-30">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-accent-soft rounded-xl flex items-center justify-center text-accent">
+            <ShieldCheck size={24} />
           </div>
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AUDITORIA</span>
+          <div>
+            <h1 className="text-lg font-bold text-ink tracking-tight">Auditoria <span className="text-accent">Inteligente</span></h1>
+            <p className="text-[10px] font-medium text-ink-muted uppercase tracking-widest">SaaS Enterprise</p>
+          </div>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
           {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
-            <div className={`px-2 py-0.5 rounded-md flex items-center space-x-1 border ${
+            <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border ${
               isSyncing 
-                ? 'bg-blue-50 border-blue-100 text-blue-500 animate-pulse' 
+                ? 'bg-blue-50 border-blue-100 text-blue-500' 
                 : syncError 
                   ? 'bg-red-50 border-red-100 text-red-500' 
                   : syncQueueLength > 0
                     ? 'bg-amber-50 border-amber-100 text-amber-500'
                     : 'bg-emerald-50 border-emerald-100 text-emerald-500'
             }`}>
-              {isSyncing ? (
-                <Cloud size={10} className="animate-bounce" />
-              ) : syncError ? (
-                <X size={10} />
-              ) : syncQueueLength > 0 ? (
-                <RefreshCw size={10} className="animate-spin-slow" />
-              ) : (
-                <ShieldCheck size={10} />
-              )}
-              <span className="text-[8px] font-black uppercase tracking-tighter">
-                {isSyncing ? 'SINCRONIZANDO' : syncError ? 'ERRO' : syncQueueLength > 0 ? `${syncQueueLength} PENDENTES` : 'SINCRONIZADO'}
+              <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : syncError ? 'bg-red-500' : syncQueueLength > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+              <span className="text-[9px] font-bold uppercase tracking-tight">
+                {isSyncing ? 'Sincronizando' : syncError ? 'Erro' : syncQueueLength > 0 ? `${syncQueueLength} Pendentes` : 'Online'}
               </span>
             </div>
           )}
-          {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
-            <button 
-              onClick={onSyncCloud}
-              disabled={isSyncing}
-              className={`p-1 rounded-md transition-all active:scale-90 ${isSyncing ? 'opacity-50' : 'hover:bg-slate-100'}`}
-              title="Sincronizar Agora"
-            >
-              <DatabaseZap size={12} className={`${isSyncing ? 'animate-spin text-blue-500' : 'text-slate-400'}`} />
-            </button>
-          )}
-          {lastSyncTime && !isSyncing && !syncError && (
-            <span className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter">
-              {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
-          <div className="flex items-center space-x-1">
-            <div className="px-2 py-0.5 bg-accent-soft border border-accent/10 rounded-md">
-              <span className="text-[8px] font-black text-accent uppercase tracking-tighter">v24.50 PRO</span>
-            </div>
-            <div className={`px-2 py-0.5 rounded-md border ${isMobileDevice ? 'bg-amber-50 border-amber-100 text-amber-600' : 'bg-blue-50 border-blue-100 text-blue-600'}`}>
-              <span className="text-[8px] font-black uppercase tracking-tighter">{databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (isMobileDevice ? 'MOBILE' : 'DESKTOP')}</span>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* COMPANY NAME BAR */}
-      <div className="px-5 py-2 bg-white border-b border-border z-30 flex items-center justify-between">
-        <h2 className="text-[11px] font-black text-ink uppercase tracking-tight truncate">
-          {selectedUnit || 'NENHUMA UNIDADE SELECIONADA'}
-        </h2>
+      {/* USER PROFILE CARD - SIMPLIFIED */}
+      <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between z-20">
         <div className="flex items-center">
-          <img 
-            src="https://flagcdn.com/w40/br.png" 
-            alt="Brasil" 
-            className="h-6 w-auto rounded-sm shadow-sm"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      </div>
-
-      {/* USER PROFILE & IMMERSIVE TOGGLE (GREEN AREA MOVED UP) */}
-      <div className="px-5 py-4 bg-white border-b border-border flex items-center justify-between z-20 shadow-sm">
-        <div className="flex items-center p-1 border-2 border-emerald-500 rounded-2xl bg-white shadow-sm">
-          <div className="w-12 h-12 bg-white border border-accent/10 rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1">
-            <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+          <div className="w-12 h-12 bg-accent-soft rounded-full flex items-center justify-center text-accent font-bold text-lg shadow-sm">
+            {user?.username?.substring(0, 2).toUpperCase() || 'OP'}
           </div>
-          <div className="ml-3 pr-4">
-            <p className="text-[8px] font-black text-accent uppercase tracking-[0.2em] mb-0.5">Mobile Audit</p>
-            <h1 className="text-base font-black text-ink truncate max-w-[140px] tracking-tight uppercase leading-tight">
+          <div className="ml-4">
+            <h2 className="text-sm font-bold text-ink leading-tight">
               {user?.username || 'Operador'}
-            </h1>
-            <div className="flex items-center space-x-1 mt-0.5">
-              <span className="text-[7px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-1 rounded border border-blue-100">
-                GRUPO: {user?.tenantid || ''}
+            </h2>
+            <div className="flex items-center space-x-2 mt-1">
+              <div className={`w-2 h-2 rounded-full ${isFullscreen ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              <span className="text-[10px] font-medium text-ink-muted uppercase tracking-wider">
+                {isFullscreen ? 'Modo Ativo' : 'Modo Standby'}
               </span>
-              {user?.role === UserRole.ADMIN && (
-                <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-1 rounded border border-emerald-100">
-                  ADMIN
-                </span>
-              )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          {/* IMMERSIVE MODE "LIGHT" BUTTON */}
-          <button 
-            onClick={onToggleFullscreen}
-            className="flex flex-col items-center group active:scale-95 transition-all"
-          >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 transition-all shadow-lg ${isFullscreen ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/30' : 'bg-red-500 border-red-400 shadow-red-500/30'}`}>
-              <ScanLine size={20} className="text-white" />
-            </div>
-            <span className={`text-[7px] font-black uppercase tracking-widest mt-1.5 ${isFullscreen ? 'text-emerald-600' : 'text-red-600'}`}>
-              {isFullscreen ? 'LIGADO' : 'DESLIGADO'}
-            </span>
-          </button>
-
-          <div className="h-10 w-px bg-border mx-1" />
-
-          <button 
-            onClick={onLogout} 
-            className="w-10 h-10 bg-red-50 border border-red-100 rounded-xl text-red-500 flex items-center justify-center active:scale-90 transition-all shadow-sm hover:bg-white"
-            title="Trocar Unidade Operacional"
-          >
-            <ArrowLeft size={20} />
-          </button>
-        </div>
+        <button 
+          onClick={onLogout} 
+          className="w-10 h-10 bg-slate-50 rounded-xl text-slate-400 flex items-center justify-center active:scale-90 transition-all hover:bg-red-50 hover:text-red-500"
+        >
+          <ArrowLeft size={20} />
+        </button>
       </div>
 
-      {/* ACTION BUTTONS BAR */}
-      <div className="px-5 py-3 bg-bg-main border-b border-border flex items-center justify-between overflow-x-auto no-scrollbar">
-        <div className="flex items-center space-x-2">
+      {/* TOOL GRID - MINIMALIST */}
+      <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between">
+        <div className="flex items-center space-x-4">
           <button 
             onClick={() => setIsPreferencesMenuOpen(true)} 
-            className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
-            title="Ajustes e Preferências de Campo"
+            className="flex flex-col items-center space-y-1 group"
           >
-            <SlidersHorizontal size={20} />
+            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+              <SlidersHorizontal size={20} />
+            </div>
+            <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
           </button>
 
           {isAdmin && (
             <button 
               onClick={() => setIsDataMenuOpen(true)} 
-              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
-              title="Gestão e Manutenção de Dados"
+              className="flex flex-col items-center space-y-1 group"
             >
-              <DatabaseZap size={20} />
+              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                <DatabaseZap size={20} />
+              </div>
+              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Dados</span>
             </button>
           )}
+
           {isAdmin && (
             <button 
               onClick={() => setIsAnalyticsMenuOpen(true)} 
-              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
-              title="Painéis e Rendimento"
+              className="flex flex-col items-center space-y-1 group"
             >
-              <BarChart3 size={20} />
+              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                <BarChart3 size={20} />
+              </div>
+              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Insights</span>
             </button>
           )}
+
           {isAdmin && (
             <button 
               onClick={() => setIsAdminMenuOpen(true)} 
-              className="p-3 bg-white border border-border rounded-xl text-ink-muted active:scale-90 transition-all shadow-sm hover:text-accent hover:border-accent/20"
-              title="Configurações do Sistema"
+              className="flex flex-col items-center space-y-1 group"
             >
-              <Settings size={20} />
-            </button>
-          )}
-          {pendingPhotosCount > 0 && databaseMode !== DatabaseMode.INTERNAL && (
-            <button 
-              onClick={() => onNavigate(AppScreen.SYNC_MANAGER)}
-              className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600 active:scale-90 transition-all shadow-sm hover:bg-amber-100 flex items-center space-x-2 animate-pulse"
-              title="Gerenciar Sincronização de Fotos"
-            >
-              <Cloud size={20} />
-              <span className="text-[10px] font-black">{pendingPhotosCount}</span>
+              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                <Settings size={20} />
+              </div>
+              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Painel</span>
             </button>
           )}
         </div>
 
-        <div className="flex items-center space-x-3">
-          <div className="flex flex-col items-end">
-            <div className="flex items-center space-x-1.5">
-              <div className={`w-2 h-2 rounded-full ${hasData ? 'bg-success shadow-sm shadow-success/20' : 'bg-slate-300'}`} />
-              <span className="text-[10px] font-black text-ink uppercase tracking-widest">
-                {hasData ? `${inventoryInfo.count} ATIVOS` : 'BASE VAZIA'}
-              </span>
-            </div>
+        <div className="flex flex-col items-end">
+          <span className="text-[10px] font-bold text-ink uppercase tracking-widest">
+            {hasData ? `${inventoryInfo.count} Ativos` : 'Vazio'}
+          </span>
+          <div className="flex items-center space-x-1 mt-1">
+            <div className={`w-1.5 h-1.5 rounded-full ${hasData ? 'bg-success' : 'bg-slate-300'}`} />
+            <span className="text-[8px] font-medium text-ink-muted uppercase">Base Local</span>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 no-scrollbar">
-        {/* CLOUD SYNC STATUS CARD */}
-        {databaseMode !== DatabaseMode.INTERNAL && (
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm mb-2">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center space-x-2">
-                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isSyncing ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
-                  <Cloud size={12} />
-                </div>
-                <span className="text-[8px] font-black text-slate-900 uppercase tracking-widest">Status da Nuvem</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                {isSyncing && (
-                  <span className="text-[7px] font-bold text-blue-500 uppercase animate-pulse">Sincronizando...</span>
-                )}
-                <button 
-                  onClick={onSyncCloud}
-                  disabled={isSyncing}
-                  className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-blue-500 hover:border-blue-200 active:scale-90 transition-all shadow-sm"
-                >
-                  <RefreshCw size={10} className={isSyncing ? 'animate-spin' : ''} />
-                </button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
-                <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Unidade Ativa</p>
-                <p className="text-[9px] font-black text-slate-900 truncate">{selectedUnit || user?.unitid || ''}</p>
-              </div>
-              <div className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm">
-                <p className="text-[6px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Ativos na Nuvem</p>
-                <p className="text-[9px] font-black text-slate-900">{inventoryInfo.totalDatabase}</p>
-              </div>
-            </div>
 
-            {syncError && (
-              <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-100 flex items-center space-x-2">
-                <ShieldAlert size={10} className="text-red-500" />
-                <p className="text-[7px] font-bold text-red-600 uppercase tracking-tight leading-tight">
-                  {syncError}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
+        {/* AI INSIGHT CARD */}
+        <AIInsightCard 
+          title="Insights de Auditoria"
+          suggestion={`Detectamos ${inventoryInfo.totalDatabase - inventoryInfo.count} itens pendentes na unidade ${selectedUnit || 'atual'}. Deseja iniciar a conferência inteligente?`}
+          onAction={() => onNavigate(AppScreen.INVENTORY)}
+          actionLabel="Iniciar Agora"
+        />
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.INVENTORY)}
-          className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
         >
-          <div className="w-10 h-10 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
-            <ClipboardList size={20} />
+          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+            <ClipboardList size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-ink uppercase tracking-tight">Inventário</h3>
-            <p className="text-[9px] text-ink-muted uppercase font-bold tracking-widest mt-0.5">Conferência Física</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">INVENTÁRIO</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conferência Física</p>
           </div>
-          <ChevronRight size={16} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.LABELING)}
-          className="w-full flex items-center p-4 bg-accent-soft border border-accent/10 rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
         >
-          <div className="w-10 h-10 bg-accent text-white rounded-xl flex items-center justify-center mr-4 shadow-md">
-            <Tag size={20} />
+          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+            <Tag size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[14px] font-bold text-accent uppercase tracking-tight">ETIQUETAR</h3>
-            <p className="text-[9px] text-accent font-bold uppercase tracking-widest mt-0.5 italic">Itens sem plaqueta</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">ETIQUETAR</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Itens sem plaqueta</p>
           </div>
-          <ChevronRight size={16} className="text-accent group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-3.5 bg-white border border-border rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
         >
-          <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
-            <Search size={18} />
+          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+            <Search size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[13px] font-bold text-ink uppercase tracking-tight">Consulta</h3>
-            <p className="text-[8px] text-ink-muted uppercase font-bold tracking-widest mt-0.5">Busca de Ativo</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">CONSULTA</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Busca de Ativo</p>
           </div>
-          <ChevronRight size={14} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
-          className="w-full flex items-center p-3.5 bg-white border border-border rounded-2xl active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm group hover:border-accent/20"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
         >
-          <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-4 group-hover:bg-accent group-hover:text-white transition-colors">
-            <ListChecks size={18} />
+          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+            <ListChecks size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-[13px] font-bold text-ink uppercase tracking-tight">Conciliação por Conta</h3>
-            <p className="text-[8px] text-ink-muted uppercase font-bold tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">CONCILIAÇÃO POR CONTA</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
           </div>
-          <ChevronRight size={14} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
       </div>
 
-      <div className="p-3 bg-white border-t border-slate-100 flex items-center justify-center">
-        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">AUDITORIA INTELIGENTE</span>
+
+      <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center">
+        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.4em]">Auditoria Inteligente • SaaS</span>
       </div>
+
+      <AIChatModal 
+        isOpen={isAIAssistantOpen}
+        onClose={() => setIsAIAssistantOpen(false)}
+        username={user?.username || 'Operador'}
+      />
 
       {isAdminMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-white/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
@@ -502,7 +405,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <div className="w-full max-w-sm space-y-3">
               <div className="text-center mb-6">
                 <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent/10 shadow-lg overflow-hidden p-1">
-                  <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                  <ShieldCheck className="text-accent" size={32} />
                 </div>
                 <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Administrativo</h2>
                 <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Protocolo de Segurança</p>

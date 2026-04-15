@@ -162,6 +162,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     if (selectedLocation !== 'ALL') {
       filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
     }
+
+    const withGps = filtered.filter(a => a._lat && a._lng).length;
+    console.log(`>>> [AssetMap] Ativos conferidos: ${filtered.length}, Com GPS: ${withGps}`);
+
     return filtered;
   }, [assets, selectedOrigin, selectedLocation]);
 

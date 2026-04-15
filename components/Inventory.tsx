@@ -4,10 +4,9 @@ import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
 import Scanner from './Scanner';
-import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
-import { generateUUID } from '../services/supabaseService';
+import { generateUUID, findAssetGlobally } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { assetRepository } from '../services/assetRepository';
 
@@ -18,9 +17,6 @@ import {
   Check,
   Zap, 
   ChevronRight,
-  Building2,
-  Hash,
-  AlertOctagon,
   Square,
   CheckSquare,
   Plus,
@@ -29,16 +25,15 @@ import {
   AlertTriangle,
   FilePlus2,
   FileText,
-  RefreshCw,
   Camera,
   Loader2,
   Database,
-  Keyboard,
-  Calendar,
   Mic,
   ShieldAlert,
   Activity,
-  WifiOff
+  WifiOff,
+  Flashlight,
+  ArrowLeft
 } from 'lucide-react';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -63,7 +58,6 @@ interface AssetCardProps {
   isBatchMode: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
-  confirmButtonRef?: React.Ref<HTMLButtonElement>;
   hasLocalPhoto?: boolean;
 }
 
@@ -104,7 +98,7 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, confirmButtonRef, hasLocalPhoto
+  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto
 }: AssetCardProps) => {
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
@@ -150,56 +144,6 @@ const AssetCard = React.memo(({
 
   }, [asset, selectedLocation, isDifferentCompany, isBaixado]);
 
-  const getColors = (tag: TagInventario) => {
-    switch (tag) {
-      case TagInventario.BAIXADO: 
-        return { bg: 'bg-danger/5', border: 'border-danger/20', text: 'text-danger', badge: 'bg-danger text-white', btn: 'bg-danger', hex: 'var(--danger)', icon: AlertOctagon };
-      case TagInventario.ADOTADO_EXTERNO: 
-        return { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-500 text-white', btn: 'bg-sky-500', hex: '#38bdf8', icon: Building2 };
-      case TagInventario.ADOTADO: 
-        return { bg: 'bg-accent-soft', border: 'border-accent/20', text: 'text-accent', badge: 'bg-accent text-white', btn: 'bg-accent', hex: 'var(--accent)', icon: MapPin };
-      case TagInventario.RE_ADOTADO: 
-        return { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-500 text-white', btn: 'bg-fuchsia-500', hex: '#e879f9', icon: RefreshCw };
-      case TagInventario.CONFERIDO: 
-        return { bg: 'bg-success/5', border: 'border-success/20', text: 'text-success', badge: 'bg-success text-white', btn: 'bg-success', hex: 'var(--success)', icon: Check };
-      case TagInventario.FALTA_ETIQUETAR: 
-        return { bg: 'bg-warning/5', border: 'border-warning/20', text: 'text-warning', badge: 'bg-warning text-white', btn: 'bg-warning', hex: 'var(--warning)', icon: Hash };
-      case TagInventario.ETIQUETADO: 
-        return { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-500 text-white', btn: 'bg-violet-500', hex: '#a78bfa', icon: Check };
-      case TagInventario.NOVO_ITEM: 
-        return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-500 text-white', btn: 'bg-orange-500', hex: '#fb923c', icon: Plus };
-      case TagInventario.DIVERGENCIA:
-        return { bg: 'bg-danger/5', border: 'border-danger/20', text: 'text-danger', badge: 'bg-danger text-white', btn: 'bg-danger', hex: 'var(--danger)', icon: AlertTriangle };
-      case TagInventario.PENDENTE:
-        return { bg: 'bg-white', border: 'border-border', text: 'text-ink', badge: 'bg-bg-main text-ink-muted', btn: 'bg-ink-muted', hex: 'var(--border)', icon: Check };
-      default: 
-        return { bg: 'bg-white', border: 'border-border', text: 'text-ink', badge: 'bg-bg-main text-ink-muted', btn: 'bg-ink-muted', hex: 'var(--border)', icon: Check };
-    }
-  };
-
-  const colors = useMemo(() => {
-    const baseColors = getColors(visualStatus);
-    
-    // REGRA DE OURO: ATIVO COM DATA DE BAIXA (DIVERGÊNCIA CRÍTICA)
-    if (asset._is_divergent_baixa) {
-      return { 
-        ...baseColors, 
-        bg: 'bg-red-600/10', 
-        border: 'border-red-600/30', 
-        text: 'text-red-700', 
-        badge: 'bg-red-600 text-white', 
-        hex: '#dc2626',
-        icon: AlertTriangle 
-      };
-    }
-
-    // Se for baixado e conferido, vamos usar um tom de vermelho mais suave ou manter o alerta
-    if (isBaixado && isConferido) {
-      return { ...baseColors, bg: 'bg-danger/5', border: 'border-danger/20' };
-    }
-    return baseColors;
-  }, [visualStatus, isBaixado, isConferido, asset._is_divergent_baixa]);
-
   const fullDescription = [
     asset.QT || '1',
     asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
@@ -208,9 +152,15 @@ const AssetCard = React.memo(({
     asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'
   ].join('; ');
 
+  const handleConfirm = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (navigator.vibrate) navigator.vibrate(10);
+    onMakeDecision(String(asset.id), 'YES');
+  };
+
   return (
     <div 
-      className={`mb-3 p-4 border border-slate-100 rounded-2xl relative overflow-hidden transition-all active:scale-[0.99] shadow-sm ${colors.bg} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
+      className={`mb-3 p-4 bg-white rounded-2xl border border-[#F1F5F9] relative transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       onClick={() => {
         if (isBatchMode) {
           if (!isConferido) onToggleSelect(String(asset.id));
@@ -219,67 +169,67 @@ const AssetCard = React.memo(({
         }
       }}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex flex-col">
+      <div className="flex items-center justify-between">
+        <div className="flex-1 pr-4">
           <div className="flex items-center space-x-2 mb-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio</span>
+            <div className="bg-[#F1F5F9] px-1.5 py-0.5 rounded-[4px]">
+              <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider">PATRIMÔNIO</span>
+            </div>
             {(asset._photoUrl || hasLocalPhoto) && (
               <Camera size={12} className="text-accent" />
             )}
+            {isBaixado && (
+              <div className="bg-red-50 px-1.5 py-0.5 rounded-[4px]">
+                <span className="text-[9px] font-extrabold text-red-600 uppercase tracking-wider">BAIXA</span>
+              </div>
+            )}
           </div>
-          <span className={`text-xl font-bold font-mono tracking-tight ${colors.text}`}>
+          
+          <h3 className="text-xl font-extrabold text-[#1E293B] font-mono tracking-tight mb-1">
             {formatEtiqueta(asset.ETIQUETA)}
-          </span>
-        </div>
-
-        <div className={`px-2 py-1 rounded-lg text-[8px] font-bold uppercase flex items-center space-x-1 shadow-sm ${colors.badge}`}>
-          {isBatchMode ? (
-            isSelected ? <CheckSquare size={10} className="text-white" strokeWidth={3} /> : <Square size={10} className="text-white/50" />
-          ) : (
-            colors.icon && <colors.icon size={10} strokeWidth={3} />
-          )}
-          <span className="tracking-widest">{asset.REGISTRO || '---'} | {visualStatus}</span>
-        </div>
-      </div>
-
-      <p className="text-xs font-medium text-slate-600 uppercase leading-snug tracking-tight line-clamp-2 mb-3">
-        {fullDescription}
-      </p>
-
-      <div className="flex flex-wrap gap-1.5 pt-1">
-        {asset._dataLeitura && (
-          <div className="px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 flex items-center space-x-1.5">
-            <Calendar size={10} />
-            <span>{formatReadingTime(asset._dataLeitura)}</span>
+          </h3>
+          
+          <p className="text-sm font-medium text-[#475569] leading-snug line-clamp-2 mb-2">
+            {fullDescription}
+          </p>
+          
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-1">
+              <div className="w-3 h-3 rounded-full bg-slate-100 flex items-center justify-center">
+                <div className="w-1 h-1 rounded-full bg-[#94A3B8]" />
+              </div>
+              <span className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-tight">
+                {asset.REGISTRO || '---'} | {visualStatus}
+              </span>
+            </div>
+            {asset._dataLeitura && (
+              <span className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-tight">
+                {formatReadingTime(asset._dataLeitura)}
+              </span>
+            )}
           </div>
-        )}
-        {isBaixado && (
-          <span className="px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider bg-red-100 text-red-600">
-            BAIXADO
-          </span>
-        )}
-        {[asset.AUDITOR_STATUS_CONFERENCIA, asset.AUDITOR_TAG_REGRA_OURO, asset.TAG_INVENTARIO].map((tag, index) => tag && (
-          <span key={index} className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${index === 0 ? 'bg-blue-100 text-blue-600' : index === 1 ? 'bg-amber-100 text-amber-600' : 'bg-purple-100 text-purple-600'}`}>
-            {String(tag)}
-          </span>
-        ))}
-      </div>
-
-      {!isConferido && !isBatchMode && (
-        <button 
-          ref={confirmButtonRef}
-          onClick={(e) => { e.stopPropagation(); onMakeDecision(String(asset.id), 'YES'); }} 
-          className="absolute bottom-4 right-4 w-12 h-12 rounded-full bg-accent text-white shadow-lg shadow-accent/30 flex items-center justify-center active:scale-90 transition-all"
-        >
-          <Check size={24} strokeWidth={3} />
-        </button>
-      )}
-
-      {isConferido && !isBatchMode && (
-        <div className={`absolute bottom-4 right-4 w-10 h-10 ${isBaixado ? 'bg-red-500' : 'bg-emerald-500'} text-white rounded-full flex items-center justify-center shadow-lg`}>
-          <Check size={20} strokeWidth={3} />
         </div>
-      )}
+
+        {/* Ação Integrada */}
+        <div className="shrink-0">
+          {isBatchMode ? (
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isSelected ? 'bg-accent text-white' : 'border-2 border-[#CBD5E1]'}`}>
+              {isSelected && <Check size={20} strokeWidth={3} />}
+            </div>
+          ) : (
+            <button 
+              onClick={!isConferido ? handleConfirm : undefined}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isConferido ? (isBaixado ? 'bg-red-500' : 'bg-[#10B981]') : 'border-2 border-[#CBD5E1] active:scale-90'}`}
+            >
+              {isConferido ? (
+                <Check size={24} className="text-white" strokeWidth={3} />
+              ) : (
+                <div className="w-6 h-6 rounded-full border border-[#CBD5E1]" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 });
@@ -315,7 +265,6 @@ interface InventoryProps {
   immersiveMode: boolean;
   onToggleFullscreen: () => void;
   batterySaver: boolean;
-  isGpsAvailable?: boolean | null;
   databaseMode: DatabaseMode;
   onSyncFromCloud: () => Promise<void>;
   user: User | null;
@@ -350,9 +299,7 @@ const Inventory: React.FC<InventoryProps> = ({
   immersiveMode, 
   onToggleFullscreen, 
   batterySaver,
-  isGpsAvailable,
   databaseMode,
-  onSyncFromCloud,
   user,
   currentCampaignId,
   unitConfig
@@ -448,7 +395,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -525,7 +471,17 @@ const Inventory: React.FC<InventoryProps> = ({
     }
     
     // Buscar o ativo no banco local (SQLite-like) para máxima performance
-    const foundAsset = await assetRepository.findByEtiqueta(term);
+    let foundAsset = await assetRepository.findByEtiqueta(term);
+    
+    // Se não encontrou localmente e estamos em modo nuvem, tenta busca global no Supabase
+    if (!foundAsset && databaseMode.startsWith('SUPABASE') && user?.tenantid) {
+      console.log(`>>> [Inventory] Ativo não encontrado localmente. Iniciando busca global na nuvem para: ${term}`);
+      const cloudAsset = await findAssetGlobally(term, user.tenantid);
+      if (cloudAsset) {
+        console.log(`>>> [Inventory] Ativo localizado globalmente na nuvem!`);
+        foundAsset = cloudAsset;
+      }
+    }
     
     // REGRA: Se já foi inventariado, avisa (Sempre mostra modal de duplicidade)
     if (foundAsset && foundAsset._conferido) {
@@ -982,7 +938,6 @@ const Inventory: React.FC<InventoryProps> = ({
   useEffect(() => {
     if (filteredAssets.length === 1 && committedSearch && !filteredAssets[0]._conferido) {
       searchInputRef.current?.blur();
-      confirmButtonRef.current?.focus();
     }
   }, [filteredAssets, committedSearch]);
 
@@ -1063,7 +1018,11 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
               <div className={`${scannedAsset._is_divergent_baixa ? 'bg-red-600' : 'bg-accent'} p-8 text-white text-center transition-colors`}>
                 <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30 overflow-hidden p-2">
-                  <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                  {scannedAsset._is_divergent_baixa ? (
+                    <AlertTriangle className="text-red-600" size={40} />
+                  ) : (
+                    <Check className="text-accent" size={40} />
+                  )}
                 </div>
                 <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">
                   {scannedAsset._is_divergent_baixa ? 'Divergência Crítica' : 'Confirmar Inventário'}
@@ -1246,49 +1205,34 @@ const Inventory: React.FC<InventoryProps> = ({
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
-        <React.Fragment>
-          <div className="px-5 pt-12 pb-4 bg-white border-b border-border">
-            <div className="flex items-center justify-between mb-6">
-              <BackButton onClick={onBack} label="Voltar" subLabel="Mapeamento de Ativos" />
+        <div className="flex flex-col h-full bg-[#F8FAFC] relative">
+          {/* Header Minimalista */}
+          <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <button 
+                onClick={onBack}
+                className="flex items-center space-x-2 text-[#1E293B] active:opacity-60 transition-all"
+              >
+                <ArrowLeft size={20} />
+                <span className="text-lg font-bold tracking-tight">Mapeamento</span>
+              </button>
               <button 
                 onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
-                className={`p-3 rounded-xl transition-all shadow-sm active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'bg-bg-main text-ink-muted'}`}
+                className={`p-2 rounded-xl transition-all active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'text-slate-400 hover:bg-slate-50'}`}
               >
                 <Search size={20} />
               </button>
             </div>
-            <h1 className="text-2xl font-bold text-ink uppercase tracking-tight">Mapeamento Geográfico</h1>
-            <div className="flex items-center justify-between mt-2">
-              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Selecione uma localidade para auditoria</p>
-              {databaseMode === 'INTERNAL' ? (
-                <div className="flex items-center space-x-1 bg-warning/10 px-2 py-1 rounded-lg border border-warning/20">
-                  <ShieldAlert size={10} className="text-warning" />
-                  <span className="text-[8px] font-black text-warning uppercase tracking-widest">Modo Offline</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2">
-                  <button 
-                    onClick={onSyncFromCloud}
-                    className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20 hover:bg-accent/20 transition-colors"
-                  >
-                    <Activity size={10} className="text-accent" />
-                    <span className="text-[8px] font-black text-accent uppercase tracking-widest">Sincronizar Nuvem</span>
-                  </button>
-                  <div className="flex items-center space-x-1 bg-success/10 px-2 py-1 rounded-lg border border-success/20">
-                    <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                    <span className="text-[8px] font-black text-success uppercase tracking-widest">Real-time On</span>
-                  </div>
-                </div>
-              )}
-            </div>
             
+            <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-[0.15em]">Selecione uma localidade para auditoria</p>
+
             {isLocationSearchVisible && (
               <div className="mt-4 relative animate-fadeIn">
                 <input 
                   type="text"
                   value={locationSearchTerm}
                   onChange={(e) => setLocationSearchTerm(e.target.value.toUpperCase())}
-                  className="w-full bg-bg-main border border-border px-4 py-3 font-bold text-sm rounded-xl text-ink outline-none focus:border-accent transition-all"
+                  className="w-full bg-slate-50 border border-slate-100 px-4 py-3 font-bold text-sm rounded-xl text-ink outline-none focus:border-accent transition-all"
                   placeholder="PESQUISAR LOCAL..."
                   autoFocus
                 />
@@ -1303,27 +1247,28 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32 no-scrollbar">
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
+            {/* Banner Offline Sutil */}
+            {databaseMode === 'INTERNAL' && (
+              <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex items-center space-x-3 mb-2">
+                <WifiOff size={14} className="text-amber-600" />
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Modo Offline Ativo</p>
+              </div>
+            )}
+
             {!unitConfig && (
-              <div className="bg-danger/10 border border-danger/20 p-4 rounded-2xl flex items-start space-x-3 mb-2 animate-pulse">
-                <ShieldAlert className="w-5 h-5 text-danger shrink-0 mt-0.5" />
+              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2">
+                <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] font-black text-danger uppercase tracking-widest">GPS Âncora Pendente</p>
-                  <p className="text-[9px] text-danger/80 font-bold uppercase leading-tight mt-1">
-                    A unidade operacional selecionada não possui coordenadas GPS configuradas. 
-                    Isso é obrigatório para liberar o inventário e garantir o rastreio.
+                  <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
+                  <p className="text-[9px] text-red-600 font-bold uppercase leading-tight mt-1">
+                    Configuração de GPS obrigatória para liberar o inventário.
                   </p>
                 </div>
               </div>
             )}
-            <button 
-              disabled={!unitConfig}
-              onClick={() => setIsNewLocationModalOpen(true)} 
-              className={`w-full p-5 rounded-2xl flex items-center justify-center space-x-3 font-bold uppercase text-sm tracking-widest active:scale-[0.98] transition-all shadow-md ${!unitConfig ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-sky-600 text-white'}`}
-            >
-              <Plus size={20} />
-              <span>Criar Nova Localidade</span>
-            </button>
+
             {Object.keys(locationsWithStats)
               .filter(locKey => normalizeKey(locationsWithStats[locKey].displayName).includes(normalizeKey(locationSearchTerm)))
               .sort((a, b) => locationsWithStats[a].displayName.localeCompare(locationsWithStats[b].displayName))
@@ -1331,75 +1276,94 @@ const Inventory: React.FC<InventoryProps> = ({
                 const stats = locationsWithStats[locKey];
                 const loc = stats.displayName;
                 const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
-                const isStarted = stats.checked > 0;
                 const isCompleted = progress === 100;
+                
+                // Extrair código e nome (assumindo formato "CODIGO NOME")
+                const parts = loc.split(' ');
+                const code = parts[0];
+                const name = parts.slice(1).join(' ') || loc;
               
                 return (
                   <button 
                     key={locKey} 
-                    disabled={isCompleted || !unitConfig}
+                    disabled={!unitConfig}
                     onClick={() => { 
                       setSelectedLocation(loc); 
                       setIsInventorying(true); 
-                    if (immersiveMode && !document.fullscreenElement) {
-                      onToggleFullscreen();
-                    }
-                  }} 
-                  className={`w-full border rounded-2xl p-4 active:scale-[0.98] transition-all flex items-center justify-between group relative overflow-hidden modern-card ${isCompleted ? 'bg-slate-50 border-slate-200 opacity-75 grayscale' : 'bg-white border-border'}`}
-                >
-                  {/* Progress Degrade */}
-                  {isStarted && !isCompleted && (
-                    <div 
-                      className="absolute top-0 left-0 bottom-0 bg-gradient-to-r from-emerald-500/10 to-emerald-500/20 transition-all duration-700 ease-out" 
-                      style={{ width: `${progress}%` }} 
-                    />
-                  )}
-                  
-                  <div className="flex items-center space-x-4 relative z-10">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-colors ${isCompleted ? 'bg-slate-200 text-slate-500 border-slate-300' : isStarted ? 'bg-success text-white border-success/20 shadow-sm' : 'bg-bg-main text-ink-muted border-border'}`}>
-                      {isCompleted ? <WifiOff size={20} /> : <MapPin size={20} />}
+                      if (immersiveMode && !document.fullscreenElement) {
+                        onToggleFullscreen();
+                      }
+                    }} 
+                    className="w-full bg-white rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group"
+                  >
+                    <div className="flex items-start space-x-4 mb-4">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${isCompleted ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#2563EB]/15 text-[#2563EB]'}`}>
+                        <MapPin size={22} strokeWidth={2.5} />
+                      </div>
+                      <div className="text-left flex-1 min-w-0">
+                        <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest block mb-1">{code}</span>
+                        <h4 className="text-sm font-bold text-[#1E293B] leading-tight line-clamp-2">
+                          {name}
+                        </h4>
+                      </div>
+                      <ChevronRight size={18} className="text-slate-300 mt-1" />
                     </div>
-                    <div className="text-left">
-                      <span className={`text-[13px] font-bold uppercase block leading-none ${isCompleted ? 'text-slate-500 line-through' : 'text-ink'}`}>{loc}</span>
-                      <div className="flex items-center space-x-2 mt-2">
-                        <span className={`text-[9px] font-bold uppercase ${isCompleted ? 'text-slate-400' : isStarted ? 'text-success' : 'text-ink-muted'}`}>
-                          {stats.checked} / {stats.total} ITENS ({progress}%)
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-end">
+                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isCompleted ? 'text-[#10B981]' : 'text-[#64748B]'}`}>
+                          {stats.checked} / {stats.total} ITENS
                         </span>
-                        {isCompleted && (
-                          <span className="px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded text-[7px] font-black uppercase tracking-widest">OFF-LINE</span>
-                        )}
+                        <span className={`text-[10px] font-black ${isCompleted ? 'text-[#10B981]' : 'text-[#2563EB]'}`}>
+                          {progress}%
+                        </span>
+                      </div>
+                      <div className="h-[6px] w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-700 ease-out rounded-full ${isCompleted ? 'bg-[#10B981]' : 'bg-[#2563EB]'}`}
+                          style={{ width: `${progress}%` }}
+                        />
                       </div>
                     </div>
-                  </div>
-                  {!isCompleted && <ChevronRight size={16} className="text-ink-muted/30 relative z-10" />}
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
           </div>
-        </React.Fragment>
+
+          {/* FAB - Criar Nova Localidade */}
+          <div className="fixed bottom-8 left-0 right-0 px-6 flex justify-center pointer-events-none">
+            <button 
+              disabled={!unitConfig}
+              onClick={() => setIsNewLocationModalOpen(true)} 
+              className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${!unitConfig ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
+            >
+              <Plus size={20} strokeWidth={3} />
+              <span>Nova Localidade</span>
+            </button>
+          </div>
+        </div>
       ) : (
         <React.Fragment>
-          {/* Top App Bar - Material 3 Style */}
-          <div className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-2 flex items-center justify-between sticky top-0 z-50">
-            <div className="flex items-center space-x-3">
+          {/* Top App Bar - Minimalist Dashboard Style */}
+          <div className="bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+            <div className="flex items-center space-x-4">
               <button 
                 onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
-                className="p-2 -ml-2 text-slate-600 active:bg-slate-100 rounded-full transition-colors"
+                className="p-2 -ml-2 text-[#1E293B] hover:bg-slate-50 rounded-full transition-colors active:scale-90"
               >
-                <ChevronRight size={24} className="rotate-180" />
+                <ArrowLeft size={24} />
               </button>
               <div>
-                <h1 className="text-base font-semibold text-slate-900 leading-tight">Auditoria</h1>
-                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Seleção de Local</p>
+                <h1 className="text-lg font-bold text-[#1E293B] leading-tight tracking-tight">Inventário</h1>
+                <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-[0.15em]">Operação em Campo</p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-2">
               {isBatchMode && (
                 <button 
                   onClick={toggleSelectAll} 
-                  className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white' : 'text-slate-600'}`}
-                  title="Selecionar Todos"
+                  className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
                 >
                   {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
                 </button>
@@ -1408,41 +1372,17 @@ const Inventory: React.FC<InventoryProps> = ({
               {activeFilter === 'checked' && (
                 <button 
                   onClick={onOpenSignature}
-                  className="w-10 h-10 flex items-center justify-center text-accent active:bg-accent/10 rounded-full transition-colors"
-                  title="Finalizar e Assinar"
+                  className="w-10 h-10 flex items-center justify-center text-accent bg-blue-50 rounded-xl transition-colors hover:bg-blue-100"
                 >
                   <FileText size={20} />
                 </button>
               )}
 
-              {isGpsAvailable !== undefined && (
-                <div className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${isGpsAvailable ? 'text-emerald-500' : 'text-slate-300'}`}>
-                  <MapPin size={20} className={isGpsAvailable ? 'animate-pulse' : ''} />
-                </div>
-              )}
-              
               <button 
                 onClick={onOpenConsultation}
-                className="w-10 h-10 flex items-center justify-center text-slate-600 active:bg-slate-100 rounded-full transition-colors"
-                title="Consultar Item na Base"
+                className="w-10 h-10 flex items-center justify-center text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
               >
                 <Database size={20} />
-              </button>
-
-              <button 
-                onClick={() => {
-                  if (searchMode === InventorySearchMode.MANUAL && isSearchVisible) {
-                    setShowNumericKeypad(!showNumericKeypad);
-                  } else {
-                    onUpdateSearchMode(InventorySearchMode.MANUAL);
-                    setIsSearchVisible(true);
-                    setIsScannerOpen(false);
-                    setShowNumericKeypad(true);
-                  }
-                }} 
-                className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent/10 text-accent' : 'text-slate-600'}`}
-              >
-                <Keyboard size={20} />
               </button>
 
               <button 
@@ -1451,84 +1391,97 @@ const Inventory: React.FC<InventoryProps> = ({
                   setIsSearchVisible(false);
                   setIsScannerOpen(true);
                 }} 
-                className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent/10 text-accent' : 'text-slate-600'}`}
+                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
               >
                 <Camera size={20} />
               </button>
             </div>
           </div>
 
-          <div className="bg-white px-4 pt-2 pb-3 shadow-sm border-b border-slate-50">
-            <div className="space-y-2">
-              {/* Location & Sensors Row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 flex-1 min-w-0 mr-2">
-                  <MapPin size={12} className="text-accent shrink-0" />
-                  <span className="text-[10px] font-bold text-slate-700 truncate uppercase">
+          <div className="bg-white px-6 py-4 shadow-sm border-b border-slate-50">
+            <div className="space-y-4">
+              {/* Sensors Row - Elegant & Thin */}
+              <div className="flex items-center justify-between bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
+                <div className="flex items-center space-x-2 px-2 flex-1 min-w-0">
+                  <MapPin size={14} className="text-accent shrink-0" />
+                  <span className="text-[10px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
                     {selectedLocation}
                   </span>
                 </div>
                 
-                <div className="flex items-center space-x-1.5 shrink-0">
-                  <div className="flex items-center space-x-1 px-2 py-1 bg-slate-50 border border-slate-100 rounded-full">
-                    <Activity size={10} className={deviceMetrics.temp > 42 ? 'text-red-500 animate-pulse' : 'text-emerald-500'} />
-                    <span className="text-[9px] font-bold text-slate-600">{deviceMetrics.temp.toFixed(1)}°</span>
+                <div className="flex items-center space-x-4 pr-2">
+                  <div className="flex items-center space-x-1.5">
+                    <Flashlight size={14} className={torch === 'on' ? 'text-amber-500' : 'text-slate-300'} />
+                    <span className="text-[10px] font-bold text-[#64748B]">LUZ</span>
                   </div>
-                  <div className="flex items-center space-x-1 px-2 py-1 bg-slate-50 border border-slate-100 rounded-full">
-                    <Zap size={10} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-amber-500'} />
-                    <span className="text-[9px] font-bold text-slate-600">{deviceMetrics.battery}%</span>
+                  <div className="flex items-center space-x-1.5">
+                    <Activity size={14} className={deviceMetrics.temp > 42 ? 'text-red-500 animate-pulse' : 'text-slate-300'} />
+                    <span className="text-[10px] font-bold text-[#64748B]">{deviceMetrics.temp.toFixed(0)}°C</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <Zap size={14} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-slate-300'} />
+                    <span className="text-[10px] font-bold text-[#64748B]">{deviceMetrics.battery}%</span>
                   </div>
                 </div>
               </div>
 
-              {isSearchVisible && (
-                <div className="relative mb-3 animate-fadeIn">
-                  <input 
-                    ref={searchInputRef} 
-                    type="text" 
-                    readOnly
-                    inputMode="none"
-                    onFocus={() => setShowNumericKeypad(true)}
-                    value={displayValue} 
-                    className="w-full bg-bg-main border border-border pl-4 pr-12 py-2 font-bold font-mono text-lg text-center rounded-xl text-ink outline-none focus:border-accent transition-all cursor-pointer" 
-                    placeholder="DIGITE ETIQUETA..." 
-                  />
+              {/* Segmented Control - Modern Pill Style */}
+              <div className="flex bg-slate-100/50 p-1 rounded-xl border border-slate-100">
+                <button 
+                  onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} 
+                  className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${activeFilter === 'pending' ? 'bg-white text-accent shadow-sm' : 'text-[#64748B]'}`}
+                >
+                  Pendentes
+                </button>
+                <button 
+                  onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} 
+                  className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${activeFilter === 'checked' ? 'bg-white text-accent shadow-sm' : 'text-[#64748B]'}`}
+                >
+                  Inventariado
+                </button>
+              </div>
+
+              {/* Search Bar - Minimalist & Functional */}
+              <div className="relative">
+                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                  <Search size={16} className="text-[#94A3B8]" />
+                </div>
+                <input 
+                  ref={searchInputRef} 
+                  type="text" 
+                  readOnly
+                  inputMode="none"
+                  onFocus={() => setShowNumericKeypad(true)}
+                  value={displayValue} 
+                  className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-base font-bold rounded-2xl text-[#1E293B] outline-none focus:ring-2 focus:ring-accent/10 focus:border-accent transition-all cursor-pointer placeholder:text-[#94A3B8] placeholder:font-sans placeholder:text-xs placeholder:tracking-widest" 
+                  placeholder="DIGITE OU ESCANEIE ETIQUETA..." 
+                />
+                <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
                   <button 
                     onClick={triggerSmartOCR}
-                    className="absolute right-12 top-1/2 -translate-y-1/2 p-2 text-ink-muted hover:text-accent active:scale-90 transition-all"
+                    className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all active:scale-90"
                     title="Busca por Foto (OCR)"
                   >
                     <Camera size={20} />
                   </button>
-                  <button onClick={() => { setIsSearchVisible(false); setShowNumericKeypad(false); setDisplayValue(''); setCommittedSearch(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted active:text-ink"><X size={20} /></button>
-                  
-                  <input 
-                    type="file" 
-                    ref={ocrInputRef} 
-                    className="hidden" 
-                    accept="image/*" 
-                    capture="environment"
-                    onChange={handleSmartOCR}
-                  />
+                  {displayValue && (
+                    <button 
+                      onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} 
+                      className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all"
+                    >
+                      <X size={20} />
+                    </button>
+                  )}
                 </div>
-              )}
-
-              {/* Material 3 Tabs */}
-              <div className="flex border-b border-slate-100">
-                <button 
-                  onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} 
-                  className={`flex-1 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${activeFilter === 'pending' ? 'text-accent' : 'text-slate-400'}`}
-                >
-                  Pendentes
-                  {activeFilter === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
-                </button>
-                <button 
-                  onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} 
-                  className={`flex-1 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${activeFilter === 'checked' ? 'text-accent' : 'text-slate-400'}`}
-                >
-                  Inventariado
-                  {activeFilter === 'checked' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
-                </button>
+                
+                <input 
+                  type="file" 
+                  ref={ocrInputRef} 
+                  className="hidden" 
+                  accept="image/*" 
+                  capture="environment"
+                  onChange={handleSmartOCR}
+                />
               </div>
             </div>
           </div>
@@ -1581,6 +1534,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     scanFeedbackMode={scanFeedbackMode}
                     batterySaver={batterySaver}
                     torch={torch}
+                    onTorchToggle={() => setTorch(torch === 'on' ? 'off' : 'on')}
                   >
                     {isThermalBlocked && (
                       <div className="absolute inset-0 bg-red-600/90 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-[110]">
@@ -1643,7 +1597,6 @@ const Inventory: React.FC<InventoryProps> = ({
                       isBatchMode={isBatchMode} 
                       isSelected={selectedIds.has(String(asset.id))} 
                       onToggleSelect={toggleSelect} 
-                      confirmButtonRef={confirmButtonRef}
                       hasLocalPhoto={localPhotoIds.has(String(asset.id))}
                     />
                   </div>
@@ -1695,6 +1648,7 @@ const Inventory: React.FC<InventoryProps> = ({
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
           torch={torch}
+          onTorchToggle={() => setTorch(torch === 'on' ? 'off' : 'on')}
           onManualInput={() => {
             setIsScannerOpen(false);
             setManualAsset({
@@ -1818,7 +1772,7 @@ const Inventory: React.FC<InventoryProps> = ({
             </button>
             <div className="bg-accent p-8 text-white text-center">
               <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30 overflow-hidden p-2">
-                <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                <Check className="text-accent" size={40} />
               </div>
               <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Confirmar Inventário</h3>
               <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Verifique os dados antes de registrar</p>
