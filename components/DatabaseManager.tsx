@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { Database, Upload, Download, Trash2, ShieldCheck, AlertTriangle, Check, Loader2, FileJson, FileSpreadsheet } from 'lucide-react';
+import { Database, Upload, Download, Trash2, ShieldCheck, AlertTriangle, Check, Loader2, FileJson, FileSpreadsheet, FolderClosed, HardDrive, RefreshCw } from 'lucide-react';
 import { assetRepository } from '../services/assetRepository';
 import { requestPersistentStorage, isStoragePersisted } from '../services/localDbService';
 import { backupInventory, restoreInventory } from '../services/persistenceService';
+import { sqliteService } from '../services/sqliteService';
 import { InventoryState, DatabaseMode } from '../types';
 
 interface DatabaseManagerProps {
@@ -16,11 +17,29 @@ interface DatabaseManagerProps {
 const DatabaseManager: React.FC<DatabaseManagerProps> = ({ mode, onRestore, onClearDatabase, onClose }) => {
   const [isPersisted, setIsPersisted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [fileStatus, setFileStatus] = useState<{ status: string, path: string, lastModified?: string } | null>(null);
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
     isStoragePersisted().then(setIsPersisted);
+    sqliteService.getFileStatus().then(setFileStatus);
   }, []);
+
+  const handleReconnect = async () => {
+    try {
+      await sqliteService.linkExistingFile();
+      const status = await sqliteService.getFileStatus();
+      setFileStatus(status);
+      setMessage({ text: 'Banco físico reconectado com sucesso.', type: 'success' });
+    } catch {
+      setMessage({ text: 'Falha ao reconectar banco físico.', type: 'error' });
+    }
+  };
+
+  const handleExportSqlite = async () => {
+    await sqliteService.exportDatabaseFile();
+    setMessage({ text: 'Arquivo .db exportado para o sistema.', type: 'success' });
+  };
 
   const handleRequestPersistence = async () => {
     const result = await requestPersistentStorage();
@@ -126,6 +145,55 @@ const DatabaseManager: React.FC<DatabaseManagerProps> = ({ mode, onRestore, onCl
             <p className="text-sm font-medium">{message.text}</p>
           </div>
         )}
+
+        {/* Soberania de Dados (Físico) */}
+        <section className="bg-white p-5 rounded-2xl border-2 border-blue-100 shadow-sm overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-2 opacity-10">
+            <HardDrive size={64} className="text-blue-600" />
+          </div>
+          <h3 className="font-black text-[10px] text-blue-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+            <FolderClosed size={16} />
+            Soberania de Dados (Modo Físico)
+          </h3>
+          
+          <div className="space-y-4">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Local do Arquivo (.db)</span>
+                <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                  fileStatus?.status === 'linked' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {fileStatus?.status === 'linked' ? 'VINCULADO' : 'DESCONECTADO'}
+                </span>
+              </div>
+              <p className="text-[11px] font-mono text-slate-700 break-all bg-white p-2 rounded border border-slate-200">
+                {fileStatus?.path || 'Nenhum arquivo físico vinculado'}
+              </p>
+              {fileStatus?.lastModified && (
+                <p className="text-[8px] font-bold text-slate-400 uppercase mt-2">
+                  Última Sincronização: {fileStatus.lastModified}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={handleReconnect}
+                className="flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm hover:bg-blue-700 transition-all active:scale-95"
+              >
+                <RefreshCw size={14} />
+                Reconectar Pasta
+              </button>
+              <button 
+                onClick={handleExportSqlite}
+                className="flex items-center justify-center gap-2 py-3 border-2 border-blue-600 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all active:scale-95"
+              >
+                <Download size={14} />
+                Exportar .DB
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* Status de Persistência */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">

@@ -38,7 +38,12 @@ export const startAutonomousTracking = () => {
       // console.log('Autônomo: Coordenada renovada', lastLocation.lat, lastLocation.lng);
     },
     (err) => {
-      console.warn('Autônomo: Erro no rastreio em tempo real', err.message);
+      if (err.message.includes('permissions policy')) {
+        console.warn('GPS: Bloqueado por política de permissões do iframe.');
+        stopAutonomousTracking(); // Para de tentar se estiver bloqueado por política
+      } else {
+        console.warn('Autônomo: Erro no rastreio em tempo real', err.message);
+      }
     },
     options
   );

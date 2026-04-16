@@ -184,19 +184,17 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: 5, // Redução drástica conforme solicitado (frameProcessorFps: 5)
+      fps: 2, // Redução drástica: 2 verificações por segundo (suficiente para QR/Barras)
       qrbox: mode === ScannerMode.BARCODE 
         ? { width: 350, height: 150 } 
         : { width: 280, height: 280 },
       formatsToSupport: formats,
       aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
-      // Otimização de Resolução: 720p é o ideal para leitura sem aquecer demais. 
-      // 1080p+ em navegadores mobile causa processamento excessivo.
       videoConstraints: {
         facingMode: "environment",
         width: { ideal: batterySaver ? 640 : 1280 },
         height: { ideal: batterySaver ? 480 : 720 },
-        frameRate: { ideal: batterySaver ? 5 : 10 }
+        frameRate: { ideal: 5 } // FPS Baixo para evitar processamento contínuo da GPU
       }
     };
 
@@ -315,24 +313,26 @@ const Scanner: React.FC<ScannerProps> = ({
   }, [startScanner, stopScanner, isPaused, isTabHidden, isInactive]);
 
   useEffect(() => {
+    let active = true;
     const applyTorch = async () => {
+      // Pequeno delay para garantir que o hardware aplicou o stream antes da constraint
       if (!trackRef.current) return;
+      await new Promise(resolve => setTimeout(resolve, 300));
+      if (!active || !trackRef.current) return;
+
       try {
         const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
-        console.log(">>> [Scanner] Camera capabilities:", capabilities);
-        
         if (capabilities.torch) {
           await trackRef.current.applyConstraints({
             advanced: [{ torch: torch === 'on' }]
-          } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-        } else {
-          console.warn(">>> [Scanner] Torch not supported on this track");
+          } as MediaTrackConstraints);
         }
       } catch (e) {
-        console.warn(">>> [Scanner] Torch control failed:", e);
+        console.warn(">>> [Scanner] Torch toggle failed", e);
       }
     };
     applyTorch();
+    return () => { active = false; };
   }, [torch]);
 
   const switchCamera = async () => {
@@ -527,7 +527,7 @@ const Scanner: React.FC<ScannerProps> = ({
 
       {/* Overlay Children (Confirmation UI) */}
       {children && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center p-6 animate-fadeIn">
+        <div className="absolute inset-0 z-[200] pointer-events-none animate-fadeIn">
           {children}
         </div>
       )}
@@ -606,4 +606,4 @@ const Scanner: React.FC<ScannerProps> = ({
   return createPortal(scannerContent, document.body);
 };
 
-export default Scanner;
+export default React.memo(Scanner);

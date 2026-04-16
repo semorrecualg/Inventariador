@@ -55,7 +55,7 @@ import { sqliteService } from './services/sqliteService';
 import DatabaseManager from './components/DatabaseManager';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, AlertCircle } from 'lucide-react';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, AlertCircle, HardDrive } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -201,6 +201,37 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('app_database_mode');
     return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
   });
+
+  // Monitor de Soberania de Arquivos (Modo Físico)
+  const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
+
+  useEffect(() => {
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      const checkFileStatus = async () => {
+        const status = await sqliteService.getFileStatus();
+        if (status.status === 'permission_denied') {
+          setShowReconnectOverlay(true);
+        }
+      };
+      checkFileStatus();
+    }
+  }, [databaseMode]);
+
+  const handleReconnectFile = async () => {
+    const success = await sqliteService.requestFilePermission();
+    if (success) {
+      setShowReconnectOverlay(false);
+      window.location.reload(); 
+    } else {
+      try {
+        await sqliteService.linkExistingFile();
+        setShowReconnectOverlay(false);
+        window.location.reload();
+      } catch {
+        console.error("Falha ao reconectar banco físico");
+      }
+    }
+  };
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const [modalConfig, setModalConfig] = useState<ModalConfig>({
     isOpen: false,
@@ -1581,6 +1612,10 @@ const App: React.FC = () => {
     const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
     const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
     
+    // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA ou Status de Baixa
+    const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.DATABAIXA;
+    asset._is_divergent_baixa = isGoldenRuleDivergent;
+    
     // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
     // Se o item nasceu para ser etiquetado, o fato de ter sido etiquetado é a informação soberana.
     const originalEtq = normalizeKey(asset._plaquetaMaster || '');
@@ -1588,6 +1623,9 @@ const App: React.FC = () => {
     if (needsLabel) {
       return isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
     }
+
+    // 1.1 DIVERGÊNCIA CRÍTICA (REGRA DE OURO)
+    if (isGoldenRuleDivergent) return TagInventario.DIVERGENCIA;
 
     // 2. BAIXADO (Se não conferido)
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
@@ -2272,6 +2310,7 @@ const App: React.FC = () => {
       updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
       
       updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
+      updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
       updates._camposAlterados = Array.from(alteredFields);
       
       if (index === -1) newAssets.push(updates);
@@ -2331,13 +2370,14 @@ const App: React.FC = () => {
 
     // Captura GPS de forma assíncrona para não travar a UI
     if (updatedAsset._conferido) {
+      console.log(`>>> [GPS] Iniciando captura para item ${updatedAsset.id}...`);
       // REGRA DE FLUIDEZ MOBILE: Commit imediato para a UI não travar esperando o GPS
       commitAssetUpdate(assetWithHistory);
       saveAssetIncremental(assetWithHistory);
 
       getCurrentLocation()
         .then(loc => {
-          console.log(`>>> [GPS] Localização capturada: ${loc.lat}, ${loc.lng}`);
+          console.log(`>>> [GPS] SUCESSO para item ${updatedAsset.id}: ${loc.lat}, ${loc.lng}`);
           // Atualiza o ativo com GPS assim que disponível
           const assetWithFinalGps = { ...assetWithHistory, _lat: loc.lat, _lng: loc.lng };
           
@@ -2664,7 +2704,10 @@ const App: React.FC = () => {
       const loc = await getCurrentLocation();
       gpsCoords = { lat: loc.lat, lng: loc.lng };
     } catch (e) {
-      console.warn('GPS não capturado para lote:', e);
+      console.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
+      if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
+        gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
+      }
     }
 
     setInventory(prev => ({
@@ -2740,7 +2783,7 @@ const App: React.FC = () => {
           const hasChanges = alteredFields.size > 0;
           updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
           
-          updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
+          updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
           updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
           updates._camposAlterados = Array.from(alteredFields);
           updates._valoresOriginais = originalValues;
@@ -2748,6 +2791,9 @@ const App: React.FC = () => {
           if (wasLabelingCandidate) {
             updates._plaquetado = true;
           }
+
+          // Persistência imediata para evitar perda de dados em lote
+          saveAssetIncremental(updates);
 
           return updates;
         }
@@ -2769,6 +2815,14 @@ const App: React.FC = () => {
       });
     }
   }, [inventoryLocation, determineTag, normalizeKey, user, databaseMode, history]);
+
+  const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
+    setInventory(prev => ({ ...prev, scannerMode: mode }));
+  }, []);
+
+  const handleUpdateSearchMode = useCallback((mode: InventorySearchMode) => {
+    setInventory(prev => ({ ...prev, inventorySearchMode: mode }));
+  }, []);
 
   const handleSelectAsset = useCallback((asset: Asset) => {
     // Se viemos da tela de consulta, o detalhe deve ser apenas leitura
@@ -3854,9 +3908,9 @@ const App: React.FC = () => {
                   onAddNewLocation={addNewLocation} 
                   locationsWithStats={locationsWithStats} 
                   scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
-                  onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+                  onUpdateScannerMode={handleUpdateScannerMode} 
                   searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
-                  onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))} 
+                  onUpdateSearchMode={handleUpdateSearchMode} 
                   autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
                   scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
                   onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
@@ -3880,7 +3934,7 @@ const App: React.FC = () => {
               userRole={user?.role}
               isFieldMode={isFieldMode}
             >
-              <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
+              <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={handleUpdateScannerMode} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.CONSULTATION && (
@@ -3890,7 +3944,7 @@ const App: React.FC = () => {
               onSelectAsset={handleSelectAsset} 
               qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
               scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
-              onUpdateScannerMode={(mode) => setInventory(prev => ({ ...prev, scannerMode: mode }))} 
+              onUpdateScannerMode={handleUpdateScannerMode} 
               scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
               isReturnMode={isConsultationFromInventory} 
               onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }} 
@@ -4310,6 +4364,41 @@ const App: React.FC = () => {
           </div>
           <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">Processando Login</h3>
           <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">Aguarde, validando credenciais...</p>
+        </div>
+      )}
+
+      {/* Overlay de Reconexão de Banco Físico */}
+      {showReconnectOverlay && (
+        <div className="fixed inset-0 z-[20000] bg-slate-900/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
+          <div className="w-24 h-24 bg-blue-600 rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-blue-500/40 relative overflow-hidden">
+            <HardDrive className="text-white relative z-10" size={48} />
+            <motion.div 
+              animate={{ rotate: 360 }}
+              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-0 border-[8px] border-white/20 border-t-white/80 rounded-full"
+            />
+          </div>
+          
+          <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">
+            Reconectando ao Banco de Dados Local...
+          </h2>
+          
+          <p className="text-slate-400 text-sm max-w-sm mb-10 leading-relaxed font-medium">
+            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">gbr_inventario_expert.db</span>. 
+            Clique abaixo para reconfirmar o acesso e continuar seu trabalho sem perdas.
+          </p>
+          
+          <button 
+            onClick={handleReconnectFile}
+            className="w-full max-w-xs py-5 bg-blue-600 text-white rounded-[1.5rem] font-bold uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+          >
+            <RefreshCw size={20} className="animate-spin-slow" />
+            Reconfirmar Permissão
+          </button>
+          
+          <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest opacity-50">
+            Soberania de Dados Ativa (Modo Interno)
+          </p>
         </div>
       )}
     </ErrorBoundary>

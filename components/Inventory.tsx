@@ -442,6 +442,27 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   }, [inventorySearchValue, clearInventorySearchValue, onUpdateSearchMode]);
 
+  const handleScannerClose = useCallback(() => {
+    setIsScannerOpen(false);
+    onUpdateSearchMode(InventorySearchMode.MANUAL);
+    setIsSearchVisible(true);
+    setTimeout(() => searchInputRef.current?.focus(), 100);
+  }, [onUpdateSearchMode]);
+
+  const handleTorchToggle = useCallback(() => {
+    setTorch(prev => prev === 'on' ? 'off' : 'on');
+  }, []);
+
+  const handleUpdateScannerModeLocal = useCallback((m: ScannerMode) => {
+    onUpdateScannerMode(m);
+  }, [onUpdateScannerMode]);
+
+  const handleScannerOpen = useCallback(() => {
+    onUpdateSearchMode(InventorySearchMode.SCANNER);
+    setIsSearchVisible(false);
+    setIsScannerOpen(true);
+  }, [onUpdateSearchMode]);
+
   const handleScan = useCallback(async (result: string) => {
     // Se estiver em cooldown térmico ou bloqueado, ignora
     if (isCoolingDown || isThermalBlocked || isScannerPaused) return;
@@ -534,7 +555,12 @@ const Inventory: React.FC<InventoryProps> = ({
     } else {
       // Se NÃO for auto-conferência (NÃO), deve mostrar o item e aguardar confirmação
       if (foundAsset) {
-        setScannedAsset(foundAsset);
+        // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA na base
+        const statusUpper = String(foundAsset.STATUS || '').toUpperCase();
+        const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!foundAsset.DATABAIXA;
+        const assetWithDivergence = { ...foundAsset, _is_divergent_baixa: isGoldenRuleDivergent };
+        
+        setScannedAsset(assetWithDivergence);
       } else {
         setScannedResult(result);
       }
@@ -1088,6 +1114,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         updatedAsset = {
                           ...scannedAsset,
                           _conferido: true,
+                          TAG_INVENTARIO: TagInventario.CONFERIDO,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
                         };
                       }
@@ -1387,13 +1414,7 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
 
               <button 
-                onClick={() => {
-                  onUpdateSearchMode(InventorySearchMode.MANUAL);
-                  setIsScannerOpen(false);
-                  setIsSearchVisible(true);
-                  // Pequeno delay para garantir que o input existe antes de focar
-                  setTimeout(() => searchInputRef.current?.focus(), 100);
-                }} 
+                onClick={handleScannerClose} 
                 className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
                 title="Busca por Teclado"
               >
@@ -1401,11 +1422,7 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
 
               <button 
-                onClick={() => {
-                  onUpdateSearchMode(InventorySearchMode.SCANNER);
-                  setIsSearchVisible(false);
-                  setIsScannerOpen(true);
-                }} 
+                onClick={handleScannerOpen} 
                 className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
                 title="Busca por Câmera"
               >
@@ -1425,18 +1442,18 @@ const Inventory: React.FC<InventoryProps> = ({
                   </span>
                 </div>
                 
-                <div className="flex items-center space-x-4 pr-2">
-                  <div className="flex items-center space-x-1.5">
-                    <Flashlight size={14} className={torch === 'on' ? 'text-amber-500' : 'text-slate-300'} />
-                    <span className="text-[10px] font-bold text-[#64748B]">LUZ</span>
+                <div className="flex items-center space-x-3 pr-2">
+                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${torch === 'on' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-100/50 border border-slate-100 text-slate-400'}`}>
+                    <Flashlight size={12} className={torch === 'on' ? 'animate-pulse' : ''} />
+                    <span className="text-[9px] font-black tracking-widest">LUZ</span>
                   </div>
-                  <div className="flex items-center space-x-1.5">
-                    <Activity size={14} className={deviceMetrics.temp > 42 ? 'text-red-500 animate-pulse' : 'text-slate-300'} />
-                    <span className="text-[10px] font-bold text-[#64748B]">{deviceMetrics.temp.toFixed(0)}°C</span>
+                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.temp > 42 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-blue-500/10 border border-blue-100 text-blue-600'}`}>
+                    <Activity size={12} className={deviceMetrics.temp > 42 ? 'animate-pulse' : ''} />
+                    <span className="text-[9px] font-black tracking-widest">{deviceMetrics.temp.toFixed(0)}°C</span>
                   </div>
-                  <div className="flex items-center space-x-1.5">
-                    <Zap size={14} className={deviceMetrics.battery < 20 ? 'text-red-500 animate-pulse' : 'text-slate-300'} />
-                    <span className="text-[10px] font-bold text-[#64748B]">{deviceMetrics.battery}%</span>
+                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.battery < 20 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-emerald-500/10 border border-emerald-100 text-emerald-600'}`}>
+                    <Zap size={12} className={deviceMetrics.battery < 20 ? 'animate-pulse' : ''} />
+                    <span className="text-[9px] font-black tracking-widest">{deviceMetrics.battery}%</span>
                   </div>
                 </div>
               </div>
@@ -1543,19 +1560,14 @@ const Inventory: React.FC<InventoryProps> = ({
                   <Scanner 
                     isInline={true}
                     mode={scannerMode}
-                    onModeChange={onUpdateScannerMode}
+                    onModeChange={handleUpdateScannerModeLocal}
                     onScan={handleScan}
-                    onClose={() => {
-                      setIsScannerOpen(false);
-                      onUpdateSearchMode(InventorySearchMode.MANUAL);
-                      setIsSearchVisible(true);
-                      setTimeout(() => searchInputRef.current?.focus(), 100);
-                    }}
+                    onClose={handleScannerClose}
                     isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
                     scanFeedbackMode={scanFeedbackMode}
                     batterySaver={batterySaver}
                     torch={torch}
-                    onTorchToggle={() => setTorch(torch === 'on' ? 'off' : 'on')}
+                    onTorchToggle={handleTorchToggle}
                   >
                     {isThermalBlocked && (
                       <div className="absolute inset-0 bg-red-600/90 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-[110]">
@@ -1572,8 +1584,8 @@ const Inventory: React.FC<InventoryProps> = ({
                       </div>
                     )}
                   </Scanner>
-                  <div className="absolute top-4 right-4 flex items-center space-x-2 z-50">
-                    <div className="px-3 py-1 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-2">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">
+                    <div className="px-3 py-1 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-2 shadow-lg border border-white/20">
                       <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
                       <span className="text-[10px] font-black text-white uppercase tracking-widest">Scanner Ativo</span>
                     </div>
@@ -1720,6 +1732,12 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
           )}
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">
+            <div className="px-4 py-2 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-3 shadow-2xl border border-white/20">
+              <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
+              <span className="text-xs font-black text-white uppercase tracking-[0.2em]">Scanner Ativo</span>
+            </div>
+          </div>
         </Scanner>
       )}
 

@@ -213,7 +213,14 @@ const Consultation: React.FC<ConsultationProps> = ({
       }
 
       return true;
-    }).sort((a, b) => String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true }));
+    }).sort((a, b) => {
+      // Prioridade 1: Divergência Crítica (Regra de Ouro)
+      if (a._is_divergent_baixa && !b._is_divergent_baixa) return -1;
+      if (!a._is_divergent_baixa && b._is_divergent_baixa) return 1;
+      
+      // Prioridade 2: Ordem Numérica de Etiqueta
+      return String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true });
+    });
   }, [assets, committedFilters]);
 
   const triggerSearch = () => {
@@ -347,10 +354,10 @@ const Consultation: React.FC<ConsultationProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* SEARCH FORM - DYNAMIC PANEL */}
         {isFilterOpen && (
-          <div className="p-5 space-y-4 bg-white border-b border-accent/10 shadow-lg animate-slideDown relative z-10">
+          <div className="p-5 space-y-4 bg-white border-b border-accent/10 shadow-lg animate-slideDown relative z-10 overflow-y-auto max-h-[60vh] shrink-0 no-scrollbar">
             <div className="flex items-center mb-4">
               <button 
                 onClick={triggerSearch}
@@ -410,25 +417,30 @@ const Consultation: React.FC<ConsultationProps> = ({
         )}
 
         {/* RESULTS */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative flex flex-col min-h-0">
           {committedFilters ? (
             filteredAssets.length > 0 ? (
-              <div className="h-full flex flex-col">
-                <div className="flex items-center justify-between px-6 py-3 bg-slate-50/50 border-b border-slate-100">
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center justify-between px-6 py-3 bg-slate-50/50 border-b border-slate-100 shrink-0">
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Resultados</span>
                   <span className="bg-accent-soft text-accent px-2 py-0.5 rounded-full text-[9px] font-bold">{filteredAssets.length}</span>
                 </div>
                 
-                <div className="flex-1">
+                <div className="flex-1 min-h-0" style={{ minHeight: '400px' }}>
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ height: '100%' }}
+                    style={{ height: '100%', minHeight: '400px' }}
                     data={filteredAssets}
+                    increaseViewportBy={500}
                     atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
                     itemContent={(index, asset) => {
+                      if (!asset || !asset.id) {
+                        console.warn(`>>> [Consultation] Ativo inválido no índice ${index}:`, asset);
+                        return null;
+                      }
                       const isDivergent = asset._is_divergent_baixa;
                       return (
-                        <div className="px-5 py-1.5">
+                        <div className="px-5 py-1.5" key={String(asset.id)}>
                           <div 
                             onClick={() => onSelectAsset(asset)} 
                             className={`w-full flex items-center p-3 rounded-xl border shadow-sm active:scale-[0.99] transition-all text-left cursor-pointer group ${

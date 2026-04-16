@@ -13,10 +13,13 @@ import {
   RefreshCw,
   Download,
   Cloud,
-  Calendar
+  Calendar,
+  ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import localforage from 'localforage';
 import { Asset, DatabaseMode } from '../types';
+import { sqliteService } from '../services/sqliteService';
 import { generateUUID, logAuditEvent } from '../services/supabaseService';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import BackButton from './BackButton';
@@ -55,7 +58,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   user,
   databaseMode
 }) => {
-  const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY'>('SOURCE');
+  const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY' | 'IMMOBILIZATION'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -329,6 +332,26 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const handleActivateSystem = async () => {
     console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
+    
+    // REGRA DE OURO DBA: Em modo INTERNO, a imobilização física é obrigatória
+    const isInternal = databaseMode === DatabaseMode.INTERNAL || localStorage.getItem('app_database_mode') === DatabaseMode.INTERNAL;
+    
+    if (isInternal) {
+      try {
+        const hasHandle = await localforage.getItem('gbr_db_file_handle');
+        if (!hasHandle) {
+          setStep('IMMOBILIZATION');
+          return;
+        }
+      } catch (err) {
+        console.warn('Erro ao verificar handle de arquivo:', err);
+      }
+    }
+
+    await performActivation();
+  };
+
+  const performActivation = async () => {
     if (rawExtractedAssetsRef.current.length > 0) {
       setIsActivating(true);
       try {
@@ -347,6 +370,18 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
     } else {
       console.warn('>>> [DatabaseLoader] Tentativa de ativar sistema sem ativos.');
+    }
+  };
+
+  const handleStartImmobilization = async () => {
+    try {
+      await sqliteService.mapLocalFolder();
+      setStep('SUMMARY');
+      // Pequeno delay para garantir que o usuário viu o sucesso
+      setTimeout(() => handleActivateSystem(), 500);
+    } catch (err) {
+      console.error('Falha na imobilização:', err);
+      alert("A imobilização é necessária para proteger seus dados contra limpezas de cache no Android. Por favor, selecione uma pasta segura (ex: Documentos).");
     }
   };
 
@@ -647,6 +682,44 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             <button disabled={selectedCompanies.size === 0} onClick={finalizeLoading} className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-lg active:scale-95 disabled:opacity-30 transition-all flex items-center justify-center space-x-3">
               <span>EFETIVAR BASE MESTRE</span> <ArrowRight size={18} />
             </button>
+          </div>
+        )}
+
+        {step === 'IMMOBILIZATION' && (
+          <div className="space-y-6 animate-slideUp">
+            <div className="bg-white border-2 border-blue-600 p-6 rounded-2xl shadow-xl">
+              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6 border border-blue-100 shadow-sm">
+                <ShieldCheck size={32} />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-3">Imobilização de Dados Permanente</h3>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed mb-6">
+                Para evitar a perda de dados ao &quot;Limpar o Navegador&quot; no Android, você deve vincular este App a um arquivo físico em seu celular.
+              </p>
+              
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-start space-x-3 mb-8">
+                <div className="mt-0.5 text-blue-600">
+                  <Info size={16} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-blue-900 uppercase tracking-tight">Instrução Crítica:</p>
+                  <p className="text-[9px] text-blue-700 font-bold uppercase tracking-widest leading-relaxed mt-1">
+                    Ao clicar abaixo, selecione a pasta <span className="text-blue-900 border-b border-blue-400">DOCUMENTOS</span> do seu celular. 
+                    Evite a pasta &quot;Downloads&quot;, pois ela pode ser limpa pelo sistema Android.
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                onClick={handleStartImmobilization}
+                className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] shadow-lg shadow-blue-500/30 active:scale-95 transition-all flex items-center justify-center space-x-3"
+              >
+                <span>VINCULAR PASTA DOCUMENTOS</span> <ArrowRight size={18} />
+              </button>
+            </div>
+            
+            <p className="text-center text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+              Conformidade com CPC 27 - Proteção de Ativo Digital
+            </p>
           </div>
         )}
 

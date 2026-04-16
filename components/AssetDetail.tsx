@@ -348,6 +348,13 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         { key: '_auditor', label: 'AUDITOR RESPONSÁVEL', icon: User },
         { key: '_localMaster', label: 'LOCAL ONDE FOI ENCONTRADO', icon: MapPin }
       ]
+    },
+    {
+      title: 'GEOLOCALIZAÇÃO',
+      fields: [
+        { key: '_lat', label: 'LATITUDE', icon: MapPin },
+        { key: '_lng', label: 'LONGITUDE', icon: MapPin }
+      ]
     }
   ];
 
