@@ -1955,6 +1955,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
+  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+  if (mode === 'INTERNAL') return [];
+  
   if (!supabase) return [];
   
   try {

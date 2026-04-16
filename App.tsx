@@ -1221,6 +1221,12 @@ const App: React.FC = () => {
 
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = useCallback(async () => {
+    // BLINDAGEM DBA: No modo INTERNO, não realizamos chamadas passivas à nuvem para evitar aquecimento e consumo de dados
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      console.log('>>> [DBA] refreshCampaigns: Modo INTERNO detectado. Ignorando sincronização passiva com a nuvem.');
+      return;
+    }
+
     const tenantId = user?._tenantid || user?.tenantid;
     console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, User: ${user?.email}, Mode: ${databaseMode}`);
     
