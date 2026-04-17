@@ -14,11 +14,14 @@ import {
   Download,
   Cloud,
   Calendar,
-  ShieldCheck
+  ShieldCheck,
+  FolderOpen,
+  ExternalLink
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import localforage from 'localforage';
 import { Asset, DatabaseMode } from '../types';
+import { APP_LOGO } from '../constants';
 import { sqliteService } from '../services/sqliteService';
 import { generateUUID, logAuditEvent } from '../services/supabaseService';
 import { deduplicateRedundantString } from '../utils/formatUtils';
@@ -73,6 +76,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   
   const [availableCompanies, setAvailableCompanies] = useState<{name: string, count: number}[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
+  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string} | null>(null);
+
+  React.useEffect(() => {
+    if (step === 'IMMOBILIZATION') {
+      sqliteService.getFileStatus().then(status => {
+        setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+      });
+    }
+  }, [step]);
 
   const rawExtractedAssetsRef = useRef<Asset[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -335,13 +347,18 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     
     // REGRA DE OURO DBA: Em modo INTERNO, a imobilização física é obrigatória
     const isInternal = databaseMode === DatabaseMode.INTERNAL || localStorage.getItem('app_database_mode') === DatabaseMode.INTERNAL;
+    const isIframe = window.self !== window.top;
     
     if (isInternal) {
       try {
         const hasHandle = await localforage.getItem('gbr_db_file_handle');
-        if (!hasHandle) {
+        if (!hasHandle && !isIframe) {
           setStep('IMMOBILIZATION');
           return;
+        }
+        
+        if (!hasHandle && isIframe) {
+          console.warn('>>> [DatabaseLoader] Operando em modo de visualização (Iframe). Imobilização física desativada temporariamente.');
         }
       } catch (err) {
         console.warn('Erro ao verificar handle de arquivo:', err);
@@ -375,13 +392,33 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const handleStartImmobilization = async () => {
     try {
-      await sqliteService.mapLocalFolder();
+      // @ts-expect-error - feature detection
+      if (!window.showDirectoryPicker) {
+        throw new Error("API_NOT_SUPPORTED");
+      }
+
+      await sqliteService.mapLocalFolder(databaseMode === DatabaseMode.INTERNAL ? 'INTERNAL' : 'SUPABASE');
+      
+      // Atualiza o status visual
+      const status = await sqliteService.getFileStatus();
+      setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+      
       setStep('SUMMARY');
-      // Pequeno delay para garantir que o usuário viu o sucesso
-      setTimeout(() => handleActivateSystem(), 500);
-    } catch (err) {
+      setTimeout(() => handleActivateSystem(), 300);
+    } catch (err: unknown) {
       console.error('Falha na imobilização:', err);
-      alert("A imobilização é necessária para proteger seus dados contra limpezas de cache no Android. Por favor, selecione uma pasta segura (ex: Documentos).");
+      if ((err as Error).message === "IFRAME_RESTRICTION") {
+        // Reduzimos o ruído em iframes para uma experiência mais fluida no editor
+        console.info("🛡️ Restrição de Iframe detectada. Prosseguindo com Imobilização Virtual (IndexedDB).");
+        setStep('SUMMARY');
+        setTimeout(() => handleActivateSystem(), 300);
+      } else if ((err as Error).message === "API_NOT_SUPPORTED") {
+        alert("Seu navegador ou dispositivo não suporta o acesso direto ao sistema de arquivos (FileSystem Access API). \n\nVocê pode continuar usando o modo LOCAL (IndexedDB), mas lembre-se de EXPORTAR seu banco de dados periodicamente para evitar perda de dados se o cache do navegador for limpo.");
+        setStep('SUMMARY');
+        setTimeout(() => handleActivateSystem(), 500);
+      } else {
+        alert("A imobilização é altamente recomendada para proteger seus dados contra limpezas de cache no Android. Por favor, tente selecionar uma pasta segura (ex: Documentos).");
+      }
     }
   };
 
@@ -555,12 +592,22 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
         {step === 'SOURCE' && (
           <div className="space-y-6">
-            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card">
-               <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v25.00</span>
-               <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-1.5 mb-2">Reestruturação</h3>
-               <p className="text-[10px] font-bold text-slate-400 leading-relaxed uppercase tracking-widest">
-                Suporte nativo para Centro de Custo, Valor e Fornecedor. Utilize arquivos <strong>Excel</strong> com 21 colunas.
-               </p>
+            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card flex items-center gap-4">
+              <div className="w-16 h-16 bg-white border border-slate-100 rounded-full flex items-center justify-center shadow-sm overflow-hidden shrink-0">
+                <img 
+                  src={APP_LOGO} 
+                  alt="GBR Auditoria Logo" 
+                  className="w-full h-full object-cover rounded-full"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div className="flex-1">
+                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v25.00</span>
+                <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-0.5">Reestruturação</h3>
+                <p className="text-[10px] font-bold text-slate-400 leading-tight uppercase tracking-widest mt-1">
+                  Suporte nativo para C. Custo, Valor e Fornecedor.
+                </p>
+              </div>
             </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
               <div className="w-16 h-16 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={32} /></div>
@@ -691,9 +738,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6 border border-blue-100 shadow-sm">
                 <ShieldCheck size={32} />
               </div>
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-3">Imobilização de Dados Permanente</h3>
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-1">Local de Trabalho Expert</h3>
+              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mb-4">Imobilização de Dados Permanente</p>
+              
               <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed mb-6">
-                Para evitar a perda de dados ao &quot;Limpar o Navegador&quot; no Android, você deve vincular este App a um arquivo físico em seu celular.
+                Defina a pasta onde o banco de dados será mantido. Isso garante que seus inventários não sejam apagados pelo sistema Android.
               </p>
               
               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-start space-x-3 mb-8">
@@ -701,24 +750,76 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                   <Info size={16} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-blue-900 uppercase tracking-tight">Instrução Crítica:</p>
+                  <p className="text-[10px] font-black text-blue-900 uppercase tracking-tight">Instrução de Diretório:</p>
                   <p className="text-[9px] text-blue-700 font-bold uppercase tracking-widest leading-relaxed mt-1">
-                    Ao clicar abaixo, selecione a pasta <span className="text-blue-900 border-b border-blue-400">DOCUMENTOS</span> do seu celular. 
-                    Evite a pasta &quot;Downloads&quot;, pois ela pode ser limpa pelo sistema Android.
+                    Ao clicar abaixo, selecione a pasta <span className="text-blue-900 border-b border-blue-400">DOCUMENTOS/GBR</span> ou crie uma nova pasta. 
+                    O App passará a ler e gravar todos os dados exclusivamente neste local.
                   </p>
                 </div>
               </div>
+
+              {window.self !== window.top && (
+                <div className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-xl border-l-4">
+                  <p className="text-[10px] font-black text-amber-900 uppercase tracking-tight">Modo Visualização (Editor):</p>
+                  <p className="text-[9px] text-amber-700 font-bold uppercase tracking-widest leading-relaxed mt-1">
+                    O navegador bloqueia o acesso a diretórios em iframes. Clique em &quot;DEFINIR LOCAL&quot; para continuar no modo virtual (cache) ou abra em uma nova aba para vincular fisicamente.
+                  </p>
+                </div>
+              )}
 
               <button 
                 onClick={handleStartImmobilization}
                 className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] shadow-lg shadow-blue-500/30 active:scale-95 transition-all flex items-center justify-center space-x-3"
               >
-                <span>VINCULAR PASTA DOCUMENTOS</span> <ArrowRight size={18} />
+                <FolderOpen size={18} />
+                <span>DEFINIR LOCAL DE TRABALHO</span>
               </button>
+
+              {fileStatus && fileStatus.status === 'linked' && (
+                <div className="mt-6 p-5 bg-emerald-50 border-2 border-emerald-100 rounded-2xl animate-fadeIn relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3">
+                    <CheckCircle2 size={24} className="text-emerald-200" />
+                  </div>
+                  
+                  <div className="flex items-center space-x-2 text-emerald-600 mb-3">
+                    <ShieldCheck size={16} />
+                    <span className="text-[11px] font-black uppercase tracking-tight">Vínculo Ativo & Protegido</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[9px] font-bold text-emerald-600/60 uppercase tracking-widest block mb-1">Caminho do Diretório:</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-mono font-bold text-emerald-900 truncate flex-1 bg-white/50 p-2 rounded-lg border border-emerald-200/50">
+                          {fileStatus.path}
+                        </p>
+                        <button 
+                          onClick={() => sqliteService.requestFilePermission()}
+                          className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm shrink-0"
+                          title="Validar Acesso"
+                        >
+                          <ExternalLink size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 border-t border-emerald-100 pt-3">
+                      <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                      <span className="text-[9px] text-emerald-700 font-black uppercase tracking-widest">
+                        Base: {fileStatus.fileName}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <p className="text-[9px] text-emerald-600/70 font-bold uppercase tracking-widest mt-4 italic leading-tight">
+                    * O sistema salvou este caminho. Em caso de reinício, o acesso será restaurado automaticamente.
+                  </p>
+                </div>
+              )}
             </div>
             
             <p className="text-center text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-              Conformidade com CPC 27 - Proteção de Ativo Digital
+              Conformidade com CPC 27 - Gestão de Ativo Imobilizado Digital
             </p>
           </div>
         )}
@@ -791,8 +892,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <p className="text-[10px] text-amber-700 mt-0.5">
                   {databaseMode === DatabaseMode.INTERNAL 
                     ? 'A base foi validada e será ativada localmente (100% Offline).' 
-                    : 'A base foi validada e está pronta para ser sincronizada com a nuvem.'}
+                    : 'A base foi validada e está pronta para ser sincronizada (Modo Nuvem).'}
                 </p>
+                {databaseMode !== DatabaseMode.INTERNAL && (
+                  <div className="mt-3 p-3 bg-blue-600/10 border border-blue-600/20 rounded-lg">
+                    <p className="text-[8px] font-bold text-blue-800 uppercase leading-tight tracking-wider">
+                      🛡️ Princípio da Redundância: Por segurança, faça backups regulares mesmo no modo nuvem. 
+                      Os arquivos receberão o sufixo <span className="underline">.Cloud</span>.
+                    </p>
+                  </div>
+                )}
                 <div className="mt-2 pt-2 border-t border-amber-200/50 flex items-center justify-between">
                   <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Tenant: {user?._tenantid || user?.tenantid || 'CICOPAL'}</span>
                   <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Modo: {localStorage.getItem('app_database_mode') || 'MOBILE PURO'}</span>

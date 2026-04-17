@@ -64,8 +64,9 @@ export const backupInventory = async (mode: DatabaseMode, customName?: string): 
     const link = document.createElement('a');
     link.href = url;
     
-    const fileName = customName || `GBR_BACKUP_${new Date().getTime()}`;
-    link.download = `${fileName}.json`;
+    const suffix = mode === DatabaseMode.INTERNAL ? '.Mobile' : '.Cloud';
+    const fileName = customName || `GBR_BACKUP_${new Date().getTime()}${suffix}`;
+    link.download = `${fileName}.db`; // Usando .db como extensão padrão com o sufixo solicitado
     
     document.body.appendChild(link);
     link.click();

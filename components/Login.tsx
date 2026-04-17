@@ -4,6 +4,7 @@ import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw
 import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername, signInWithMagicLink } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
+import { APP_LOGO } from '../constants';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
@@ -466,23 +467,32 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
   return (
     <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
-      {/* Header compactado e movido para cima (X) */}
-      <div className="mb-3 text-center relative">
+      {/* Header com Logotipo */}
+      <div className="mb-4 text-center relative flex flex-col items-center">
         {/* Indicador de Plataforma */}
-        <div className="absolute -top-1 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
+        <div className="absolute top-0 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
           <span className="text-[6px] font-black text-accent uppercase tracking-widest">
             {databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'MOBILE' : 'DESKTOP')}
           </span>
+        </div>
+
+        <div className="w-24 h-24 bg-white border border-border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main">
+          <img 
+            src={APP_LOGO} 
+            alt="GBR Auditoria Logo" 
+            className="w-full h-full object-cover rounded-full"
+            referrerPolicy="no-referrer"
+          />
         </div>
         
         <h1 
           id="login-title"
           onClick={handleTitleClick}
-          className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
+          className="text-lg font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
         >
           SISTEMA <span className="text-accent">AUDITORIA</span>
         </h1>
-        <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+        <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-1 opacity-70">
           INVENTÁRIO DE ATIVO IMOBILIZADO
         </p>
       </div>

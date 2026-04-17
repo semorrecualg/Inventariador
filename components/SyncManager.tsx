@@ -256,13 +256,31 @@ const SyncManager: React.FC<SyncManagerProps> = ({
       </div>
 
       {/* Info Footer */}
-      <div className="p-4 bg-white border-t border-border flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
-          <AlertCircle className="w-4 h-4" />
+      <div className="p-4 bg-white border-t border-border space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+            <AlertCircle className="w-4 h-4" />
+          </div>
+          <p className="text-[9px] text-ink-muted leading-tight uppercase font-bold tracking-tighter">
+            Fotos capturadas em modo offline são armazenadas localmente e enviadas automaticamente quando a conexão é restaurada.
+          </p>
         </div>
-        <p className="text-[9px] text-ink-muted leading-tight uppercase font-bold tracking-tighter">
-          Fotos capturadas em modo offline são armazenadas localmente e enviadas automaticamente quando a conexão é restaurada.
-        </p>
+
+        {localStorage.getItem('app_database_mode') === 'SUPABASE' && (
+          <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+              <Cloud className="w-4 h-4" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[9px] text-blue-900 leading-tight uppercase font-bold tracking-tight">
+                🛡️ Modo Nuvem Ativo (Princípio da Redundância)
+              </p>
+              <p className="text-[8px] text-blue-700/70 leading-tight uppercase font-medium mt-0.5">
+                Recomendamos backups locais (.Cloud) por segurança adicional dos dados.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

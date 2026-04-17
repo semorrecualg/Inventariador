@@ -55,7 +55,8 @@ import { sqliteService } from './services/sqliteService';
 import DatabaseManager from './components/DatabaseManager';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, AlertCircle, HardDrive } from 'lucide-react';
+import { APP_LOGO } from './constants';
+import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -97,8 +98,13 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     if (this.state.hasError) {
       return (
         <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center">
-          <div className="w-20 h-20 bg-white border border-border rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10 overflow-hidden p-1">
-            <AlertCircle className="text-red-500" size={40} />
+          <div className="w-32 h-32 bg-white border border-border rounded-full flex items-center justify-center mb-6 shadow-2xl shadow-red-500/10 overflow-hidden p-1">
+            <img 
+              src={APP_LOGO} 
+              alt="GBR Auditoria Logo" 
+              className="w-full h-full object-cover rounded-full"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <h1 className="text-2xl font-bold text-ink mb-2 uppercase tracking-tight">Ops! Algo deu errado</h1>
           <p className="text-sm text-ink-muted mb-8 max-w-xs">

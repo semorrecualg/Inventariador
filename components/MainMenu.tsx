@@ -35,7 +35,9 @@ import {
   ShieldAlert,
   ExternalLink,
   Activity,
-  Calendar
+  Calendar,
+  FolderOpen,
+  HardDrive
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
@@ -181,6 +183,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com" || user?.email.toLowerCase() === "semorr@gmail.com.br";
   const hasData = inventoryInfo.totalDatabase > 0;
+
+  const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);
+
+  React.useEffect(() => {
+    if (isDataMenuOpen) {
+      import('../services/sqliteService').then(m => {
+        m.sqliteService.getFileStatus().then(status => {
+          setDirStatus(status as { status: string; path: string; fileName?: string });
+        });
+      });
+    }
+  }, [isDataMenuOpen]);
 
   const handleSecureAction = (action: () => void) => {
     setPendingAction(() => action);
@@ -807,6 +821,56 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
+              {/* Working Directory Status Card */}
+              <div className="w-full p-5 bg-blue-600 rounded-2xl shadow-xl shadow-blue-500/20 mb-4 border border-blue-400 relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <FolderOpen size={64} className="text-white" />
+                </div>
+
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-white backdrop-blur-sm border border-white/30">
+                    <HardDrive size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">Vínculo de Diretório</h4>
+                    <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania Local Permanente</p>
+                  </div>
+                </div>
+
+                <div className="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/10 mb-4">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Caminho do Banco:</span>
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${dirStatus?.status === 'linked' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                      {dirStatus?.status === 'linked' ? 'ATIVO' : 'DESCONECTADO'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] font-mono font-bold text-white break-all leading-tight">
+                    {dirStatus?.path || 'Nenhum diretório selecionado'}
+                  </p>
+                  <div className="mt-2 flex items-center space-x-2">
+                    <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: {dirStatus?.fileName || 'Aguardando...'}</span>
+                  </div>
+                </div>
+
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => onNavigate(AppScreen.LOAD_DATABASE)}
+                    className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
+                  >
+                    <FolderOpen size={12} />
+                    <span>ALTERAR PASTA</span>
+                  </button>
+                  <button 
+                    onClick={() => import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission())}
+                    className="w-12 py-2.5 bg-blue-700 text-white rounded-xl flex items-center justify-center hover:bg-blue-800 transition-all border border-white/10"
+                    title="Autorizar Acesso"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </div>
+              </div>
+
               {/* Security Status Card */}
               <div className="w-full p-4 bg-emerald-50 border border-emerald-100 rounded-2xl shadow-sm mb-3">
                 <div className="flex items-center justify-between mb-3">

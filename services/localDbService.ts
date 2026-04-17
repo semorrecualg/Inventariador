@@ -49,7 +49,11 @@ export const localDb = {
       await localDb.assets.add(asset);
     },
     bulkAdd: async (assets: Asset[]) => {
-      for (const asset of assets) await localDb.assets.add(asset);
+      const commands = assets.map(asset => {
+        const { sql, values } = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
+        return { sql, params: values };
+      });
+      await sqliteService.executeBatch(commands);
     },
     bulkPut: async (assets: Asset[]) => {
       await localDb.assets.bulkAdd(assets);

@@ -324,7 +324,7 @@ const Scanner: React.FC<ScannerProps> = ({
         const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
         if (capabilities.torch) {
           await trackRef.current.applyConstraints({
-            advanced: [{ torch: torch === 'on' }]
+            advanced: [{ torch: torch === 'on' }] as unknown as MediaTrackConstraintSet[]
           } as MediaTrackConstraints);
         }
       } catch (e) {
