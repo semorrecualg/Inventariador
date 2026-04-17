@@ -15,8 +15,7 @@ import {
   Cloud,
   Calendar,
   ShieldCheck,
-  FolderOpen,
-  ExternalLink
+  FolderOpen
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import localforage from 'localforage';
@@ -50,6 +49,7 @@ interface DatabaseLoaderProps {
   user?: import('../types').User | null;
   databaseMode?: import('../types').DatabaseMode;
   showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
+  onOpenHelp?: () => void;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
@@ -61,10 +61,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   campaigns = [],
   user,
   databaseMode,
-  showModal
+  showModal,
+  onOpenHelp
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY' | 'IMMOBILIZATION'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
+  const [hasTriedImmobilization, setHasTriedImmobilization] = useState(false);
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
@@ -347,14 +349,22 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const handleActivateSystem = async () => {
     console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
     
-    // REGRA DE OURO DBA: Em modo INTERNO, a imobilização física é obrigatória
-    const isInternal = databaseMode === DatabaseMode.INTERNAL || localStorage.getItem('app_database_mode') === DatabaseMode.INTERNAL;
+    // REGRA DE OURO DBA: Em modo INTERNO, a imobilização física é preferencial
+    const currentDbMode = databaseMode || (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL;
+    const isInternal = currentDbMode === DatabaseMode.INTERNAL;
     const isIframe = window.self !== window.top;
     
-    if (isInternal) {
+    // Feature detection para File System Access API
+    // @ts-expect-error - feature detection
+    const isFileSystemSupported = !!window.showDirectoryPicker;
+    
+    if (isInternal && isFileSystemSupported && !hasTriedImmobilization) {
       try {
-        const hasHandle = await localforage.getItem('gbr_db_file_handle');
+        const dirHandleKey = `gbr_db_dir_handle_${currentDbMode}`;
+        const hasHandle = await localforage.getItem(dirHandleKey);
+        
         if (!hasHandle && !isIframe) {
+          console.log('>>> [DatabaseLoader] Navegador suporta FileSystem mas pasta não está vinculada. Indo para IMMOBILIZATION.');
           setStep('IMMOBILIZATION');
           return;
         }
@@ -365,6 +375,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       } catch (err) {
         console.warn('Erro ao verificar handle de arquivo:', err);
       }
+    }
+
+    if (isInternal && !isFileSystemSupported) {
+      console.log('>>> [DatabaseLoader] Navegador não suporta FileSystem (Mobile?). Prosseguindo com armazenamento virtual.');
     }
 
     await performActivation();
@@ -486,15 +500,27 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     );
   }
 
+  const handleCustomBack = () => {
+    if (step === 'IMMOBILIZATION') {
+      setStep('SUMMARY');
+    } else if (step === 'SUMMARY') {
+      setStep('COMPANY_SELECTION');
+    } else if (step === 'COMPANY_SELECTION') {
+      setStep('SOURCE');
+    } else {
+      onBack();
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn w-full overflow-hidden">
       <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-200 flex items-center justify-between shadow-sm relative z-20">
         <div className="flex items-center space-x-4">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Base de Dados" />
+          <BackButton onClick={handleCustomBack} label="Voltar" subLabel={step === 'SOURCE' ? 'Base de Dados' : 'Etapa Anterior'} />
         </div>
         <div className="flex items-center space-x-2">
           <button 
-            onClick={() => setIsHelpOpen(true)}
+            onClick={() => onOpenHelp ? onOpenHelp() : setIsHelpOpen(true)}
             className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"
           >
             <HelpCircle size={20} />
@@ -776,94 +802,97 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         )}
 
         {step === 'IMMOBILIZATION' && (
-          <div className="space-y-6 animate-slideUp">
-            <div className="bg-white border-2 border-blue-600 p-6 rounded-2xl shadow-xl">
-              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6 border border-blue-100 shadow-sm">
-                <ShieldCheck size={32} />
-              </div>
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-1">Local de Trabalho Expert</h3>
-              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mb-4">Imobilização de Dados Permanente</p>
-              
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed mb-6">
-                Defina a pasta onde o banco de dados será mantido. Isso garante que seus inventários não sejam apagados pelo sistema Android.
-              </p>
-              
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-start space-x-3 mb-8">
-                <div className="mt-0.5 text-blue-600">
-                  <Info size={16} />
+          <div className="space-y-3 animate-slideUp">
+            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="w-9 h-9 bg-slate-50 text-slate-900 rounded-lg flex items-center justify-center border border-slate-100">
+                  <ShieldCheck size={18} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-blue-900 uppercase tracking-tight">Instrução de Diretório:</p>
-                  <p className="text-[9px] text-blue-700 font-bold uppercase tracking-widest leading-relaxed mt-1">
-                    Ao clicar abaixo, selecione a pasta <span className="text-blue-900 border-b border-blue-400">DOCUMENTOS/GBR</span> ou crie uma nova pasta. 
-                    O App passará a ler e gravar todos os dados exclusivamente neste local.
-                  </p>
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Configuração de Diretório</h3>
+                  <p className="text-[10px] text-slate-500 font-medium leading-tight">Imobilização de dados permanente.</p>
                 </div>
               </div>
-
-              {window.self !== window.top && (
-                <div className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-xl border-l-4">
-                  <p className="text-[10px] font-black text-amber-900 uppercase tracking-tight">Modo Visualização (Editor):</p>
-                  <p className="text-[9px] text-amber-700 font-bold uppercase tracking-widest leading-relaxed mt-1">
-                    O navegador bloqueia o acesso a diretórios em iframes. Clique em &quot;DEFINIR LOCAL&quot; para continuar no modo virtual (cache) ou abra em uma nova aba para vincular fisicamente.
-                  </p>
+              
+              <div className="space-y-3 mb-4">
+                <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-100">
+                  <div className="flex items-center space-x-2 mb-2 text-slate-900">
+                    <FolderOpen size={14} className="text-blue-600" />
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Instruções de Configuração</span>
+                  </div>
+                  
+                  <div className="space-y-2.5 text-slate-600">
+                    <p className="text-[10px] leading-relaxed">
+                      Escolha o destino para processamento e armazenamento seguro dos dados.
+                    </p>
+                    
+                    <ul className="space-y-1">
+                      <li className="flex items-start space-x-2 text-[10px]">
+                        <span className="flex-shrink-0 w-3.5 h-3.5 bg-white border border-slate-200 rounded-full flex items-center justify-center text-[7px] font-bold text-slate-400">1</span>
+                        <span><strong className="text-slate-900 font-bold">Evite Downloads</strong> para prevenir exclusão automática.</span>
+                      </li>
+                      <li className="flex items-start space-x-2 text-[10px]">
+                        <span className="flex-shrink-0 w-3.5 h-3.5 bg-white border border-slate-200 rounded-full flex items-center justify-center text-[7px] font-bold text-slate-400">2</span>
+                        <span>Crie a pasta: <code className="bg-slate-100 px-1 py-0.5 rounded text-blue-700 font-mono font-bold">Inventariador_App</code></span>
+                      </li>
+                      <li className="flex items-start space-x-2 text-[10px]">
+                        <span className="flex-shrink-0 w-3.5 h-3.5 bg-white border border-slate-200 rounded-full flex items-center justify-center text-[7px] font-bold text-slate-400">3</span>
+                        <span>Mantenha sua <strong className="text-slate-900 font-bold">Planilha Excel</strong> nesta pasta.</span>
+                      </li>
+                    </ul>
+                    
+                    <p className="text-[9px] text-slate-500 italic mt-2 border-t border-slate-100 pt-2 leading-tight">
+                      O app gerará o <strong className="text-slate-700">Banco de Dados SQL</strong> neste local.
+                    </p>
+                  </div>
                 </div>
-              )}
 
-              <button 
-                onClick={handleStartImmobilization}
-                className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] shadow-lg shadow-blue-500/30 active:scale-95 transition-all flex items-center justify-center space-x-3"
-              >
-                <FolderOpen size={18} />
-                <span>DEFINIR LOCAL DE TRABALHO</span>
-              </button>
+                {window.self !== window.top && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-100 rounded-xl flex items-start space-x-2">
+                    <Info size={12} className="mt-0.5 text-amber-600 shrink-0" />
+                    <p className="text-[9px] text-amber-700 leading-tight">
+                      Navegador bloqueia acesso a pastas em iframes. Use modo virtual ou nova aba.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button 
+                  onClick={handleStartImmobilization}
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold uppercase text-[10px] tracking-[0.15em] shadow-sm active:scale-[0.98] transition-all flex items-center justify-center space-x-2 hover:bg-slate-800"
+                >
+                  <FolderOpen size={16} />
+                  <span>SELECIONAR DIRETÓRIO</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setHasTriedImmobilization(true);
+                    setStep('SUMMARY');
+                    setTimeout(() => handleActivateSystem(), 300);
+                  }}
+                  className="w-full px-4 py-1.5 rounded-xl font-bold uppercase text-[8px] tracking-widest text-slate-400 hover:text-slate-500 border border-transparent transition-all flex items-center justify-center"
+                >
+                  Continuar sem vínculo (Virtual)
+                </button>
+              </div>
 
               {fileStatus && fileStatus.status === 'linked' && (
-                <div className="mt-6 p-5 bg-emerald-50 border-2 border-emerald-100 rounded-2xl animate-fadeIn relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-3">
-                    <CheckCircle2 size={24} className="text-emerald-200" />
+                <div className="mt-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl animate-fadeIn">
+                  <div className="flex items-center space-x-2 text-emerald-700 mb-1.5">
+                    <CheckCircle2 size={14} />
+                    <span className="text-[8px] font-bold uppercase tracking-wider">Diretório Vinculado</span>
                   </div>
                   
-                  <div className="flex items-center space-x-2 text-emerald-600 mb-3">
-                    <ShieldCheck size={16} />
-                    <span className="text-[11px] font-black uppercase tracking-tight">Vínculo Ativo & Protegido</span>
+                  <div className="bg-white/80 p-1.5 rounded-lg border border-emerald-100">
+                    <p className="text-[8px] font-mono text-emerald-800 break-all leading-tight">
+                      {fileStatus.path}
+                    </p>
                   </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-[9px] font-bold text-emerald-600/60 uppercase tracking-widest block mb-1">Caminho do Diretório:</span>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-mono font-bold text-emerald-900 truncate flex-1 bg-white/50 p-2 rounded-lg border border-emerald-200/50">
-                          {fileStatus.path}
-                        </p>
-                        <button 
-                          onClick={() => sqliteService.requestFilePermission()}
-                          className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm shrink-0"
-                          title="Validar Acesso"
-                        >
-                          <ExternalLink size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2 border-t border-emerald-100 pt-3">
-                      <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      <span className="text-[9px] text-emerald-700 font-black uppercase tracking-widest">
-                        Base: {fileStatus.fileName}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <p className="text-[9px] text-emerald-600/70 font-bold uppercase tracking-widest mt-4 italic leading-tight">
-                    * O sistema salvou este caminho. Em caso de reinício, o acesso será restaurado automaticamente.
-                  </p>
                 </div>
               )}
             </div>
-            
-            <p className="text-center text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-              Conformidade com CPC 27 - Gestão de Ativo Imobilizado Digital
-            </p>
           </div>
         )}
 

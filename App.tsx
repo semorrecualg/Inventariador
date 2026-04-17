@@ -199,6 +199,7 @@ const App: React.FC = () => {
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
@@ -3713,6 +3714,7 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.MAIN_MENU && (
             <MainMenu 
+              onOpenHelp={() => setIsHelpMenuOpen(true)}
               onNavigate={pushScreen} 
               onLogout={() => { 
                 // Agora "Sair" do menu principal volta para a seleção de unidade
@@ -3787,6 +3789,7 @@ const App: React.FC = () => {
           {screen === AppScreen.LOAD_DATABASE && (
             isAdmin ? (
               <DatabaseLoader 
+                onOpenHelp={() => setIsHelpMenuOpen(true)}
                 onBack={popScreen} 
                 isSyncing={isSyncing}
                 syncProgress={syncProgress}
@@ -4257,6 +4260,8 @@ const App: React.FC = () => {
           }}
           onOpenPalette={() => setIsPaletteOpen(true)}
           onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
+          isOpen={isHelpMenuOpen}
+          onToggle={setIsHelpMenuOpen}
         />
 
         <PrivacyCenter 

@@ -37,7 +37,8 @@ import {
   Activity,
   Calendar,
   FolderOpen,
-  HardDrive
+  HardDrive,
+  HelpCircle
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
@@ -98,6 +99,7 @@ interface MainMenuProps {
   showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
   isAIAssistantOpen: boolean;
   setIsAIAssistantOpen: (val: boolean) => void;
+  onOpenHelp?: () => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -148,7 +150,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onCheckIntegrity,
   showModal,
   isAIAssistantOpen,
-  setIsAIAssistantOpen
+  setIsAIAssistantOpen,
+  onOpenHelp
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -266,6 +269,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </span>
             </div>
           )}
+          <button 
+            onClick={() => onOpenHelp?.()}
+            className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"
+          >
+            <HelpCircle size={20} />
+          </button>
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
         </div>
       </div>
 
