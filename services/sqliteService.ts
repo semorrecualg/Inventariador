@@ -230,7 +230,7 @@ class SQLiteService {
   }
 
   async linkExistingFile() {
-    return this.mapLocalFolder('INTERNAL');
+    return this.mapLocalFolder();
   }
 
   async exportDatabaseFile() {
@@ -322,11 +322,11 @@ class SQLiteService {
   }
 
   async hardResetDatabase() {
-    const { dbKey, fileHandleKey } = this.keys;
+    const { dbKey, dirHandleKey } = this.keys;
     this.db = null;
     this.isInitialized = false;
     await localforage.removeItem(dbKey);
-    await localforage.removeItem(fileHandleKey);
+    await localforage.removeItem(dirHandleKey);
     await this.init();
   }
 }

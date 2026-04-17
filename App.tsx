@@ -3794,6 +3794,7 @@ const App: React.FC = () => {
                 campaigns={campaigns}
                 user={user}
                 databaseMode={databaseMode}
+                showModal={showModal}
                 onDataLoaded={async (a, c) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
                   console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}, Modo: ${databaseMode}`);

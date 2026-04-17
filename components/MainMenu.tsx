@@ -41,9 +41,10 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
+import AIChatModal from './AIChatModal';
 
 import AIInsightCard from './AIInsightCard';
-import AIChatModal from './AIChatModal';
+import { sqliteService } from '../services/sqliteService';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen) => void;
@@ -199,6 +200,33 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const handleSecureAction = (action: () => void) => {
     setPendingAction(() => action);
     setIsSecurityPinOpen(true);
+  };
+
+  const handlePickDirectory = async () => {
+    try {
+      if (window.self !== window.top) {
+        showModal(
+          "Restrição de Navegador",
+          "O navegador impede a seleção de pastas dentro de janelas de visualização (iframes). Por favor, abra o aplicativo em uma nova aba para vincular sua pasta física permanentemente.",
+          "warning"
+        );
+        return;
+      }
+      
+      await sqliteService.mapLocalFolder();
+      const status = await sqliteService.getFileStatus();
+      setDirStatus(status as { status: string; path: string; fileName?: string });
+      
+      showModal(
+        "Sucesso",
+        "Diretório de trabalho vinculado com sucesso. Seus dados agora estão imobilizados fisicamente neste local.",
+        "success"
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.error(err);
+      showModal("Erro", "Não foi possível vincular a pasta: " + (err instanceof Error ? err.message : String(err)), "error");
+    }
   };
 
   return (
@@ -855,7 +883,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
                 <div className="flex space-x-2">
                   <button 
-                    onClick={() => onNavigate(AppScreen.LOAD_DATABASE)}
+                    onClick={handlePickDirectory}
                     className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
                   >
                     <FolderOpen size={12} />

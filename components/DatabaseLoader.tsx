@@ -49,6 +49,7 @@ interface DatabaseLoaderProps {
   campaigns?: import('../types').InventoryCampaign[];
   user?: import('../types').User | null;
   databaseMode?: import('../types').DatabaseMode;
+  showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
@@ -59,7 +60,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   excludedAccounts = [],
   campaigns = [],
   user,
-  databaseMode
+  databaseMode,
+  showModal
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY' | 'IMMOBILIZATION'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
@@ -392,12 +394,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const handleStartImmobilization = async () => {
     try {
+      if (window.self !== window.top) {
+        showModal(
+          "Restrição de Navegador",
+          "O navegador impede a seleção de pastas dentro de janelas de visualização (iframes). Por favor, abra o aplicativo em uma nova aba para vincular sua pasta física permanentemente.",
+          "warning"
+        );
+        return;
+      }
+
       // @ts-expect-error - feature detection
       if (!window.showDirectoryPicker) {
         throw new Error("API_NOT_SUPPORTED");
       }
 
-      await sqliteService.mapLocalFolder(databaseMode === DatabaseMode.INTERNAL ? 'INTERNAL' : 'SUPABASE');
+      await sqliteService.mapLocalFolder();
       
       // Atualiza o status visual
       const status = await sqliteService.getFileStatus();
@@ -406,18 +417,30 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       setStep('SUMMARY');
       setTimeout(() => handleActivateSystem(), 300);
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Falha na imobilização:', err);
-      if ((err as Error).message === "IFRAME_RESTRICTION") {
-        // Reduzimos o ruído em iframes para uma experiência mais fluida no editor
-        console.info("🛡️ Restrição de Iframe detectada. Prosseguindo com Imobilização Virtual (IndexedDB).");
+      
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      if (errorMessage === "IFRAME_RESTRICTION") {
+        showModal(
+          "Restrição de Iframe",
+          "O navegador bloqueia o acesso a pastas locais quando o app está em modo de visualização. Abra o app em uma nova aba para usar esta função.",
+          "info"
+        );
+        // Fallback silencioso para continuar a experiência básica
         setStep('SUMMARY');
         setTimeout(() => handleActivateSystem(), 300);
-      } else if ((err as Error).message === "API_NOT_SUPPORTED") {
-        alert("Seu navegador ou dispositivo não suporta o acesso direto ao sistema de arquivos (FileSystem Access API). \n\nVocê pode continuar usando o modo LOCAL (IndexedDB), mas lembre-se de EXPORTAR seu banco de dados periodicamente para evitar perda de dados se o cache do navegador for limpo.");
+      } else if (errorMessage === "API_NOT_SUPPORTED") {
+        showModal(
+          "Não Suportado",
+          "Seu navegador não suporta acesso a pastas locais. Usaremos o armazenamento virtual temporário.",
+          "warning"
+        );
         setStep('SUMMARY');
         setTimeout(() => handleActivateSystem(), 500);
       } else {
-        alert("A imobilização é altamente recomendada para proteger seus dados contra limpezas de cache no Android. Por favor, tente selecionar uma pasta segura (ex: Documentos).");
+        showModal("Erro de Vínculo", "Não foi possível vincular a pasta: " + errorMessage, "error");
       }
     }
   };
@@ -609,6 +632,26 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 </p>
               </div>
             </div>
+
+            {/* Quick Link to Immobilization - Requested by user to find "Determinar local" easily */}
+            <button 
+              onClick={() => setStep('IMMOBILIZATION')}
+              className="w-full bg-blue-600/5 hover:bg-blue-600/10 text-blue-700 p-6 rounded-2xl border-2 border-blue-600/20 flex items-center gap-4 transition-all group border-dashed"
+            >
+              <div className="w-12 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md group-hover:scale-110 transition-transform shrink-0">
+                <FolderOpen size={24} />
+              </div>
+              <div className="text-left">
+                <h3 className="text-[11px] font-black uppercase tracking-tight">Vincular Local de Trabalho</h3>
+                <p className="text-[9px] font-bold opacity-70 uppercase mt-1 tracking-widest leading-tight">
+                  Apenas determinar o local onde a base de dados (.db) será mantida permanentemente.
+                </p>
+              </div>
+              <div className="ml-auto text-blue-600/30 group-hover:text-blue-600">
+                <ArrowRight size={20} />
+              </div>
+            </button>
+
             <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
               <div className="w-16 h-16 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={32} /></div>
               <div className="text-center">
