@@ -55,14 +55,23 @@ const Scanner: React.FC<ScannerProps> = ({
   useEffect(() => {
     isMounted.current = true;
     
-    const handleVisibilityChange = () => {
-      setIsTabHidden(document.hidden);
+    const handleEvents = () => {
+      // REGRA DE OURO: Resume scanner ao voltar para o app/aba
+      if (!document.hidden && isMounted.current) {
+        setIsTabHidden(false);
+        resetInactivityTimeout();
+      } else {
+        setIsTabHidden(true);
+      }
     };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    document.addEventListener("visibilitychange", handleEvents);
+    window.addEventListener("focus", handleEvents);
 
     return () => {
       isMounted.current = false;
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleEvents);
+      window.removeEventListener("focus", handleEvents);
       if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
       // Garantir que o track pare ao desmontar para economizar bateria
       if (trackRef.current) {
@@ -315,20 +324,26 @@ const Scanner: React.FC<ScannerProps> = ({
   useEffect(() => {
     let active = true;
     const applyTorch = async () => {
-      // Pequeno delay para garantir que o hardware aplicou o stream antes da constraint
       if (!trackRef.current) return;
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Aguarda o hardware estar pronto
+      await new Promise(resolve => setTimeout(resolve, 500));
       if (!active || !trackRef.current) return;
 
       try {
         const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
+        console.log(">>> [Scanner] Capabilities:", capabilities);
+        
         if (capabilities.torch) {
+          // Hardware native command for torch mode
           await trackRef.current.applyConstraints({
-            advanced: [{ torch: torch === 'on' }] as unknown as MediaTrackConstraintSet[]
-          } as MediaTrackConstraints);
+            advanced: [{ torch: torch === 'on' }]
+          } as unknown as MediaTrackConstraints);
+          console.log(`>>> [Scanner] Torch set to: ${torch}`);
+        } else {
+          console.warn(">>> [Scanner] Torch not supported by this camera track");
         }
       } catch (e) {
-        console.warn(">>> [Scanner] Torch toggle failed", e);
+        console.warn(">>> [Scanner] Torch applyConstraints failed", e);
       }
     };
     applyTorch();
@@ -376,9 +391,9 @@ const Scanner: React.FC<ScannerProps> = ({
           <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mb-4 border border-amber-500/30">
             <RefreshCw size={32} className="text-amber-500" />
           </div>
-          <h3 className="text-white font-black uppercase tracking-tighter text-lg mb-2">Scanner em Repouso</h3>
+          <h3 className="text-white font-black uppercase tracking-tighter text-lg mb-2">Standby Térmico</h3>
           <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">
-            O scanner foi pausado para economizar bateria e evitar aquecimento.
+            O scanner foi pausado devido ao tempo de inatividade para evitar superaquecimento.
           </p>
           <button 
             onClick={resetInactivityTimeout}

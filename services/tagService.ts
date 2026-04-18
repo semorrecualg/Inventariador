@@ -193,42 +193,52 @@ export const normalizeString = (s: string): string => {
 export const determineAssetTag = (asset: Asset, targetLocation: string, selectedUnit: string | null): TagInventario => {
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+  const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
-  // 1. BAIXADO (Prioridade Máxima)
-  if (isBaixado) return TagInventario.BAIXADO;
+  // REGRA DE OURO: Divergência Crítica (Ativo mas com Baixa)
+  const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.DATABAIXA;
+  if (isGoldenRuleDivergent) return TagInventario.DIVERGENCIA;
+
+  // 1. ETIQUETAGEM (Workflow Soberano v24)
+  const masterEtq = normalizeString(asset._plaquetaMaster || '');
+  if (masterEtq === 'ETIQUETAR') {
+    return isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
+  }
   
-  // 2. ADOTADO EXTERNO
+  // 2. BAIXADO (Se não conferido)
+  if (isBaixado && !isConferido) return TagInventario.BAIXADO;
+  
+  // 3. ADOTADO EXTERNO (Empresa/Unidade diferente)
   if (selectedUnit) {
-    const assetCompKey = normalizeString(asset.UNIDADE_OPERACIONAL || asset._unitid || '');
+    const assetCompKey = normalizeString(asset.UNIDADE_OPERACIONAL || asset._unitid || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeString(selectedUnit);
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
     }
   }
-
-  // 3. ETIQUETAGEM (Workflow específico)
-  const needsLabel = normalizeString(asset.ETIQUETA || '') === 'ETIQUETAR';
-  if (needsLabel) {
-    return asset._conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
-  }
   
   // 4. NOVO ITEM
-  if (asset._isNew) return TagInventario.NOVO_ITEM;
+  if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
-  // 5. DIVERGÊNCIA
+  // 5. DIVERGÊNCIA (Plaqueta física != lógíca)
   const currentEtq = normalizeString(asset.ETIQUETA || "");
-  const masterEtq = normalizeString(asset._plaquetaMaster || "");
-  if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
+  if (masterEtq !== "" && currentEtq !== masterEtq) {
     return TagInventario.DIVERGENCIA;
   }
 
   // Se não foi conferido ainda, é PENDENTE
-  if (!asset._conferido) return TagInventario.PENDENTE;
+  if (!isConferido) return TagInventario.PENDENTE;
 
-  // 6. CONFERIDO vs ADOTADO
+  // 6. CONFERIDO vs ADOTADO vs RE-ADOTADO
   const targetLocKey = normalizeString(targetLocation);
   const originalLocKey = normalizeString(asset.ENDERECO || ""); 
+  const currentAuditLocKey = asset._localMaster ? normalizeString(asset._localMaster) : "";
   
+  // 3) RE-ADOTADO: Já conferido anteriormente em um local e agora encontrado em outro local
+  if (isConferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
+    return TagInventario.RE_ADOTADO;
+  }
+
   if (originalLocKey === targetLocKey) {
     return TagInventario.CONFERIDO;
   }

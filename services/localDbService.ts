@@ -72,7 +72,23 @@ export const localDb = {
       await sqliteService.execute("DELETE FROM assets");
     },
     toArray: async () => {
-      return await sqliteService.query("SELECT * FROM assets") as unknown as Asset[];
+      const results = await sqliteService.query("SELECT * FROM assets") as Record<string, unknown>[];
+      return results.map(row => {
+        const asset = { ...row } as Record<string, unknown>;
+        // Converte 0/1 de volta para boolean para o React
+        ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
+          if (Object.prototype.hasOwnProperty.call(asset, key)) {
+            asset[key] = asset[key] === 1;
+          }
+        });
+        // Tenta fazer parse de campos que podem ser JSON
+        ['DE_PARA', '_history'].forEach(key => {
+          if (typeof asset[key] === 'string' && (asset[key].startsWith('{') || asset[key].startsWith('['))) {
+            try { asset[key] = JSON.parse(asset[key]); } catch { /* ignore */ }
+          }
+        });
+        return asset as unknown as Asset;
+      });
     },
     where: (field: string) => ({
       equals: (value: SqlValue) => ({

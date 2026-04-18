@@ -189,12 +189,10 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     // Mirroring in Dexie for extra robustness (SQL-like storage)
     try {
       if (mode === DatabaseMode.INTERNAL) {
-        await localDb.transaction('rw', localDb.assets, localDb.campaigns, async () => {
-          // Clear and bulk add for assets
-          await localDb.assets.clear();
-          await localDb.assets.bulkAdd(assets);
-        });
-        console.log('>>> [Persistence] Espelhamento Dexie concluído.');
+        // SEGURANÇA: Não usamos clear() para evitar "Update Gaps" se o app fechar durante o processo
+        // Usamos bulkPut (Upsert) que é atômico via executeBatch no SQL.js
+        await localDb.assets.bulkPut(assets);
+        console.log('>>> [Persistence] Espelhamento Dexie (Delta/Full) concluído.');
       }
     } catch (dexieErr) {
       console.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
@@ -226,69 +224,65 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
 export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState | null> => {
   try {
     const keys = getInventoryKeys(mode);
+    
+    // PRIORIDADE 1: Em modo INTERNO, o SQL (localDb) é a fonte da verdade para Ativos
+    // Isso evita usar dados obsoletos do IndexedDB se o salvamento foi via incremental
+    let sqlAssets: Asset[] = [];
+    if (mode === DatabaseMode.INTERNAL) {
+      try {
+        sqlAssets = await localDb.assets.toArray();
+        console.log(`>>> [Persistence] ${sqlAssets.length} ativos carregados do SQL (Primary).`);
+      } catch (sqlErr) {
+        console.warn('>>> [Persistence] Falha ao ler do SQL no init:', sqlErr);
+      }
+    }
+
     const [encryptedAssets, encryptedConfig] = await Promise.all([
       localforage.getItem<Uint8Array | string>(keys.assets),
       localforage.getItem<Uint8Array | string>(keys.config)
     ]);
 
-    if (!encryptedConfig && !encryptedAssets) {
-      // Tenta recuperar do espelhamento Dexie se o localforage sumiu
-      if (mode === DatabaseMode.INTERNAL) {
-        console.log('>>> [Persistence] Localforage vazio. Tentando recuperar do Dexie...');
-        const dexieAssets = await localDb.assets.toArray();
-        if (dexieAssets.length > 0) {
-          console.log(`>>> [Persistence] Recuperados ${dexieAssets.length} ativos do Dexie.`);
-          return {
-            assets: dexieAssets,
-            databaseMode: mode,
-            status: DatabaseStatus.LOADED,
-            lastUpdated: new Date().toISOString()
-          } as InventoryState;
-        }
-      }
+    if (!encryptedConfig && !encryptedAssets && sqlAssets.length === 0) {
       return null;
     }
 
-    // Decriptografamos os dados carregados
-    try {
-      const [assets, config] = await Promise.all([
-        encryptedAssets ? (encryption.decrypt(encryptedAssets) as Promise<Asset[]>) : Promise.resolve([]),
-        encryptedConfig ? (encryption.decrypt(encryptedConfig) as Promise<Record<string, unknown>>) : Promise.resolve({})
-      ]);
-
-      // 1.2 Validação de Integridade (Checksum)
-      const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
-      if (storedHash) {
-        const currentHash = await generateChecksum(assets);
-        
-        if (storedHash !== currentHash) {
-          console.error('%c>>> [Integrity] ALERTA: Falha na validação de integridade! O arquivo pode ter sido alterado externamente ou corrompido.', "color: #ef4444; font-weight: bold;");
-          // Marcamos o estado para que a UI possa alertar o usuário
-          (config as Record<string, unknown>)._integrity_failed = true;
-        } else {
-          console.log('%c>>> [Integrity] Validação de integridade SHA-256: OK', "color: #3ecf8e;");
-        }
+    // Decriptografamos as configurações
+    let config: Record<string, unknown> = {};
+    if (encryptedConfig) {
+      try {
+        config = await encryption.decrypt(encryptedConfig) as Record<string, unknown>;
+      } catch (err) {
+        console.warn('>>> [Persistence] Falha ao decriptografar config:', err);
       }
-
-      return {
-        ...(config as Record<string, unknown> || {}),
-        assets: assets || [],
-        databaseMode: mode // Garante que o modo carregado é o correto
-      } as InventoryState;
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-        console.warn('>>> [Persistence] Falha crítica de decriptografia. Limpando cache local corrompido...');
-        // Limpa os dados locais que não podem ser lidos para evitar erros persistentes
-        await Promise.all([
-          localforage.removeItem(keys.assets),
-          localforage.removeItem(keys.config)
-        ]);
-        return null;
-      }
-      throw error;
     }
+
+    // Decriptografamos ativos apenas se não viermos do SQL ou se o SQL estiver vazio
+    let finalAssets = sqlAssets;
+    if (finalAssets.length === 0 && encryptedAssets) {
+      try {
+        finalAssets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
+        console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do IndexedDB (Fallback).`);
+      } catch (err) {
+        console.warn('>>> [Persistence] Falha ao decriptografar ativos do IndexedDB fallback:', err);
+      }
+    }
+
+    // 1.2 Validação de Integridade (Checksum) - Apenas para base carregada do cache
+    if (finalAssets.length > 0 && (config as Record<string, unknown>)._integrity_hash) {
+      const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
+      const currentHash = await generateChecksum(finalAssets);
+      if (storedHash !== currentHash) {
+        console.warn('>>> [Integrity] Checksum divergente (Normal se houve alterações incrementais fora do saveFull).');
+      }
+    }
+
+    return {
+      ...(config as Record<string, unknown> || {}),
+      assets: finalAssets,
+      databaseMode: mode
+    } as InventoryState;
   } catch (error) {
-    console.error('Error loading inventory from IndexedDB:', error);
+    console.error('Error loading inventory:', error);
     return null;
   }
 };

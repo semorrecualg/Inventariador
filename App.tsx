@@ -353,64 +353,62 @@ const App: React.FC = () => {
 
   useEffect(() => {
     // Inicializa SQLite Nativo (Simulado via WASM para Web)
-    sqliteService.init().catch(err => console.error("[DBA] Erro ao inicializar SQLite:", err));
+    sqliteService.init().catch(err => {
+      console.error("[DBA] Erro ao inicializar SQLite:", err);
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        setModalConfig({
+          isOpen: true,
+          title: 'Erro de Banco de Dados',
+          message: 'Não foi possível carregar o motor de banco de dados SQL. Se estiver offline, tente conectar-se uma vez para baixar o motor.',
+          type: 'error'
+        });
+      }
+    });
 
-    // Debug environment variables
-    const env = import.meta.env.VITE_ENVIRONMENT || 'development';
-    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    
-    console.log(`%c[Environment] ${env}`, "color: #3b82f6; font-weight: bold;");
-    if (geminiKey) {
-      console.log(`%c[AI] Chave Gemini detectada: ${geminiKey.substring(0, 8)}...`, "color: #8b5cf6;");
-    } else {
-      console.warn("[AI] Chave Gemini não encontrada no ambiente.");
-    }
+    const handleInitFailed = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      console.error(">>> [DBA] Falha de inicialização capturada:", detail?.error);
+      setModalConfig({
+        isOpen: true,
+        title: 'Motor de Dados Offline',
+        message: 'O motor SQL.js não pôde ser carregado. Verifique sua conexão ou tente recarregar o app.',
+        type: 'warning'
+      });
+    };
 
+    window.addEventListener('gbr_db_init_failed', handleInitFailed);
+    return () => window.removeEventListener('gbr_db_init_failed', handleInitFailed);
+  }, [databaseMode]);
+
+  useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
     if (!initialCheck.isSafe) {
-      setIsSafeMode(prev => prev === false ? prev : false);
-      setSecurityThreats(prev => {
-        // Comparação profunda simples para evitar re-renders desnecessários
-        if (prev.length === initialCheck.threats.length && prev.every((v, i) => v === initialCheck.threats[i])) {
-          return prev;
-        }
-        return initialCheck.threats;
-      });
+      setIsSafeMode(false);
+      setSecurityThreats(initialCheck.threats);
     }
 
-    // Monitor contínuo
+    // Monitor contínuo de segurança
     const monitorId = startSecurityMonitor((threats) => {
-      setIsSafeMode(prev => prev === false ? prev : false);
-      setSecurityThreats(prev => {
-        if (prev.length === threats.length && prev.every((v, i) => v === threats[i])) {
-          return prev;
-        }
-        return threats;
-      });
+      setIsSafeMode(false);
+      setSecurityThreats(threats);
       
-      // Se detectar debugger ou scripts maliciosos, forçamos logout por segurança
       if (threats.includes('DEBUGGER_DETECTED') || threats.includes('SUSPICIOUS_SCRIPTS')) {
-        setModalConfig((prev: ModalConfig) => {
-          if (prev.isOpen && prev.title === 'Violação de Segurança Detectada') return prev;
-          return {
-            isOpen: true,
-            title: 'Violação de Segurança Detectada',
-            message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
-            type: 'error',
-            onConfirm: () => {
-               localStorage.removeItem('app_current_user');
-               window.location.reload();
-            }
-          };
+        setModalConfig({
+          isOpen: true,
+          title: 'Violação de Segurança Detectada',
+          message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
+          type: 'error',
+          onConfirm: () => {
+             localStorage.removeItem('app_current_user');
+             window.location.reload();
+          }
         });
       }
     });
 
     return () => clearInterval(monitorId);
   }, []);
-
-
 
   const [history, setHistory] = useState<AppScreen[]>(() => {
     try {
@@ -1042,6 +1040,21 @@ const App: React.FC = () => {
         //   await syncFromCloud();
         //   return;
         // }
+
+        // AUDITORIA DE PERSISTÊNCIA: Executa um SELECT global para garantir que os dados estão presentes
+        if (databaseMode === DatabaseMode.INTERNAL && savedInventory && savedInventory.assets) {
+          try {
+            const count = await localDb.assets.count();
+            console.log(`>>> [Auditoria] Verificação de Persistência SQL: ${count} itens encontrados no banco nativo.`);
+            if (count > 0 && savedInventory.assets.length === 0) {
+              console.warn(">>> [Auditoria] Discrepância detectada: Dados no SQL mas recusados pelo loadInventory. Tentando recuperação direta...");
+              const forcedAssets = await localDb.assets.toArray();
+              savedInventory.assets = forcedAssets;
+            }
+          } catch (sqlErr) {
+            console.error(">>> [Auditoria] Falha ao verificar banco nativo SQL:", sqlErr);
+          }
+        }
 
         if (saved && (saved as InventoryState & { _integrity_failed?: boolean })._integrity_failed) {
           setIntegrityFailed(true);
@@ -2381,47 +2394,46 @@ const App: React.FC = () => {
       _dataLeitura: new Date().toISOString()
     };
 
-    // Captura GPS de forma assíncrona para não travar a UI
+    // Captura GPS de forma ASSÍNCRONA mas PRIORITÁRIA para o primeiro commit
     if (updatedAsset._conferido) {
-      console.log(`>>> [GPS] Iniciando captura para item ${updatedAsset.id}...`);
-      // REGRA DE FLUIDEZ MOBILE: Commit imediato para a UI não travar esperando o GPS
-      commitAssetUpdate(assetWithHistory);
-      saveAssetIncremental(assetWithHistory);
-
-      getCurrentLocation()
-        .then(loc => {
-          console.log(`>>> [GPS] SUCESSO para item ${updatedAsset.id}: ${loc.lat}, ${loc.lng}`);
-          // Atualiza o ativo com GPS assim que disponível
-          const assetWithFinalGps = { ...assetWithHistory, _lat: loc.lat, _lng: loc.lng };
-          
-          // Adiciona à lista de sujos para garantir que o GPS seja enviado no próximo sync
-          dirtyAssetsRef.current.add(String(assetWithFinalGps.id));
-          
-          commitAssetUpdate(assetWithFinalGps);
-          saveAssetIncremental(assetWithFinalGps);
-        })
-        .catch(e => {
-          console.warn('>>> [GPS] Falha na captura em tempo real:', e);
-          
-          // REGRA DE RESILIÊNCIA: Se o GPS do dispositivo falhar, usamos a ÂNCORA da unidade como fallback
-          // Isso garante que o Mapa de Calor e a rastreabilidade tenham ao menos a posição da Unidade.
-          let assetWithFallback = assetWithHistory;
-          if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-            console.log(`>>> [GPS] Aplicando ÂNCORA da unidade (${selectedUnit}) como fallback.`);
-            assetWithFallback = {
-              ...assetWithHistory,
-              _lat: currentUnitConfig.lat,
-              _lng: currentUnitConfig.lng
-            };
+      console.log(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
+      
+      try {
+        // REGRA DE RIGOR: Aguarda até 3 segundos pela posição GPS antes de salvar
+        // Se falhar ou timeout, usa fallback da unidade
+        const loc = await Promise.race([
+          getCurrentLocation(),
+          new Promise<{lat: number, lng: number}>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+        ]).catch(e => {
+          console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
+          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
           }
-
-          commitAssetUpdate(assetWithFallback);
-          saveAssetIncremental(assetWithFallback);
+          return { lat: 0, lng: 0 };
         });
-    } else {
-      commitAssetUpdate(assetWithHistory);
-      saveAssetIncremental(assetWithHistory);
+
+        console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}`);
+        
+        // Injeta GPS no objeto e no registro da auditoria
+        assetWithHistory._lat = loc.lat;
+        assetWithHistory._lng = loc.lng;
+        
+        // Atualiza a última entrada da trilha com a posição exata
+        const lastIndex = assetWithHistory._history.length - 1;
+        if (lastIndex >= 0) {
+          assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}]`;
+        }
+      } catch (e) {
+        console.error(">>> [GPS] Erro fatal na lógica de captura:", e);
+      }
     }
+
+    // Commit definitivo com ou sem GPS (fallback garantido acima)
+    commitAssetUpdate(assetWithHistory);
+    saveAssetIncremental(assetWithHistory);
+    
+    // Adiciona à lista de sujos para garantir sync
+    dirtyAssetsRef.current.add(String(assetWithHistory.id));
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {

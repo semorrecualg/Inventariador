@@ -12,6 +12,7 @@ import { assetRepository } from '../services/assetRepository';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
+import { determineAssetTag, getTagMetadata } from '../services/tagService';
 import { 
   MapPin, 
   Check,
@@ -101,12 +102,6 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto
 }: AssetCardProps) => {
-  const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-  
-  const companyKey = useMemo(() => normalizeKeyFast(selectedUnit), [selectedUnit]);
-  const assetCompanyKey = useMemo(() => normalizeKeyFast(asset.UNIDADE_OPERACIONAL || asset._unitid), [asset.UNIDADE_OPERACIONAL, asset._unitid]);
-  const isDifferentCompany = selectedUnit && assetCompanyKey !== "" && assetCompanyKey !== companyKey;
-  
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   
   const isBaixado = useMemo(() => {
@@ -114,36 +109,11 @@ const AssetCard = React.memo(({
   }, [statusUpper, asset.DATABAIXA]);
 
   const visualStatus = useMemo(() => {
-    if (isBaixado && !isConferido) return TagInventario.BAIXADO;
-    if (isDifferentCompany) return TagInventario.ADOTADO_EXTERNO;
+    return determineAssetTag(asset, selectedLocation || asset.ENDERECO || "", selectedUnit);
+  }, [asset, selectedLocation, selectedUnit]);
 
-    if (!isConferido) {
-      const needsLabel = normalizeKeyFast(asset.ETIQUETA) === 'ETIQUETAR';
-      if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
-      return TagInventario.PENDENTE;
-    }
-
-    const wasFaltaEtiquetar = normalizeKeyFast(asset._plaquetaMaster) === 'ETIQUETAR';
-    if (wasFaltaEtiquetar && normalizeKeyFast(asset.ETIQUETA) !== 'ETIQUETAR') {
-      return TagInventario.ETIQUETADO;
-    }
-
-    if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
-    if (asset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return TagInventario.RE_ADOTADO;
-
-    const currentEtq = normalizeKeyFast(asset.ETIQUETA);
-    const masterEtq = normalizeKeyFast(asset._plaquetaMaster);
-    if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
-      return TagInventario.DIVERGENCIA;
-    }
-
-    const targetLocKey = normalizeKeyFast(selectedLocation);
-    const effectiveLocKey = normalizeKeyFast(asset._localMaster || asset.ENDERECO); 
-
-    if (effectiveLocKey === targetLocKey && normalizeKeyFast(asset.ENDERECO) === targetLocKey) return TagInventario.CONFERIDO;
-    return TagInventario.ADOTADO;
-
-  }, [asset, selectedLocation, isDifferentCompany, isBaixado]);
+  const meta = getTagMetadata(visualStatus);
+  const StatusIcon = meta.icon;
 
   const fullDescription = [
     asset.QT || '1',
@@ -195,16 +165,19 @@ const AssetCard = React.memo(({
           </p>
           
           <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-1">
-              <div className="w-3 h-3 rounded-full bg-slate-100 flex items-center justify-center">
-                <div className="w-1 h-1 rounded-full bg-[#94A3B8]" />
-              </div>
-              <span className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-tight">
-                {asset.REGISTRO || '---'} | {visualStatus}
+            <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md ${meta.color.bg} ${meta.color.border} border`}>
+              <StatusIcon size={10} className={meta.color.text} />
+              <span className={`text-[10px] font-black uppercase tracking-tight ${meta.color.text}`}>
+                {visualStatus}
               </span>
             </div>
+            {asset.REGISTRO && (
+              <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
+                REG: {asset.REGISTRO}
+              </span>
+            )}
             {asset._dataLeitura && (
-              <span className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-tight">
+              <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
                 {formatReadingTime(asset._dataLeitura)}
               </span>
             )}
@@ -212,20 +185,20 @@ const AssetCard = React.memo(({
         </div>
 
         {/* Ação Integrada */}
-        <div className="shrink-0">
+        <div className="shrink-0 ml-2">
           {isBatchMode ? (
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isSelected ? 'bg-accent text-white' : 'border-2 border-[#CBD5E1]'}`}>
-              {isSelected && <Check size={20} strokeWidth={3} />}
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-accent text-white ring-4 ring-accent/20' : 'border-2 border-[#CBD5E1] bg-white'}`}>
+              {isSelected && <Check size={22} strokeWidth={4} />}
             </div>
           ) : (
             <button 
               onClick={!isConferido ? handleConfirm : undefined}
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isConferido ? (isBaixado ? 'bg-red-500' : 'bg-[#10B981]') : 'border-2 border-[#CBD5E1] active:scale-90'}`}
+              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-md ${isConferido ? meta.color.bg.replace('/30', '') : 'border-2 border-[#CBD5E1] bg-white active:scale-90'} ${isConferido ? 'text-white' : ''}`}
             >
               {isConferido ? (
-                <Check size={24} className="text-white" strokeWidth={3} />
+                <Check size={26} strokeWidth={4} />
               ) : (
-                <div className="w-6 h-6 rounded-full border border-[#CBD5E1]" />
+                <div className="w-6 h-6 rounded-full border-2 border-[#CBD5E1]/50" />
               )}
             </button>
           )}
@@ -690,24 +663,18 @@ const Inventory: React.FC<InventoryProps> = ({
       });
     }
 
-    const companyMatches = [];
-    for (let i = 0; i < assets.length; i++) {
-      const a = assets[i];
-      const etq = normalizeKeyFast(a.ETIQUETA || '');
-      if (etq === term || etq.includes(term)) {
-        companyMatches.push(a);
-      }
+    const localMatches = [];
+    const targetAssets = allAssets && allAssets.length > 0 ? allAssets : assets;
+    
+    for (let i = 0; i < targetAssets.length; i++) {
+        const a = targetAssets[i];
+        const etq = normalizeKeyFast(a.ETIQUETA || '');
+        if (etq === term || etq.includes(term)) {
+            localMatches.push(a);
+        }
     }
 
-    // Otimização: Não precisamos mais do loop global se usarmos o repositório
-    // Mas como o memo é síncrono, vamos manter a lógica local e usar o repositório apenas no handleScan
-    // Para buscas globais na UI, poderíamos usar um useEffect, mas para 7k itens o loop acima é aceitável.
-    // O que realmente trava é o salvamento pesado que já corrigimos.
-
-    const combined = [...companyMatches];
-    // Global matches agora são tratados via handleScan e repositório
-
-    return combined.sort((a, b) => {
+    return localMatches.sort((a, b) => {
       if (activeFilter === 'checked') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
@@ -1823,13 +1790,38 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
             
             <div className="p-8 space-y-4">
-              <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
-                <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
-                <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
-                <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
-                  <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Localização Atual:</span>
-                  <span className="text-[9px] font-black text-accent uppercase">{selectedLocation}</span>
+              <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10 space-y-3">
+                <div>
+                  <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
+                  <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
+                  <p className="text-[10px] font-bold text-ink-muted mt-1 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                </div>
+
+                <div className="pt-3 border-t border-accent/10 space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Local de Origem</span>
+                      <span className="text-[9px] font-black text-amber-600 uppercase">
+                        {scannedAsset._localMaster || scannedAsset.ENDERECO || 'NÃO DEFINIDO'}
+                      </span>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 mt-2" />
+                    <div className="flex flex-col items-end">
+                      <span className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Local Inventariado</span>
+                      <span className="text-[9px] font-black text-emerald-600 uppercase">
+                        {selectedLocation}
+                      </span>
+                    </div>
+                  </div>
+
+                  {normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') && (
+                    <div className="p-2 bg-amber-50 rounded-lg border border-amber-100 flex items-center space-x-2">
+                      <AlertTriangle size={12} className="text-amber-600 shrink-0" />
+                      <span className="text-[8px] font-bold text-amber-700 uppercase leading-none">
+                        Divergência de Empresa detectada. O Ativo será adotado por esta unidade.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

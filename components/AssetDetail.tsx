@@ -39,6 +39,7 @@ import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/pho
 import { createWorker } from 'tesseract.js';
 
 import { reverseGeocode } from '../services/geocodingService';
+import { determineAssetTag, getTagMetadata } from '../services/tagService';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -512,42 +513,13 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     onUpdate(updated);
   };
 
-  const getTagColors = (tag: TagInventario | string) => {
-    switch (tag) {
-      case TagInventario.BAIXADO: return { bg: 'bg-red-400', hex: '#f87171' };
-      case TagInventario.ADOTADO_EXTERNO: return { bg: 'bg-sky-400', hex: '#38bdf8' };
-      case TagInventario.ADOTADO: return { bg: 'bg-indigo-400', hex: '#818cf8' };
-      case TagInventario.RE_ADOTADO: return { bg: 'bg-fuchsia-400', hex: '#e879f9' };
-      case TagInventario.CONFERIDO: return { bg: 'bg-emerald-400', hex: '#34d399' };
-      case TagInventario.FALTA_ETIQUETAR: return { bg: 'bg-amber-400', hex: '#fbbf24' };
-      case TagInventario.ETIQUETADO: return { bg: 'bg-violet-400', hex: '#a78bfa' };
-      case TagInventario.NOVO_ITEM: return { bg: 'bg-orange-400', hex: '#fb923c' };
-      case TagInventario.DIVERGENCIA: return { bg: 'bg-rose-400', hex: '#fb7185' };
-      default: return { bg: 'bg-slate-400', hex: '#94a3b8' };
-    }
-  };
+  const visualStatus = useMemo(() => {
+    return determineAssetTag(workingAsset, workingAsset._localMaster || workingAsset.ENDERECO || "", tenantid);
+  }, [workingAsset, tenantid]);
 
-  const isBaixado = useMemo(() => {
-    const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
-    return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
-  }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
-
-  const isConferido = useMemo(() => {
-    return !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-  }, [workingAsset._conferido, workingAsset.AUDITOR_STATUS_CONFERENCIA]);
-
-  const tagColors = useMemo(() => {
-    if (isBatch) return { bg: 'bg-amber-400', hex: '#fbbf24' };
-    const tag = workingAsset.TAG_INVENTARIO || (isConferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE);
-    const base = getTagColors(tag);
-    // Se for baixado, vamos manter o cabeçalho vermelho ou com tom de alerta
-    if (isBaixado) {
-      return { bg: 'bg-red-400', hex: '#f87171' };
-    }
-    return base;
-  }, [isBatch, workingAsset, isBaixado, isConferido]);
-
-  const headerBg = tagColors.bg;
+  const meta = getTagMetadata(visualStatus);
+  const StatusIcon = meta.icon;
+  const headerBg = meta.color.bg.replace('/30', '');
 
   const calculateImpairment = () => {
     // Fidedignidade: Garantir que o valor contábil seja calculado corretamente (CPC 27 / CPC 01)
@@ -660,12 +632,11 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
             </div>
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
-              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">AUDITORIA</p>
+              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">SITUAÇÃO / TAG</p>
               <div className="flex items-center space-x-2">
-                <div className={`w-1.5 h-1.5 rounded-full ${isBaixado ? 'bg-red-400 shadow-red-400/50' : 'bg-sky-400 shadow-sky-400/50'} shadow-sm`} />
-                <span className={`text-[10px] font-bold uppercase ${isBaixado ? 'text-red-100' : 'text-sky-300'} tracking-widest`}>
-                  {isBaixado ? 'BAIXADO | ' : ''}
-                  {workingAsset.TAG_INVENTARIO || (isConferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE)}
+                <StatusIcon size={14} className="text-white" />
+                <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                  {meta.label}
                 </span>
               </div>
             </div>

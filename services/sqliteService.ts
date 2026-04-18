@@ -152,8 +152,28 @@ class SQLiteService {
       await navigator.storage.persist();
     }
 
-    const SQL = await initSqlJs({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/${file}`
+    const SQL = await Promise.race([
+      initSqlJs({
+        locateFile: file => {
+          // Tentativa de carregar via CDN com cache agressivo
+          return `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/${file}`;
+        }
+      }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('WASM_LOAD_TIMEOUT')), 20000))
+    ]).catch(err => {
+      console.error(">>> [DBA] Falha crítica ao carregar motor SQL.js:", err);
+      // Fallback para outros CDNs se o principal falhar
+      if (err.message === 'WASM_LOAD_TIMEOUT') {
+         console.warn(">>> [DBA] Tentando CDN alternativo (Unpkg)...");
+         return initSqlJs({
+           locateFile: file => `https://unpkg.com/sql.js@1.14.1/dist/${file}`
+         }).catch(innerErr => {
+           window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: innerErr.message } }));
+           throw innerErr;
+         });
+      }
+      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: err.message } }));
+      throw err;
     });
 
     // 2. Tenta Recuperar do Diretório Físico
@@ -172,11 +192,23 @@ class SQLiteService {
           const buffer = await file.arrayBuffer();
           
           if (buffer.byteLength > 0) {
-            console.log(`>>> [DBA] Carregando do Diretório Físico (${dirHandle.name}/${fileName})`);
+            console.log(`>>> [DBA] Carregando do Diretório Físico (${dirHandle.name}/${fileName}) - Size: ${buffer.byteLength} bytes`);
             this.db = new SQL.Database(new Uint8Array(buffer));
+            
+            // Verificação de Integridade Básica
+            try {
+              this.db.run("PRAGMA integrity_check");
+              console.log(">>> [DBA] Integridade física do arquivo SQL: OK");
+            } catch (pErr) {
+              console.warn(">>> [DBA] Arquivo físico corrompido, tentando reparar...", pErr);
+              this.db.run(FULL_SCHEMA);
+            }
+            
             this.isInitialized = true;
             return;
           }
+        } else {
+          console.warn(">>> [DBA] Diretório mapeado existe mas permissão foi perdida.");
         }
       }
     } catch (err) {
