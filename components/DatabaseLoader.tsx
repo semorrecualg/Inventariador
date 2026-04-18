@@ -15,13 +15,19 @@ import {
   Cloud,
   Calendar,
   ShieldCheck,
-  FolderOpen
+  FolderOpen,
+  Trash2,
+  Upload,
+  Database,
+  FileJson,
+  FileCode
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import localforage from 'localforage';
-import { Asset, DatabaseMode } from '../types';
-import { APP_LOGO } from '../constants';
+import { Asset, DatabaseMode, InventoryState } from '../types';
 import { sqliteService } from '../services/sqliteService';
+import { requestPersistentStorage, isStoragePersisted } from '../services/localDbService';
+import { backupInventory, restoreInventory } from '../services/persistenceService';
 import { generateUUID, logAuditEvent } from '../services/supabaseService';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import BackButton from './BackButton';
@@ -42,12 +48,14 @@ interface LoadSummary {
 interface DatabaseLoaderProps {
   onBack: () => void;
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
+  onRestore: (state: InventoryState) => void;
+  onClearDatabase: () => void;
   isSyncing?: boolean;
   syncProgress?: { current: number; total: number } | null;
   excludedAccounts?: string[];
   campaigns?: import('../types').InventoryCampaign[];
   user?: import('../types').User | null;
-  databaseMode?: import('../types').DatabaseMode;
+  databaseMode: import('../types').DatabaseMode;
   showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
   onOpenHelp?: () => void;
 }
@@ -55,6 +63,8 @@ interface DatabaseLoaderProps {
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
   onBack, 
   onDataLoaded, 
+  onRestore,
+  onClearDatabase,
   isSyncing, 
   syncProgress,
   excludedAccounts = [],
@@ -66,10 +76,48 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 }) => {
   const [step, setStep] = useState<'SOURCE' | 'LOADING' | 'COMPANY_SELECTION' | 'SUMMARY' | 'IMMOBILIZATION'>('SOURCE');
   const [isActivating, setIsActivating] = useState(false);
+  const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [hasTriedImmobilization, setHasTriedImmobilization] = useState(false);
+  const [isPersisted, setIsPersisted] = useState(false);
   const [summary, setSummary] = useState<LoadSummary | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
+  React.useEffect(() => {
+    isStoragePersisted().then(setIsPersisted);
+    sqliteService.getFileStatus().then(status => {
+      setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+    });
+
+    const handleInitFailed = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      showModal("Erro de Conectividade", detail.error, "error");
+    };
+
+    const handleWriteBlocked = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      console.warn(">>> [UI] Gravação bloqueada detectada:", detail);
+      sqliteService.getFileStatus().then(status => {
+         setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+      });
+    };
+
+    const handlePersisted = () => {
+      sqliteService.getFileStatus().then(status => {
+         setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+      });
+    };
+
+    window.addEventListener('gbr_db_init_failed', handleInitFailed);
+    window.addEventListener('gbr_db_write_blocked', handleWriteBlocked);
+    window.addEventListener('gbr_db_persisted', handlePersisted);
+    
+    return () => {
+      window.removeEventListener('gbr_db_init_failed', handleInitFailed);
+      window.removeEventListener('gbr_db_write_blocked', handleWriteBlocked);
+      window.removeEventListener('gbr_db_persisted', handlePersisted);
+    };
+  }, []);
+  
   React.useEffect(() => {
     const hasSeenHelp = localStorage.getItem('gbr_seen_load_help');
     if (!hasSeenHelp) {
@@ -83,7 +131,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string} | null>(null);
 
   React.useEffect(() => {
-    if (step === 'IMMOBILIZATION') {
+    if (step === 'IMMOBILIZATION' || step === 'SOURCE') {
       sqliteService.getFileStatus().then(status => {
         setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
       });
@@ -92,6 +140,59 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const rawExtractedAssetsRef = useRef<Asset[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportDB = async () => {
+    setIsLoadingTools(true);
+    try {
+      const dbBlob = await sqliteService.exportDatabase();
+      if (!dbBlob) throw new Error("Falha ao gerar blob do banco.");
+      
+      const url = window.URL.createObjectURL(dbBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventory_${new Date().toISOString().split('T')[0]}.db`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      showModal("Sucesso", "Arquivo .DB exportado com sucesso. Este arquivo pode ser aberto em qualquer gestor SQLite.", "success");
+    } catch (err) {
+      showModal("Erro", "Falha ao exportar .DB: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setIsLoadingTools(false);
+    }
+  };
+
+  const handleBackup = async () => {
+    setIsLoadingTools(true);
+    try {
+      await backupInventory();
+      showModal("Sucesso", "Backup JSON gerado e salvo nos downloads.", "success");
+    } catch (err) {
+      showModal("Erro", "Falha ao gerar backup: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setIsLoadingTools(false);
+    }
+  };
+
+  const handleJsonRestore = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setIsLoadingTools(true);
+    try {
+      const state = await restoreInventory(file);
+      onRestore(state);
+      showModal("Sucesso", "Backup restaurado com sucesso.", "success");
+    } catch (err) {
+      showModal("Erro", "Falha ao restaurar backup: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setIsLoadingTools(false);
+      if (jsonInputRef.current) jsonInputRef.current.value = '';
+    }
+  };
 
   const normalizeKey = (s: unknown) => {
     if (s === null || s === undefined) return '';
@@ -640,93 +741,174 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         )}
 
         {step === 'SOURCE' && (
-          <div className="space-y-6">
-            <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm modern-card flex items-center gap-4">
-              <div className="w-16 h-16 bg-white border border-slate-100 rounded-full flex items-center justify-center shadow-sm overflow-hidden shrink-0">
-                <img 
-                  src={APP_LOGO} 
-                  alt="GBR Auditoria Logo" 
-                  className="w-full h-full object-cover rounded-full"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-              <div className="flex-1">
-                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600">Mapeamento v25.00</span>
-                <h3 className="text-lg font-bold uppercase text-slate-900 tracking-tight mt-0.5">Reestruturação</h3>
-                <p className="text-[10px] font-bold text-slate-400 leading-tight uppercase tracking-widest mt-1">
-                  Suporte nativo para C. Custo, Valor e Fornecedor.
-                </p>
+          <div className="space-y-4">
+            {/* 1. STATUS DE DIRETÓRIO (Painel de Soberania Unificado) */}
+            <div className={`rounded-2xl shadow-xl border p-5 relative overflow-hidden group transition-all duration-500 ${fileStatus?.status === 'linked' ? 'bg-blue-600 border-blue-400' : 'bg-slate-900 border-slate-700'}`}>
+               <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <FolderOpen size={64} className="text-white" />
+               </div>
+
+               <div className="flex items-center space-x-3 mb-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white backdrop-blur-sm border border-white/30 ${fileStatus?.status === 'linked' ? 'bg-white/20' : 'bg-slate-800'}`}>
+                    <Database size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">Status da Base Local</h4>
+                    <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania de Dados Permanente</p>
+                  </div>
+               </div>
+
+               {fileStatus?.status === 'none' && (
+                 <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/10 mb-4">
+                    <p className="text-[10px] text-white/80 font-bold uppercase tracking-widest leading-relaxed">
+                      ⚠️ ATENÇÃO: Nenhum diretório físico vinculado. 
+                      Os dados serão salvos apenas na memória do navegador. 
+                      <strong className="text-white underline ml-1">VINCULE UMA PASTA PARA SEGURANÇA TOTAL.</strong>
+                    </p>
+                 </div>
+               )}
+
+               {fileStatus?.status === 'prompt' && (
+                 <div className="bg-amber-500/20 backdrop-blur-md rounded-2xl p-4 border border-amber-500/30 mb-4 animate-pulse">
+                    <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest leading-relaxed">
+                       ⚠️ PERMISSÃO EXPIRADA: Clique no botão de atualizar (laranja) para retomar o vínculo com a pasta. Sem isso, os dados ficam apenas na memória.
+                    </p>
+                 </div>
+               )}
+
+                {fileStatus?.status === 'denied' && (
+                  <div className="bg-red-500/20 backdrop-blur-md rounded-2xl p-4 border border-red-500/30 mb-4">
+                     <p className="text-[10px] text-red-200 font-bold uppercase tracking-widest leading-relaxed">
+                        ❌ ACESSO NEGADO: O navegador bloqueou a escrita nesta pasta. Tente &quot;Alterar Pasta&quot; e selecione novamente para restaurar a gravação.
+                     </p>
+                  </div>
+                )}
+
+               {fileStatus?.status === 'linked' && (
+                 <div className="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/10 mb-4">
+                    <div className="flex justify-between items-center mb-1.5">
+                      <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Caminho Físico:</span>
+                      <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow-sm">
+                        DIRETÓRIO ATIVO
+                      </span>
+                    </div>
+                    <p className="text-[10px] font-mono font-bold text-white break-all leading-tight mb-2">
+                       {fileStatus.path}
+                    </p>
+                    {/* @ts-expect-error - size added in service */}
+                    {fileStatus.size !== undefined && (
+                      <div className="flex items-center space-x-3 text-[8px] font-bold text-white/50 uppercase tracking-widest mt-2 pt-2 border-t border-white/5">
+                        {/* @ts-expect-error - size added in service */}
+                        <span>Tamanho: {(fileStatus.size / 1024).toFixed(1)} KB</span>
+                        {/* @ts-expect-error - lastModified added in service */}
+                        <span>Modificado: {new Date(fileStatus.lastModified || '').toLocaleTimeString()}</span>
+                      </div>
+                    )}
+                 </div>
+               )}
+
+               <div className="flex space-x-2">
+                 <button 
+                  onClick={handleStartImmobilization}
+                  className={`flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-black/10 flex items-center justify-center space-x-2 active:scale-95 ${fileStatus?.status === 'linked' ? 'bg-white text-blue-600 hover:bg-blue-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                 >
+                   <FolderOpen size={16} />
+                   <span>{fileStatus?.status === 'linked' ? 'ALTERAR PASTA' : (fileStatus?.status === 'none' ? 'VINCULAR PASTA AGORA' : 'REABRIR PASTA')}</span>
+                 </button>
+                 
+                 {fileStatus?.status === 'prompt' && (
+                    <button 
+                      onClick={() => sqliteService.requestFilePermission()}
+                      className="w-14 py-3 bg-amber-500 text-white rounded-xl flex items-center justify-center hover:bg-amber-600 transition-all shadow-lg active:scale-95"
+                    >
+                      <RefreshCw size={20} />
+                    </button>
+                 )}
+               </div>
+            </div>
+
+            {/* 2. CARGA DE NOVOS DADOS */}
+            <div className="grid grid-cols-1 gap-3">
+              <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-6 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-3 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
+                <div className="w-14 h-14 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={28} /></div>
+                <div className="text-center">
+                  <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Carregar Nova Base</h3>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase mt-1 tracking-widest">Excel v25 ou CSV Master</p>
+                </div>
+              </button>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={handleBackup}
+                  disabled={isLoadingTools}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col items-center justify-center hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-2"><FileJson size={20} /></div>
+                  <span className="text-[9px] font-bold text-slate-900 uppercase tracking-tight">Gerar Backup</span>
+                  <span className="text-[8px] font-bold text-slate-400 uppercase mt-0.5">JSON Local</span>
+                </button>
+
+                <button 
+                  onClick={() => jsonInputRef.current?.click()}
+                  disabled={isLoadingTools}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col items-center justify-center hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center mb-2"><Upload size={20} /></div>
+                  <span className="text-[9px] font-bold text-slate-900 uppercase tracking-tight">Restaurar</span>
+                  <span className="text-[8px] font-bold text-slate-400 uppercase mt-0.5">Importar JSON</span>
+                </button>
               </div>
             </div>
 
-            {/* Quick Link to Immobilization - Requested by user to find "Determinar local" easily */}
-            <button 
-              onClick={() => setStep('IMMOBILIZATION')}
-              className="w-full bg-blue-600/5 hover:bg-blue-600/10 text-blue-700 p-6 rounded-2xl border-2 border-blue-600/20 flex items-center gap-4 transition-all group border-dashed"
-            >
-              <div className="w-12 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md group-hover:scale-110 transition-transform shrink-0">
-                <FolderOpen size={24} />
-              </div>
-              <div className="text-left">
-                <h3 className="text-[11px] font-black uppercase tracking-tight">Vincular Local de Trabalho</h3>
-                <p className="text-[9px] font-bold opacity-70 uppercase mt-1 tracking-widest leading-tight">
-                  Apenas determinar o local onde a base de dados (.db) será mantida permanentemente.
-                </p>
-              </div>
-              <div className="ml-auto text-blue-600/30 group-hover:text-blue-600">
-                <ArrowRight size={20} />
-              </div>
-            </button>
+            {/* 3. UTILITÁRIOS AVANÇADOS */}
+            <div className="bg-slate-100/50 p-4 rounded-2xl border border-slate-200 space-y-3">
+               <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Utilitários Avançados</h4>
+               
+               <div className="grid grid-cols-2 gap-2">
+                  <button 
+                    onClick={handleExportDB}
+                    disabled={isLoadingTools}
+                    className="flex items-center space-x-2 p-3 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center shrink-0">
+                      <FileCode size={16} />
+                    </div>
+                    <div className="text-left overflow-hidden">
+                      <p className="text-[9px] font-black text-slate-900 uppercase truncate">Exportar .DB</p>
+                      <p className="text-[7px] font-bold text-slate-400 uppercase">SQLite Nativo</p>
+                    </div>
+                  </button>
 
-            <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center space-y-4 active:scale-[0.98] transition-all hover:border-blue-300 hover:bg-blue-50/30 group">
-              <div className="w-16 h-16 bg-slate-50 text-blue-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm group-hover:scale-110 transition-transform"><FileSpreadsheet size={32} /></div>
-              <div className="text-center">
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Carregar Base de Dados</h3>
-                <p className="text-[9px] font-bold text-slate-400 uppercase mt-1.5 tracking-widest">Excel / CSV Autodetect</p>
-              </div>
-            </button>
+                  <button 
+                    onClick={onClearDatabase}
+                    disabled={isLoadingTools}
+                    className="flex items-center space-x-2 p-3 bg-red-50 border border-red-100 rounded-xl shadow-sm hover:bg-red-100 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <div className="w-8 h-8 bg-white text-red-600 rounded-lg flex items-center justify-center shrink-0 shadow-sm">
+                      <Trash2 size={16} />
+                    </div>
+                    <div className="text-left overflow-hidden">
+                      <p className="text-[9px] font-black text-red-600 uppercase truncate">Limpar Tudo</p>
+                      <p className="text-[7px] font-bold text-red-400 uppercase tracking-tighter">Reset Fábrica</p>
+                    </div>
+                  </button>
+               </div>
 
-            <button 
-              onClick={() => {
-                const headers = [
-                  'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 
-                  'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 
-                  'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 
-                  'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'
-                ];
-                const exampleData = [{
-                  GRUPO_EMPRESARIAL: 'EXEMPLO_SA',
-                  UNIDADE_OPERACIONAL: 'MATRIZ',
-                  STATUS: 'ATIVO',
-                  ETIQUETA: 'PAT-0001',
-                  QT: 1,
-                  DESCRICAO: 'NOTEBOOK DELL LATITUDE',
-                  SERIAL: 'ABC123XYZ',
-                  DATA_AQ: '2023-01-15',
-                  CNPJ: '00.000.000/0001-00',
-                  FORNECEDOR: 'DELL BRASIL',
-                  NF: '12345',
-                  ENDERECO: 'SALA 101 - TI',
-                  REGISTRO: 'REG-001',
-                  SUBREG: '00',
-                  DATA_BAIXA: '',
-                  CONTA: '1.02.01.01.01',
-                  PK: 'ERP-001',
-                  CUSTO: '10101',
-                  VALOR: 5500.00,
-                  SN1_RECNO: 1,
-                  SN3_RECNO: 1
-                }];
-                const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "CargaExpert");
-                XLSX.writeFile(wb, "Matriz_Carga_Expert_v25.xls");
-              }}
-              className="w-full py-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl border border-slate-200 flex items-center justify-center space-x-2 transition-all group"
-            >
-              <Download size={16} className="group-hover:translate-y-0.5 transition-transform" />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Baixar Planilha Matriz</span>
-            </button>
+               <div className="flex items-center justify-between px-2 pt-1">
+                 <div className="flex items-center space-x-2">
+                   <div className={`w-2 h-2 rounded-full ${isPersisted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500'}`} />
+                   <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Reforço de Persistência Browser</span>
+                 </div>
+                 {!isPersisted && (
+                   <button 
+                    onClick={() => requestPersistentStorage().then(setIsPersisted)}
+                    className="text-[8px] font-black text-blue-600 uppercase hover:underline"
+                   >
+                     Solicitar
+                   </button>
+                 )}
+               </div>
+            </div>
 
             <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={(e) => {
                const f = e.target.files?.[0];
@@ -741,6 +923,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                  r.readAsArrayBuffer(f);
                }
             }} />
+            
+            <input 
+              ref={jsonInputRef} 
+              type="file" 
+              className="hidden" 
+              accept=".json" 
+              onChange={handleJsonRestore} 
+            />
           </div>
         )}
 

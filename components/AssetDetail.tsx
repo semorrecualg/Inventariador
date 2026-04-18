@@ -27,6 +27,7 @@ import {
   Camera,
   X,
   ChevronRight,
+  ArrowDown,
   Image as ImageIcon,
   Trash2,
   History
@@ -577,6 +578,19 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         </div>
         
         <div className="flex flex-col">
+          <div className="flex items-center space-x-2 mb-3">
+            <div className="bg-white/20 px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm flex items-center space-x-2">
+              <StatusIcon size={12} className="text-white" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white">{visualStatus}</span>
+            </div>
+            {isBaixado && (
+              <div className="bg-red-500 px-3 py-1 rounded-full border border-red-400 flex items-center space-x-2 shadow-lg">
+                <AlertTriangle size={12} className="text-white" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-white">BAIXADO</span>
+              </div>
+            )}
+          </div>
+
           <h2 className="text-xl font-bold uppercase tracking-tight leading-tight mb-6 text-white line-clamp-2">
             {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
           </h2>
@@ -683,6 +697,73 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
+          {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
+          {(isAdopted || workingAsset._is_divergent_baixa || isConferido) && (
+            <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
+              <div className="flex items-center justify-between mb-1">
+                <h4 className="text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] flex items-center">
+                  <ShieldCheck size={14} className="mr-2 text-accent" /> Situação da Auditoria
+                </h4>
+                <div className={`px-3 py-1 rounded-lg border ${meta.color.bg} ${meta.color.border}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-tight ${meta.color.text}`}>{visualStatus}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                {/* LOCAL DE ORIGEM VS NOVO LOCAL */}
+                <div className={`p-4 rounded-2xl border ${isAdopted ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex flex-col space-y-3">
+                    <div className="flex items-start">
+                      <div className="w-8 h-8 rounded-xl bg-slate-200 flex items-center justify-center mr-3 shrink-0">
+                        <MapPin size={14} className="text-slate-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Local de Origem (Base)</p>
+                        <p className="text-xs font-black text-slate-700 uppercase leading-snug break-words">
+                          {workingAsset.ENDERECO || 'LOCAL NÃO INFORMADO NA BASE'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {isAdopted && (
+                      <div className="flex items-center justify-center h-4 relative">
+                        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-blue-300" />
+                        <div className="bg-blue-50 px-2 relative z-10">
+                          <ArrowDown size={12} className="text-blue-500 animate-bounce" />
+                        </div>
+                      </div>
+                    )}
+
+                    {(isAdopted || isConferido) && (
+                      <div className="flex items-start">
+                        <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center mr-3 shrink-0 shadow-lg shadow-blue-500/20">
+                          <MapPin size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[8px] font-bold text-blue-500 uppercase tracking-widest mb-0.5">Novo Local (Inventariado)</p>
+                          <p className="text-xs font-black text-blue-900 uppercase leading-snug break-words">
+                            {workingAsset._localMaster || workingAsset.ENDERECO}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* DIVERGÊNCIA DE BAIXA */}
+                {workingAsset._is_divergent_baixa && !isAdopted && (
+                  <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center space-x-3">
+                    <AlertTriangle className="text-red-500 shrink-0" size={20} />
+                    <div>
+                      <p className="text-[9px] font-black text-red-600 uppercase tracking-widest">Divergência Crítica</p>
+                      <p className="text-[11px] font-bold text-red-900 leading-tight">ATIVO com DATA DE BAIXA ({workingAsset.DATABAIXA})</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <input 
             type="file" 
             accept="image/*" 

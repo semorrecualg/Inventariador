@@ -13,7 +13,7 @@ const ASSET_COLUMNS = [
   '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
   '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
-  '_isNew', '_is_unitized', '_is_divergent_baixa', 'DE_PARA',
+  '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',
   'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
 ];
 

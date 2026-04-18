@@ -993,17 +993,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
 
               <button 
-                onClick={() => { setIsDataMenuOpen(false); onNavigate(AppScreen.DATABASE_MANAGER); }} 
-                className="w-full flex items-center p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl active:scale-[0.98] transition-all text-left"
+                onClick={() => { 
+                  setIsDataMenuOpen(false); 
+                  setIsAdminMenuOpen(false);
+                  onNavigate(AppScreen.LOAD_DATABASE); 
+                }} 
+                className="w-full flex items-center p-5 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20 border-2 border-white/20"
               >
-                <div className="w-10 h-10 bg-indigo-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-indigo-500/20">
-                  <Database size={20} />
-                </div>
+                <div className="w-12 h-12 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5 shadow-inner"><DatabaseZap size={24} /></div>
                 <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-indigo-400 uppercase tracking-tight">Gestor de Banco Local</h4>
-                  <p className="text-[8px] font-bold text-indigo-400/60 uppercase tracking-widest mt-0.5">Carga Inicial (JSON/CSV) & Persistência</p>
+                  <h4 className="text-sm font-black uppercase tracking-tight">GESTOR DE DADOS</h4>
+                  <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5 whitespace-pre-wrap">
+                    Carga Expert (v25), Backup, Exportação & Persistência
+                  </p>
                 </div>
-                <ChevronRight size={14} className="text-indigo-400/40" />
+                <ChevronRight size={20} className="text-white/40" />
               </button>
 
               {databaseMode !== DatabaseMode.INTERNAL && (
@@ -1067,22 +1071,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </button>
               </div>
 
-              <button 
-                onClick={() => { 
-                  setIsDataMenuOpen(false); 
-                  setIsAdminMenuOpen(false);
-                  onNavigate(AppScreen.LOAD_DATABASE); 
-                }} 
-                className="w-full flex items-center p-4 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20"
-              >
-                <div className="w-10 h-10 bg-white/20 text-white rounded-lg flex items-center justify-center mr-4"><DatabaseZap size={20} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold uppercase tracking-tight">Carga Expert</h4>
-                  <p className="text-[8px] font-bold text-white/70 uppercase tracking-widest mt-0.5">
-                    Importar Base Master
-                  </p>
-                </div>
-              </button>
 
               <button onClick={() => { 
                 setIsSelectiveClearOpen(true);

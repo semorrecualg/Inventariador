@@ -52,7 +52,6 @@ import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
-import DatabaseManager from './components/DatabaseManager';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
@@ -3822,6 +3821,11 @@ const App: React.FC = () => {
                 user={user}
                 databaseMode={databaseMode}
                 showModal={showModal}
+                onRestore={(state) => {
+                  setInventory(state);
+                  popScreen();
+                }}
+                onClearDatabase={handleClearDatabase}
                 onDataLoaded={async (a, c) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
                   console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}, Modo: ${databaseMode}`);
@@ -4035,14 +4039,28 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.DATABASE_MANAGER && (
-            <DatabaseManager 
-              mode={databaseMode}
+            <DatabaseLoader 
+              onBack={popScreen} 
+              databaseMode={databaseMode}
+              user={user}
+              onOpenHelp={() => setIsHelpMenuOpen(true)}
+              showModal={(title, message, type) => setModalConfig({ 
+                isOpen: true, title, message, type, 
+                showCancel: false, confirmText: 'OK' 
+              })}
+              campaigns={campaigns}
+              excludedAccounts={excludedAccounts}
+              isSyncing={isSyncing}
+              syncProgress={syncProgress}
               onRestore={(state) => {
                 setInventory(state);
                 popScreen();
               }}
               onClearDatabase={handleClearDatabase}
-              onClose={popScreen}
+              onDataLoaded={async (assets) => {
+                setInventory(prev => ({ ...prev, assets }));
+                popScreen();
+              }} 
             />
           )}
           {screen === AppScreen.SIGNATURE && (

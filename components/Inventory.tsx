@@ -38,6 +38,8 @@ import {
   ArrowLeft
 } from 'lucide-react';
 
+import { QRCodeSVG } from 'qrcode.react';
+
 
 interface AssetCardProps {
   asset: Asset;
@@ -49,6 +51,7 @@ interface AssetCardProps {
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   hasLocalPhoto?: boolean;
+  onShowQr: (asset: Asset) => void;
 }
 
 const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
@@ -88,7 +91,7 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto
+  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto, onShowQr
 }: AssetCardProps) => {
   return (
     <AssetListItem 
@@ -101,6 +104,7 @@ const AssetCard = React.memo(({
       isSelected={isSelected}
       onToggleSelect={onToggleSelect}
       hasLocalPhoto={hasLocalPhoto}
+      onShowQr={onShowQr}
     />
   );
 });
@@ -182,6 +186,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
+  const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
 
   // Telemetria e Hardware
   const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
@@ -1519,6 +1524,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       isSelected={selectedIds.has(String(asset.id))} 
                       onToggleSelect={toggleSelect} 
                       hasLocalPhoto={localPhotoIds.has(String(asset.id))}
+                      onShowQr={(a) => setQrModalAsset(a)}
                     />
                   </div>
                 )}
@@ -1691,6 +1697,35 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {qrModalAsset && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <button 
+              onClick={() => setQrModalAsset(null)}
+              className="absolute top-4 right-4 z-10 p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="bg-slate-100 p-8 text-center border-b border-slate-200">
+               <div className="bg-white p-6 rounded-3xl shadow-xl inline-block mb-4 border border-slate-200">
+                 <QRCodeSVG value={qrModalAsset.ETIQUETA || qrModalAsset.id || ''} size={180} />
+               </div>
+               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none mb-1">{qrModalAsset.ETIQUETA}</h3>
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qrModalAsset.DESCRICAODOATIVO}</p>
+            </div>
+            <div className="p-6 bg-white">
+               <button 
+                 onClick={() => setQrModalAsset(null)}
+                 className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all shadow-lg"
+               >
+                 Fechar
+               </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {scannedAsset && createPortal(

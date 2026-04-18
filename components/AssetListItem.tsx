@@ -7,7 +7,9 @@ import {
   Camera, 
   Check, 
   QrCode,
-  AlertTriangle 
+  AlertTriangle,
+  ArrowDown,
+  MapPin
 } from 'lucide-react';
 
 interface AssetListItemProps {
@@ -120,14 +122,38 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
           </p>
           
           {isAdopted && (
-            <div className="mb-2 bg-blue-50/50 border border-blue-100/50 rounded-lg p-2 space-y-1">
-              <div className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">ORIGEM: {asset.ENDERECO || 'N/I'}</span>
+            <div className="mb-3 bg-blue-50/70 border border-blue-200 rounded-xl p-3 space-y-2 animate-fadeIn shadow-sm">
+              <div className="flex items-center justify-between border-b border-blue-100 pb-1.5 mb-1.5">
+                <span className="text-[9px] font-black text-blue-600 uppercase tracking-[0.2em]">Situação: Adoção</span>
+                <MapPin size={10} className="text-blue-500" />
               </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-[8px] font-bold text-blue-600 uppercase tracking-widest">ENCONTRADO: {asset._localMaster || selectedLocation || 'ATUAL'}</span>
+              
+              <div className="flex items-start">
+                <div className="w-5 h-5 rounded-lg bg-slate-200 flex items-center justify-center mr-2 shrink-0">
+                  <MapPin size={10} className="text-slate-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-0.5">Origem (Base)</p>
+                  <p className="text-[10px] font-black text-slate-700 uppercase leading-tight truncate">
+                    {asset.ENDERECO || 'NÃO INFORMADO'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center -my-1 h-3">
+                <ArrowDown size={10} className="text-blue-400 animate-bounce" />
+              </div>
+
+              <div className="flex items-start">
+                <div className="w-5 h-5 rounded-lg bg-blue-500 flex items-center justify-center mr-2 shrink-0 shadow-lg shadow-blue-500/20">
+                  <MapPin size={10} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[7px] font-bold text-blue-500 uppercase tracking-widest leading-none mb-0.5">Encontrado (Inventário)</p>
+                  <p className="text-[10px] font-black text-blue-700 uppercase leading-tight truncate">
+                    {asset._localMaster || selectedLocation || 'LOCAL ATUAL'}
+                  </p>
+                </div>
               </div>
             </div>
           )}
