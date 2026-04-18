@@ -60,6 +60,8 @@ const Scanner: React.FC<ScannerProps> = ({
       if (!document.hidden && isMounted.current) {
         setIsTabHidden(false);
         resetInactivityTimeout();
+        // Garantir que tente reiniciar se estava em standby automático
+        if (isInactive) setIsInactive(false);
       } else {
         setIsTabHidden(true);
       }
@@ -68,12 +70,16 @@ const Scanner: React.FC<ScannerProps> = ({
     document.addEventListener("visibilitychange", handleEvents);
     window.addEventListener("focus", handleEvents);
 
+    // RESET INICIAL: Garante que o timer comece no mount
+    resetInactivityTimeout();
+
     return () => {
       isMounted.current = false;
       document.removeEventListener("visibilitychange", handleEvents);
       window.removeEventListener("focus", handleEvents);
       if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
       // Garantir que o track pare ao desmontar para economizar bateria
+      stopScanner();
       if (trackRef.current) {
         trackRef.current.stop();
         trackRef.current = null;
@@ -138,14 +144,17 @@ const Scanner: React.FC<ScannerProps> = ({
   };
 
   const stopScanner = useCallback(async () => {
+    if (isStoppingRef.current) return;
+
     // Se estiver iniciando, espera um pouco para não interromper o play()
     if (isStartingRef.current) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
 
-    if (scannerRef.current && !isStoppingRef.current) {
+    if (scannerRef.current) {
       isStoppingRef.current = true;
       try {
+        console.log(">>> [Scanner] Parando câmera...");
         await scannerRef.current.stop();
         scannerRef.current = null;
         
@@ -160,6 +169,7 @@ const Scanner: React.FC<ScannerProps> = ({
         scannerRef.current = null;
       } finally {
         isStoppingRef.current = false;
+        console.log(">>> [Scanner] Câmera parada.");
       }
     }
   }, []);
@@ -392,15 +402,29 @@ const Scanner: React.FC<ScannerProps> = ({
             <RefreshCw size={32} className="text-amber-500" />
           </div>
           <h3 className="text-white font-black uppercase tracking-tighter text-lg mb-2">Standby Térmico</h3>
-          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6 px-4">
             O scanner foi pausado devido ao tempo de inatividade para evitar superaquecimento.
           </p>
-          <button 
-            onClick={resetInactivityTimeout}
-            className="px-8 py-3 bg-amber-500 text-black rounded-2xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all shadow-xl shadow-amber-500/20"
-          >
-            Retomar Leitura
-          </button>
+          <div className="flex flex-col space-y-3 w-full max-w-xs">
+            <button 
+              onClick={() => {
+                setIsInactive(false);
+                resetInactivityTimeout();
+                // O useEffect disparará o startScanner() automaticamente
+              }}
+              className="px-8 py-4 bg-amber-500 text-black rounded-2xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all shadow-xl shadow-amber-500/20 pointer-events-auto"
+            >
+              Retomar Leitura
+            </button>
+            {onClose && (
+              <button 
+                onClick={onClose}
+                className="px-8 py-3 bg-white/10 text-white rounded-2xl font-bold uppercase tracking-widest text-[9px] active:scale-95 transition-all pointer-events-auto"
+              >
+                Fechar Scanner
+              </button>
+            )}
+          </div>
         </div>
       )}
 

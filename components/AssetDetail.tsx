@@ -626,7 +626,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner">
               <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">PLAQUETA</p>
               <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
@@ -641,6 +641,28 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               </div>
             </div>
           </div>
+
+          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.ENDERECO) && (
+            <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
+              <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+                <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>
+                <MapPin size={14} className="text-white/60" />
+              </div>
+              <div className="space-y-3">
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest">Local de Origem (Base)</span>
+                  <span className="text-xs font-bold text-white uppercase mt-0.5">{workingAsset.ENDERECO || 'NÃO INFORMADO'}</span>
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    <span className="text-[8px] font-bold text-blue-300 uppercase tracking-widest">Novo Local (Inventariado)</span>
+                  </div>
+                  <span className="text-xs font-black text-white uppercase mt-1 bg-white/10 px-2 py-1.5 rounded-lg border border-white/10">{workingAsset._localMaster}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -973,7 +995,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               )}
               <button 
                 onClick={handleFinalize} 
-                className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${tagColors.bg}`}
+                className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${meta.color.bg.replace('/30', '')}`}
               >
                  <Check size={20} strokeWidth={3} />
                  <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>

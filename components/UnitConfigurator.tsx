@@ -11,12 +11,13 @@ import {
   ChevronRight,
   Layers,
   ArrowLeft,
+  Calendar,
   ChevronUp,
   ChevronDown,
   Map as MapIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { UnitConfig, User } from '../types';
+import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { getCurrentLocation } from '../utils/gpsUtils';
 import 'leaflet/dist/leaflet.css';
@@ -337,6 +338,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
       {/* Floating Action Buttons (Bottom Right) */}
       <div className="absolute bottom-32 right-4 z-40 flex flex-col space-y-3">
+        <button 
+          onClick={() => {
+            const win = window as unknown as { pushScreen: (screen: AppScreen) => void };
+            if (win.pushScreen) {
+              win.pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
+            }
+          }}
+          className="w-12 h-12 bg-amber-500 text-black rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border border-amber-400 group relative pointer-events-auto"
+          title="Gestão de Campanhas"
+        >
+          <Calendar size={20} className="shrink-0" />
+          <div className="absolute right-full mr-2 px-2 py-1 bg-black/80 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity uppercase tracking-widest">
+            Campanhas
+          </div>
+        </button>
         <button 
           onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
           className={`w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border ${

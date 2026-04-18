@@ -1515,14 +1515,22 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
 export const findAssetGlobally = async (etiqueta: string, tenantid: string): Promise<Asset | null> => {
   if (!supabase) return null;
   
-  const term = etiqueta.trim().toUpperCase();
-  console.log(`>>> [Supabase] Busca Global Iniciada: ${term} (Tenant: ${tenantid})`);
+  const rawTerm = etiqueta.trim();
+  const upperTerm = rawTerm.toUpperCase();
+  
+  // Tenta variações (original, upper, e com zero-padding se for apenas números)
+  const variations = [upperTerm];
+  if (/^\d+$/.test(rawTerm) && rawTerm.length < 6) {
+    variations.push(rawTerm.padStart(6, '0'));
+  }
+  
+  console.log(`>>> [Supabase] Busca Global Iniciada: ${variations.join(' | ')} (Tenant: ${tenantid})`);
   
   const { data, error } = await supabase
     .from('assets')
     .select('*')
     .eq('_tenantid', tenantid)
-    .eq('ETIQUETA', term)
+    .in('ETIQUETA', variations)
     .maybeSingle();
 
   if (error) {
@@ -1956,9 +1964,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  if (mode === 'INTERNAL') return [];
-  
-  if (!supabase) return [];
+  const isInternal = mode === 'INTERNAL';
   
   try {
     const configs: Record<string, UnitConfig> = {};
@@ -1981,9 +1987,19 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
-      if (config.tenant_id === tenantid) configs[config.unit_id] = config;
+      if (config.tenant_id === tenantid || config._tenantid === tenantid) {
+        configs[config.unit_id] = config;
+      }
     });
 
+    // Se for modo interno, retornamos apenas o que está no local
+    if (isInternal) {
+      console.log(`>>> [Local] fetchUnitConfigs retornando ${Object.values(configs).length} configs locais.`);
+      return Object.values(configs);
+    }
+
+    if (!supabase) return Object.values(configs);
+    
     // 2. Tenta carregar da Nuvem (unit_gps_data) para atualizar o local
     try {
       const { data, error } = await supabase

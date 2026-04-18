@@ -5,17 +5,17 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
-import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { generateUUID, findAssetGlobally } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { assetRepository } from '../services/assetRepository';
+import { AssetListItem } from './AssetListItem';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
-import { determineAssetTag, getTagMetadata } from '../services/tagService';
 import { 
   MapPin, 
   Check,
+  CheckCircle2,
   Zap, 
   ChevronRight,
   Square,
@@ -38,18 +38,6 @@ import {
   ArrowLeft
 } from 'lucide-react';
 
-const formatReadingTime = (isoStr?: string) => {
-  if (!isoStr) return '';
-  const date = new Date(isoStr);
-  return date.toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-};
 
 interface AssetCardProps {
   asset: Asset;
@@ -102,109 +90,18 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto
 }: AssetCardProps) => {
-  const statusUpper = String(asset.STATUS || '').toUpperCase();
-  
-  const isBaixado = useMemo(() => {
-    return statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
-  }, [statusUpper, asset.DATABAIXA]);
-
-  const visualStatus = useMemo(() => {
-    return determineAssetTag(asset, selectedLocation || asset.ENDERECO || "", selectedUnit);
-  }, [asset, selectedLocation, selectedUnit]);
-
-  const meta = getTagMetadata(visualStatus);
-  const StatusIcon = meta.icon;
-
-  const fullDescription = [
-    asset.QT || '1',
-    asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
-    asset.SERIAL || 'S/N',
-    formatMonthYearBR(asset.DATAAQUISIC),
-    asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'
-  ].join('; ');
-
-  const handleConfirm = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (navigator.vibrate) navigator.vibrate(10);
-    onMakeDecision(String(asset.id), 'YES');
-  };
-
   return (
-    <div 
-      className={`mb-3 p-4 bg-white rounded-2xl border border-[#F1F5F9] relative transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isSelected ? 'ring-2 ring-accent' : ''}`} 
-      onClick={() => {
-        if (isBatchMode) {
-          if (!isConferido) onToggleSelect(String(asset.id));
-        } else {
-          onSelect(asset);
-        }
-      }}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex-1 pr-4">
-          <div className="flex items-center space-x-2 mb-1">
-            <div className="bg-[#F1F5F9] px-1.5 py-0.5 rounded-[4px]">
-              <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider">PATRIMÔNIO</span>
-            </div>
-            {(asset._photoUrl || hasLocalPhoto) && (
-              <Camera size={12} className="text-accent" />
-            )}
-            {isBaixado && (
-              <div className="bg-red-50 px-1.5 py-0.5 rounded-[4px]">
-                <span className="text-[9px] font-extrabold text-red-600 uppercase tracking-wider">BAIXA</span>
-              </div>
-            )}
-          </div>
-          
-          <h3 className="text-xl font-extrabold text-[#1E293B] font-mono tracking-tight mb-1">
-            {formatEtiqueta(asset.ETIQUETA)}
-          </h3>
-          
-          <p className="text-sm font-medium text-[#475569] leading-snug line-clamp-2 mb-2">
-            {fullDescription}
-          </p>
-          
-          <div className="flex items-center space-x-3">
-            <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md ${meta.color.bg} ${meta.color.border} border`}>
-              <StatusIcon size={10} className={meta.color.text} />
-              <span className={`text-[10px] font-black uppercase tracking-tight ${meta.color.text}`}>
-                {visualStatus}
-              </span>
-            </div>
-            {asset.REGISTRO && (
-              <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
-                REG: {asset.REGISTRO}
-              </span>
-            )}
-            {asset._dataLeitura && (
-              <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
-                {formatReadingTime(asset._dataLeitura)}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Ação Integrada */}
-        <div className="shrink-0 ml-2">
-          {isBatchMode ? (
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-accent text-white ring-4 ring-accent/20' : 'border-2 border-[#CBD5E1] bg-white'}`}>
-              {isSelected && <Check size={22} strokeWidth={4} />}
-            </div>
-          ) : (
-            <button 
-              onClick={!isConferido ? handleConfirm : undefined}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-md ${isConferido ? meta.color.bg.replace('/30', '') : 'border-2 border-[#CBD5E1] bg-white active:scale-90'} ${isConferido ? 'text-white' : ''}`}
-            >
-              {isConferido ? (
-                <Check size={26} strokeWidth={4} />
-              ) : (
-                <div className="w-6 h-6 rounded-full border-2 border-[#CBD5E1]/50" />
-              )}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    <AssetListItem 
+      asset={asset}
+      selectedLocation={selectedLocation}
+      onSelect={onSelect}
+      onMakeDecision={onMakeDecision}
+      selectedUnit={selectedUnit}
+      isBatchMode={isBatchMode}
+      isSelected={isSelected}
+      onToggleSelect={onToggleSelect}
+      hasLocalPhoto={hasLocalPhoto}
+    />
   );
 });
 
@@ -1026,15 +923,39 @@ const Inventory: React.FC<InventoryProps> = ({
                 </p>
               </div>
               
-              <div className="p-8 space-y-4">
+        <div className="p-8 space-y-4">
+                {/* Info de Local de Origem se for diferente */}
+                {(normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') || 
+                  normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '') !== normalizeKey(selectedLocation || '')) && (
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
+                    <div className="flex items-center space-x-2 text-amber-700">
+                      <MapPin size={14} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">Local de Origem (Base)</span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-slate-700 uppercase">
+                        {scannedAsset.UNIDADE_OPERACIONAL || 'Unidade não informada'}
+                      </p>
+                      <p className="text-[9px] text-slate-500 font-medium uppercase italic">
+                        {scannedAsset.ENDERECO || 'Endereço não informado'}
+                      </p>
+                    </div>
+                    <div className="pt-2 border-t border-amber-200">
+                      <div className="flex items-center space-x-2 text-emerald-700">
+                        <CheckCircle2 size={14} />
+                        <span className="text-[9px] font-black uppercase tracking-widest">Novo Local (Inventariado)</span>
+                      </div>
+                      <p className="text-[10px] font-bold text-emerald-800 uppercase mt-1">
+                        {selectedUnit} / {selectedLocation}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className={`${scannedAsset._is_divergent_baixa ? 'bg-red-50 border-red-100' : 'bg-accent-soft border-accent/10'} p-4 rounded-2xl border transition-colors`}>
                   <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
                   <p className={`text-xl font-black font-mono ${scannedAsset._is_divergent_baixa ? 'text-red-700' : 'text-ink'}`}>{scannedAsset.ETIQUETA}</p>
                   <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
-                  <div className={`mt-3 pt-3 border-t flex items-center justify-between ${scannedAsset._is_divergent_baixa ? 'border-red-100' : 'border-accent/10'}`}>
-                    <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Localização Atual:</span>
-                    <span className={`text-[9px] font-black uppercase ${scannedAsset._is_divergent_baixa ? 'text-red-600' : 'text-accent'}`}>{selectedLocation}</span>
-                  </div>
                 </div>
 
                 {scannedAsset._is_divergent_baixa && (

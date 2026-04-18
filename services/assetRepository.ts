@@ -18,8 +18,19 @@ export const assetRepository = {
    * Busca um ativo pelo código de patrimônio (Busca Instantânea)
    */
   async findByEtiqueta(etiqueta: string): Promise<Asset | undefined> {
-    const term = etiqueta.trim().toUpperCase();
-    return await localDb.assets.where('ETIQUETA').equals(term).first();
+    const rawTerm = etiqueta.trim();
+    const upperTerm = rawTerm.toUpperCase();
+    
+    // Tenta busca exata primeiro
+    let asset = await localDb.assets.where('ETIQUETA').equals(upperTerm).first();
+    
+    // Se não encontrou e for numérico curto, tenta com padding de 6 zeros
+    if (!asset && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
+      const padded = rawTerm.padStart(6, '0');
+      asset = await localDb.assets.where('ETIQUETA').equals(padded).first();
+    }
+    
+    return asset || undefined;
   },
 
   /**

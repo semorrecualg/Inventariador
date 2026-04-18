@@ -116,7 +116,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
                 <MapPin size={18} />
               </div>
               <div>
-                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">LOCALIZAÇÃO ORIGINAL</p>
+                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Local de Origem (Base)</p>
                 <p className="text-xs font-black text-slate-800 uppercase leading-tight">{asset.ENDERECO}</p>
               </div>
             </div>
@@ -128,7 +128,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
                 <MapPin size={18} />
               </div>
               <div>
-                <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mb-0.5">LOCALIZAÇÃO AUDITADA</p>
+                <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mb-0.5">Novo Local (Inventariado)</p>
                 <p className="text-xs font-black text-indigo-800 uppercase leading-tight">{asset._localMaster}</p>
               </div>
             </div>

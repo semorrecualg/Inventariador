@@ -65,7 +65,7 @@ import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
-import { requestPersistentStorage } from './services/localDbService';
+import { requestPersistentStorage, localDb } from './services/localDbService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
@@ -1241,12 +1241,6 @@ const App: React.FC = () => {
 
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = useCallback(async () => {
-    // BLINDAGEM DBA: No modo INTERNO, não realizamos chamadas passivas à nuvem para evitar aquecimento e consumo de dados
-    if (databaseMode === DatabaseMode.INTERNAL) {
-      console.log('>>> [DBA] refreshCampaigns: Modo INTERNO detectado. Ignorando sincronização passiva com a nuvem.');
-      return;
-    }
-
     const tenantId = user?._tenantid || user?.tenantid;
     console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, User: ${user?.email}, Mode: ${databaseMode}`);
     
@@ -1282,7 +1276,7 @@ const App: React.FC = () => {
   }, [user?._tenantid, user?.tenantid, user?.email, databaseMode]);
 
   useEffect(() => {
-    if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION) {
+    if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION || screen === AppScreen.UNIT_CONFIGURATOR) {
       console.log(`>>> [App] useEffect disparando refreshCampaigns para tela: ${screen}`);
       refreshCampaigns();
     }
@@ -1643,11 +1637,11 @@ const App: React.FC = () => {
     asset._is_divergent_baixa = isGoldenRuleDivergent;
     
     // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
-    // Se o item nasceu para ser etiquetado, o fato de ter sido etiquetado é a informação soberana.
     const originalEtq = normalizeKey(asset._plaquetaMaster || '');
     const needsLabel = originalEtq === 'ETIQUETAR';
     if (needsLabel) {
-      return isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
+      if (isConferido) return TagInventario.ETIQUETADO;
+      return TagInventario.FALTA_ETIQUETAR;
     }
 
     // 1.1 DIVERGÊNCIA CRÍTICA (REGRA DE OURO)
@@ -1666,16 +1660,21 @@ const App: React.FC = () => {
     // 4. NOVO ITEM
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
-    const targetLocKey = normalizeKey(targetLocation);
-    const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
-    const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
-
-    // 6) DIVERGÊNCIA: Etiqueta física difere do registro lógico
+    // 5. DIVERGÊNCIA: Etiqueta física difere do registro lógico
     const currentEtq = normalizeKey(asset.ETIQUETA || "");
     const masterEtq = normalizeKey(asset._plaquetaMaster || "");
     if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
       return TagInventario.DIVERGENCIA;
     }
+
+    // REGRA DE OURO: Se não foi conferido, é PENDENTE
+    if (!isConferido) {
+      return TagInventario.PENDENTE;
+    }
+
+    const targetLocKey = normalizeKey(targetLocation);
+    const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
+    const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
 
     // 1) CONFERIDO: Localizado exatamente no ENDERECO original
     if (originalLocKey === targetLocKey) {
@@ -1683,7 +1682,7 @@ const App: React.FC = () => {
     }
 
     // 3) RE-ADOTADO: Já conferido anteriormente em um local e agora encontrado em outro local
-    if (asset._conferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
+    if (isConferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
       return TagInventario.RE_ADOTADO;
     }
 
