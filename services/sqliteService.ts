@@ -112,7 +112,13 @@ class SQLiteService {
           fileName: fileName
         };
       }
-      return { status: 'permission_denied', path: 'Acesso negado pelo navegador' };
+      
+      // Distingue entre acesso permanentemente negado e necessidade de novo prompt (comum em mobile após reload)
+      if (permission === 'prompt') {
+        return { status: 'prompt', path: 'Acesso aguardando confirmação (Prompt)' };
+      }
+      
+      return { status: 'permission_denied', path: 'Acesso negado permanentemente pelo navegador' };
     } catch {
       return { status: 'error', path: 'Erro ao verificar diretório' };
     }

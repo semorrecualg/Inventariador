@@ -215,8 +215,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL) {
       const checkFileStatus = async () => {
-        const status = await sqliteService.getFileStatus();
-        if (status.status === 'permission_denied') {
+        const result = await sqliteService.getFileStatus();
+        if (result.status === 'permission_denied' || result.status === 'prompt') {
           setShowReconnectOverlay(true);
         }
       };
@@ -228,12 +228,25 @@ const App: React.FC = () => {
     const success = await sqliteService.requestFilePermission();
     if (success) {
       setShowReconnectOverlay(false);
-      window.location.reload(); 
+      // Recarrega os dados do inventário para o estado do React sem recarregar a página
+      // para evitar perder o grant de permissão que o navegador acabou de dar.
+      try {
+        const loaded = await loadInventory(databaseMode);
+        if (loaded) {
+          setInventory(loaded);
+        }
+      } catch (err) {
+        console.error("Erro ao carregar dados após reconexão:", err);
+      }
     } else {
       try {
         await sqliteService.linkExistingFile();
         setShowReconnectOverlay(false);
-        window.location.reload();
+        // Mesmo procedimento para o fallback
+        const loaded = await loadInventory(databaseMode);
+        if (loaded) {
+          setInventory(loaded);
+        }
       } catch {
         console.error("Falha ao reconectar banco físico");
       }
