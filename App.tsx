@@ -4049,7 +4049,7 @@ const App: React.FC = () => {
                 showCancel: false, confirmText: 'OK' 
               })}
               campaigns={campaigns}
-              excludedAccounts={excludedAccounts}
+              excludedAccounts={inventory.excludedAccounts}
               isSyncing={isSyncing}
               syncProgress={syncProgress}
               onRestore={(state) => {

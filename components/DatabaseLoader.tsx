@@ -145,7 +145,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const handleExportDB = async () => {
     setIsLoadingTools(true);
     try {
-      const dbBlob = await sqliteService.exportDatabase();
+      const dbBlob = await sqliteService.exportDatabaseFile();
       if (!dbBlob) throw new Error("Falha ao gerar blob do banco.");
       
       const url = window.URL.createObjectURL(dbBlob);
@@ -168,7 +168,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const handleBackup = async () => {
     setIsLoadingTools(true);
     try {
-      await backupInventory();
+      await backupInventory(databaseMode);
       showModal("Sucesso", "Backup JSON gerado e salvo nos downloads.", "success");
     } catch (err) {
       showModal("Erro", "Falha ao gerar backup: " + (err instanceof Error ? err.message : String(err)), "error");
@@ -183,9 +183,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     
     setIsLoadingTools(true);
     try {
-      const state = await restoreInventory(file);
-      onRestore(state);
-      showModal("Sucesso", "Backup restaurado com sucesso.", "success");
+      const state = await restoreInventory(file, databaseMode);
+      if (state) {
+        onRestore(state);
+        showModal("Sucesso", "Backup restaurado com sucesso.", "success");
+      } else {
+        throw new Error("Falha ao descriptografar ou processar o arquivo de backup.");
+      }
     } catch (err) {
       showModal("Erro", "Falha ao restaurar backup: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {

@@ -518,6 +518,14 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return determineAssetTag(workingAsset, workingAsset._localMaster || workingAsset.ENDERECO || "", tenantid);
   }, [workingAsset, tenantid]);
 
+  const isBaixado = useMemo(() => {
+    const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
+    return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
+  }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
+
+  const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
+
   const meta = getTagMetadata(visualStatus);
   const StatusIcon = meta.icon;
   const headerBg = meta.color.bg.replace('/30', '');

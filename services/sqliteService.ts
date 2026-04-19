@@ -280,21 +280,12 @@ class SQLiteService {
     return this.mapLocalFolder();
   }
 
-  async exportDatabaseFile() {
+  async exportDatabaseFile(): Promise<Blob | null> {
     if (!this.db) await this.init();
     const data = this.db?.export();
-    if (!data) return;
+    if (!data) return null;
     
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-    
-    const blob = new Blob([data], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gbr_backup_expert_${new Date().getTime()}.db${suffix}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return new Blob([data], { type: 'application/x-sqlite3' });
   }
 
   /**
@@ -314,6 +305,7 @@ class SQLiteService {
 
       if (dirHandle) {
         const options = { mode: 'readwrite' as const };
+        // @ts-expect-error - queryPermission only exists in some browsers
         const permission = await dirHandle.queryPermission(options);
         
         if (permission === 'granted') {

@@ -1710,7 +1710,7 @@ const Inventory: React.FC<InventoryProps> = ({
             </button>
             <div className="bg-slate-100 p-8 text-center border-b border-slate-200">
                <div className="bg-white p-6 rounded-3xl shadow-xl inline-block mb-4 border border-slate-200">
-                 <QRCodeSVG value={qrModalAsset.ETIQUETA || qrModalAsset.id || ''} size={180} />
+                 <QRCodeSVG value={String(qrModalAsset.ETIQUETA || qrModalAsset.id || '')} size={180} />
                </div>
                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none mb-1">{qrModalAsset.ETIQUETA}</h3>
                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qrModalAsset.DESCRICAODOATIVO}</p>
