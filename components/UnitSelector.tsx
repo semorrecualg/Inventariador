@@ -34,13 +34,14 @@ interface UnitSelectorProps {
   onDownload?: (unit: string) => void;
   onConfigGPS?: (unit: string) => void;
   onCampaigns?: (unit: string) => void;
+  onLoadDatabase?: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   isAdmin?: boolean;
   databaseMode?: DatabaseMode;
 }
 
-const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, isSyncing, isAdmin, databaseMode }) => {
+const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, onLoadDatabase, isSyncing, isAdmin, databaseMode }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
@@ -107,6 +108,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
           <div className="flex items-center space-x-2">
+            {isAdmin && onLoadDatabase && (
+              <button 
+                onClick={onLoadDatabase}
+                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md bg-white text-indigo-600 border border-indigo-100 active:scale-95 hover:bg-indigo-50"
+                title="Carga Expert de Dados"
+              >
+                <Database size={20} />
+              </button>
+            )}
             {onSync && databaseMode !== DatabaseMode.INTERNAL && (
               <button 
                 onClick={onSync}
@@ -246,9 +256,38 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-accent">Sincronizando Unidades...</p>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 opacity-20">
-            <Building2 size={60} className="text-slate-300" />
-            <p className="font-bold uppercase tracking-[0.3em] text-[10px] mt-6 text-slate-400">Unidade não encontrada</p>
+          <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+            <div className="w-20 h-20 bg-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 mb-6">
+              <Building2 size={40} />
+            </div>
+            <p className="font-black uppercase tracking-[0.2em] text-[10px] text-slate-400 mb-8">Nenhuma Unidade Operacional Disponível</p>
+            
+            {isAdmin && onLoadDatabase && (
+              <button
+                onClick={onLoadDatabase}
+                className="w-full max-w-xs py-4 bg-accent text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-accent/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+              >
+                <Database size={18} />
+                Iniciar Carga de Dados (Expert)
+              </button>
+            )}
+
+            {!isAdmin && databaseMode !== DatabaseMode.INTERNAL && onSync && (
+              <button
+                onClick={onSync}
+                disabled={isSyncing}
+                className="w-full max-w-xs py-4 bg-white border-2 border-accent/20 text-accent rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] active:scale-95 transition-all flex items-center justify-center gap-3"
+              >
+                <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                Tentar Sincronizar da Nuvem
+              </button>
+            )}
+            
+            {!isAdmin && (databaseMode === DatabaseMode.INTERNAL || !onSync) && (
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest max-w-[200px] leading-relaxed">
+                Solicite ao administrador a carga da base de dados para iniciar o inventário.
+              </p>
+            )}
           </div>
         )}
       </div>

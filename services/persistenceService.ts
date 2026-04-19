@@ -192,6 +192,13 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
         // SEGURANÇA: Não usamos clear() para evitar "Update Gaps" se o app fechar durante o processo
         // Usamos bulkPut (Upsert) que é atômico via executeBatch no SQL.js
         await localDb.assets.bulkPut(assets);
+        
+        // Atualiza o status interno do banco físico para ACTIVE se houver ativos
+        if (assets.length > 0) {
+          const { sqliteService } = await import('./sqliteService');
+          await sqliteService.setSystemStatus('ACTIVE');
+        }
+        
         console.log('>>> [Persistence] Espelhamento Dexie (Delta/Full) concluído.');
       }
     } catch (dexieErr) {

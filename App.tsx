@@ -474,6 +474,7 @@ const App: React.FC = () => {
   console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [sqliteStatus, setSqliteStatus] = useState<'EMPTY' | 'ACTIVE'>('EMPTY');
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
     try {
       const saved = localStorage.getItem('inventory_campaigns_cache');
@@ -1070,6 +1071,13 @@ const App: React.FC = () => {
 
         if (saved && (saved as InventoryState & { _integrity_failed?: boolean })._integrity_failed) {
           setIntegrityFailed(true);
+        }
+
+        // Recupera o status do SQLite para Soberania de Dados
+        if (databaseMode === DatabaseMode.INTERNAL) {
+          const status = sqliteService.getDbStatus();
+          setSqliteStatus(status);
+          console.log(`>>> [Boot] Status do Banco SQLite: ${status}`);
         }
 
         if (saved && saved.assets && saved.assets.length > 0) {
@@ -3137,6 +3145,11 @@ const App: React.FC = () => {
         const normalizedSel = selectedUnit.toUpperCase().trim();
         const remainingAssets = inventory.assets.filter(a => (a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
         
+        if (remainingAssets.length === 0) {
+          setSqliteStatus('EMPTY');
+          await sqliteService.setSystemStatus('EMPTY');
+        }
+
         setInventory(prev => ({
           ...prev,
           assets: remainingAssets,
@@ -3145,6 +3158,8 @@ const App: React.FC = () => {
         }));
       } else {
         // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
+        setSqliteStatus('EMPTY');
+        await sqliteService.setSystemStatus('EMPTY');
         setInventory(prev => ({ 
           ...prev,
           assets: [], 
@@ -3492,7 +3507,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const rawTenants = user?.tenants || (user?.tenantid ? [user.tenantid] : []);
     const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
-    const isEmpty = inventory.assets.length === 0;
+    const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
+    const isTrulyEmpty = isEmpty && sqliteStatus !== 'ACTIVE';
     
     if (screen === AppScreen.UNIT_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
       // Evita loops infinitos se o sync falhar ou retornar vazio
@@ -3518,7 +3534,7 @@ const App: React.FC = () => {
       syncFromCloud(tenants, databaseMode).then(() => {
         console.log('>>> [AutoSync] Sincronização automática concluída.');
       });
-    } else if (screen === AppScreen.UNIT_SELECTION && isEmpty && isAdmin && !isSyncing && isDataLoaded) {
+    } else if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
       // Mas apenas se for realmente um administrador do sistema e os dados já foram carregados
       const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
@@ -3527,7 +3543,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.LOAD_DATABASE);
       }
     }
-  }, [screen, inventory.assets.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen]);
+  }, [screen, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen, isDataLoaded, sqliteStatus]);
 
   // Auto-select unit if only one is available for the auditor
   useEffect(() => {
@@ -3854,6 +3870,11 @@ const App: React.FC = () => {
                     console.log('>>> [DatabaseLoader] Salvando inventário localmente (Dexie/LocalStorage)...');
                     setInventory(newInventory); 
                     await saveInventory(newInventory);
+                    
+                    if (databaseMode === DatabaseMode.INTERNAL && a.length > 0) {
+                      setSqliteStatus('ACTIVE');
+                    }
+                    
                     console.log('>>> [DatabaseLoader] Inventário local salvo com sucesso.');
                     
                     if (shouldSync) {
@@ -4074,6 +4095,7 @@ const App: React.FC = () => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL}
+              onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
               databaseMode={databaseMode}
               units={fullCompaniesWithStatus
                 .filter(c => {
@@ -4208,6 +4230,7 @@ const App: React.FC = () => {
             <ModuleSelector 
               username={user?.username || ''}
               userRole={user?.role}
+              onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({
@@ -4228,7 +4251,7 @@ const App: React.FC = () => {
                 localStorage.setItem('app_current_module', module);
                 if (module === AppModule.INVENTORY) {
                   const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
-                  const isEmpty = inventory.assets.length === 0;
+                  const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
                   if (isEmpty && isSystemAdmin) {
                     pushScreen(AppScreen.LOAD_DATABASE);
                   } else {

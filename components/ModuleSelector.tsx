@@ -7,18 +7,21 @@ import {
   ArrowRight,
   ShieldCheck,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  Database
 } from 'lucide-react';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
   onLogout: () => void;
+  onOpenDatabaseManager?: () => void;
   username: string;
   userRole?: UserRole;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, username, userRole }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole }) => {
   const isAuditor = userRole === UserRole.AUDITOR;
+  const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
   return (
     <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn overflow-y-auto">
       {/* Header */}
@@ -41,9 +44,20 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, use
       </div>
 
       <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full py-4">
-        <div className="mb-10">
-          <h2 className="text-3xl font-bold text-ink mb-2 tracking-tight">Bem-vindo, {username}</h2>
-          <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Selecione o módulo de trabalho</p>
+        <div className="mb-10 flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold text-ink mb-2 tracking-tight">Bem-vindo, {username}</h2>
+            <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Selecione o módulo de trabalho</p>
+          </div>
+          {isAdmin && onOpenDatabaseManager && (
+            <button 
+              onClick={onOpenDatabaseManager}
+              className="flex items-center space-x-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition-all border border-slate-200 active:scale-95 group"
+            >
+              <Database size={16} className="group-hover:text-accent" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Gestor de Base</span>
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

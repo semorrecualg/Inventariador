@@ -117,6 +117,29 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       window.removeEventListener('gbr_db_persisted', handlePersisted);
     };
   }, []);
+
+  const handleLinkSpecificFile = async () => {
+    try {
+      if (window.self !== window.top) {
+        showModal(
+          "Restrição de Navegador",
+          "O navegador impede a seleção de arquivos dentro de iframes. Abra o app em uma nova aba para blindar seu banco de dados.",
+          "warning"
+        );
+        return;
+      }
+      
+      const success = await sqliteService.mapSpecificFile();
+      if (success) {
+        const status = await sqliteService.getFileStatus();
+        setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+        showModal("Banco Blindado", "O aplicativo agora está trabalhando exclusivamente com o arquivo físico selecionado.", "success");
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      showModal("Erro de Vínculo", "Não foi possível vincular o arquivo: " + (err instanceof Error ? err.message : String(err)), "error");
+    }
+  };
   
   React.useEffect(() => {
     const hasSeenHelp = localStorage.getItem('gbr_seen_load_help');
@@ -754,10 +777,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
                <div className="flex items-center space-x-3 mb-4">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white backdrop-blur-sm border border-white/30 ${fileStatus?.status === 'linked' ? 'bg-white/20' : 'bg-slate-800'}`}>
-                    <Database size={20} />
+                    {fileStatus?.folderName === 'Arquivo Individual' ? <ShieldCheck size={20} /> : <Database size={20} />}
                   </div>
                   <div>
-                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">Status da Base Local</h4>
+                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">
+                      {fileStatus?.folderName === 'Arquivo Individual' ? 'Base Blindada Individual' : 'Status da Base Local'}
+                    </h4>
                     <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania de Dados Permanente</p>
                   </div>
                </div>
@@ -811,22 +836,38 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                  </div>
                )}
 
-               <div className="flex space-x-2">
-                 <button 
-                  onClick={handleStartImmobilization}
-                  className={`flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-black/10 flex items-center justify-center space-x-2 active:scale-95 ${fileStatus?.status === 'linked' ? 'bg-white text-blue-600 hover:bg-blue-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-                 >
-                   <FolderOpen size={16} />
-                   <span>{fileStatus?.status === 'linked' ? 'ALTERAR PASTA' : (fileStatus?.status === 'none' ? 'VINCULAR PASTA AGORA' : 'REABRIR PASTA')}</span>
-                 </button>
+               <div className="flex flex-col space-y-2">
+                 <div className="flex space-x-2">
+                   <button 
+                    onClick={handleLinkSpecificFile}
+                    className={`flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-black/10 flex items-center justify-center space-x-2 active:scale-95 ${fileStatus?.status === 'linked' && fileStatus?.folderName === 'Arquivo Individual' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`}
+                   >
+                     <ShieldCheck size={16} />
+                     <span>{fileStatus?.status === 'linked' && fileStatus?.folderName === 'Arquivo Individual' ? 'ALTERAR ARQUIVO .DB' : 'VINCULAR ARQUIVO .DB'}</span>
+                   </button>
+
+                   <button 
+                    onClick={handleStartImmobilization}
+                    className={`flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-black/10 flex items-center justify-center space-x-2 active:scale-95 ${fileStatus?.status === 'linked' && fileStatus?.folderName !== 'Arquivo Individual' ? 'bg-white text-blue-600 hover:bg-blue-50' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`}
+                   >
+                     <FolderOpen size={16} />
+                     <span>{fileStatus?.status === 'linked' && fileStatus?.folderName !== 'Arquivo Individual' ? 'ALTERAR PASTA' : 'VINCULAR PASTA'}</span>
+                   </button>
+                   
+                   {fileStatus?.status === 'prompt' && (
+                      <button 
+                        onClick={() => sqliteService.requestFilePermission()}
+                        className="w-14 py-3 bg-amber-500 text-white rounded-xl flex items-center justify-center hover:bg-amber-600 transition-all shadow-lg active:scale-95"
+                      >
+                        <RefreshCw size={20} />
+                      </button>
+                   )}
+                 </div>
                  
-                 {fileStatus?.status === 'prompt' && (
-                    <button 
-                      onClick={() => sqliteService.requestFilePermission()}
-                      className="w-14 py-3 bg-amber-500 text-white rounded-xl flex items-center justify-center hover:bg-amber-600 transition-all shadow-lg active:scale-95"
-                    >
-                      <RefreshCw size={20} />
-                    </button>
+                 {fileStatus?.status === 'none' && (
+                   <p className="text-[7px] text-white/40 font-bold uppercase tracking-widest text-center">
+                     Recomendado: Vincule um arquivo .db específico para trabalhar em modo Expert &quot;Blindado&quot;
+                   </p>
                  )}
                </div>
             </div>

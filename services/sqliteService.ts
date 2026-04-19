@@ -74,51 +74,70 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details TEXT,
     _tenantid TEXT
 );
+CREATE TABLE IF NOT EXISTS system_status (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 `;
 
 class SQLiteService {
   private db: Database | null = null;
   private isInitialized = false;
+  private currentDbStatus: 'EMPTY' | 'ACTIVE' = 'EMPTY';
 
   private get keys() {
     const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
     return {
       dbKey: `gbr_expert_db_binary_${mode}`,
-      dirHandleKey: `gbr_db_dir_handle_${mode}`
+      dirHandleKey: `gbr_db_dir_handle_${mode}`,
+      fileHandleKey: `gbr_db_file_handle_${mode}`
     };
   }
 
   /**
-   * Verifica se o acesso ao diretório físico está ativo e funcional
+   * Verifica se o acesso ao arquivo físico está ativo e funcional.
+   * Agora prioriza o FileHandle direto se disponível.
    */
   async getFileStatus() {
     try {
+      const { dirHandleKey, fileHandleKey } = this.keys;
       const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-      const dirHandleKey = `gbr_db_dir_handle_${mode}`;
       const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-      const fileName = `gbr_inventario_expert${suffix}.db`;
+      const defaultFileName = `gbr_inventario_expert${suffix}.db`;
       
-      const handle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      if (!handle) return { status: 'none', path: 'Nenhum diretório vinculado', fileName };
-      
+      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
+      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
+
+      if (!fileHandle && !dirHandle) {
+        return { status: 'none', path: 'Nenhum banco físico vinculado', fileName: defaultFileName };
+      }
+
+      const handle = fileHandle || dirHandle;
       const options: unknown = { mode: 'readwrite' };
       // @ts-expect-error - queryPermission
       const permission = await handle.queryPermission(options);
       
       if (permission === 'granted') {
-        const fileHandle = await handle.getFileHandle(fileName, { create: true });
-        const file = await fileHandle.getFile();
-        return { 
-          status: 'linked', 
-          path: `${handle.name}/${fileName}`,
-          folderName: handle.name,
-          fileName: fileName,
-          size: file.size,
-          lastModified: new Date(file.lastModified).toISOString()
-        };
+        let activeFileHandle = fileHandle;
+
+        if (!activeFileHandle && dirHandle) {
+          activeFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
+        }
+
+        if (activeFileHandle) {
+          const file = await activeFileHandle.getFile();
+          return { 
+            status: 'linked', 
+            path: activeFileHandle.name,
+            folderName: dirHandle?.name || 'Arquivo Individual',
+            fileName: activeFileHandle.name,
+            size: file.size,
+            lastModified: new Date(file.lastModified).toISOString()
+          };
+        }
       }
       
-      return { status: permission, path: handle.name, folderName: handle.name, fileName };
+      return { status: permission, path: handle?.name || 'Unknown', fileName: fileHandle?.name || defaultFileName };
     } catch (err) {
       console.error(">>> [DBA] Erro ao verificar status do arquivo:", err);
       return { status: 'error', path: 'Falha de acesso', error: String(err) };
@@ -126,16 +145,19 @@ class SQLiteService {
   }
 
   /**
-   * Solicita permissão de leitura/escrita para o diretório já vinculado
+   * Solicita permissão de leitura/escrita para o arquivo/diretório já vinculado
    */
   async requestFilePermission() {
     try {
-      const { dirHandleKey } = this.keys;
-      const handle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
+      const { dirHandleKey, fileHandleKey } = this.keys;
+      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
+      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
+      
+      const handle = fileHandle || dirHandle;
       if (!handle) return false;
 
       const options: unknown = { mode: 'readwrite' };
-      // @ts-expect-error - requestPermission exists in major browsers
+      // @ts-expect-error - requestPermission
       const status = await handle.requestPermission(options);
       
       if (status === 'granted') {
@@ -145,13 +167,13 @@ class SQLiteService {
       }
       return false;
     } catch (_err) {
-      console.error(">>> [DBA] Erro ao solicitar permissão de diretório:", _err);
+      console.error(">>> [DBA] Erro ao solicitar permissão:", _err);
       return false;
     }
   }
 
   async init() {
-    const { dbKey, dirHandleKey } = this.keys;
+    const { dbKey } = this.keys;
     
     if (this.isInitialized) return;
 
@@ -184,50 +206,61 @@ class SQLiteService {
       throw new Error(errMsg);
     });
 
-    // 2. Tenta Recuperar do Diretório Físico (PRIORIDADE MÁXIMA)
+    // 2. Tenta Recuperar do Arquivo/Diretório Físico (PRIORIDADE MÁXIMA)
     try {
+      const { dirHandleKey, fileHandleKey } = this.keys;
+      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
       const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      if (dirHandle) {
+      
+      const handle = fileHandle || dirHandle;
+
+      if (handle) {
         const options: unknown = { mode: 'readwrite' };
         // @ts-expect-error - queryPermission exists
-        const permission = await dirHandle.queryPermission(options);
+        const permission = await handle.queryPermission(options);
         
         if (permission === 'granted') {
-          const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-          const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-          const fileName = `gbr_inventario_expert${suffix}.db`;
+          let activeFileHandle: FileSystemFileHandle | null = fileHandle;
           
-          const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
-          const file = await fileHandle.getFile();
-          const buffer = await file.arrayBuffer();
-          
-          if (buffer.byteLength > 0) {
-            console.log(`>>> [DBA] Carregando do Diretório Físico (${dirHandle.name}/${fileName}) - Tamanho: ${buffer.byteLength} bytes`);
-            this.db = new SQL.Database(new Uint8Array(buffer));
+          if (!activeFileHandle && dirHandle) {
+             const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+             const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
+             const defaultFileName = `gbr_inventario_expert${suffix}.db`;
+             activeFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
+          }
+
+          if (activeFileHandle) {
+            const file = await activeFileHandle.getFile();
+            const buffer = await file.arrayBuffer();
             
-            // Verificação de Integridade Básica
-            try {
-              this.db.run("PRAGMA integrity_check");
-              console.log(">>> [DBA] Sucesso: Arquivo físico carregado e validado.");
-            } catch (pErr) {
-              console.warn(">>> [DBA] Arquivo físico corrompido, tentando recuperar...", pErr);
+            if (buffer.byteLength > 0) {
+              console.log(`>>> [DBA] Carregando do Banco Físico (${activeFileHandle.name}) - Tamanho: ${buffer.byteLength} bytes`);
+              this.db = new SQL.Database(new Uint8Array(buffer));
+              
+              // Verificação de Integridade Básica
+              try {
+                this.db.run("PRAGMA integrity_check");
+                console.log(">>> [DBA] Sucesso: Banco físico validado.");
+              } catch (pErr) {
+                console.warn(">>> [DBA] Banco físico corrompido, tentando recuperar...", pErr);
+                this.db.run(FULL_SCHEMA);
+              }
+              
+              this.isInitialized = true;
               this.db.run(FULL_SCHEMA);
+              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+              return;
             }
-            
-            this.isInitialized = true;
-            return;
-          } else {
-            console.log(">>> [DBA] Arquivo físico encontrado mas está vazio. Verificando cache...");
           }
         } else {
-          console.warn(`>>> [ALERTA] Permissão de acesso físico pendente: ${permission}.`);
+          console.warn(`>>> [ALERTA] Permissão de acesso físico bloqueada: ${permission}.`);
           window.dispatchEvent(new CustomEvent('gbr_db_write_blocked', { 
-            detail: { status: permission, path: dirHandle.name } 
+            detail: { status: permission, path: handle.name } 
           }));
         }
       }
     } catch (err) {
-      console.warn(">>> [DBA] Falha técnica ao ler do diretório físico:", err);
+      console.warn(">>> [DBA] Falha técnica ao ler do banco físico:", err);
     }
 
     // 3. Fallback: Recupera do IndexedDB (Puro Binário)
@@ -237,6 +270,7 @@ class SQLiteService {
         this.db = new SQL.Database(binary);
         // Executa Full Schema (CPC 27 Compliance)
         this.db.run(FULL_SCHEMA);
+        this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
         this.isInitialized = true;
         return;
       }
@@ -248,11 +282,13 @@ class SQLiteService {
     this.db = new SQL.Database();
     this.db.run(FULL_SCHEMA);
     this.isInitialized = true;
+    this.currentDbStatus = 'EMPTY';
+    await this.setSystemStatus('EMPTY');
     await this.persist();
   }
 
   async mapLocalFolder() {
-    const { dirHandleKey } = this.keys;
+    const { dirHandleKey, fileHandleKey } = this.keys;
     try {
       const isIframe = window.self !== window.top;
       if (isIframe) {
@@ -264,14 +300,45 @@ class SQLiteService {
         mode: 'readwrite'
       });
       
+      await localforage.removeItem(fileHandleKey); // Limpa o handle de arquivo se mudar para pasta
       await localforage.setItem(dirHandleKey, handle);
-      await this.persist();
+      this.isInitialized = false;
+      await this.init();
       return true;
     } catch (err) {
       if (err instanceof Error && (err.name === 'SecurityError' || err.message.includes('sub frames'))) {
         throw new Error("IFRAME_RESTRICTION");
       }
       console.error("Mapeamento de diretório cancelado:", err);
+      throw err;
+    }
+  }
+
+  /**
+   * Nova funcionalidade: Mapeia um ARQUIVO específico .db definido pelo usuário.
+   * Isso permite "blindar" o app para trabalhar exclusivamente com um banco legado ou oficial.
+   */
+  async mapSpecificFile() {
+    const { dirHandleKey, fileHandleKey } = this.keys;
+    try {
+      // @ts-expect-error - showOpenFilePicker
+      const [handle] = await window.showOpenFilePicker({
+        types: [{
+          description: 'SQLite Database',
+          accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] }
+        }],
+        multiple: false
+      });
+      
+      if (!handle) return false;
+
+      await localforage.removeItem(dirHandleKey); // Limpa o handle de pasta se mudar para arquivo específico
+      await localforage.setItem(fileHandleKey, handle);
+      this.isInitialized = false;
+      await this.init();
+      return true;
+    } catch (err) {
+      console.error("Mapeamento de arquivo cancelado:", err);
       throw err;
     }
   }
@@ -294,35 +361,44 @@ class SQLiteService {
    */
   private async persist() {
     if (!this.db) return;
-    const { dbKey, dirHandleKey } = this.keys;
+    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     
     try {
       const data = this.db.export();
       const fileSize = data.length;
       
+      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
       const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
+      
       let physicalSaved = false;
+      const activeHandle = fileHandle || dirHandle;
 
-      if (dirHandle) {
+      if (activeHandle) {
         const options = { mode: 'readwrite' as const };
-        // @ts-expect-error - queryPermission only exists in some browsers
-        const permission = await dirHandle.queryPermission(options);
+        // @ts-expect-error - queryPermission
+        const permission = await activeHandle.queryPermission(options);
         
         if (permission === 'granted') {
-          const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-          const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-          const fileName = `gbr_inventario_expert${suffix}.db`;
+          let writableHandle: FileSystemFileHandle | null = fileHandle;
+          
+          if (!writableHandle && dirHandle) {
+            const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+            const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
+            const fileName = `gbr_inventario_expert${suffix}.db`;
+            writableHandle = await dirHandle.getFileHandle(fileName, { create: true });
+          }
 
-          const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(data);
-          await writable.close();
-          physicalSaved = true;
-          console.log(`>>> [Sincronização OK] Arquivo: ${dirHandle.name}/${fileName} | Tamanho: ${fileSize} bytes`);
+          if (writableHandle) {
+            const writable = await writableHandle.createWritable();
+            await writable.write(data);
+            await writable.close();
+            physicalSaved = true;
+            console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes`);
+          }
         } else {
-          console.warn(`>>> [ALERTA] Gravação física bloqueada! Status: ${permission}. Os dados estão apenas em cache.`);
+          console.warn(`>>> [ALERTA] Gravação física bloqueada! Status: ${permission}.`);
           window.dispatchEvent(new CustomEvent('gbr_db_write_blocked', { 
-            detail: { status: permission, path: dirHandle.name } 
+            detail: { status: permission, path: activeHandle.name } 
           }));
         }
       }
@@ -392,12 +468,40 @@ class SQLiteService {
     return results;
   }
 
+  /**
+   * Gerencia o status de uso do banco de dados para permitir auto-boot.
+   */
+  async getSystemStatus(): Promise<string> {
+    try {
+      const results = await this.query("SELECT value FROM system_status WHERE key = 'db_status'");
+      return results.length > 0 ? (results[0].value as string) : 'EMPTY';
+    } catch {
+      return 'EMPTY';
+    }
+  }
+
+  async setSystemStatus(status: 'EMPTY' | 'ACTIVE') {
+    try {
+      await this.execute("INSERT OR REPLACE INTO system_status (key, value) VALUES ('db_status', ?)", [status]);
+      this.currentDbStatus = status;
+      console.log(`>>> [DBA] Status do banco atualizado para: ${status}`);
+    } catch (err) {
+      console.error(">>> [DBA] Erro ao definir status do sistema:", err);
+    }
+  }
+
+  getDbStatus(): 'EMPTY' | 'ACTIVE' {
+    return this.currentDbStatus;
+  }
+
   async hardResetDatabase() {
-    const { dbKey, dirHandleKey } = this.keys;
+    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     this.db = null;
     this.isInitialized = false;
+    this.currentDbStatus = 'EMPTY';
     await localforage.removeItem(dbKey);
     await localforage.removeItem(dirHandleKey);
+    await localforage.removeItem(fileHandleKey);
     await this.init();
   }
 }
