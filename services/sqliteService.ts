@@ -127,10 +127,11 @@ class SQLiteService {
 
         if (activeFileHandle) {
           const file = await activeFileHandle.getFile();
+          const folderName = dirHandle?.name || 'Arquivo Individual';
           return { 
             status: 'linked', 
-            path: activeFileHandle.name,
-            folderName: dirHandle?.name || 'Arquivo Individual',
+            path: folderName,
+            folderName: folderName,
             fileName: activeFileHandle.name,
             size: file.size,
             lastModified: new Date(file.lastModified).toISOString()
@@ -138,7 +139,13 @@ class SQLiteService {
         }
       }
       
-      return { status: permission, path: handle?.name || 'Unknown', fileName: fileHandle?.name || defaultFileName };
+      const folderName = dirHandle?.name || 'Arquivo Individual';
+      return { 
+        status: permission, 
+        path: folderName, 
+        folderName: folderName,
+        fileName: fileHandle?.name || defaultFileName 
+      };
     } catch (err) {
       console.error(">>> [DBA] Erro ao verificar status do arquivo:", err);
       return { status: 'error', path: 'Falha de acesso', error: String(err) };

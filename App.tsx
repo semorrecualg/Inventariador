@@ -4124,7 +4124,10 @@ const App: React.FC = () => {
               }}
               onClearDatabase={handleClearDatabase}
               onDataLoaded={async (assets, companies) => {
-                const extractedCompanies = [...new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))].filter(Boolean);
+                const extractedCompanies = [...new Set(assets.map(a => {
+                  const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
+                  return val;
+                }))].filter(Boolean);
                 const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
                 
                 setInventory(prev => ({ 
@@ -4525,8 +4528,8 @@ const App: React.FC = () => {
           </h2>
           
           <p className="text-slate-400 text-sm max-w-sm mb-10 leading-relaxed font-medium">
-            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">{fileStatus?.fileName || 'gbr_inventario_expert.db'}</span>. 
-            No diretório: <span className="text-slate-300 italic">{fileStatus?.path || 'não identificado'}</span>.
+            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">{fileStatus?.fileName || 'gbr_inventario_expert.Mobile.db'}</span>. 
+            No diretório: <span className="text-slate-300 italic">{fileStatus?.folderName || fileStatus?.path || 'não identificado'}</span>.
             Clique abaixo para reconfirmar o acesso e continuar seu trabalho sem perdas.
           </p>
           

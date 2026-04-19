@@ -285,6 +285,20 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       }
     }
 
+    // SEGURANÇA: Garante que a lista de empresas está populada se houver ativos mas a lista no cache estiver vazia
+    if (finalAssets.length > 0) {
+      const currentConfig = config as Record<string, unknown>;
+      const currentCompanies = currentConfig.companies as string[] || [];
+      if (currentCompanies.length === 0) {
+        console.log('>>> [Persistence] Auto-populando lista de empresas a partir dos ativos SQL...');
+        const extracted = [...new Set(finalAssets.map(a => {
+          const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
+          return val;
+        }))].filter(Boolean);
+        currentConfig.companies = extracted;
+      }
+    }
+
     return {
       ...(config as Record<string, unknown> || {}),
       assets: finalAssets,
