@@ -783,7 +783,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     <h4 className="text-[13px] font-black text-white uppercase tracking-tight">
                       {fileStatus?.folderName === 'Arquivo Individual' ? 'Base Blindada Individual' : 'Status da Base Local'}
                     </h4>
-                    <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania de Dados Permanente</p>
+                    <div className="flex items-center space-x-2">
+                      <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania de Dados Permanente</p>
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black border ${sqliteService.getDbStatus() === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-white/10 text-white/50 border-white/20'}`}>
+                        {sqliteService.getDbStatus() === 'ACTIVE' ? 'ATIVO' : 'EM DESUSO'}
+                      </span>
+                    </div>
                   </div>
                </div>
 
@@ -856,7 +861,18 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                    
                    {fileStatus?.status === 'prompt' && (
                       <button 
-                        onClick={() => sqliteService.requestFilePermission()}
+                        onClick={async () => {
+                          const success = await sqliteService.requestFilePermission();
+                          if (success) {
+                            const status = await sqliteService.getFileStatus();
+                            setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+                            // Forçar carregamento imediato dos ativos do banco reabilitado
+                            const items = await sqliteService.query("SELECT * FROM assets") as Asset[];
+                            if (items && items.length > 0) {
+                              onDataLoaded(items, [...new Set(items.map(a => a.UNIDADE_OPERACIONAL || ''))]);
+                            }
+                          }
+                        }}
                         className="w-14 py-3 bg-amber-500 text-white rounded-xl flex items-center justify-center hover:bg-amber-600 transition-all shadow-lg active:scale-95"
                       >
                         <RefreshCw size={20} />

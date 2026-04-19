@@ -210,18 +210,7 @@ const App: React.FC = () => {
 
   // Monitor de Soberania de Arquivos (Modo Físico)
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
-
-  useEffect(() => {
-    if (databaseMode === DatabaseMode.INTERNAL) {
-      const checkFileStatus = async () => {
-        const result = await sqliteService.getFileStatus();
-        if (result.status === 'permission_denied' || result.status === 'prompt') {
-          setShowReconnectOverlay(true);
-        }
-      };
-      checkFileStatus();
-    }
-  }, [databaseMode]);
+  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string} | null>(null);
 
   const handleReconnectFile = async () => {
     const success = await sqliteService.requestFilePermission();
@@ -233,6 +222,10 @@ const App: React.FC = () => {
         const loaded = await loadInventory(databaseMode);
         if (loaded) {
           setInventory(loaded);
+          if (loaded.assets.length > 0) {
+            setSqliteStatus('ACTIVE');
+            await sqliteService.setSystemStatus('ACTIVE');
+          }
         }
       } catch (err) {
         console.error("Erro ao carregar dados após reconexão:", err);
@@ -510,6 +503,37 @@ const App: React.FC = () => {
   useEffect(() => {
     inventoryRef.current = inventory;
   }, [inventory]);
+
+  // Monitor de Soberania de Arquivos (Modo Físico)
+  useEffect(() => {
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      const checkFileStatus = async () => {
+        const result = await sqliteService.getFileStatus();
+        setFileStatus(result);
+        
+        if (result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired') {
+          setShowReconnectOverlay(true);
+        } else if (result.status === 'linked') {
+          setShowReconnectOverlay(false);
+          // Se recuperou permissão mas o estado do React está vazio, tenta recarregar
+          if (inventoryRef.current.assets.length === 0) {
+            const status = sqliteService.getDbStatus();
+            if (status === 'ACTIVE') {
+              const loaded = await loadInventory(databaseMode);
+              if (loaded && loaded.assets.length > 0) {
+                setInventory(loaded);
+                setSqliteStatus('ACTIVE');
+              }
+            }
+          }
+        }
+      };
+      
+      checkFileStatus();
+      const interval = setInterval(checkFileStatus, 10000); // Checa a cada 10s
+      return () => clearInterval(interval);
+    }
+  }, [databaseMode, inventory.assets.length]);
 
   useEffect(() => {
     if (user?.tenantid && databaseMode.startsWith('SUPABASE')) {
@@ -3663,12 +3687,12 @@ const App: React.FC = () => {
               {recoverySource === 'PHYSICAL' ? <FileText size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
               <div className="flex flex-col">
                 <span className="text-[10px] font-black uppercase tracking-widest text-center">
-                  {recoverySource === 'PHYSICAL' ? 'Banco de Dados SQL Vinculado' : 
+                  {recoverySource === 'PHYSICAL' ? 'Banco de Dados Blindado' : 
                    recoverySource === 'CLOUD' ? 'Sincronização com Nuvem' :
                    'Base de Dados Recuperada'}
                 </span>
                 <span className="text-[8px] opacity-80 font-medium text-center">
-                  {recoverySource === 'PHYSICAL' ? 'Carregado do arquivo físico com sucesso' : 
+                  {recoverySource === 'PHYSICAL' ? 'Conectado diretamente ao arquivo .db do usuário' : 
                    recoverySource === 'CLOUD' ? 'Dados baixados e sincronizados com sucesso' :
                    recoverySource === 'LEGACY' ? 'Restaurado do cache legado local' : 'Dados carregados do cache seguro'}
                 </span>
@@ -4099,8 +4123,21 @@ const App: React.FC = () => {
                 popScreen();
               }}
               onClearDatabase={handleClearDatabase}
-              onDataLoaded={async (assets) => {
-                setInventory(prev => ({ ...prev, assets }));
+              onDataLoaded={async (assets, companies) => {
+                const extractedCompanies = [...new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))].filter(Boolean);
+                const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
+                
+                setInventory(prev => ({ 
+                  ...prev, 
+                  assets, 
+                  companies: finalCompanies 
+                }));
+                
+                if (databaseMode === DatabaseMode.INTERNAL && assets.length > 0) {
+                  setSqliteStatus('ACTIVE');
+                  await sqliteService.setSystemStatus('ACTIVE');
+                }
+                
                 popScreen();
               }} 
             />
@@ -4488,7 +4525,8 @@ const App: React.FC = () => {
           </h2>
           
           <p className="text-slate-400 text-sm max-w-sm mb-10 leading-relaxed font-medium">
-            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">gbr_inventario_expert.db</span>. 
+            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">{fileStatus?.fileName || 'gbr_inventario_expert.db'}</span>. 
+            No diretório: <span className="text-slate-300 italic">{fileStatus?.path || 'não identificado'}</span>.
             Clique abaixo para reconfirmar o acesso e continuar seu trabalho sem perdas.
           </p>
           
