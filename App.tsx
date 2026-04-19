@@ -55,7 +55,7 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive } from 'lucide-react';
+import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -500,6 +500,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
   const [integrityFailed, setIntegrityFailed] = useState(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -812,6 +813,7 @@ const App: React.FC = () => {
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
         if (cloudData.assets && cloudData.assets.length > 0) {
+          setRecoverySource('CLOUD');
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
         }
@@ -1076,8 +1078,10 @@ const App: React.FC = () => {
         // Recupera o status do SQLite para Soberania de Dados
         if (databaseMode === DatabaseMode.INTERNAL) {
           const status = sqliteService.getDbStatus();
+          const source = sqliteService.getStorageSource();
           setSqliteStatus(status);
-          console.log(`>>> [Boot] Status do Banco SQLite: ${status}`);
+          setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
+          console.log(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
         }
 
         if (saved && saved.assets && saved.assets.length > 0) {
@@ -1137,12 +1141,17 @@ const App: React.FC = () => {
             inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
             immersiveMode: saved.immersiveMode ?? prev.immersiveMode
           }));
+          
+          // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
+          if (!recoverySource) setRecoverySource('CACHE');
+          
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
         } else {
           // Fallback to localStorage for migration
           const legacy = localStorage.getItem('inventory_data');
           if (legacy) {
+            setRecoverySource('LEGACY');
             const parsed = JSON.parse(legacy);
             if (parsed && parsed.assets && parsed.assets.length > 0) {
               // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
@@ -1233,6 +1242,7 @@ const App: React.FC = () => {
                 setInventory(newState);
                 await saveInventory(newState);
                 setLastSyncTime(new Date().toISOString());
+                setRecoverySource('CLOUD');
                 setShowRecoveryToast(true);
                 setTimeout(() => setShowRecoveryToast(false), 5000);
               } 
@@ -3649,9 +3659,20 @@ const App: React.FC = () => {
       )}
 
       {showRecoveryToast && (
-            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs">
-              <ShieldCheck size={20} className="shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-center">Base de Dados Recuperada com Sucesso</span>
+            <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] ${recoverySource === 'PHYSICAL' ? 'bg-blue-600' : 'bg-emerald-600'} text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs`}>
+              {recoverySource === 'PHYSICAL' ? <FileText size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest text-center">
+                  {recoverySource === 'PHYSICAL' ? 'Banco de Dados SQL Vinculado' : 
+                   recoverySource === 'CLOUD' ? 'Sincronização com Nuvem' :
+                   'Base de Dados Recuperada'}
+                </span>
+                <span className="text-[8px] opacity-80 font-medium text-center">
+                  {recoverySource === 'PHYSICAL' ? 'Carregado do arquivo físico com sucesso' : 
+                   recoverySource === 'CLOUD' ? 'Dados baixados e sincronizados com sucesso' :
+                   recoverySource === 'LEGACY' ? 'Restaurado do cache legado local' : 'Dados carregados do cache seguro'}
+                </span>
+              </div>
             </div>
           )}
           {screen === AppScreen.STRESS_TEST && (

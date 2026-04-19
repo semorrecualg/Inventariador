@@ -84,6 +84,7 @@ class SQLiteService {
   private db: Database | null = null;
   private isInitialized = false;
   private currentDbStatus: 'EMPTY' | 'ACTIVE' = 'EMPTY';
+  private storageSource: 'PHYSICAL' | 'CACHE' | 'MEMORY' = 'MEMORY';
 
   private get keys() {
     const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
@@ -245,12 +246,16 @@ class SQLiteService {
                 console.warn(">>> [DBA] Banco físico corrompido, tentando recuperar...", pErr);
                 this.db.run(FULL_SCHEMA);
               }
-              
-              this.isInitialized = true;
+            } else {
+              console.log(`>>> [DBA] Banco Físico vinculado mas vazio. Criando novo.`);
+              this.db = new SQL.Database();
               this.db.run(FULL_SCHEMA);
-              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-              return;
             }
+            
+            this.isInitialized = true;
+            this.storageSource = 'PHYSICAL';
+            this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+            return;
           }
         } else {
           console.warn(`>>> [ALERTA] Permissão de acesso físico bloqueada: ${permission}.`);
@@ -270,6 +275,7 @@ class SQLiteService {
         this.db = new SQL.Database(binary);
         // Executa Full Schema (CPC 27 Compliance)
         this.db.run(FULL_SCHEMA);
+        this.storageSource = 'CACHE';
         this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
         this.isInitialized = true;
         return;
@@ -282,6 +288,7 @@ class SQLiteService {
     this.db = new SQL.Database();
     this.db.run(FULL_SCHEMA);
     this.isInitialized = true;
+    this.storageSource = 'MEMORY';
     this.currentDbStatus = 'EMPTY';
     await this.setSystemStatus('EMPTY');
     await this.persist();
@@ -492,6 +499,10 @@ class SQLiteService {
 
   getDbStatus(): 'EMPTY' | 'ACTIVE' {
     return this.currentDbStatus;
+  }
+
+  getStorageSource(): 'PHYSICAL' | 'CACHE' | 'MEMORY' {
+    return this.storageSource;
   }
 
   async hardResetDatabase() {

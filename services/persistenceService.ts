@@ -265,7 +265,9 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
 
     // Decriptografamos ativos apenas se não viermos do SQL ou se o SQL estiver vazio
     let finalAssets = sqlAssets;
-    if (finalAssets.length === 0 && encryptedAssets) {
+    // SEGURANÇA/SOBERANIA: Em modo INTERNO, não fazemos fallback para o IndexedDB se o SQL estiver vazio.
+    // Isso evita "interferência" de dados antigos de cache quando o usuário vincula um arquivo novo e limpo.
+    if (finalAssets.length === 0 && encryptedAssets && mode !== DatabaseMode.INTERNAL) {
       try {
         finalAssets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
         console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do IndexedDB (Fallback).`);
