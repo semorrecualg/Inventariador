@@ -540,12 +540,16 @@ const App: React.FC = () => {
         const isRestricted = result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired';
         
         if (isRestricted && !isReconnecting) {
-          if (!showReconnectOverlay) {
+          // Só abrimos o overlay se NÃO houver dados carregados ou se estivermos em Dashboard (onde integridade é vital)
+          if (!showReconnectOverlay && (!isDataLoaded || inventoryRef.current.assets.length === 0 || screen === 'DASHBOARD')) {
             console.warn(`>>> [DBA] Vínculo expirado (${result.status}). Abrindo overlay.`);
             setShowReconnectOverlay(true);
           }
-        } else if (result.status === 'linked') {
-          if (showReconnectOverlay) setShowReconnectOverlay(false);
+        } else if (result.status === 'linked' || result.status === 'granted') {
+          if (showReconnectOverlay) {
+            console.log(">>> [DBA] Vínculo reestabelecido. Fechando overlay.");
+            setShowReconnectOverlay(false);
+          }
           
           // Sincronização reativa e proteção contra UI vazia
           if (!isDataLoaded || inventoryRef.current.assets.length === 0) {
@@ -3944,15 +3948,18 @@ const App: React.FC = () => {
                   }
 
                   try {
-                    console.log('>>> [DatabaseLoader] Salvando inventário localmente (Dexie/LocalStorage)...');
+                    console.log('>>> [DatabaseLoader] Salvando inventário localmente e marcando sistema como ATIVO...');
                     setInventory(newInventory); 
-                    await saveInventory(newInventory);
+                    console.log('>>> [DatabaseLoader] Persistindo dados no SQLite físico (Modo Imobilização)...');
+                    await saveInventory(newInventory, a); 
+                    setIsDataLoaded(true); 
                     
                     if (databaseMode === DatabaseMode.INTERNAL && a.length > 0) {
                       setSqliteStatus('ACTIVE');
+                      await sqliteService.setSystemStatus('ACTIVE');
                     }
                     
-                    console.log('>>> [DatabaseLoader] Inventário local salvo com sucesso.');
+                    console.log('>>> [DatabaseLoader] Inventário local e físico (SQLite) salvos com sucesso.');
                     
                     if (shouldSync) {
                       console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
@@ -4593,6 +4600,18 @@ const App: React.FC = () => {
                 Reconfirmar Permissão
               </>
             )}
+          </button>
+          
+          <button 
+            onClick={async () => {
+               if (window.confirm("Isso removerá o vínculo com a pasta atual. Você precisará vincular novamente. Deseja prosseguir?")) {
+                  await sqliteService.hardResetDatabase();
+                  window.location.reload();
+               }
+            }}
+            className="mt-4 text-[10px] text-red-400 font-bold uppercase tracking-widest hover:underline"
+          >
+            Desvincular e Reiniciar Sistema
           </button>
           
           <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest opacity-50">

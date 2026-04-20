@@ -121,12 +121,11 @@ class SQLiteService {
     
     try {
       const { dirHandleKey, fileHandleKey } = this.keys;
+      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
+      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
       const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
       const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
       const defaultFileName = `gbr_inventario_expert${suffix}.db`;
-      
-      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
-      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
 
       if (fileHandle || dirHandle) {
         const handle = fileHandle || dirHandle;
@@ -135,30 +134,39 @@ class SQLiteService {
         const permission = await handle.queryPermission(options);
         
         if (permission === 'granted') {
-          let finalFileHandle = fileHandle;
+          let activeFileHandle = fileHandle;
 
-          if (!finalFileHandle && dirHandle) {
-            finalFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
+          if (!activeFileHandle && dirHandle) {
+            try {
+              activeFileHandle = await this.findDatabaseFile(dirHandle);
+            } catch (fileErr) {
+              console.warn(">>> [DBA] Arquivo não encontrado no diretório vinculado:", fileErr);
+            }
           }
 
-          if (finalFileHandle) {
-            const file = await finalFileHandle.getFile();
-            const folderName = dirHandle?.name || 'Arquivo Individual';
-            return { 
-              status: 'linked', 
-              linkType: dirHandle ? 'DIRECTORY' : 'FILE',
-              path: folderName,
-              folderName: folderName,
-              fileName: finalFileHandle.name,
-              size: file.size,
-              lastModified: new Date(file.lastModified).toISOString()
-            };
+          if (activeFileHandle) {
+            try {
+              const file = await activeFileHandle.getFile();
+              const folderName = dirHandle?.name || 'Arquivo Individual';
+              return { 
+                status: 'linked', 
+                linkType: dirHandle ? 'DIRECTORY' : 'FILE',
+                path: folderName,
+                folderName: folderName,
+                fileName: activeFileHandle.name,
+                size: file.size,
+                lastModified: new Date(file.lastModified).toISOString()
+              };
+            } catch (getErr) {
+              console.error(">>> [DBA] Erro ao obter objeto File do handle:", getErr);
+              return { status: 'error', path: 'Handle Inválido', error: String(getErr) };
+            }
           }
         }
         
         const folderName = dirHandle?.name || 'Arquivo Individual';
         return { 
-          status: permission, 
+          status: permission, // 'prompt', 'denied' etc.
           linkType: dirHandle ? 'DIRECTORY' : 'FILE',
           path: folderName, 
           folderName: folderName,
@@ -190,9 +198,14 @@ class SQLiteService {
       const status = await handle.requestPermission(options);
       
       if (status === 'granted') {
-        console.log(">>> [DBA] Permissão concedida pelo usuário.");
-        this.isInitialized = false;
-        await this.init();
+        console.log(">>> [DBA] Permissão concedida pelo usuário. Reinicializando sistema...");
+        await this.init(true); // Força reinicialização limpa
+        
+        // Verificação dupla: garante que o status interno reflita o sucesso físico
+        if (this.storageSource === 'PHYSICAL') {
+          this.currentDbStatus = 'ACTIVE';
+        }
+        
         return true;
       }
       return false;
@@ -228,11 +241,11 @@ class SQLiteService {
     }
   }
 
-  async init() {
+  async init(forced = false) {
     const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     
-    if (this.isInitialized) return;
-    if (this.isInitializing) {
+    if (this.isInitialized && !forced) return;
+    if (this.isInitializing && !forced) {
       // Aguarda inicialização em curso
       while (this.isInitializing) {
         await new Promise(r => setTimeout(r, 100));
@@ -241,7 +254,14 @@ class SQLiteService {
     }
 
     this.isInitializing = true;
+    
     try {
+      if (this.db && forced) {
+        try { this.db.close(); } catch {}
+        this.db = null;
+        this.isInitialized = false;
+      }
+
       if (navigator.storage && navigator.storage.persist) {
         await navigator.storage.persist();
       }
@@ -291,14 +311,15 @@ class SQLiteService {
               const file = await activeFileHandle.getFile();
               const buffer = await file.arrayBuffer();
               
+              console.log(`>>> [DBA] Carregando do Banco Físico: ${activeFileHandle.name} | Tamanho lido: ${buffer.byteLength} bytes`);
+              
               if (buffer.byteLength > 4096) { // Mínimo de 4KB para ser uma base válida
-                console.log(`>>> [DBA] Carregando do Banco Físico (${activeFileHandle.name}) - Tamanho: ${buffer.byteLength} bytes`);
                 this.db = new SQL.Database(new Uint8Array(buffer));
                 
                 // Verificação de Integridade Básica
                 try {
-                  this.db.run("PRAGMA integrity_check");
-                  console.log(">>> [DBA] Sucesso: Banco físico validado.");
+                  const check = this.db.exec("PRAGMA integrity_check");
+                  console.log(">>> [DBA] Sucesso: Banco físico validado.", check);
                 } catch (pErr) {
                   console.warn(">>> [DBA] Banco físico corrompido ou incompleto, tentando recuperar schema...", pErr);
                   this.db.run(FULL_SCHEMA);

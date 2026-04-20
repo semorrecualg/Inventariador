@@ -250,17 +250,20 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         console.log('>>> [Persistence] Tentando carregar dados do SQLite físico...');
         
         // Antes de carregar, verificamos o status do arquivo
-        const status = await sqliteService.getFileStatus();
+        const fileStatus = await sqliteService.getFileStatus();
         
         // Se o arquivo estiver bloqueado ou aguardando permissão, NÃO prosseguimos para o cache.
-        // Retornamos um estado "especificamente" vazio ou lançamos erro para evitar rollback.
-        if (status.status === 'permission_denied' || status.status === 'prompt' || status.status === 'expired') {
-          console.warn('>>> [Persistence] SOBERANIA: Arquivo físico detectado mas bloqueado. Impedindo carga de cache para evitar rollback.');
+        // Admitimos 'linked' (sucesso total) ou 'granted' (permissão ok, handle pronto)
+        const isAcessivel = fileStatus.status === 'linked' || fileStatus.status === 'granted';
+        
+        if (!isAcessivel && (fileStatus.status === 'permission_denied' || fileStatus.status === 'prompt' || fileStatus.status === 'expired')) {
+          console.warn(`>>> [Persistence] SOBERANIA: Arquivo físico detectado mas bloqueado (${fileStatus.status}). Impedindo carga de cache.`);
           return {
             assets: [],
+            companies: [],
             databaseMode: mode,
             status: DatabaseStatus.ERROR,
-            _integrity_failed: true // Sinaliza para a UI que a carga não foi completa
+            _integrity_failed: true 
           } as unknown as InventoryState;
         }
 
@@ -275,6 +278,9 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         
         if (sqlAssets.length > 0) {
           console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do SQLite físico.`);
+          if (sqlAssets.length > 0) {
+            console.table(sqlAssets.slice(0, 3).map(a => ({ id: a.id, tag: a.ETIQUETA, desc: a.DESCRICAODOATIVO?.slice(0, 20) })));
+          }
         } else {
           console.warn('>>> [Persistence] SQLite físico vazio ou sem ativos.');
         }
