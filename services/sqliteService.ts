@@ -601,6 +601,49 @@ class SQLiteService {
     return res.length > 0 ? (res[0].total as number) : 0;
   }
 
+  async bulkInsertAssets(assets: Asset[]) {
+    if (!this.db) await this.init();
+    if (assets.length === 0) return;
+
+    console.log(`>>> [DBA] Iniciando persistência de ${assets.length} ativos no banco físico...`);
+    
+    // Schema mapping para garantir que todas as colunas sejam preenchidas corretamente
+    const sql = `
+      INSERT OR REPLACE INTO assets (
+        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, VLRAQUISIC, DATAAQUISIC, 
+        CENTRODECUSTO, CONTACONTABIL, TAG_INVENTARIO, ESTADO_CONSERVACAO, 
+        GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, UNIDADE, QT, SERIAL, CNPJ, 
+        NOMEFORNECEDOR, NOTAFISCAL, ENDERECO, SUBREG, DATABAIXA, PRIMARYKEY, 
+        _tenantid, _unitid, _unidade, _conferido, _localMaster, _lastUpdated, 
+        _dataLeitura, _auditor, _photoUrl, _lat, _lng, _campaignId, _version, 
+        _is_deleted, _plaquetado, _plaquetaMaster, _descricaoMaster, _aprovado, 
+        _dataAprovacao, _aprovador, _assinatura, _isNew, _is_unitized, 
+        _is_divergent_baixa, Sn1_recno, Sn3_recno, DE_PARA, 
+        AUDITOR_STATUS_CONFERENCIA, _origemTransacao
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const commands = assets.map(a => ({
+      sql,
+      params: [
+        a.id || null, a.ETIQUETA || null, a.REGISTRO || null, a.DESCRICAODOATIVO || null, a.VLRAQUISIC || 0, a.DATAAQUISIC || null,
+        a.CENTRODECUSTO || null, a.CONTACONTABIL || null, a.TAG_INVENTARIO || null, a.ESTADO_CONSERVACAO || null,
+        a.GRUPO_EMPRESARIAL || null, a.UNIDADE_OPERACIONAL || null, a.UNIDADE || null, a.QT || null, a.SERIAL || null, a.CNPJ || null,
+        a.NOMEFORNECEDOR || null, a.NOTAFISCAL || null, a.ENDERECO || null, a.SUBREG || null, a.DATABAIXA || null, a.PRIMARYKEY || null,
+        a._tenantid || null, a._unitid || null, a._unidade || null, a._conferido ? 1 : 0, a._localMaster || null, a._lastUpdated || null,
+        a._dataLeitura || null, a._auditor || null, a._photoUrl || null, a._lat || null, a._lng || null, a._campaignId || null, a._version || 1,
+        a._is_deleted ? 1 : 0, a._plaquetado ? 1 : 0, a._plaquetaMaster || null, a._descricaoMaster || null, a._aprovado ? 1 : 0,
+        a._dataAprovacao || null, a._aprovador || null, a._assinatura || null, a._isNew ? 1 : 0, a._is_unitized ? 1 : 0,
+        a._is_divergent_baixa ? 1 : 0, a.Sn1_recno || null, a.Sn3_recno || null, a.DE_PARA || null,
+        a.AUDITOR_STATUS_CONFERENCIA || null, a._origemTransacao || null
+      ] as SqlValue[]
+    }));
+
+    await this.executeBatch(commands);
+    this.currentDbStatus = 'ACTIVE';
+    console.log(`>>> [DBA] Persistência física concluída para ${assets.length} ativos.`);
+  }
+
   async saveInventoryConfig(config: Partial<InventoryState>) {
     if (!this.db) await this.init();
     const data = JSON.stringify(config);

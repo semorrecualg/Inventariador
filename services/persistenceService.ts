@@ -174,7 +174,14 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       console.log('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
       await sqliteService.saveInventoryConfig(config);
       
-      // Atualiza o status interno do banco físico para ACTIVE se houver ativos
+      // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
+      // persistimos os ativos na tabela SQL física.
+      const assetsToSave = dirtyAssets || assets;
+      if (assetsToSave.length > 0) {
+        await sqliteService.bulkInsertAssets(assetsToSave);
+      }
+      
+      // Atualiza o status interno do banco físico para ACTIVE se houver ativos no banco
       const assetCount = await sqliteService.getAssetCount();
       if (assetCount > 0) {
         await sqliteService.setSystemStatus('ACTIVE');

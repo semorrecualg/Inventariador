@@ -218,13 +218,20 @@ const App: React.FC = () => {
     setIsReconnecting(true);
     
     try {
+      console.log(">>> [DBA] Iniciando processo de reconexão manual...");
       const success = await sqliteService.requestFilePermission();
+      
       if (success) {
-        setShowReconnectOverlay(false);
-        // Recarrega os dados do inventário para o estado do React sem recarregar a página
+        // Aguarda um pequeno delay para o OS processar a permissão
+        await new Promise(r => setTimeout(r, 500));
+        
+        // Recarrega os dados do inventário para o estado do React
         const loaded = await loadInventory(databaseMode);
-        if (loaded) {
-          // Garantir que empresas estão extraídas mesmo que config esteja vazia
+        
+        // Só atualizamos o inventário se o carregamento foi bem sucessido e retornou dados.
+        // Se retornar status ERROR, significa que a permissão falhou novamente.
+        if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
+          // Garantir que empresas estão extraídas
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
              loaded.companies = [...new Set(loaded.assets.map(a => {
                return (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
@@ -232,22 +239,33 @@ const App: React.FC = () => {
           }
           
           setInventory(loaded);
+          setIsDataLoaded(true);
+          setShowReconnectOverlay(false);
+          
           if (loaded.assets.length > 0) {
             setSqliteStatus('ACTIVE');
             await sqliteService.setSystemStatus('ACTIVE');
           }
-          console.log(`>>> [DBA] Reconexão concluída: ${loaded.assets.length} ativos carregados.`);
+          console.log(`>>> [DBA] Reconexão manual concluída: ${loaded.assets.length} ativos carregados.`);
+        } else {
+          console.error(">>> [DBA] Falha ao recarregar inventário após permissão.");
         }
       } else {
+        // Tenta vincular o arquivo novamente se a permissão simples falhar
         try {
           await sqliteService.linkExistingFile();
-          setShowReconnectOverlay(false);
           const loaded = await loadInventory(databaseMode);
-          if (loaded) setInventory(loaded);
-        } catch {
-          console.error("Falha ao reconectar banco físico");
+          if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
+            setInventory(loaded);
+            setIsDataLoaded(true);
+            setShowReconnectOverlay(false);
+          }
+        } catch (err) {
+          console.error("Falha ao re-vincular banco físico:", err);
         }
       }
+    } catch (err) {
+      console.error("Erro no fluxo de reconexão:", err);
     } finally {
       setIsReconnecting(false);
     }
