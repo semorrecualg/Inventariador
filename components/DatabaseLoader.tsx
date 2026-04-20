@@ -151,7 +151,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   
   const [availableCompanies, setAvailableCompanies] = useState<{name: string, count: number}[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
-  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string} | null>(null);
+  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string, linkType?: string} | null>(null);
 
   React.useEffect(() => {
     if (step === 'IMMOBILIZATION' || step === 'SOURCE') {
@@ -534,7 +534,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
   };
 
+  const [isMapping, setIsMapping] = useState(false);
+
   const handleStartImmobilization = async () => {
+    if (isMapping) return;
+    setIsMapping(true);
+    
     try {
       if (window.self !== window.top) {
         showModal(
@@ -550,14 +555,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         throw new Error("API_NOT_SUPPORTED");
       }
 
-      await sqliteService.mapLocalFolder();
+      const success = await sqliteService.mapLocalFolder();
       
-      // Atualiza o status visual
-      const status = await sqliteService.getFileStatus();
-      setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
-      
-      setStep('SUMMARY');
-      setTimeout(() => handleActivateSystem(), 300);
+      if (success) {
+        // Atualiza o status visual
+        const status = await sqliteService.getFileStatus();
+        setFileStatus(status as { status: string; path: string; folderName?: string; fileName?: string });
+        
+        setStep('SUMMARY');
+        setTimeout(() => handleActivateSystem(), 300);
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Falha na imobilização:', err);
@@ -580,10 +587,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           "warning"
         );
         setStep('SUMMARY');
-        setTimeout(() => handleActivateSystem(), 500);
+        setTimeout(() => handleActivateSystem(), 300);
       } else {
         showModal("Erro de Vínculo", "Não foi possível vincular a pasta: " + errorMessage, "error");
       }
+    } finally {
+      setIsMapping(false);
     }
   };
 
@@ -821,14 +830,31 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                {fileStatus?.status === 'linked' && (
                  <div className="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/10 mb-4">
                     <div className="flex justify-between items-center mb-1.5">
-                      <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Caminho Físico:</span>
+                      <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">
+                        {fileStatus.linkType === 'DIRECTORY' ? 'Pasta Vinculada:' : 'Arquivo Vinculado:'}
+                      </span>
                       <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow-sm">
-                        DIRETÓRIO ATIVO
+                        {fileStatus.linkType === 'DIRECTORY' ? 'DIRETÓRIO ATIVO' : 'ARQUIVO ATIVO'}
                       </span>
                     </div>
                     <p className="text-[10px] font-mono font-bold text-white break-all leading-tight mb-2">
                        {fileStatus.path}
                     </p>
+                    
+                    {fileStatus.linkType === 'DIRECTORY' && (
+                      <div className="mb-2 p-1.5 bg-white/5 rounded border border-white/10">
+                        <p className="text-[8px] text-white/60 font-medium">
+                          Buscando arquivo: <span className="text-blue-300">{fileStatus.fileName}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="p-2 bg-slate-900/50 rounded-lg mb-2">
+                       <p className="text-[7px] text-white/40 leading-tight">
+                         <span className="text-blue-300 font-black">NOTA DBA:</span> Por segurança do navegador (Sandbox), o caminho completo (Ex: C:\Users\...) não é exposto. O sistema garante o vínculo persistente com a pasta selecionada.
+                       </p>
+                    </div>
+
                     {/* @ts-expect-error - size added in service */}
                     {fileStatus.size !== undefined && (
                       <div className="flex items-center space-x-3 text-[8px] font-bold text-white/50 uppercase tracking-widest mt-2 pt-2 border-t border-white/5">
@@ -869,7 +895,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                             // Forçar carregamento imediato dos ativos do banco reabilitado
                             const items = await sqliteService.query("SELECT * FROM assets") as Asset[];
                             if (items && items.length > 0) {
-                              onDataLoaded(items, [...new Set(items.map(a => a.UNIDADE_OPERACIONAL || ''))]);
+                              onDataLoaded(items, [...new Set(items.map(a => {
+                                const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
+                                return val;
+                              }))].filter(Boolean));
                             }
                           }
                         }}

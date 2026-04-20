@@ -5,6 +5,7 @@ import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
+import { sqliteService } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 
 export interface ProvisionResult {
@@ -1549,12 +1550,22 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    const cached = localStorage.getItem('inventory_campaigns_cache');
-    if (!cached) return false;
-    const campaigns = JSON.parse(cached) as InventoryCampaign[];
-    const filtered = campaigns.filter(c => c.id !== campaignId);
-    localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
-    return true;
+    console.log('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
+    try {
+      await sqliteService.deleteCampaignSql(campaignId);
+      
+      // Atualiza LS para redundância
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      if (cached) {
+        const campaigns = JSON.parse(cached) as InventoryCampaign[];
+        const filtered = campaigns.filter(c => c.id !== campaignId);
+        localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
+      }
+      return true;
+    } catch (err) {
+      console.error(">>> [SQLite] Falha ao excluir campanha:", err);
+      return false;
+    }
   }
 
   if (!supabase) return false;
@@ -1587,9 +1598,35 @@ export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaig
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    console.log('>>> [Local] Buscando campanhas locais (Modo Mobile Puro)...');
-    const cached = localStorage.getItem('inventory_campaigns_cache');
-    return cached ? JSON.parse(cached) : [];
+    console.log('>>> [SQLite] Buscando campanhas físicas...');
+    try {
+      const sqlCampaigns = await sqliteService.getCampaigns(tenantid);
+      if (sqlCampaigns && sqlCampaigns.length > 0) {
+        return sqlCampaigns as unknown as InventoryCampaign[];
+      }
+      
+      // Fallback para cache legado se o SQL estiver vazio (Migração Silenciosa)
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as InventoryCampaign[];
+          console.log(`>>> [Migração] Migrando ${parsed.length} campanhas do LS para SQLite...`);
+          for (const c of parsed) {
+            await sqliteService.saveCampaign(c);
+          }
+          // Uma vez migrado, podemos opcionalmente limpar o LS, mas manteremos por segurança por enquanto
+          return parsed;
+        } catch (e) {
+          console.error("Falha ao parsear cache de campanhas:", e);
+        }
+      }
+      return [];
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao buscar campanhas:", err);
+      // Fallback desesperado para localStorage
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      return cached ? JSON.parse(cached) : [];
+    }
   }
 
   if (!supabase) {
@@ -1706,19 +1743,30 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    console.log('>>> [Local] Criando campanha local (Modo Mobile Puro)...');
+    console.log('>>> [SQLite] Criando campanha no banco físico...');
     const newCampaign = {
       ...campaign,
-      id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: campaign.id || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       created_at: new Date().toISOString()
     } as InventoryCampaign;
 
-    const cached = localStorage.getItem('inventory_campaigns_cache');
-    const campaigns = cached ? JSON.parse(cached) : [];
-    const updatedCampaigns = [newCampaign, ...campaigns];
-    localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedCampaigns));
-    
-    return newCampaign;
+    try {
+      await sqliteService.saveCampaign(newCampaign);
+      
+      // Mantém o LS atualizado para redundância
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      const campaigns = cached ? JSON.parse(cached) : [];
+      localStorage.setItem('inventory_campaigns_cache', JSON.stringify([newCampaign, ...campaigns]));
+      
+      return newCampaign;
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao salvar campanha:", err);
+      // Fallback para LS
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      const campaigns = cached ? JSON.parse(cached) : [];
+      localStorage.setItem('inventory_campaigns_cache', JSON.stringify([newCampaign, ...campaigns]));
+      return newCampaign;
+    }
   }
 
   if (!supabase) return null;
@@ -1793,15 +1841,32 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    console.log('>>> [Local] Atualizando status da campanha local:', campaignId);
-    const cached = localStorage.getItem('inventory_campaigns_cache');
-    if (cached) {
-      const campaigns = JSON.parse(cached) as InventoryCampaign[];
-      const updated = campaigns.map(c => 
-        c.id === campaignId ? { ...c, status, end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : null } : c
-      );
-      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updated));
-      return true;
+    console.log('>>> [SQLite] Atualizando status da campanha no banco físico:', campaignId);
+    try {
+      const cached = localStorage.getItem('inventory_campaigns_cache');
+      let campaignToUpdate: InventoryCampaign | undefined;
+      
+      if (cached) {
+        const campaigns = JSON.parse(cached) as InventoryCampaign[];
+        campaignToUpdate = campaigns.find(c => c.id === campaignId);
+      }
+
+      if (campaignToUpdate) {
+        const updated: InventoryCampaign = { 
+          ...campaignToUpdate, 
+          status, 
+          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : undefined 
+        };
+        await sqliteService.saveCampaign(updated);
+        
+        // Atualiza LS
+        const campaigns = JSON.parse(cached!) as InventoryCampaign[];
+        const updatedList = campaigns.map(c => c.id === campaignId ? updated : c);
+        localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedList));
+        return true;
+      }
+    } catch (err) {
+      console.error(">>> [SQLite] Falha ao atualizar status da campanha:", err);
     }
     return false;
   }

@@ -64,7 +64,7 @@ import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
-import { requestPersistentStorage, localDb } from './services/localDbService';
+import { requestPersistentStorage } from './services/localDbService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
@@ -210,38 +210,46 @@ const App: React.FC = () => {
 
   // Monitor de Soberania de Arquivos (Modo Físico)
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
-  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string} | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string, linkType?: string} | null>(null);
 
   const handleReconnectFile = async () => {
-    const success = await sqliteService.requestFilePermission();
-    if (success) {
-      setShowReconnectOverlay(false);
-      // Recarrega os dados do inventário para o estado do React sem recarregar a página
-      // para evitar perder o grant de permissão que o navegador acabou de dar.
-      try {
+    if (isReconnecting) return;
+    setIsReconnecting(true);
+    
+    try {
+      const success = await sqliteService.requestFilePermission();
+      if (success) {
+        setShowReconnectOverlay(false);
+        // Recarrega os dados do inventário para o estado do React sem recarregar a página
         const loaded = await loadInventory(databaseMode);
         if (loaded) {
+          // Garantir que empresas estão extraídas mesmo que config esteja vazia
+          if (loaded.companies.length === 0 && loaded.assets.length > 0) {
+             loaded.companies = [...new Set(loaded.assets.map(a => {
+               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
+             }))].filter(Boolean);
+          }
+          
           setInventory(loaded);
           if (loaded.assets.length > 0) {
             setSqliteStatus('ACTIVE');
             await sqliteService.setSystemStatus('ACTIVE');
           }
+          console.log(`>>> [DBA] Reconexão concluída: ${loaded.assets.length} ativos carregados.`);
         }
-      } catch (err) {
-        console.error("Erro ao carregar dados após reconexão:", err);
-      }
-    } else {
-      try {
-        await sqliteService.linkExistingFile();
-        setShowReconnectOverlay(false);
-        // Mesmo procedimento para o fallback
-        const loaded = await loadInventory(databaseMode);
-        if (loaded) {
-          setInventory(loaded);
+      } else {
+        try {
+          await sqliteService.linkExistingFile();
+          setShowReconnectOverlay(false);
+          const loaded = await loadInventory(databaseMode);
+          if (loaded) setInventory(loaded);
+        } catch {
+          console.error("Falha ao reconectar banco físico");
         }
-      } catch {
-        console.error("Falha ao reconectar banco físico");
       }
+    } finally {
+      setIsReconnecting(false);
     }
   };
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
@@ -475,11 +483,6 @@ const App: React.FC = () => {
     } catch { return []; }
   });
 
-  useEffect(() => {
-    if (campaigns.length > 0) {
-      localStorage.setItem('inventory_campaigns_cache', JSON.stringify(campaigns));
-    }
-  }, [campaigns]);
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
@@ -508,21 +511,35 @@ const App: React.FC = () => {
   useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL) {
       const checkFileStatus = async () => {
+        // Evita polling agressivo durante tentativa de reconexão ou link manual
+        if (isReconnecting || screen === AppScreen.DATABASE_MANAGER) return;
+
         const result = await sqliteService.getFileStatus();
+        if (result.status === 'busy') return; // Ignora pacificamente se houver gravação em curso
+        
         setFileStatus(result);
         
-        if (result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired') {
-          setShowReconnectOverlay(true);
+        const isRestricted = result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired';
+        
+        if (isRestricted && !isReconnecting) {
+          if (!showReconnectOverlay) {
+            console.warn(`>>> [DBA] Vínculo expirado (${result.status}). Abrindo overlay.`);
+            setShowReconnectOverlay(true);
+          }
         } else if (result.status === 'linked') {
-          setShowReconnectOverlay(false);
-          // Se recuperou permissão mas o estado do React está vazio, tenta recarregar
-          if (inventoryRef.current.assets.length === 0) {
+          if (showReconnectOverlay) setShowReconnectOverlay(false);
+          
+          // Sincronização reativa e proteção contra UI vazia
+          if (!isDataLoaded || inventoryRef.current.assets.length === 0) {
             const status = sqliteService.getDbStatus();
             if (status === 'ACTIVE') {
+              console.log(">>> [DBA] Permissão reestabelecida. Recarregando banco físico com soberania...");
               const loaded = await loadInventory(databaseMode);
-              if (loaded && loaded.assets.length > 0) {
-                setInventory(loaded);
+              if (loaded && loaded.assets && loaded.assets.length > 0) {
+                setInventory(prev => ({ ...prev, ...loaded, assets: loaded.assets }));
                 setSqliteStatus('ACTIVE');
+                setIsDataLoaded(true);
+                setShowReconnectOverlay(false);
               }
             }
           }
@@ -530,10 +547,10 @@ const App: React.FC = () => {
       };
       
       checkFileStatus();
-      const interval = setInterval(checkFileStatus, 10000); // Checa a cada 10s
+      const interval = setInterval(checkFileStatus, 5000); // Polling mais frequente (5s) para melhor UX
       return () => clearInterval(interval);
     }
-  }, [databaseMode, inventory.assets.length]);
+  }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
 
   useEffect(() => {
     if (user?.tenantid && databaseMode.startsWith('SUPABASE')) {
@@ -1081,17 +1098,27 @@ const App: React.FC = () => {
         // }
 
         // AUDITORIA DE PERSISTÊNCIA: Executa um SELECT global para garantir que os dados estão presentes
-        if (databaseMode === DatabaseMode.INTERNAL && savedInventory && savedInventory.assets) {
+        if (databaseMode === DatabaseMode.INTERNAL && savedInventory) {
           try {
-            const count = await localDb.assets.count();
-            console.log(`>>> [Auditoria] Verificação de Persistência SQL: ${count} itens encontrados no banco nativo.`);
-            if (count > 0 && savedInventory.assets.length === 0) {
-              console.warn(">>> [Auditoria] Discrepância detectada: Dados no SQL mas recusados pelo loadInventory. Tentando recuperação direta...");
-              const forcedAssets = await localDb.assets.toArray();
-              savedInventory.assets = forcedAssets;
+            const count = await sqliteService.getAssetCount();
+            console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
+            
+            // Se o SQLite reportar 0 mas o loadInventory retornou algo (fallback de cache),
+            // ou se o loadInventory sinalizou que está bloqueado (_integrity_failed), 
+            // tratamos como falha de integridade para forçar a re-permissão.
+            if (savedInventory.status === DatabaseStatus.ERROR || (count === 0 && savedInventory.assets.length > 0)) {
+              console.warn(">>> [Auditoria] Discrepância / Bloqueio detectado. Ativando proteção de rollback.");
+              setIntegrityFailed(true);
+              setShowReconnectOverlay(true);
+              
+              // Se detectamos que está bloqueado, não prosseguimos com o init normal.
+              // O App ficará no Splash/Loader até que a permissão seja concedida e init() re-chamado.
+              if (savedInventory.status === DatabaseStatus.ERROR) {
+                return; 
+              }
             }
           } catch (sqlErr) {
-            console.error(">>> [Auditoria] Falha ao verificar banco nativo SQL:", sqlErr);
+            console.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
           }
         }
 
@@ -1296,38 +1323,25 @@ const App: React.FC = () => {
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = useCallback(async () => {
     const tenantId = user?._tenantid || user?.tenantid;
-    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, User: ${user?.email}, Mode: ${databaseMode}`);
+    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, Mode: ${databaseMode}`);
     
-    if (!tenantId) {
-      console.warn('>>> [App] refreshCampaigns abortado: tenantId não encontrado no usuário.');
-      return;
-    }
+    if (!tenantId) return;
 
     try {
-      // Configurações de GPS sempre são buscadas (local + nuvem se disponível)
+      // Configurações de GPS
       const gpsData = await fetchUnitConfigs(tenantId);
       setUnitConfigs(gpsData);
-      setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-      // Campanhas são buscadas na nuvem se houver tenantId, independente do modo, 
-      // pois são entidades globais de controle. No modo interno, servem para ativação.
-      // Adicionada resiliência para manter dados locais se a nuvem falhar.
-      console.log(`>>> [App] Buscando campanhas na nuvem para tenant: ${tenantId}`);
-      try {
-        const campaignData = await fetchCampaigns(tenantId);
-        console.log(`>>> [App] fetchCampaigns retornou ${campaignData?.length || 0} campanhas.`);
-        
-        // Sempre atualiza o estado, mesmo que seja array vazio, para refletir a realidade da nuvem
-        setCampaigns(campaignData || []);
-        
-        console.log(`>>> [App] Sincronização global concluída: ${campaignData?.length || 0} campanhas e ${gpsData.length} configs GPS.`);
-      } catch (err) {
-        console.warn('>>> [App] Falha ao buscar campanhas da nuvem, mantendo locais:', err);
-      }
+      // Campanhas (Resiliência Total)
+      const campaignData = await fetchCampaigns(tenantId);
+      console.log(`>>> [App] Campanhas atualizadas: ${campaignData?.length || 0} encontradas.`);
+      
+      // Atualização atômica do estado para garantir reatividade
+      setCampaigns([...(campaignData || [])]);
     } catch (err) {
-      console.error('>>> [App] Erro crítico ao buscar dados globais:', err);
+      console.error('>>> [App] Erro ao buscar campanhas:', err);
     }
-  }, [user?._tenantid, user?.tenantid, user?.email, databaseMode]);
+  }, [user?._tenantid, user?.tenantid, databaseMode]);
 
   useEffect(() => {
     if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION || screen === AppScreen.UNIT_CONFIGURATOR) {
@@ -4527,18 +4541,40 @@ const App: React.FC = () => {
             Reconectando ao Banco de Dados Local...
           </h2>
           
-          <p className="text-slate-400 text-sm max-w-sm mb-10 leading-relaxed font-medium">
-            O navegador perdeu o vínculo físico com o arquivo <span className="text-blue-400 font-bold">{fileStatus?.fileName || 'gbr_inventario_expert.Mobile.db'}</span>. 
-            No diretório: <span className="text-slate-300 italic">{fileStatus?.folderName || fileStatus?.path || 'não identificado'}</span>.
-            Clique abaixo para reconfirmar o acesso e continuar seu trabalho sem perdas.
+          <p className="text-slate-400 text-sm max-w-md mb-10 leading-relaxed font-medium">
+            {fileStatus?.linkType === 'DIRECTORY' ? (
+              <>
+                O navegador precisa de permissão para acessar a pasta:<br/>
+                <span className="text-blue-400 font-bold">&quot;{fileStatus?.folderName}&quot;</span><br/>
+                onde o arquivo <span className="text-slate-300 italic">{fileStatus?.fileName}</span> está localizado.
+              </>
+            ) : (
+              <>
+                O navegador perdeu o vínculo físico com o arquivo individual:<br/>
+                <span className="text-blue-400 font-bold">&quot;{fileStatus?.fileName}&quot;</span>.
+              </>
+            )}
           </p>
+          
+          <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 mb-8 max-w-sm">
+             <p className="text-[10px] text-slate-400 leading-normal text-left">
+               <span className="text-blue-400 font-black">SEGURANÇA DO NAVEGADOR:</span> Por restrições de privacidade (&quot;Sandbox&quot;), o navegador não revela o caminho absoluto do seu disco (Ex: C:\Usuarios\...). Ele identifica apenas o nome da pasta selecionada por você. O vínculo permanece intacto no diretório que você mapeou originalmente.
+             </p>
+          </div>
           
           <button 
             onClick={handleReconnectFile}
-            className="w-full max-w-xs py-5 bg-blue-600 text-white rounded-[1.5rem] font-bold uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+            disabled={isReconnecting}
+            className="w-full max-w-xs py-5 bg-blue-600 text-white rounded-[1.5rem] font-bold uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
           >
-            <RefreshCw size={20} className="animate-spin-slow" />
-            Reconfirmar Permissão
+            {isReconnecting ? (
+              <Loader2 size={24} className="animate-spin" />
+            ) : (
+              <>
+                <RefreshCw size={20} className="animate-spin-slow" />
+                Reconfirmar Permissão
+              </>
+            )}
           </button>
           
           <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest opacity-50">

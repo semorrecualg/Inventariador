@@ -1,6 +1,7 @@
 
 import localforage from 'localforage';
 import initSqlJs, { Database, SqlValue } from 'sql.js';
+import { InventoryCampaign, Asset, InventoryState } from '../types';
 
 localforage.config({
   name: 'GBR_SYSTEM_DB',
@@ -74,6 +75,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details TEXT,
     _tenantid TEXT
 );
+CREATE TABLE IF NOT EXISTS campaigns (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    status TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    _tenantid TEXT,
+    _unitid TEXT,
+    created_by TEXT,
+    created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS system_status (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -83,6 +96,8 @@ CREATE TABLE IF NOT EXISTS system_status (
 class SQLiteService {
   private db: Database | null = null;
   private isInitialized = false;
+  private isInitializing = false;
+  private isPersisting = false;
   private currentDbStatus: 'EMPTY' | 'ACTIVE' = 'EMPTY';
   private storageSource: 'PHYSICAL' | 'CACHE' | 'MEMORY' = 'MEMORY';
 
@@ -100,6 +115,10 @@ class SQLiteService {
    * Agora prioriza o FileHandle direto se disponível.
    */
   async getFileStatus() {
+    if (this.isPersisting) {
+      return { status: 'busy', linkType: 'UNKNOWN', path: '', folderName: '', fileName: '' };
+    }
+    
     try {
       const { dirHandleKey, fileHandleKey } = this.keys;
       const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
@@ -109,43 +128,45 @@ class SQLiteService {
       const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
       const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
 
-      if (!fileHandle && !dirHandle) {
-        return { status: 'none', path: 'Nenhum banco físico vinculado', fileName: defaultFileName };
+      if (fileHandle || dirHandle) {
+        const handle = fileHandle || dirHandle;
+        const options: unknown = { mode: 'readwrite' };
+        // @ts-expect-error - queryPermission
+        const permission = await handle.queryPermission(options);
+        
+        if (permission === 'granted') {
+          let finalFileHandle = fileHandle;
+
+          if (!finalFileHandle && dirHandle) {
+            finalFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
+          }
+
+          if (finalFileHandle) {
+            const file = await finalFileHandle.getFile();
+            const folderName = dirHandle?.name || 'Arquivo Individual';
+            return { 
+              status: 'linked', 
+              linkType: dirHandle ? 'DIRECTORY' : 'FILE',
+              path: folderName,
+              folderName: folderName,
+              fileName: finalFileHandle.name,
+              size: file.size,
+              lastModified: new Date(file.lastModified).toISOString()
+            };
+          }
+        }
+        
+        const folderName = dirHandle?.name || 'Arquivo Individual';
+        return { 
+          status: permission, 
+          linkType: dirHandle ? 'DIRECTORY' : 'FILE',
+          path: folderName, 
+          folderName: folderName,
+          fileName: fileHandle?.name || defaultFileName 
+        };
       }
 
-      const handle = fileHandle || dirHandle;
-      const options: unknown = { mode: 'readwrite' };
-      // @ts-expect-error - queryPermission
-      const permission = await handle.queryPermission(options);
-      
-      if (permission === 'granted') {
-        let activeFileHandle = fileHandle;
-
-        if (!activeFileHandle && dirHandle) {
-          activeFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
-        }
-
-        if (activeFileHandle) {
-          const file = await activeFileHandle.getFile();
-          const folderName = dirHandle?.name || 'Arquivo Individual';
-          return { 
-            status: 'linked', 
-            path: folderName,
-            folderName: folderName,
-            fileName: activeFileHandle.name,
-            size: file.size,
-            lastModified: new Date(file.lastModified).toISOString()
-          };
-        }
-      }
-      
-      const folderName = dirHandle?.name || 'Arquivo Individual';
-      return { 
-        status: permission, 
-        path: folderName, 
-        folderName: folderName,
-        fileName: fileHandle?.name || defaultFileName 
-      };
+      return { status: 'none', path: 'Nenhum banco físico vinculado', fileName: defaultFileName, linkType: 'NONE' };
     } catch (err) {
       console.error(">>> [DBA] Erro ao verificar status do arquivo:", err);
       return { status: 'error', path: 'Falha de acesso', error: String(err) };
@@ -169,6 +190,7 @@ class SQLiteService {
       const status = await handle.requestPermission(options);
       
       if (status === 'granted') {
+        console.log(">>> [DBA] Permissão concedida pelo usuário.");
         this.isInitialized = false;
         await this.init();
         return true;
@@ -180,128 +202,190 @@ class SQLiteService {
     }
   }
 
+  /**
+   * Tenta encontrar o arquivo de banco de dados no diretório seguindo a regra de nomes (novo -> legado)
+   */
+  private async findDatabaseFile(dirHandle: FileSystemDirectoryHandle): Promise<FileSystemFileHandle> {
+    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+    const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
+    const currentName = `gbr_inventario_expert${suffix}.db`;
+    const legacyName = `gbr_inventario_expert.db`;
+    
+    // 1. Tenta o nome atual
+    try {
+      return await dirHandle.getFileHandle(currentName, { create: false });
+    } catch {
+      // 2. Tenta o nome legado
+      try {
+        const legacyHandle = await dirHandle.getFileHandle(legacyName, { create: false });
+        console.log(`>>> [DBA] Arquivo legado encontrado: ${legacyName}.`);
+        return legacyHandle;
+      } catch {
+        // 3. Se não encontrar nenhum, cria o novo
+        console.log(`>>> [DBA] Nenhum arquivo existente encontrado em ${dirHandle.name}. Criando novo: ${currentName}`);
+        return await dirHandle.getFileHandle(currentName, { create: true });
+      }
+    }
+  }
+
   async init() {
-    const { dbKey } = this.keys;
+    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     
     if (this.isInitialized) return;
-
-    if (navigator.storage && navigator.storage.persist) {
-      await navigator.storage.persist();
+    if (this.isInitializing) {
+      // Aguarda inicialização em curso
+      while (this.isInitializing) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return;
     }
 
-    const SQL = await Promise.race([
-      initSqlJs({
-        locateFile: file => {
-          // Tentativa de carregar via CDN com cache agressivo
-          return `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/${file}`;
-        }
-      }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('WASM_LOAD_TIMEOUT')), 20000))
-    ]).catch(err => {
-      console.error(">>> [DBA] Falha crítica ao carregar motor SQL.js:", err);
-      // Fallback para outros CDNs se o principal falhar
-      if (err.message === 'WASM_LOAD_TIMEOUT') {
-         console.warn(">>> [DBA] Tentando CDN alternativo (Unpkg)...");
-         return initSqlJs({
-           locateFile: file => `https://unpkg.com/sql.js@1.14.1/dist/${file}`
-         }).catch(innerErr => {
-           window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: innerErr.message } }));
-           throw innerErr;
-         });
-      }
-      const errMsg = `Falha ao carregar motor SQL.js (WASM). Isso geralmente ocorre se o seu navegador não consegue acessar os serviços de CDN externos (jsdelivr.net ou unpkg.com). Se você estiver em uma rede corporativa ou VPN, peça para liberar estes domínios ou tente outra conexão. Detalhe: ${err.message}`;
-      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: errMsg } }));
-      throw new Error(errMsg);
-    });
-
-    // 2. Tenta Recuperar do Arquivo/Diretório Físico (PRIORIDADE MÁXIMA)
+    this.isInitializing = true;
     try {
-      const { dirHandleKey, fileHandleKey } = this.keys;
+      if (navigator.storage && navigator.storage.persist) {
+        await navigator.storage.persist();
+      }
+
+      const SQL = await Promise.race([
+        initSqlJs({
+          locateFile: file => {
+            return `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/${file}`;
+          }
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('WASM_LOAD_TIMEOUT')), 20000))
+      ]).catch(err => {
+        console.error(">>> [DBA] Falha crítica ao carregar motor SQL.js:", err);
+        // Fallback para outros CDNs se o principal falhar
+        if (err.message === 'WASM_LOAD_TIMEOUT') {
+           console.warn(">>> [DBA] Tentando CDN alternativo (Unpkg)...");
+           return initSqlJs({
+             locateFile: file => `https://unpkg.com/sql.js@1.14.1/dist/${file}`
+           }).catch(innerErr => {
+             window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: innerErr.message } }));
+             throw innerErr;
+           });
+        }
+        const errMsg = `Falha ao carregar motor SQL.js (WASM). Detalhe: ${err.message}`;
+        window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: errMsg } }));
+        throw new Error(errMsg);
+      });
+
+      // 2. Tenta Recuperar do Arquivo/Diretório Físico (PRIORIDADE MÁXIMA)
       const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
       const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      
       const handle = fileHandle || dirHandle;
 
       if (handle) {
-        const options: unknown = { mode: 'readwrite' };
-        // @ts-expect-error - queryPermission exists
-        const permission = await handle.queryPermission(options);
-        
-        if (permission === 'granted') {
-          let activeFileHandle: FileSystemFileHandle | null = fileHandle;
+        try {
+          const options: unknown = { mode: 'readwrite' };
+          // @ts-expect-error - queryPermission exists
+          const permission = await handle.queryPermission(options);
           
-          if (!activeFileHandle && dirHandle) {
-             const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-             const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-             const defaultFileName = `gbr_inventario_expert${suffix}.db`;
-             activeFileHandle = await dirHandle.getFileHandle(defaultFileName, { create: true });
-          }
-
-          if (activeFileHandle) {
-            const file = await activeFileHandle.getFile();
-            const buffer = await file.arrayBuffer();
-            
-            if (buffer.byteLength > 0) {
-              console.log(`>>> [DBA] Carregando do Banco Físico (${activeFileHandle.name}) - Tamanho: ${buffer.byteLength} bytes`);
-              this.db = new SQL.Database(new Uint8Array(buffer));
-              
-              // Verificação de Integridade Básica
-              try {
-                this.db.run("PRAGMA integrity_check");
-                console.log(">>> [DBA] Sucesso: Banco físico validado.");
-              } catch (pErr) {
-                console.warn(">>> [DBA] Banco físico corrompido, tentando recuperar...", pErr);
-                this.db.run(FULL_SCHEMA);
-              }
-            } else {
-              console.log(`>>> [DBA] Banco Físico vinculado mas vazio. Criando novo.`);
-              this.db = new SQL.Database();
-              this.db.run(FULL_SCHEMA);
+          if (permission === 'granted') {
+            let activeFileHandle = fileHandle;
+            if (!activeFileHandle && dirHandle) {
+               activeFileHandle = await this.findDatabaseFile(dirHandle);
             }
-            
-            this.isInitialized = true;
-            this.storageSource = 'PHYSICAL';
-            this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+
+            if (activeFileHandle) {
+              const file = await activeFileHandle.getFile();
+              const buffer = await file.arrayBuffer();
+              
+              if (buffer.byteLength > 4096) { // Mínimo de 4KB para ser uma base válida
+                console.log(`>>> [DBA] Carregando do Banco Físico (${activeFileHandle.name}) - Tamanho: ${buffer.byteLength} bytes`);
+                this.db = new SQL.Database(new Uint8Array(buffer));
+                
+                // Verificação de Integridade Básica
+                try {
+                  this.db.run("PRAGMA integrity_check");
+                  console.log(">>> [DBA] Sucesso: Banco físico validado.");
+                } catch (pErr) {
+                  console.warn(">>> [DBA] Banco físico corrompido ou incompleto, tentando recuperar schema...", pErr);
+                  this.db.run(FULL_SCHEMA);
+                }
+              } else {
+                console.warn(`>>> [DBA] Arquivo Físico (${activeFileHandle.name}) muito pequeno (${buffer.byteLength} bytes). Verificando cache IndexedDB.`);
+                // Se o arquivo físico estiver vazio, tentamos o IndexedDB antes de desistir e criar um novo
+                const binary = await localforage.getItem<Uint8Array>(dbKey);
+                if (binary && binary.length > 4096) {
+                  console.log(">>> [DBA] Recuperando dados do cache IndexedDB para o arquivo físico...");
+                  this.db = new SQL.Database(binary);
+                  this.db.run(FULL_SCHEMA);
+                } else {
+                  console.log(">>> [DBA] Cache IndexedDB também vazio. Inicializando novo schema.");
+                  this.db = new SQL.Database();
+                  this.db.run(FULL_SCHEMA);
+                }
+                await this.persist();
+              }
+              
+              this.isInitialized = true;
+              this.storageSource = 'PHYSICAL';
+              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+              return;
+            }
+          } else {
+            console.warn(`>>> [DBA] Acesso físico bloqueado (${permission}). Prioridade mantida ao físico, não inicializando banco substituto.`);
+            // CRITICAL: Se temos um handle mas não temos permissão, não carregamos NADA.
+            // Isso força o usuário a reconfirmar a permissão em vez de trabalhar com um banco vazio e depois sobrescrever o original.
+            this.isInitializing = false;
             return;
           }
-        } else {
-          console.warn(`>>> [ALERTA] Permissão de acesso físico bloqueada: ${permission}.`);
-          window.dispatchEvent(new CustomEvent('gbr_db_write_blocked', { 
-            detail: { status: permission, path: handle.name } 
-          }));
+        } catch (err) {
+          console.warn(">>> [DBA] Falha técnica ao ler do banco físico:", err);
         }
       }
-    } catch (err) {
-      console.warn(">>> [DBA] Falha técnica ao ler do banco físico:", err);
-    }
 
-    // 3. Fallback: Recupera do IndexedDB (Puro Binário)
-    try {
-      const binary = await localforage.getItem<Uint8Array>(dbKey);
-      if (binary) {
-        this.db = new SQL.Database(binary);
-        // Executa Full Schema (CPC 27 Compliance)
+      // 3. Fallback: Recupera do IndexedDB (Puro Binário) - Apenas se NÃO houver handle físico salvo
+      if (!handle) {
+        try {
+          const binary = await localforage.getItem<Uint8Array>(dbKey);
+          if (binary) {
+            this.db = new SQL.Database(binary);
+            this.db.run(FULL_SCHEMA);
+            this.storageSource = 'CACHE';
+            this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+            this.isInitialized = true;
+            return;
+          }
+        } catch {
+          console.warn(">>> [DBA] Cache IndexedDB não encontrado.");
+        }
+
+        // 4. Cria novo banco se nada existir
+        this.db = new SQL.Database();
         this.db.run(FULL_SCHEMA);
-        this.storageSource = 'CACHE';
-        this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
         this.isInitialized = true;
-        return;
+        this.storageSource = 'MEMORY';
+        this.currentDbStatus = 'EMPTY';
+        await this.setSystemStatus('EMPTY');
+        await this.persist();
       }
-    } catch {
-      console.warn(">>> [DBA] Cache IndexedDB não encontrado.");
+    } finally {
+      // Migração Silenciosa de Campanhas (LocalStorage -> SQLite)
+      if (this.isInitialized) {
+        const cachedCampaigns = localStorage.getItem('inventory_campaigns_cache');
+        if (cachedCampaigns) {
+          try {
+            const parsed = JSON.parse(cachedCampaigns);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              console.log(`>>> [Migração] Verificando ${parsed.length} campanhas legadas para sincronismo...`);
+              for (const camp of parsed) {
+                await this.saveCampaign(camp);
+              }
+            }
+          } catch (e) {
+            console.error(">>> [Migração] Erro ao sincronizar campanhas legadas:", e);
+          }
+        }
+      }
+      this.isInitializing = false;
     }
-
-    // 4. Cria novo banco se nada existir
-    this.db = new SQL.Database();
-    this.db.run(FULL_SCHEMA);
-    this.isInitialized = true;
-    this.storageSource = 'MEMORY';
-    this.currentDbStatus = 'EMPTY';
-    await this.setSystemStatus('EMPTY');
-    await this.persist();
   }
 
   async mapLocalFolder() {
+    if (this.isInitializing) return false;
+    
     const { dirHandleKey, fileHandleKey } = this.keys;
     try {
       const isIframe = window.self !== window.top;
@@ -314,8 +398,11 @@ class SQLiteService {
         mode: 'readwrite'
       });
       
+      if (!handle) return false;
+
       await localforage.removeItem(fileHandleKey); // Limpa o handle de arquivo se mudar para pasta
       await localforage.setItem(dirHandleKey, handle);
+      
       this.isInitialized = false;
       await this.init();
       return true;
@@ -323,7 +410,10 @@ class SQLiteService {
       if (err instanceof Error && (err.name === 'SecurityError' || err.message.includes('sub frames'))) {
         throw new Error("IFRAME_RESTRICTION");
       }
-      console.error("Mapeamento de diretório cancelado:", err);
+      if (err instanceof Error && err.name === 'AbortError') {
+        return false;
+      }
+      console.error("Mapeamento de diretório cancelado ou falhou:", err);
       throw err;
     }
   }
@@ -333,6 +423,8 @@ class SQLiteService {
    * Isso permite "blindar" o app para trabalhar exclusivamente com um banco legado ou oficial.
    */
   async mapSpecificFile() {
+    if (this.isInitializing) return false;
+
     const { dirHandleKey, fileHandleKey } = this.keys;
     try {
       // @ts-expect-error - showOpenFilePicker
@@ -352,6 +444,7 @@ class SQLiteService {
       await this.init();
       return true;
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return false;
       console.error("Mapeamento de arquivo cancelado:", err);
       throw err;
     }
@@ -374,7 +467,9 @@ class SQLiteService {
    * Chamado após cada operação de escrita.
    */
   private async persist() {
-    if (!this.db) return;
+    if (!this.db || this.isPersisting) return;
+    this.isPersisting = true;
+    
     const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     
     try {
@@ -399,15 +494,26 @@ class SQLiteService {
             const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
             const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
             const fileName = `gbr_inventario_expert${suffix}.db`;
-            writableHandle = await dirHandle.getFileHandle(fileName, { create: true });
+            try {
+              writableHandle = await dirHandle.getFileHandle(fileName, { create: true });
+            } catch (handleErr) {
+              console.error(">>> [ALERTA] Falha ao obter handle de escrita:", handleErr);
+            }
           }
 
           if (writableHandle) {
-            const writable = await writableHandle.createWritable();
-            await writable.write(data);
-            await writable.close();
-            physicalSaved = true;
-            console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes`);
+            try {
+              const writable = await writableHandle.createWritable();
+              await writable.write(data);
+              await writable.close();
+              physicalSaved = true;
+              console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes`);
+            } catch (writeErr) {
+              console.error(">>> [ALERTA] Falha ao gravar no arquivo físico. Arquivo pode estar sendo usado por outro processo ou aba.", writeErr);
+              window.dispatchEvent(new CustomEvent('gbr_db_write_failed', { 
+                detail: { error: writeErr, fileName: writableHandle.name } 
+              }));
+            }
           }
         } else {
           console.warn(`>>> [ALERTA] Gravação física bloqueada! Status: ${permission}.`);
@@ -417,7 +523,7 @@ class SQLiteService {
         }
       }
 
-      // Salva no IndexedDB como segurança redundante
+      // Salva no IndexedDB como segurança redundante (Sempre ocorre, mesmo se o físico falhar)
       await localforage.setItem(dbKey, data);
       
       window.dispatchEvent(new CustomEvent('gbr_db_persisted', { 
@@ -429,6 +535,8 @@ class SQLiteService {
       }));
     } catch (err) {
       console.error(">>> [ERRO CRÍTICO] Falha ao comitar banco de dados:", err);
+    } finally {
+      this.isPersisting = false;
     }
   }
 
@@ -437,6 +545,79 @@ class SQLiteService {
     const result = this.db?.run(sql, params);
     await this.persist();
     return result;
+  }
+
+  async query(sql: string, params?: SqlValue[]) {
+    if (!this.db) await this.init();
+    const res = this.db?.exec(sql, params);
+    if (!res || res.length === 0) return [];
+    
+    const columns = res[0].columns;
+    return res[0].values.map(row => {
+      const obj: Record<string, SqlValue> = {};
+      columns.forEach((col, i) => obj[col] = row[i]);
+      return obj;
+    }) as unknown as Record<string, SqlValue>[];
+  }
+
+  async saveCampaign(campaign: Partial<InventoryCampaign>) {
+    const sql = `
+      INSERT OR REPLACE INTO campaigns (id, name, description, status, start_date, end_date, _tenantid, _unitid, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const params = [
+      campaign.id || null,
+      campaign.name || null,
+      campaign.description || null,
+      campaign.status || null,
+      campaign.start_date || null,
+      campaign.end_date || null,
+      campaign._tenantid || (campaign as { tenantid?: string }).tenantid || null,
+      campaign._unitid || (campaign as { unit_id?: string }).unit_id || null,
+      campaign.created_by || null,
+      campaign.created_at || new Date().toISOString()
+    ];
+    return this.execute(sql, params);
+  }
+
+  async getCampaigns(tenantId: string) {
+    return this.query("SELECT * FROM campaigns WHERE _tenantid = ? ORDER BY start_date DESC", [tenantId]);
+  }
+
+  async deleteCampaignSql(id: string) {
+    return this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
+  }
+
+  // --- MÉTODOS DE INVENTÁRIO (Soberania de Dados) ---
+
+  async getAllAssets(): Promise<Asset[]> {
+    if (!this.db) await this.init();
+    return this.query("SELECT * FROM assets WHERE _is_deleted = 0") as unknown as Asset[];
+  }
+
+  async getAssetCount(): Promise<number> {
+    if (!this.db) await this.init();
+    const res = await this.query("SELECT COUNT(*) as total FROM assets WHERE _is_deleted = 0");
+    return res.length > 0 ? (res[0].total as number) : 0;
+  }
+
+  async saveInventoryConfig(config: Partial<InventoryState>) {
+    if (!this.db) await this.init();
+    const data = JSON.stringify(config);
+    return this.execute("INSERT OR REPLACE INTO system_status (key, value) VALUES ('inventory_config', ?)", [data]);
+  }
+
+  async getInventoryConfig(): Promise<Partial<InventoryState> | null> {
+    if (!this.db) await this.init();
+    const res = await this.query("SELECT value FROM system_status WHERE key = 'inventory_config'");
+    if (res.length > 0) {
+      try {
+        return JSON.parse(res[0].value as string);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   /**
@@ -468,18 +649,6 @@ class SQLiteService {
     } finally {
       await this.persist();
     }
-  }
-
-  async query(sql: string, params?: SqlValue[]) {
-    if (!this.db) await this.init();
-    const stmt = this.db?.prepare(sql);
-    stmt?.bind(params);
-    const results = [];
-    while (stmt?.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt?.free();
-    return results;
   }
 
   /**

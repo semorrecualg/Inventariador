@@ -49,7 +49,8 @@ export interface AuditLogEntry {
 export enum DatabaseStatus {
   EMPTY = 'EMPTY',
   LOADED = 'LOADED',
-  IN_USE = 'IN_USE'
+  IN_USE = 'IN_USE',
+  ERROR = 'ERROR'
 }
 
 export enum TagInventario {
@@ -393,6 +394,7 @@ export interface InventoryCampaign {
   tenantid: string; // Deprecated: use _tenantid
   unit_id?: string; // Deprecated: use _unitid
   created_by: string;
+  created_at: string;
   // Estatísticas calculadas
   total_assets?: number;
   inventoried_assets?: number;

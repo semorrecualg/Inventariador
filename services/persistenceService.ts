@@ -3,6 +3,7 @@ import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb } from './localDbService';
+import { sqliteService } from './sqliteService';
 import { generateChecksum } from './utils';
 
 // Chaves base para o armazenamento
@@ -158,7 +159,8 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     const keys = getInventoryKeys(mode);
     
     console.log(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode})...`);
-    // 1. Salva localmente primeiro (Offline-First) com Blindagem Técnica (Criptografia)
+    
+    // 1. Salva localmente primeiro (Offline-First)
     const config = { ...data } as Record<string, unknown>;
     const assets = data.assets;
     
@@ -167,39 +169,38 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     delete config._integrity_failed;
     delete config._integrity_hash;
 
-    // 1.1 Cálculo de Checksum (Integridade de Dados - Auditoria)
-    console.log('>>> [Persistence] Gerando Checksum de integridade...');
-    // Focamos o checksum apenas nos ativos para evitar falhas por mudanças em metadados voláteis
+    // 1.1 Persistência Global em SQLite (Soberania de Dados)
+    if (mode === DatabaseMode.INTERNAL) {
+      console.log('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
+      await sqliteService.saveInventoryConfig(config);
+      
+      // Atualiza o status interno do banco físico para ACTIVE se houver ativos
+      const assetCount = await sqliteService.getAssetCount();
+      if (assetCount > 0) {
+        await sqliteService.setSystemStatus('ACTIVE');
+      }
+    }
+
+    // 1.2 Cálculo de Checksum
     const integrityHash = await generateChecksum(assets);
     config._integrity_hash = integrityHash;
 
-    console.log(`>>> [Persistence] Criptografando ${assets.length} ativos e configurações...`);
-    // Criptografamos os dados antes de salvar no IndexedDB
+    console.log(`>>> [Persistence] Criptografando e gravando cache IndexedDB...`);
+    // Criptografamos os dados para o cache do Navegador (Legado/Fallback)
     const [encryptedConfig, encryptedAssets] = await Promise.all([
       encryption.encrypt(config),
       encryption.encrypt(assets)
     ]);
 
-    console.log(`>>> [Persistence] Gravando no IndexedDB (Chaves: ${keys.assets})...`);
     await Promise.all([
       localforage.setItem(keys.config, encryptedConfig),
       localforage.setItem(keys.assets, encryptedAssets)
     ]);
 
-    // Mirroring in Dexie for extra robustness (SQL-like storage)
+    // Espelhamento Dexie para compatibilidade
     try {
       if (mode === DatabaseMode.INTERNAL) {
-        // SEGURANÇA: Não usamos clear() para evitar "Update Gaps" se o app fechar durante o processo
-        // Usamos bulkPut (Upsert) que é atômico via executeBatch no SQL.js
         await localDb.assets.bulkPut(assets);
-        
-        // Atualiza o status interno do banco físico para ACTIVE se houver ativos
-        if (assets.length > 0) {
-          const { sqliteService } = await import('./sqliteService');
-          await sqliteService.setSystemStatus('ACTIVE');
-        }
-        
-        console.log('>>> [Persistence] Espelhamento Dexie (Delta/Full) concluído.');
       }
     } catch (dexieErr) {
       console.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
@@ -232,18 +233,50 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
   try {
     const keys = getInventoryKeys(mode);
     
-    // PRIORIDADE 1: Em modo INTERNO, o SQL (localDb) é a fonte da verdade para Ativos
-    // Isso evita usar dados obsoletos do IndexedDB se o salvamento foi via incremental
+    // PRIORIDADE 0: Carregamento do SQLite Físico (MODO INTERNO)
+    // No modo mobile puro, o arquivo .db local é o ÚNICO ponto da verdade.
     let sqlAssets: Asset[] = [];
+    let sqlConfig: Partial<InventoryState> | null = null;
+
     if (mode === DatabaseMode.INTERNAL) {
       try {
-        sqlAssets = await localDb.assets.toArray();
-        console.log(`>>> [Persistence] ${sqlAssets.length} ativos carregados do SQL (Primary).`);
+        console.log('>>> [Persistence] Tentando carregar dados do SQLite físico...');
+        
+        // Antes de carregar, verificamos o status do arquivo
+        const status = await sqliteService.getFileStatus();
+        
+        // Se o arquivo estiver bloqueado ou aguardando permissão, NÃO prosseguimos para o cache.
+        // Retornamos um estado "especificamente" vazio ou lançamos erro para evitar rollback.
+        if (status.status === 'permission_denied' || status.status === 'prompt' || status.status === 'expired') {
+          console.warn('>>> [Persistence] SOBERANIA: Arquivo físico detectado mas bloqueado. Impedindo carga de cache para evitar rollback.');
+          return {
+            assets: [],
+            databaseMode: mode,
+            status: DatabaseStatus.ERROR,
+            _integrity_failed: true // Sinaliza para a UI que a carga não foi completa
+          } as unknown as InventoryState;
+        }
+
+        // Buscamos ativos e config em paralelo do SQLite
+        const [assets, config] = await Promise.all([
+          sqliteService.getAllAssets(),
+          sqliteService.getInventoryConfig()
+        ]);
+        
+        sqlAssets = assets || [];
+        sqlConfig = config;
+        
+        if (sqlAssets.length > 0) {
+          console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do SQLite físico.`);
+        } else {
+          console.warn('>>> [Persistence] SQLite físico vazio ou sem ativos.');
+        }
       } catch (sqlErr) {
-        console.warn('>>> [Persistence] Falha ao ler do SQL no init:', sqlErr);
+        console.error('>>> [Persistence] Erro crítico ao ler SQLite físico:', sqlErr);
       }
     }
 
+    // Carregamento de Fallback (Cache do Navegador)
     const [encryptedAssets, encryptedConfig] = await Promise.all([
       localforage.getItem<Uint8Array | string>(keys.assets),
       localforage.getItem<Uint8Array | string>(keys.config)
@@ -254,25 +287,28 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     }
 
     // Decriptografamos as configurações
-    let config: Record<string, unknown> = {};
-    if (encryptedConfig) {
+    let config: Record<string, unknown> = sqlConfig || {};
+    
+    // Se não veio do SQL, tenta o cache criptografado
+    if (Object.keys(config).length === 0 && encryptedConfig) {
       try {
         config = await encryption.decrypt(encryptedConfig) as Record<string, unknown>;
+        console.log('>>> [Persistence] Configuração carregada do cache IndexedDB.');
       } catch (err) {
-        console.warn('>>> [Persistence] Falha ao decriptografar config:', err);
+        console.warn('>>> [Persistence] Falha ao decriptografar config do cache:', err);
       }
     }
 
     // Decriptografamos ativos apenas se não viermos do SQL ou se o SQL estiver vazio
     let finalAssets = sqlAssets;
-    // SEGURANÇA/SOBERANIA: Em modo INTERNO, não fazemos fallback para o IndexedDB se o SQL estiver vazio.
-    // Isso evita "interferência" de dados antigos de cache quando o usuário vincula um arquivo novo e limpo.
-    if (finalAssets.length === 0 && encryptedAssets && mode !== DatabaseMode.INTERNAL) {
+    
+    // SOBERANIA: Se não houver ativos no SQL físico e houver cache, carregamos o cache.
+    if (finalAssets.length === 0 && encryptedAssets) {
       try {
         finalAssets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
-        console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do IndexedDB (Fallback).`);
+        console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
       } catch (err) {
-        console.warn('>>> [Persistence] Falha ao decriptografar ativos do IndexedDB fallback:', err);
+        console.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
       }
     }
 
