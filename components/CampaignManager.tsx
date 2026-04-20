@@ -143,7 +143,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    const tenantId = user?._tenantid || user?.tenantid;
+    let tenantId = user?._tenantid || user?.tenantid;
+    const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
+    if (!tenantId && isAdmin) tenantId = 'CICOPAL';
+
     if (tenantId) {
       setStatsLoading(true);
       const campaignStats = await fetchCampaignStats(campaign.id, tenantId);
@@ -214,8 +217,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   exit={{ height: 0, opacity: 0 }}
                   className="px-4 pb-4 font-mono text-[9px] text-emerald-500/80 space-y-1"
                 >
-                  <p>TENANT: {user?._tenantid || 'N/A'}</p>
+                  <p>TENANT: {user?._tenantid || user?.tenantid || 'N/A'}</p>
                   <p>COUNT: {campaigns.length}</p>
+                  <p>UNIT: {user?._unitid || user?.unitid || 'N/A'}</p>
                 </motion.div>
               )}
             </AnimatePresence>

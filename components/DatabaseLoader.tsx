@@ -516,6 +516,17 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     if (rawExtractedAssetsRef.current.length > 0) {
       setIsActivating(true);
       try {
+        // REGRA DE OURO v24.51: Garante que todos os ativos importados herdem o tenant do usuário logado
+        // se estiverem vazios. Isso evita que fiquem órfãos em buscas por tenant.
+        const activeTenant = (user?._tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
+        console.log(`>>> [DatabaseLoader] Normalizando ${rawExtractedAssetsRef.current.length} ativos para o tenant: ${activeTenant}`);
+        
+        rawExtractedAssetsRef.current = rawExtractedAssetsRef.current.map(a => ({
+          ...a,
+          _tenantid: a._tenantid || activeTenant,
+          GRUPO_EMPRESARIAL: a.GRUPO_EMPRESARIAL || activeTenant
+        }));
+
         // Log de Auditoria: Carga Expert
         await logAuditEvent({
           user_email: user?.email || 'ADMIN',

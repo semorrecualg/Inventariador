@@ -541,8 +541,11 @@ const App: React.FC = () => {
         
         if (isRestricted && !isReconnecting) {
           // Só abrimos o overlay se NÃO houver dados carregados ou se estivermos em Dashboard (onde integridade é vital)
-          if (!showReconnectOverlay && (!isDataLoaded || inventoryRef.current.assets.length === 0 || screen === 'DASHBOARD')) {
-            console.warn(`>>> [DBA] Vínculo expirado (${result.status}). Abrindo overlay.`);
+          // v24.5.1: Se o sistema JA está inicializado (isInitialized), ignoramos status 'prompt' temporários do navegador
+          const isReallyDisconnected = !sqliteService.getIsInitialized() || result.status === 'permission_denied' || result.status === 'expired';
+          
+          if (!showReconnectOverlay && isReallyDisconnected && (!isDataLoaded || inventoryRef.current.assets.length === 0 || screen === 'DASHBOARD')) {
+            console.warn(`>>> [DBA] Vínculo expirado ou inacessível (${result.status}). Abrindo overlay.`);
             setShowReconnectOverlay(true);
           }
         } else if (result.status === 'linked' || result.status === 'granted') {
@@ -1344,7 +1347,10 @@ const App: React.FC = () => {
 
   // Carregamento de Campanhas e Configurações de GPS para visibilidade global
   const refreshCampaigns = useCallback(async () => {
-    const tenantId = user?._tenantid || user?.tenantid;
+    let tenantId = user?._tenantid || user?.tenantid;
+    const isGestor = !tenantId && (user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
+    if (isGestor) tenantId = 'CICOPAL';
+
     console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, Mode: ${databaseMode}`);
     
     if (!tenantId) return;
@@ -1363,7 +1369,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('>>> [App] Erro ao buscar campanhas:', err);
     }
-  }, [user?._tenantid, user?.tenantid, databaseMode]);
+  }, [user?._tenantid, user?.tenantid, user?.role, user?.isAdmin, user?.email, databaseMode]);
 
   useEffect(() => {
     if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION || screen === AppScreen.UNIT_CONFIGURATOR) {

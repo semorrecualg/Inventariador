@@ -528,7 +528,7 @@ class SQLiteService {
               await writable.write(data);
               await writable.close();
               physicalSaved = true;
-              console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes`);
+              console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes | Hora: ${new Date().toLocaleTimeString()}`);
             } catch (writeErr) {
               console.error(">>> [ALERTA] Falha ao gravar no arquivo físico. Arquivo pode estar sendo usado por outro processo ou aba.", writeErr);
               window.dispatchEvent(new CustomEvent('gbr_db_write_failed', { 
@@ -739,6 +739,10 @@ class SQLiteService {
 
   getDbStatus(): 'EMPTY' | 'ACTIVE' {
     return this.currentDbStatus;
+  }
+
+  getIsInitialized(): boolean {
+    return this.isInitialized;
   }
 
   getStorageSource(): 'PHYSICAL' | 'CACHE' | 'MEMORY' {
