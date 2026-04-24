@@ -805,8 +805,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     </h4>
                     <div className="flex items-center space-x-2">
                       <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania de Dados Permanente</p>
-                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black border ${sqliteService.getDbStatus() === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-white/10 text-white/50 border-white/20'}`}>
-                        {sqliteService.getDbStatus() === 'ACTIVE' ? 'ATIVO' : 'EM DESUSO'}
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black border ${sqliteService.getDbStatus() === 'ACTIVE' && fileStatus?.status === 'linked' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-white/10 text-white/50 border-white/20'}`}>
+                        {sqliteService.getDbStatus() === 'ACTIVE' && fileStatus?.status === 'linked' ? 'ATIVO' : 'AGUARDANDO'}
                       </span>
                     </div>
                   </div>

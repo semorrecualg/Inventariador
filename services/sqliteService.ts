@@ -279,13 +279,14 @@ class SQLiteService {
     }
 
     this.isInitializing = true;
+    console.log(`>>> [DBA] Inicializando SQLite Service (forced=${forced})...`);
     
     try {
       if (this.db && forced) {
         try { 
           this.db.close(); 
         } catch {
-          // Ignora erro ao fechar banco já fechado ou nulo
+          // Ignora
         }
         this.db = null;
         this.isInitialized = false;
@@ -340,92 +341,42 @@ class SQLiteService {
               const file = await activeFileHandle.getFile();
               const buffer = await file.arrayBuffer();
               
-              console.log(`>>> [DBA] Carregando do Banco Físico: ${activeFileHandle.name} | Tamanho lido: ${buffer.byteLength} bytes`);
-              
-              if (buffer.byteLength > 4096) { // Mínimo de 4KB para ser uma base válida
-                try {
-                  this.db = new SQL.Database(new Uint8Array(buffer));
-                  
-                  // Verificação de Integridade Básica
-                  const check = this.db.exec("PRAGMA integrity_check");
-                  console.log(">>> [DBA] Sucesso: Banco físico validado.", check);
-                  
-                  // Verifica se a tabela assets existe
-                  const tableCheck = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='assets'");
-                  if (tableCheck.length === 0) {
-                    console.warn(">>> [DBA] Tabela 'assets' não encontrada no banco carregado. Criando schema...");
-                    this.db.run(FULL_SCHEMA);
-                  }
-
-                  // Garantir compatibilidade de colunas em campaigns
-                  await this.ensureCampaignsTableHasTenantColumn();
-                } catch (pErr) {
-                  console.warn(">>> [DBA] Falha ao ler estrutura do banco físico. Tentando IndexedDB como fallback...", pErr);
-                  const binary = await localforage.getItem<Uint8Array>(dbKey);
-                  if (binary && binary.length > 4096) {
-                    this.db = new SQL.Database(binary);
-                  } else {
-                    this.db = new SQL.Database();
-                    this.db.run(FULL_SCHEMA);
-                  }
-                }
+              if (buffer.byteLength > 4096) { 
+                console.log(`>>> [DBA] Sucesso Físico: ${activeFileHandle.name} (${buffer.byteLength} bytes)`);
+                this.db = new SQL.Database(new Uint8Array(buffer));
+                
+                // Validação e Reparo de Schema
+                this.db.run(FULL_SCHEMA);
+                await this.ensureCampaignsTableHasTenantColumn();
+                
+                this.isInitialized = true;
+                this.storageSource = 'PHYSICAL';
+                this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+                return;
               } else {
-                console.warn(`>>> [DBA] Arquivo Físico (${activeFileHandle.name}) muito pequeno (${buffer.byteLength} bytes). Verificando cache IndexedDB.`);
-                const binary = await localforage.getItem<Uint8Array>(dbKey);
-                if (binary && binary.length > 4096) {
-                  this.db = new SQL.Database(binary);
-                  this.db.run(FULL_SCHEMA);
-                } else {
-                  this.db = new SQL.Database();
-                  this.db.run(FULL_SCHEMA);
-                }
-                await this.persist();
+                console.warn(">>> [DBA] Arquivo físico muito pequeno. Usando cache IndexedDB como segurança.");
               }
-              
-              this.isInitialized = true;
-              this.storageSource = 'PHYSICAL';
-              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-              return;
             }
           } else {
-            console.warn(`>>> [DBA] Acesso físico bloqueado (${permission}).`);
-            // v24.51: Se bloqueado, tentamos ao menos carregar o Cache do IndexedDB para NÃO deixar o app vazio,
-            // mas marcamos storageSource como 'CACHE' para sinalizar que não é o arquivo físico.
-            const binary = await localforage.getItem<Uint8Array>(dbKey);
-            if (binary && binary.length > 4096) {
-              console.log(">>> [DBA] Carregando cache IndexedDB enquanto espera permissão física...");
-              this.db = new SQL.Database(binary);
-              this.isInitialized = true;
-              this.storageSource = 'CACHE';
-              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-              this.isInitializing = false;
-              return;
-            }
-            this.isInitializing = false;
-            return;
+            console.warn(`>>> [DBA] Permissão Física: ${permission}. Tentando Cache.`);
           }
         } catch (err) {
-          console.warn(">>> [DBA] Falha técnica ao ler do banco físico:", err);
+          console.warn(">>> [DBA] Erro ao acessar arquivo físico:", err);
         }
       }
 
-      // 3. Fallback: Recupera do IndexedDB (Puro Binário) - Apenas se NÃO houver handle físico salvo
-      if (!handle) {
-        try {
-          const binary = await localforage.getItem<Uint8Array>(dbKey);
-          if (binary) {
-            this.db = new SQL.Database(binary);
-            this.db.run(FULL_SCHEMA);
-            this.storageSource = 'CACHE';
-            this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-            this.isInitialized = true;
-            return;
-          }
-        } catch {
-          console.warn(">>> [DBA] Cache IndexedDB não encontrado.");
-        }
-
+      // 3. Fallback: Recupera do IndexedDB (Puro Binário)
+      const binary = await localforage.getItem<Uint8Array>(dbKey);
+      if (binary && binary.length > 4096) {
+        console.log(`>>> [DBA] Sucesso Cache: ${binary.length} bytes carregados.`);
+        this.db = new SQL.Database(binary);
+        this.db.run(FULL_SCHEMA);
+        this.storageSource = 'CACHE';
+        this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+        this.isInitialized = true;
+      } else {
         // 4. Cria novo banco se nada existir
+        console.log(">>> [DBA] Criando novo banco em memória...");
         this.db = new SQL.Database();
         this.db.run(FULL_SCHEMA);
         this.isInitialized = true;
@@ -435,7 +386,9 @@ class SQLiteService {
         await this.persist();
       }
     } finally {
-      // Migração Silenciosa de Campanhas (LocalStorage -> SQLite)
+      this.isInitializing = false;
+      
+      // Migração Silenciosa de Campanhas
       if (this.isInitialized) {
         const cachedCampaigns = localStorage.getItem('inventory_campaigns_cache');
         if (cachedCampaigns) {

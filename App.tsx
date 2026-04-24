@@ -4461,18 +4461,21 @@ const App: React.FC = () => {
         />
 
         {/* Indicador de Banco de Dados Local (Soberania) */}
-        {databaseMode === DatabaseMode.INTERNAL && user && screen !== AppScreen.LOGIN && (
+        {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || fileStatus?.status === 'expired') && (
           <motion.div 
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            className="fixed bottom-6 left-6 z-[50] flex flex-col gap-2"
+            className="fixed bottom-6 left-6 z-[60] flex flex-col gap-2"
           >
-            <div className="bg-ink/80 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 shadow-2xl flex items-center gap-3">
+            <div 
+              onClick={handleReconnectFile}
+              className="bg-[#1e293b]/95 backdrop-blur-xl px-4 py-3 rounded-2xl border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-center gap-3 cursor-pointer hover:bg-[#334155] transition-all group scale-95 md:scale-100"
+            >
               <div className="relative">
                 {sqliteService.getStorageSource() === 'PHYSICAL' ? (
-                  <Database size={18} className="text-green-400" />
+                  <Database size={18} className="text-green-400 group-hover:scale-110 transition-transform" />
                 ) : sqliteService.getStorageSource() === 'CACHE' ? (
-                  <Database size={18} className="text-amber-400" />
+                  <Database size={18} className="text-amber-400 animate-pulse" />
                 ) : (
                   <Database size={18} className="text-red-400" />
                 )}
@@ -4482,31 +4485,29 @@ const App: React.FC = () => {
                     animate={{ scale: 1 }}
                     className="absolute -top-1 -right-1"
                   >
-                    <CheckCircle2 size={10} className="text-green-400 fill-ink" />
+                    <CheckCircle2 size={10} className="text-green-400 fill-[#1e293b]" />
                   </motion.div>
                 )}
               </div>
               
-              <div className="flex flex-col">
+              <div className="flex flex-col min-w-[80px]">
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'Arquivo Conectado' : 
-                   sqliteService.getStorageSource() === 'CACHE' ? 'Cache Local Ativo' : 'Banco Temporário'}
+                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'Blindagem Ativa' : 
+                   sqliteService.getStorageSource() === 'CACHE' ? 'Cache Temporário' : 'Banco Volátil'}
                   {sqliteService.getStorageSource() === 'PHYSICAL' && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}
                 </span>
-                <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter mt-1 truncate max-w-[140px]">
+                <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter mt-1 truncate max-w-[120px]">
                   {sqliteService.getStorageSource() === 'PHYSICAL' 
                     ? (fileStatus?.fileName || 'Sincronizado') 
-                    : sqliteService.getStorageSource() === 'CACHE'
-                      ? 'Fallback de Segurança'
-                      : 'Memória Volátil'}
+                    : fileStatus?.status === 'expired' ? 'Permissão Expirada - Toque Aqui' : 'Aguardando Arquivo'}
                 </span>
               </div>
 
               {lastLocalSave && (
                 <div className="ml-2 pl-3 border-l border-white/10 flex flex-col">
-                   <span className="text-[7px] font-black text-white/40 uppercase tracking-widest leading-none">Último Salvamento</span>
+                   <span className="text-[7px] font-black text-white/40 uppercase tracking-widest leading-none">Gravado</span>
                    <span className="text-[8px] font-bold text-green-400 uppercase tracking-tighter mt-0.5">
                      {new Date(lastLocalSave).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                    </span>
