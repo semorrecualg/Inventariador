@@ -158,15 +158,16 @@ class SQLiteService {
                 lastModified: new Date(file.lastModified).toISOString()
               };
             } catch (getErr) {
-              console.error(">>> [DBA] Erro ao obter objeto File do handle:", getErr);
-              return { status: 'error', path: 'Handle Inválido', error: String(getErr) };
+              console.error(">>> [DBA] Erro ao obter objeto File do handle. Permissão pode ter caído.", getErr);
+              return { status: 'expired', path: 'Vínculo Expirado', error: String(getErr) };
             }
           }
         }
         
         const folderName = dirHandle?.name || 'Arquivo Individual';
+        const finalStatus = permission === 'prompt' ? 'prompt' : (permission === 'denied' ? 'permission_denied' : permission);
         return { 
-          status: permission, // 'prompt', 'denied' etc.
+          status: finalStatus, 
           linkType: dirHandle ? 'DIRECTORY' : 'FILE',
           path: folderName, 
           folderName: folderName,
@@ -241,6 +242,30 @@ class SQLiteService {
     }
   }
 
+  private async ensureCampaignsTableHasTenantColumn() {
+    if (!this.db) return;
+    try {
+      const res = this.db.exec("PRAGMA table_info(campaigns)");
+      if (res.length === 0) return;
+      const columns = res[0]?.values.map(v => v[1] as string) || [];
+      
+      if (!columns.includes('_tenantid')) {
+        if (columns.includes('tenantid')) {
+          console.log(">>> [DBA] Renomeando coluna 'tenantid' para '_tenantid' em campaigns...");
+          this.db.run("ALTER TABLE campaigns RENAME COLUMN tenantid TO _tenantid");
+        } else if (columns.includes('tenant_id')) {
+          console.log(">>> [DBA] Renomeando coluna 'tenant_id' para '_tenantid' em campaigns...");
+          this.db.run("ALTER TABLE campaigns RENAME COLUMN tenant_id TO _tenantid");
+        } else {
+          console.log(">>> [DBA] Adicionando coluna '_tenantid' ausente em campaigns...");
+          this.db.run("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
+        }
+      }
+    } catch (e) {
+      console.warn(">>> [DBA] Erro ao verificar/corrigir coluna _tenantid em campaigns:", e);
+    }
+  }
+
   async init(forced = false) {
     const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
     
@@ -257,7 +282,11 @@ class SQLiteService {
     
     try {
       if (this.db && forced) {
-        try { this.db.close(); } catch {}
+        try { 
+          this.db.close(); 
+        } catch {
+          // Ignora erro ao fechar banco já fechado ou nulo
+        }
         this.db = null;
         this.isInitialized = false;
       }
@@ -314,26 +343,39 @@ class SQLiteService {
               console.log(`>>> [DBA] Carregando do Banco Físico: ${activeFileHandle.name} | Tamanho lido: ${buffer.byteLength} bytes`);
               
               if (buffer.byteLength > 4096) { // Mínimo de 4KB para ser uma base válida
-                this.db = new SQL.Database(new Uint8Array(buffer));
-                
-                // Verificação de Integridade Básica
                 try {
+                  this.db = new SQL.Database(new Uint8Array(buffer));
+                  
+                  // Verificação de Integridade Básica
                   const check = this.db.exec("PRAGMA integrity_check");
                   console.log(">>> [DBA] Sucesso: Banco físico validado.", check);
+                  
+                  // Verifica se a tabela assets existe
+                  const tableCheck = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='assets'");
+                  if (tableCheck.length === 0) {
+                    console.warn(">>> [DBA] Tabela 'assets' não encontrada no banco carregado. Criando schema...");
+                    this.db.run(FULL_SCHEMA);
+                  }
+
+                  // Garantir compatibilidade de colunas em campaigns
+                  await this.ensureCampaignsTableHasTenantColumn();
                 } catch (pErr) {
-                  console.warn(">>> [DBA] Banco físico corrompido ou incompleto, tentando recuperar schema...", pErr);
-                  this.db.run(FULL_SCHEMA);
+                  console.warn(">>> [DBA] Falha ao ler estrutura do banco físico. Tentando IndexedDB como fallback...", pErr);
+                  const binary = await localforage.getItem<Uint8Array>(dbKey);
+                  if (binary && binary.length > 4096) {
+                    this.db = new SQL.Database(binary);
+                  } else {
+                    this.db = new SQL.Database();
+                    this.db.run(FULL_SCHEMA);
+                  }
                 }
               } else {
                 console.warn(`>>> [DBA] Arquivo Físico (${activeFileHandle.name}) muito pequeno (${buffer.byteLength} bytes). Verificando cache IndexedDB.`);
-                // Se o arquivo físico estiver vazio, tentamos o IndexedDB antes de desistir e criar um novo
                 const binary = await localforage.getItem<Uint8Array>(dbKey);
                 if (binary && binary.length > 4096) {
-                  console.log(">>> [DBA] Recuperando dados do cache IndexedDB para o arquivo físico...");
                   this.db = new SQL.Database(binary);
                   this.db.run(FULL_SCHEMA);
                 } else {
-                  console.log(">>> [DBA] Cache IndexedDB também vazio. Inicializando novo schema.");
                   this.db = new SQL.Database();
                   this.db.run(FULL_SCHEMA);
                 }
@@ -346,9 +388,19 @@ class SQLiteService {
               return;
             }
           } else {
-            console.warn(`>>> [DBA] Acesso físico bloqueado (${permission}). Prioridade mantida ao físico, não inicializando banco substituto.`);
-            // CRITICAL: Se temos um handle mas não temos permissão, não carregamos NADA.
-            // Isso força o usuário a reconfirmar a permissão em vez de trabalhar com um banco vazio e depois sobrescrever o original.
+            console.warn(`>>> [DBA] Acesso físico bloqueado (${permission}).`);
+            // v24.51: Se bloqueado, tentamos ao menos carregar o Cache do IndexedDB para NÃO deixar o app vazio,
+            // mas marcamos storageSource como 'CACHE' para sinalizar que não é o arquivo físico.
+            const binary = await localforage.getItem<Uint8Array>(dbKey);
+            if (binary && binary.length > 4096) {
+              console.log(">>> [DBA] Carregando cache IndexedDB enquanto espera permissão física...");
+              this.db = new SQL.Database(binary);
+              this.isInitialized = true;
+              this.storageSource = 'CACHE';
+              this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
+              this.isInitializing = false;
+              return;
+            }
             this.isInitializing = false;
             return;
           }

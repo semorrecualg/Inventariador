@@ -263,7 +263,9 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
             companies: [],
             databaseMode: mode,
             status: DatabaseStatus.ERROR,
-            _integrity_failed: true 
+            // v25.01: Não marcamos como integrity_failed se for apenas falta de permissão, 
+            // caso contrário o sistema exibe o alerta vermelho de corrupção indevidamente.
+            _integrity_failed: false 
           } as unknown as InventoryState;
         }
 

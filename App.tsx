@@ -1131,16 +1131,18 @@ const App: React.FC = () => {
             // Se o SQLite reportar 0 mas o loadInventory retornou algo (fallback de cache),
             // ou se o loadInventory sinalizou que está bloqueado (_integrity_failed), 
             // tratamos como falha de integridade para forçar a re-permissão.
-            if (savedInventory.status === DatabaseStatus.ERROR || (count === 0 && savedInventory.assets.length > 0)) {
-              console.warn(">>> [Auditoria] Discrepância / Bloqueio detectado. Ativando proteção de rollback.");
-              setIntegrityFailed(true);
+            // Se detectamos que está simplesmente bloqueado por permissão (ERRO de acesso)...
+            if (savedInventory.status === DatabaseStatus.ERROR) {
+              console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
+              // NÃO ativamos IntegrityFailed se for apenas falta de permissão
               setShowReconnectOverlay(true);
-              
-              // Se detectamos que está bloqueado, não prosseguimos com o init normal.
-              // O App ficará no Splash/Loader até que a permissão seja concedida e init() re-chamado.
-              if (savedInventory.status === DatabaseStatus.ERROR) {
-                return; 
-              }
+              return; 
+            }
+
+            // Discrepância real: O loadInventory trouxe dados (do cache?) mas o banco físico executado agora reporta 0
+            if (count === 0 && savedInventory.assets.length > 0) {
+              console.warn(">>> [Auditoria] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO.");
+              setIntegrityFailed(true);
             }
           } catch (sqlErr) {
             console.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
@@ -3507,10 +3509,32 @@ const App: React.FC = () => {
       };
     });
 
-    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
+    // REGRA DE OURO v25.01: Se o banco físico carregou ativos (assets.length > 0) mas a lista 
+    // de empresas resultou vazia (talvez por filtro de permissão equivocado), forçamos
+    // a inclusão de todas as unidades encontradas nos ativos para evitar o bloqueio do app.
     if (result.length === 0 && assets.length > 0) {
-      console.warn('>>> [fullCompaniesWithStatus] WARNING: Assets exist but no units were extracted!');
+      console.warn('>>> [fullCompaniesWithStatus] CRITICAL: Assets exist but no units were extracted! Applying EMERGENCY extraction.');
+      const emergencyUnits = new Set<string>();
+      for (let i = 0; i < assets.length; i++) {
+        const a = assets[i];
+        const company = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+        if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
+          emergencyUnits.add(company.replace(/_/g, ' '));
+        }
+      }
+      
+      if (emergencyUnits.size > 0) {
+        return Array.from(emergencyUnits).map(name => ({
+          name,
+          hasData: true,
+          hasActiveAssets: true,
+          hasCampaign: false,
+          hasGps: false
+        }));
+      }
     }
+
+    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
     return result;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs]);
 
@@ -4606,6 +4630,18 @@ const App: React.FC = () => {
                 Reconfirmar Permissão
               </>
             )}
+          </button>
+          
+          <button 
+            onClick={async () => {
+               if (window.confirm("Isso removerá o vínculo com a pasta atual. Você precisará vincular novamente. Deseja prosseguir?")) {
+                  await sqliteService.hardResetDatabase();
+                  window.location.reload();
+               }
+            }}
+            className="mt-4 text-[10px] text-red-400 font-bold uppercase tracking-widest hover:underline"
+          >
+            Desvincular e Reiniciar Sistema
           </button>
           
           <button 
