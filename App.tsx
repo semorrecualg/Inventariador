@@ -244,7 +244,7 @@ const App: React.FC = () => {
           
           if (loaded.assets.length > 0) {
             setSqliteStatus('ACTIVE');
-            await sqliteService.setSystemStatus('ACTIVE');
+            await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
           }
           console.log(`>>> [DBA] Reconexão manual concluída: ${loaded.assets.length} ativos carregados.`);
         } else {
@@ -484,7 +484,7 @@ const App: React.FC = () => {
   console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [sqliteStatus, setSqliteStatus] = useState<'EMPTY' | 'ACTIVE'>('EMPTY');
+  const [sqliteStatus, setSqliteStatus] = useState<DatabaseStatus | string>(DatabaseStatus.EMPTY);
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
     try {
       const saved = localStorage.getItem('inventory_campaigns_cache');
@@ -527,7 +527,7 @@ const App: React.FC = () => {
         const result = await sqliteService.getFileStatus();
         if (result.status === 'busy') return; // Ignora pacificamente se houver gravação em curso
         
-        setFileStatus(result);
+        setFileStatus(result as any);
         
         const isRestricted = result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired';
         
@@ -549,7 +549,7 @@ const App: React.FC = () => {
           // Sincronização reativa e proteção contra UI vazia
           if (!isDataLoaded || inventoryRef.current.assets.length === 0) {
             const status = sqliteService.getDbStatus();
-            if (status === 'ACTIVE') {
+            if (status === DatabaseStatus.ACTIVE) {
               console.log(">>> [DBA] Permissão reestabelecida. Recarregando banco físico com soberania...");
               const loaded = await loadInventory(databaseMode);
               if (loaded && loaded.assets && loaded.assets.length > 0) {
@@ -3221,7 +3221,7 @@ const App: React.FC = () => {
         
         if (remainingAssets.length === 0) {
           setSqliteStatus('EMPTY');
-          await sqliteService.setSystemStatus('EMPTY');
+          await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
         }
 
         setInventory(prev => ({
@@ -3233,7 +3233,7 @@ const App: React.FC = () => {
       } else {
         // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
         setSqliteStatus('EMPTY');
-        await sqliteService.setSystemStatus('EMPTY');
+        await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
         setInventory(prev => ({ 
           ...prev,
           assets: [], 
@@ -3949,11 +3949,11 @@ const App: React.FC = () => {
                   popScreen();
                 }}
                 onClearDatabase={handleClearDatabase}
-                onDataLoaded={async (a, c) => { 
+                onDataLoaded={async (a: Asset[], c: string[]) => { 
                   console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
                   console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}, Modo: ${databaseMode}`);
                   
-                  const newInventory = { 
+                  const newInventory: InventoryState = { 
                     ...inventory, 
                     assets: a, 
                     companies: c, 
@@ -3982,7 +3982,7 @@ const App: React.FC = () => {
                     
                     if (databaseMode === DatabaseMode.INTERNAL && a.length > 0) {
                       setSqliteStatus('ACTIVE');
-                      await sqliteService.setSystemStatus('ACTIVE');
+                      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
                     }
                     
                     console.log('>>> [DatabaseLoader] Inventário local e físico (SQLite) salvos com sucesso.');
@@ -4203,7 +4203,7 @@ const App: React.FC = () => {
                 
                 if (databaseMode === DatabaseMode.INTERNAL && assets.length > 0) {
                   setSqliteStatus('ACTIVE');
-                  await sqliteService.setSystemStatus('ACTIVE');
+                  await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
                 }
                 
                 popScreen();

@@ -194,7 +194,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     if (isDataMenuOpen) {
       import('../services/sqliteService').then(m => {
         m.sqliteService.getFileStatus().then(status => {
-          setDirStatus(status as { status: string; path: string; fileName?: string });
+          setDirStatus(status as any);
         });
       });
     }

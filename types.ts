@@ -50,7 +50,9 @@ export enum DatabaseStatus {
   EMPTY = 'EMPTY',
   LOADED = 'LOADED',
   IN_USE = 'IN_USE',
-  ERROR = 'ERROR'
+  ERROR = 'ERROR',
+  ACTIVE = 'ACTIVE',
+  INITIALIZING = 'INITIALIZING'
 }
 
 export enum TagInventario {

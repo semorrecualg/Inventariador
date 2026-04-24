@@ -184,7 +184,7 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       // Atualiza o status interno do banco físico para ACTIVE se houver ativos no banco
       const assetCount = await sqliteService.getAssetCount();
       if (assetCount > 0) {
-        await sqliteService.setSystemStatus('ACTIVE');
+        await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
       }
     }
 
@@ -273,8 +273,8 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
           sqliteService.getInventoryConfig()
         ]);
         
-        sqlAssets = assets || [];
-        sqlConfig = config;
+        sqlAssets = assets as unknown as Asset[] || [];
+        sqlConfig = config as Partial<InventoryState>;
         
         if (sqlAssets.length > 0) {
           console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);

@@ -1,79 +1,34 @@
-
+import initSqlJs, { Database } from 'sql.js';
 import localforage from 'localforage';
-import initSqlJs, { Database, SqlValue } from 'sql.js';
-import { InventoryCampaign, Asset, InventoryState } from '../types';
-
-localforage.config({
-  name: 'GBR_SYSTEM_DB',
-  storeName: 'sqlite_expert_file'
-});
+import { DatabaseStatus, Asset, InventoryCampaign } from '../types';
 
 const FULL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
     ETIQUETA TEXT,
-    REGISTRO TEXT,
-    DESCRICAODOATIVO TEXT,
-    VLRAQUISIC REAL,
-    DATAAQUISIC TEXT,
-    CENTRODECUSTO TEXT,
-    CONTACONTABIL TEXT,
-    TAG_INVENTARIO TEXT,
-    ESTADO_CONSERVACAO TEXT,
+    DESCRICAODOBEM TEXT,
     GRUPO_EMPRESARIAL TEXT,
     UNIDADE_OPERACIONAL TEXT,
-    UNIDADE TEXT,
-    QT TEXT,
-    SERIAL TEXT,
-    CNPJ TEXT,
-    NOMEFORNECEDOR TEXT,
-    NOTAFISCAL TEXT,
-    ENDERECO TEXT,
-    SUBREG TEXT,
-    DATABAIXA TEXT,
-    PRIMARYKEY TEXT,
-    _tenantid TEXT,
+    CC_CUSTO TEXT,
+    CONTA_CONTABIL TEXT,
+    STATUS TEXT,
+    AUDITOR_NOME TEXT,
+    AUDITOR_STATUS_CONFERENCIA TEXT,
+    DATA_HORA_CONFERENCIA TEXT,
+    LATITUDE TEXT,
+    LONGITUDE TEXT,
+    OBSERVACAO TEXT,
+    TAG_INVENTARIO TEXT,
+    _photoUrl TEXT,
+    _is_unitized INTEGER DEFAULT 0,
+    _parent_id TEXT,
+    _localMaster TEXT,
     _unitid TEXT,
     _unidade TEXT,
-    _conferido INTEGER DEFAULT 0,
-    _localMaster TEXT,
-    _lastUpdated TEXT,
-    _dataLeitura TEXT,
-    _auditor TEXT,
-    _photoUrl TEXT,
-    _lat REAL,
-    _lng REAL,
-    _campaignId TEXT,
-    _version INTEGER DEFAULT 1,
+    _tenantid TEXT,
     _is_deleted INTEGER DEFAULT 0,
-    _plaquetado INTEGER DEFAULT 0,
-    _plaquetaMaster TEXT,
-    _descricaoMaster TEXT,
-    _aprovado INTEGER DEFAULT 0,
-    _dataAprovacao TEXT,
-    _aprovador TEXT,
-    _assinatura TEXT,
-    _isNew INTEGER DEFAULT 0,
-    _is_unitized INTEGER DEFAULT 0,
-    _is_divergent_baixa INTEGER DEFAULT 0,
-    Sn1_recno INTEGER,
-    Sn3_recno INTEGER,
-    DE_PARA TEXT,
-    AUDITOR_STATUS_CONFERENCIA TEXT,
-    _origemTransacao TEXT
-);
-CREATE TABLE IF NOT EXISTS unit_configs (
-    unit_id TEXT PRIMARY KEY,
-    tenant_id TEXT,
-    config_data TEXT
-);
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT,
-    user_email TEXT,
-    action TEXT,
-    details TEXT,
-    _tenantid TEXT
+    _lastUpdated TEXT,
+    _conferido INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY,
@@ -83,687 +38,321 @@ CREATE TABLE IF NOT EXISTS campaigns (
     start_date TEXT,
     end_date TEXT,
     _tenantid TEXT,
-    _unitid TEXT,
-    created_by TEXT,
-    created_at TEXT
+    _unitid TEXT
 );
-CREATE TABLE IF NOT EXISTS system_status (
-    key TEXT PRIMARY KEY,
-    value TEXT
+CREATE TABLE IF NOT EXISTS inventory_config (
+    id TEXT PRIMARY KEY,
+    _tenantid TEXT,
+    data TEXT
 );
 `;
 
-class SQLiteService {
+export type StorageSource = 'PHYSICAL' | 'CACHE' | 'MEMORY' | 'NONE';
+
+class SqliteService {
   private db: Database | null = null;
   private isInitialized = false;
-  private isInitializing = false;
-  private isPersisting = false;
-  private currentDbStatus: 'EMPTY' | 'ACTIVE' = 'EMPTY';
-  private storageSource: 'PHYSICAL' | 'CACHE' | 'MEMORY' = 'MEMORY';
+  private storageSource: StorageSource = 'NONE';
+  private currentDbStatus: DatabaseStatus = DatabaseStatus.EMPTY;
+  private activeFileHandle: FileSystemFileHandle | null = null;
+  
+  private keys = {
+    dbKey: 'sqlite_db_binary',
+    fileHandleKey: 'sqlite_file_handle',
+    statusKey: 'sqlite_db_status'
+  };
 
-  private get keys() {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    return {
-      dbKey: `gbr_expert_db_binary_${mode}`,
-      dirHandleKey: `gbr_db_dir_handle_${mode}`,
-      fileHandleKey: `gbr_db_file_handle_${mode}`
-    };
+  // --- Singleton Management ---
+  async reset() {
+    console.log(">>> [DBA] Resetando Instância do Singleton...");
+    if (this.db) {
+      try { this.db.close(); } catch (e) { console.warn("Erro ao fechar DB:", e); }
+      this.db = null;
+    }
+    this.isInitialized = false;
+    this.storageSource = 'NONE';
   }
 
-  /**
-   * Verifica se o acesso ao arquivo físico está ativo e funcional.
-   * Agora prioriza o FileHandle direto se disponível.
-   */
+  async hardResetDatabase() {
+    console.log(">>> [DBA] Hard Reset solicitado...");
+    await this.reset();
+    await localforage.removeItem(this.keys.dbKey);
+    await localforage.removeItem(this.keys.fileHandleKey);
+    await localforage.removeItem(this.keys.statusKey);
+    this.currentDbStatus = DatabaseStatus.EMPTY;
+  }
+
+  getIsInitialized() { return this.isInitialized; }
+  getStorageSource() { return this.storageSource; }
+  async getDb() { return this.db; }
+
+  getDbStatus() { 
+    return this.currentDbStatus;
+  }
+
+  async setSystemStatus(status: DatabaseStatus) {
+    this.currentDbStatus = status;
+    await localforage.setItem(this.keys.statusKey, status);
+  }
+
+  async getSystemStatus(): Promise<DatabaseStatus> {
+    const status = await localforage.getItem<DatabaseStatus>(this.keys.statusKey);
+    return status || DatabaseStatus.EMPTY;
+  }
+
+  // --- Permission & Link Flow ---
   async getFileStatus() {
-    if (this.isPersisting) {
-      return { status: 'busy', linkType: 'UNKNOWN', path: '', folderName: '', fileName: '' };
-    }
-    
     try {
-      const { dirHandleKey, fileHandleKey } = this.keys;
-      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
-      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-      const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-      const defaultFileName = `gbr_inventario_expert${suffix}.db`;
+      const handle = await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+      if (!handle) return { status: 'none', fileName: null, path: '' };
 
-      if (fileHandle || dirHandle) {
-        const handle = fileHandle || dirHandle;
-        const options: unknown = { mode: 'readwrite' };
-        // @ts-expect-error - queryPermission
-        const permission = await handle.queryPermission(options);
-        
-        if (permission === 'granted') {
-          let activeFileHandle = fileHandle;
-
-          if (!activeFileHandle && dirHandle) {
-            try {
-              activeFileHandle = await this.findDatabaseFile(dirHandle);
-            } catch (fileErr) {
-              console.warn(">>> [DBA] Arquivo não encontrado no diretório vinculado:", fileErr);
-            }
-          }
-
-          if (activeFileHandle) {
-            try {
-              const file = await activeFileHandle.getFile();
-              const folderName = dirHandle?.name || 'Arquivo Individual';
-              return { 
-                status: 'linked', 
-                linkType: dirHandle ? 'DIRECTORY' : 'FILE',
-                path: folderName,
-                folderName: folderName,
-                fileName: activeFileHandle.name,
-                size: file.size,
-                lastModified: new Date(file.lastModified).toISOString()
-              };
-            } catch (getErr) {
-              console.error(">>> [DBA] Erro ao obter objeto File do handle. Permissão pode ter caído.", getErr);
-              return { status: 'expired', path: 'Vínculo Expirado', error: String(getErr) };
-            }
-          }
-        }
-        
-        const folderName = dirHandle?.name || 'Arquivo Individual';
-        const finalStatus = permission === 'prompt' ? 'prompt' : (permission === 'denied' ? 'permission_denied' : permission);
-        return { 
-          status: finalStatus, 
-          linkType: dirHandle ? 'DIRECTORY' : 'FILE',
-          path: folderName, 
-          folderName: folderName,
-          fileName: fileHandle?.name || defaultFileName 
-        };
-      }
-
-      return { status: 'none', path: 'Nenhum banco físico vinculado', fileName: defaultFileName, linkType: 'NONE' };
-    } catch (err) {
-      console.error(">>> [DBA] Erro ao verificar status do arquivo:", err);
-      return { status: 'error', path: 'Falha de acesso', error: String(err) };
-    }
-  }
-
-  /**
-   * Solicita permissão de leitura/escrita para o arquivo/diretório já vinculado
-   */
-  async requestFilePermission() {
-    try {
-      const { dirHandleKey, fileHandleKey } = this.keys;
-      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
-      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      
-      const handle = fileHandle || dirHandle;
-      if (!handle) return false;
-
-      const options: unknown = { mode: 'readwrite' };
-      // @ts-expect-error - requestPermission
-      const status = await handle.requestPermission(options);
-      
-      if (status === 'granted') {
-        console.log(">>> [DBA] Permissão concedida pelo usuário. Reinicializando sistema...");
-        await this.init(true); // Força reinicialização limpa
-        
-        // Verificação dupla: garante que o status interno reflita o sucesso físico
-        if (this.storageSource === 'PHYSICAL') {
-          this.currentDbStatus = 'ACTIVE';
-        }
-        
-        return true;
-      }
-      return false;
-    } catch (_err) {
-      console.error(">>> [DBA] Erro ao solicitar permissão:", _err);
-      return false;
-    }
-  }
-
-  /**
-   * Tenta encontrar o arquivo de banco de dados no diretório seguindo a regra de nomes (novo -> legado)
-   */
-  private async findDatabaseFile(dirHandle: FileSystemDirectoryHandle): Promise<FileSystemFileHandle> {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-    const currentName = `gbr_inventario_expert${suffix}.db`;
-    const legacyName = `gbr_inventario_expert.db`;
-    
-    // 1. Tenta o nome atual
-    try {
-      return await dirHandle.getFileHandle(currentName, { create: false });
-    } catch {
-      // 2. Tenta o nome legado
-      try {
-        const legacyHandle = await dirHandle.getFileHandle(legacyName, { create: false });
-        console.log(`>>> [DBA] Arquivo legado encontrado: ${legacyName}.`);
-        return legacyHandle;
-      } catch {
-        // 3. Se não encontrar nenhum, cria o novo
-        console.log(`>>> [DBA] Nenhum arquivo existente encontrado em ${dirHandle.name}. Criando novo: ${currentName}`);
-        return await dirHandle.getFileHandle(currentName, { create: true });
-      }
-    }
-  }
-
-  private async ensureCampaignsTableHasTenantColumn() {
-    if (!this.db) return;
-    try {
-      const res = this.db.exec("PRAGMA table_info(campaigns)");
-      if (res.length === 0) return;
-      const columns = res[0]?.values.map(v => v[1] as string) || [];
-      
-      if (!columns.includes('_tenantid')) {
-        if (columns.includes('tenantid')) {
-          console.log(">>> [DBA] Renomeando coluna 'tenantid' para '_tenantid' em campaigns...");
-          this.db.run("ALTER TABLE campaigns RENAME COLUMN tenantid TO _tenantid");
-        } else if (columns.includes('tenant_id')) {
-          console.log(">>> [DBA] Renomeando coluna 'tenant_id' para '_tenantid' em campaigns...");
-          this.db.run("ALTER TABLE campaigns RENAME COLUMN tenant_id TO _tenantid");
-        } else {
-          console.log(">>> [DBA] Adicionando coluna '_tenantid' ausente em campaigns...");
-          this.db.run("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
-        }
-      }
+      // @ts-expect-error mode property is part of the experimental API
+      const currentPerm = await handle.queryPermission({ mode: 'readwrite' });
+      return { 
+        status: currentPerm as string, 
+        fileName: handle.name,
+        path: handle.name, 
+        handle 
+      };
     } catch (e) {
-      console.warn(">>> [DBA] Erro ao verificar/corrigir coluna _tenantid em campaigns:", e);
+      console.error(">>> [DBA] Erro ao checar status do arquivo:", e);
+      return { status: 'error', fileName: null, path: '' };
     }
   }
 
-  async init(forced = false) {
-    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
-    
-    if (this.isInitialized && !forced) return;
-    if (this.isInitializing && !forced) {
-      // Aguarda inicialização em curso
-      while (this.isInitializing) {
-        await new Promise(r => setTimeout(r, 100));
-      }
-      return;
+  async requestFilePermission() {
+    const status = await this.getFileStatus();
+    if (status.handle) {
+      // @ts-expect-error requestPermission is part of the experimental API
+      return await status.handle.requestPermission({ mode: 'readwrite' });
     }
-
-    this.isInitializing = true;
-    console.log(`>>> [DBA] Inicializando SQLite Service (forced=${forced})...`);
-    
-    try {
-      if (this.db && forced) {
-        try { 
-          this.db.close(); 
-        } catch {
-          // Ignora
-        }
-        this.db = null;
-        this.isInitialized = false;
-      }
-
-      if (navigator.storage && navigator.storage.persist) {
-        await navigator.storage.persist();
-      }
-
-      const SQL = await Promise.race([
-        initSqlJs({
-          locateFile: file => {
-            return `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/${file}`;
-          }
-        }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('WASM_LOAD_TIMEOUT')), 20000))
-      ]).catch(err => {
-        console.error(">>> [DBA] Falha crítica ao carregar motor SQL.js:", err);
-        // Fallback para outros CDNs se o principal falhar
-        if (err.message === 'WASM_LOAD_TIMEOUT') {
-           console.warn(">>> [DBA] Tentando CDN alternativo (Unpkg)...");
-           return initSqlJs({
-             locateFile: file => `https://unpkg.com/sql.js@1.14.1/dist/${file}`
-           }).catch(innerErr => {
-             window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: innerErr.message } }));
-             throw innerErr;
-           });
-        }
-        const errMsg = `Falha ao carregar motor SQL.js (WASM). Detalhe: ${err.message}`;
-        window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: errMsg } }));
-        throw new Error(errMsg);
-      });
-
-      // 2. Tenta Recuperar do Arquivo/Diretório Físico (PRIORIDADE MÁXIMA)
-      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
-      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      const handle = fileHandle || dirHandle;
-
-      if (handle) {
-        try {
-          const options: unknown = { mode: 'readwrite' };
-          // @ts-expect-error - queryPermission exists
-          const permission = await handle.queryPermission(options);
-          
-          if (permission === 'granted') {
-            let activeFileHandle = fileHandle;
-            if (!activeFileHandle && dirHandle) {
-               activeFileHandle = await this.findDatabaseFile(dirHandle);
-            }
-
-            if (activeFileHandle) {
-              const file = await activeFileHandle.getFile();
-              const buffer = await file.arrayBuffer();
-              
-              if (buffer.byteLength > 4096) { 
-                console.log(`>>> [DBA] Sucesso Físico: ${activeFileHandle.name} (${buffer.byteLength} bytes)`);
-                this.db = new SQL.Database(new Uint8Array(buffer));
-                
-                // Validação e Reparo de Schema
-                this.db.run(FULL_SCHEMA);
-                await this.ensureCampaignsTableHasTenantColumn();
-                
-                this.isInitialized = true;
-                this.storageSource = 'PHYSICAL';
-                this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-                return;
-              } else {
-                console.warn(">>> [DBA] Arquivo físico muito pequeno. Usando cache IndexedDB como segurança.");
-              }
-            }
-          } else {
-            console.warn(`>>> [DBA] Permissão Física: ${permission}. Tentando Cache.`);
-          }
-        } catch (err) {
-          console.warn(">>> [DBA] Erro ao acessar arquivo físico:", err);
-        }
-      }
-
-      // 3. Fallback: Recupera do IndexedDB (Puro Binário)
-      const binary = await localforage.getItem<Uint8Array>(dbKey);
-      if (binary && binary.length > 4096) {
-        console.log(`>>> [DBA] Sucesso Cache: ${binary.length} bytes carregados.`);
-        this.db = new SQL.Database(binary);
-        this.db.run(FULL_SCHEMA);
-        this.storageSource = 'CACHE';
-        this.currentDbStatus = (await this.getSystemStatus()) as 'EMPTY' | 'ACTIVE';
-        this.isInitialized = true;
-      } else {
-        // 4. Cria novo banco se nada existir
-        console.log(">>> [DBA] Criando novo banco em memória...");
-        this.db = new SQL.Database();
-        this.db.run(FULL_SCHEMA);
-        this.isInitialized = true;
-        this.storageSource = 'MEMORY';
-        this.currentDbStatus = 'EMPTY';
-        await this.setSystemStatus('EMPTY');
-        await this.persist();
-      }
-    } finally {
-      this.isInitializing = false;
-      
-      // Migração Silenciosa de Campanhas
-      if (this.isInitialized) {
-        const cachedCampaigns = localStorage.getItem('inventory_campaigns_cache');
-        if (cachedCampaigns) {
-          try {
-            const parsed = JSON.parse(cachedCampaigns);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              console.log(`>>> [Migração] Verificando ${parsed.length} campanhas legadas para sincronismo...`);
-              for (const camp of parsed) {
-                await this.saveCampaign(camp);
-              }
-            }
-          } catch (e) {
-            console.error(">>> [Migração] Erro ao sincronizar campanhas legadas:", e);
-          }
-        }
-      }
-      this.isInitializing = false;
-    }
+    return 'none';
   }
 
-  async mapLocalFolder() {
-    if (this.isInitializing) return false;
-    
-    const { dirHandleKey, fileHandleKey } = this.keys;
+  async linkFile() {
+    console.log(">>> [DBA] Iniciando Processo de Vínculo Físico...");
     try {
-      const isIframe = window.self !== window.top;
-      if (isIframe) {
-        console.warn(">>> [DBA] Detectado ambiente Iframe. File System Access API pode ser restrita.");
-      }
-
-      // @ts-expect-error - File System Access API
-      const handle = await window.showDirectoryPicker({
-        mode: 'readwrite'
-      });
-      
-      if (!handle) return false;
-
-      await localforage.removeItem(fileHandleKey); // Limpa o handle de arquivo se mudar para pasta
-      await localforage.setItem(dirHandleKey, handle);
-      
-      this.isInitialized = false;
-      await this.init();
-      return true;
-    } catch (err) {
-      if (err instanceof Error && (err.name === 'SecurityError' || err.message.includes('sub frames'))) {
-        throw new Error("IFRAME_RESTRICTION");
-      }
-      if (err instanceof Error && err.name === 'AbortError') {
-        return false;
-      }
-      console.error("Mapeamento de diretório cancelado ou falhou:", err);
-      throw err;
-    }
-  }
-
-  /**
-   * Nova funcionalidade: Mapeia um ARQUIVO específico .db definido pelo usuário.
-   * Isso permite "blindar" o app para trabalhar exclusivamente com um banco legado ou oficial.
-   */
-  async mapSpecificFile() {
-    if (this.isInitializing) return false;
-
-    const { dirHandleKey, fileHandleKey } = this.keys;
-    try {
-      // @ts-expect-error - showOpenFilePicker
+      // @ts-expect-error showOpenFilePicker is part of the experimental API
       const [handle] = await window.showOpenFilePicker({
-        types: [{
-          description: 'SQLite Database',
-          accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] }
-        }],
+        types: [{ description: 'SQLite Database', accept: { 'application/x-sqlite3': ['.db'] } }],
+        excludeAcceptAllOption: true,
         multiple: false
       });
-      
-      if (!handle) return false;
 
-      await localforage.removeItem(dirHandleKey); // Limpa o handle de pasta se mudar para arquivo específico
-      await localforage.setItem(fileHandleKey, handle);
-      this.isInitialized = false;
-      await this.init();
-      return true;
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return false;
-      console.error("Mapeamento de arquivo cancelado:", err);
-      throw err;
-    }
-  }
-
-  async linkExistingFile() {
-    return this.mapLocalFolder();
-  }
-
-  async exportDatabaseFile(): Promise<Blob | null> {
-    if (!this.db) await this.init();
-    const data = this.db?.export();
-    if (!data) return null;
-    
-    return new Blob([data], { type: 'application/x-sqlite3' });
-  }
-
-  /**
-   * Força a gravação do banco da memória para o armazenamento físico e cache.
-   * Chamado após cada operação de escrita.
-   */
-  private async persist() {
-    if (!this.db || this.isPersisting) return;
-    this.isPersisting = true;
-    
-    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
-    
-    try {
-      const data = this.db.export();
-      const fileSize = data.length;
-      
-      const fileHandle = await localforage.getItem<FileSystemFileHandle>(fileHandleKey);
-      const dirHandle = await localforage.getItem<FileSystemDirectoryHandle>(dirHandleKey);
-      
-      let physicalSaved = false;
-      const activeHandle = fileHandle || dirHandle;
-
-      if (activeHandle) {
-        const options = { mode: 'readwrite' as const };
-        // @ts-expect-error - queryPermission
-        const permission = await activeHandle.queryPermission(options);
-        
-        if (permission === 'granted') {
-          let writableHandle: FileSystemFileHandle | null = fileHandle;
-          
-          if (!writableHandle && dirHandle) {
-            const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-            const suffix = mode === 'INTERNAL' ? '.Mobile' : '.Cloud';
-            const fileName = `gbr_inventario_expert${suffix}.db`;
-            try {
-              writableHandle = await dirHandle.getFileHandle(fileName, { create: true });
-            } catch (handleErr) {
-              console.error(">>> [ALERTA] Falha ao obter handle de escrita:", handleErr);
-            }
-          }
-
-          if (writableHandle) {
-            try {
-              const writable = await writableHandle.createWritable();
-              await writable.write(data);
-              await writable.close();
-              physicalSaved = true;
-              console.log(`>>> [Sincronização OK] Base Física: ${writableHandle.name} | Tamanho: ${fileSize} bytes | Hora: ${new Date().toLocaleTimeString()}`);
-            } catch (writeErr) {
-              console.error(">>> [ALERTA] Falha ao gravar no arquivo físico. Arquivo pode estar sendo usado por outro processo ou aba.", writeErr);
-              window.dispatchEvent(new CustomEvent('gbr_db_write_failed', { 
-                detail: { error: writeErr, fileName: writableHandle.name } 
-              }));
-            }
-          }
-        } else {
-          console.warn(`>>> [ALERTA] Gravação física bloqueada! Status: ${permission}.`);
-          window.dispatchEvent(new CustomEvent('gbr_db_write_blocked', { 
-            detail: { status: permission, path: activeHandle.name } 
-          }));
-        }
+      if (handle) {
+        await localforage.setItem(this.keys.fileHandleKey, handle);
+        this.activeFileHandle = handle;
+        console.log(">>> [DBA] Arquivo vinculado com sucesso:", handle.name);
+        return handle;
       }
-
-      // Salva no IndexedDB como segurança redundante (Sempre ocorre, mesmo se o físico falhar)
-      await localforage.setItem(dbKey, data);
-      
-      window.dispatchEvent(new CustomEvent('gbr_db_persisted', { 
-        detail: { 
-          size: fileSize, 
-          timestamp: new Date().toISOString(), 
-          physical: physicalSaved 
-        } 
-      }));
-    } catch (err) {
-      console.error(">>> [ERRO CRÍTICO] Falha ao comitar banco de dados:", err);
-    } finally {
-      this.isPersisting = false;
-    }
-  }
-
-  async execute(sql: string, params?: SqlValue[]) {
-    if (!this.db) await this.init();
-    const result = this.db?.run(sql, params);
-    await this.persist();
-    return result;
-  }
-
-  async query(sql: string, params?: SqlValue[]) {
-    if (!this.db) await this.init();
-    const res = this.db?.exec(sql, params);
-    if (!res || res.length === 0) return [];
-    
-    const columns = res[0].columns;
-    return res[0].values.map(row => {
-      const obj: Record<string, SqlValue> = {};
-      columns.forEach((col, i) => obj[col] = row[i]);
-      return obj;
-    }) as unknown as Record<string, SqlValue>[];
-  }
-
-  async saveCampaign(campaign: Partial<InventoryCampaign>) {
-    const sql = `
-      INSERT OR REPLACE INTO campaigns (id, name, description, status, start_date, end_date, _tenantid, _unitid, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    const params = [
-      campaign.id || null,
-      campaign.name || null,
-      campaign.description || null,
-      campaign.status || null,
-      campaign.start_date || null,
-      campaign.end_date || null,
-      campaign._tenantid || (campaign as { tenantid?: string }).tenantid || null,
-      campaign._unitid || (campaign as { unit_id?: string }).unit_id || null,
-      campaign.created_by || null,
-      campaign.created_at || new Date().toISOString()
-    ];
-    return this.execute(sql, params);
-  }
-
-  async getCampaigns(tenantId: string) {
-    return this.query("SELECT * FROM campaigns WHERE _tenantid = ? ORDER BY start_date DESC", [tenantId]);
-  }
-
-  async deleteCampaignSql(id: string) {
-    return this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
-  }
-
-  // --- MÉTODOS DE INVENTÁRIO (Soberania de Dados) ---
-
-  async getAllAssets(): Promise<Asset[]> {
-    if (!this.db) await this.init();
-    return this.query("SELECT * FROM assets WHERE _is_deleted = 0") as unknown as Asset[];
-  }
-
-  async getAssetCount(): Promise<number> {
-    if (!this.db) await this.init();
-    const res = await this.query("SELECT COUNT(*) as total FROM assets WHERE _is_deleted = 0");
-    return res.length > 0 ? (res[0].total as number) : 0;
-  }
-
-  async bulkInsertAssets(assets: Asset[]) {
-    if (!this.db) await this.init();
-    if (assets.length === 0) return;
-
-    console.log(`>>> [DBA] Iniciando persistência de ${assets.length} ativos no banco físico...`);
-    
-    // Schema mapping para garantir que todas as colunas sejam preenchidas corretamente
-    const sql = `
-      INSERT OR REPLACE INTO assets (
-        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, VLRAQUISIC, DATAAQUISIC, 
-        CENTRODECUSTO, CONTACONTABIL, TAG_INVENTARIO, ESTADO_CONSERVACAO, 
-        GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, UNIDADE, QT, SERIAL, CNPJ, 
-        NOMEFORNECEDOR, NOTAFISCAL, ENDERECO, SUBREG, DATABAIXA, PRIMARYKEY, 
-        _tenantid, _unitid, _unidade, _conferido, _localMaster, _lastUpdated, 
-        _dataLeitura, _auditor, _photoUrl, _lat, _lng, _campaignId, _version, 
-        _is_deleted, _plaquetado, _plaquetaMaster, _descricaoMaster, _aprovado, 
-        _dataAprovacao, _aprovador, _assinatura, _isNew, _is_unitized, 
-        _is_divergent_baixa, Sn1_recno, Sn3_recno, DE_PARA, 
-        AUDITOR_STATUS_CONFERENCIA, _origemTransacao
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const commands = assets.map(a => ({
-      sql,
-      params: [
-        a.id || null, a.ETIQUETA || null, a.REGISTRO || null, a.DESCRICAODOATIVO || null, a.VLRAQUISIC || 0, a.DATAAQUISIC || null,
-        a.CENTRODECUSTO || null, a.CONTACONTABIL || null, a.TAG_INVENTARIO || null, a.ESTADO_CONSERVACAO || null,
-        a.GRUPO_EMPRESARIAL || null, a.UNIDADE_OPERACIONAL || null, a.UNIDADE || null, a.QT || null, a.SERIAL || null, a.CNPJ || null,
-        a.NOMEFORNECEDOR || null, a.NOTAFISCAL || null, a.ENDERECO || null, a.SUBREG || null, a.DATABAIXA || null, a.PRIMARYKEY || null,
-        a._tenantid || null, a._unitid || null, a._unidade || null, a._conferido ? 1 : 0, a._localMaster || null, a._lastUpdated || null,
-        a._dataLeitura || null, a._auditor || null, a._photoUrl || null, a._lat || null, a._lng || null, a._campaignId || null, a._version || 1,
-        a._is_deleted ? 1 : 0, a._plaquetado ? 1 : 0, a._plaquetaMaster || null, a._descricaoMaster || null, a._aprovado ? 1 : 0,
-        a._dataAprovacao || null, a._aprovador || null, a._assinatura || null, a._isNew ? 1 : 0, a._is_unitized ? 1 : 0,
-        a._is_divergent_baixa ? 1 : 0, a.Sn1_recno || null, a.Sn3_recno || null, a.DE_PARA || null,
-        a.AUDITOR_STATUS_CONFERENCIA || null, a._origemTransacao || null
-      ] as SqlValue[]
-    }));
-
-    await this.executeBatch(commands);
-    this.currentDbStatus = 'ACTIVE';
-    console.log(`>>> [DBA] Persistência física concluída para ${assets.length} ativos.`);
-  }
-
-  async saveInventoryConfig(config: Partial<InventoryState>) {
-    if (!this.db) await this.init();
-    const data = JSON.stringify(config);
-    return this.execute("INSERT OR REPLACE INTO system_status (key, value) VALUES ('inventory_config', ?)", [data]);
-  }
-
-  async getInventoryConfig(): Promise<Partial<InventoryState> | null> {
-    if (!this.db) await this.init();
-    const res = await this.query("SELECT value FROM system_status WHERE key = 'inventory_config'");
-    if (res.length > 0) {
-      try {
-        return JSON.parse(res[0].value as string);
-      } catch {
-        return null;
-      }
+    } catch (e) {
+      console.warn(">>> [DBA] Usuário cancelou ou falha no picker:", e);
     }
     return null;
   }
 
-  /**
-   * Executa múltiplos comandos e persiste apenas uma vez ao final.
-   * CRITICAL: Fundamental para performance no modo de Carga Expert Mobile.
-   */
-  async executeBatch(commands: { sql: string, params?: SqlValue[] }[]) {
-    if (!this.db) await this.init();
+  async mapSpecificFile() {
+    return this.linkFile();
+  }
+
+  async mapLocalFolder() {
+    // Para simplificar e evitar confusão, vamos usar apenas arquivo direto na v25
+    return this.linkFile();
+  }
+
+  // --- Initialization Flow ---
+  async init() {
+    console.log(">>> [DBA] Passstep 1: Verificando handles persistidos...");
     
     try {
-      this.db?.run("BEGIN TRANSACTION");
-      console.debug(`>>> [DBA] Iniciando Processamento em Lote (${commands.length} comandos)...`);
-      
-      for (let i = 0; i < commands.length; i++) {
-        const cmd = commands[i];
-        this.db?.run(cmd.sql, cmd.params);
-        
-        if (i > 0 && i % 1000 === 0) {
-          console.debug(`>>> [DBA] Progresso Bancário: ${i}/${commands.length} processados...`);
+      const SQL = await initSqlJs({ locateFile: (file: string) => `https://sql.js.org/dist/${file}` });
+      const handle = await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+      this.currentDbStatus = await this.getSystemStatus();
+
+      if (handle) {
+        console.log(">>> [DBA] Passo 2: Handle encontrado. Solicitando permissão...");
+        try {
+          // @ts-expect-error queryPermission is part of the experimental API
+          const permission = await handle.queryPermission({ mode: 'readwrite' });
+          
+          if (permission === 'granted') {
+            console.log(">>> [DBA] Passo 3: Permissão concedida. Lendo arquivo físico...");
+            const file = await handle.getFile();
+            const buffer = await file.arrayBuffer();
+            
+            this.db = new SQL.Database(new Uint8Array(buffer));
+            this.db.run(FULL_SCHEMA);
+            this.storageSource = 'PHYSICAL';
+            this.isInitialized = true;
+            this.activeFileHandle = handle;
+            console.log(">>> [DBA] SUCESSO: Banco físico montado e pronto.");
+            return true;
+          } else {
+            console.warn(">>> [DBA] Passo 3: Permissão pendente ou negada:", permission);
+          }
+        } catch (err: unknown) {
+          const permErr = err as Error;
+          if (permErr.name === 'NotAllowedError') {
+            console.error(">>> [DBA] BLOQUEIO DE SEGURANÇA: Navegador negou acesso automático.");
+          } else {
+            console.error(">>> [DBA] Erro ao interagir com handle:", permErr);
+          }
         }
       }
+
+      // Fallback para Cache (Neutral State)
+      console.log(">>> [DBA] Tentando recuperar Cache Local (Fallback)...");
+      const binary = await localforage.getItem<Uint8Array>(this.keys.dbKey);
+      if (binary && binary.length > 4096) {
+        this.db = new SQL.Database(binary);
+        this.db.run(FULL_SCHEMA);
+        this.storageSource = 'CACHE';
+        this.isInitialized = true;
+        console.log(">>> [DBA] SUCESSO: Cache local carregado enquanto aguarda arquivo.");
+        return true;
+      }
+
+      // Último caso: Novo banco em memória
+      console.log(">>> [DBA] Inicializando novo banco padrão (Vazio)...");
+      this.db = new SQL.Database();
+      this.db.run(FULL_SCHEMA);
+      this.storageSource = 'MEMORY';
+      this.isInitialized = true;
+      return true;
+
+    } catch (err) {
+      console.error(">>> [DBA] FALHA CRÍTICA NA INICIALIZAÇÃO:", err);
+      this.isInitialized = false;
+      return false;
+    }
+  }
+
+  // --- Persistence ---
+  async persist() {
+    if (!this.db) return;
+    try {
+      const binary = this.db.export();
+      await localforage.setItem(this.keys.dbKey, binary);
       
-      this.db?.run("COMMIT");
-      console.debug(`>>> [DBA] Transação finalizada com sucesso.`);
+      if (this.storageSource === 'PHYSICAL' && this.activeFileHandle) {
+        try {
+          const writable = await this.activeFileHandle.createWritable();
+          await writable.write(binary);
+          await writable.close();
+          console.log(">>> [DBA] Sincronização Física OK:", this.activeFileHandle.name);
+        } catch (err: unknown) {
+          const e = err as Error;
+          if (e.name === 'NotAllowedError') {
+            console.warn(">>> [DBA] Permissão de escrita expirou. Dados salvos apenas no cache.");
+          } else {
+            console.error(">>> [DBA] Falha na escrita física:", e);
+          }
+        }
+      }
     } catch (err) {
-      console.error(`>>> [DBA] Erro fatal no lote: ${err instanceof Error ? err.message : String(err)}`);
-      this.db?.run("ROLLBACK");
-      throw err;
-    } finally {
+      console.error(">>> [DBA] Falha na persistência:", err);
+    }
+  }
+
+  // --- Helpers ---
+  async execute(sql: string, params: unknown[] = []) {
+    if (!this.db) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.db.run(sql, params as any[]);
+    await this.persist();
+  }
+
+  async executeBatch(queries: { sql: string; params: unknown[] }[]) {
+    if (!this.db) return;
+    this.db.run("BEGIN TRANSACTION");
+    try {
+      for (const q of queries) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.db.run(q.sql, q.params as any[]);
+      }
+      this.db.run("COMMIT");
       await this.persist();
+    } catch (e) {
+      this.db.run("ROLLBACK");
+      throw e;
     }
   }
 
-  /**
-   * Gerencia o status de uso do banco de dados para permitir auto-boot.
-   */
-  async getSystemStatus(): Promise<string> {
+  async query(sql: string, params: unknown[] = []) {
+    if (!this.db) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = this.db.exec(sql, params as any[]);
+    if (res.length === 0) return [];
+    
+    const columns = res[0].columns;
+    return res[0].values.map(row => {
+      const obj: Record<string, unknown> = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return obj;
+    });
+  }
+
+  async getAllAssets() {
+    return this.query("SELECT * FROM assets WHERE _is_deleted = 0");
+  }
+
+  async getAssetCount(): Promise<number> {
+    const res = await this.query("SELECT COUNT(*) as total FROM assets WHERE _is_deleted = 0");
+    return Number(res[0]?.total || 0);
+  }
+
+  // --- Inventory Config ---
+  async saveInventoryConfig(data: any) {
+    const tenantId = data._tenantid || 'default';
+    await this.execute(
+      "INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)",
+      [tenantId, tenantId, JSON.stringify(data)]
+    );
+  }
+
+  async getInventoryConfig(tenantId?: string): Promise<any | null> {
+    const tid = tenantId || 'default';
+    const res = await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tid]);
+    if (!res[0]?.data) return null;
     try {
-      const results = await this.query("SELECT value FROM system_status WHERE key = 'db_status'");
-      return results.length > 0 ? (results[0].value as string) : 'EMPTY';
+      return JSON.parse(res[0].data as string);
     } catch {
-      return 'EMPTY';
+      return null;
     }
   }
 
-  async setSystemStatus(status: 'EMPTY' | 'ACTIVE') {
-    try {
-      await this.execute("INSERT OR REPLACE INTO system_status (key, value) VALUES ('db_status', ?)", [status]);
-      this.currentDbStatus = status;
-      console.log(`>>> [DBA] Status do banco atualizado para: ${status}`);
-    } catch (err) {
-      console.error(">>> [DBA] Erro ao definir status do sistema:", err);
-    }
+  // --- Bulk Ops ---
+  async bulkInsertAssets(assets: Asset[]) {
+    const queries = assets.map(asset => ({
+      sql: `INSERT OR REPLACE INTO assets (
+        id, ETIQUETA, DESCRICAODOBEM, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, 
+        _unitid, _tenantid, _photoUrl, TAG_INVENTARIO, STATUS, _lastUpdated
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [
+        asset.id, asset.ETIQUETA, asset.DESCRICAODOATIVO, asset.GRUPO_EMPRESARIAL, asset.UNIDADE_OPERACIONAL,
+        asset._unitid, asset._tenantid, asset._photoUrl, asset.TAG_INVENTARIO, asset.STATUS, asset._lastUpdated
+      ]
+    }));
+    await this.executeBatch(queries);
   }
 
-  getDbStatus(): 'EMPTY' | 'ACTIVE' {
-    return this.currentDbStatus;
+  // --- Campaigns ---
+  async getCampaigns(tenantId: string): Promise<InventoryCampaign[]> {
+    return await this.query("SELECT * FROM campaigns WHERE _tenantid = ?", [tenantId]) as unknown as InventoryCampaign[];
   }
 
-  getIsInitialized(): boolean {
-    return this.isInitialized;
+  async saveCampaign(campaign: InventoryCampaign) {
+    await this.execute(
+      "INSERT OR REPLACE INTO campaigns (id, name, description, status, start_date, end_date, _tenantid, _unitid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [campaign.id, campaign.name, campaign.description, campaign.status, campaign.start_date, campaign.end_date, campaign._tenantid, campaign._unitid]
+    );
   }
 
-  getStorageSource(): 'PHYSICAL' | 'CACHE' | 'MEMORY' {
-    return this.storageSource;
-  }
-
-  async hardResetDatabase() {
-    const { dbKey, dirHandleKey, fileHandleKey } = this.keys;
-    this.db = null;
-    this.isInitialized = false;
-    this.currentDbStatus = 'EMPTY';
-    await localforage.removeItem(dbKey);
-    await localforage.removeItem(dirHandleKey);
-    await localforage.removeItem(fileHandleKey);
-    await this.init();
+  async deleteCampaignSql(id: string) {
+    await this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
   }
 }
 
-export const sqliteService = new SQLiteService();
+export const sqliteService = new SqliteService();
