@@ -55,7 +55,7 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive } from 'lucide-react';
+import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -228,19 +228,19 @@ const App: React.FC = () => {
         // Recarrega os dados do inventário para o estado do React
         const loaded = await loadInventory(databaseMode);
         
-        // Só atualizamos o inventário se o carregamento foi bem sucessido e retornou dados.
-        // Se retornar status ERROR, significa que a permissão falhou novamente.
+        // v25.01: Se carregou dados (mesmo que do cache), atualizamos o estado
         if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
           // Garantir que empresas estão extraídas
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
              loaded.companies = [...new Set(loaded.assets.map(a => {
-               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
+               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
           }
           
           setInventory(loaded);
           setIsDataLoaded(true);
           setShowReconnectOverlay(false);
+          setIntegrityFailed(false); // Limpa o estado de falha se reconectou
           
           if (loaded.assets.length > 0) {
             setSqliteStatus('ACTIVE');
@@ -251,25 +251,16 @@ const App: React.FC = () => {
           console.error(">>> [DBA] Falha ao recarregar inventário após permissão.");
         }
       } else {
-        // Tenta vincular o arquivo novamente se a permissão simples falhar
-        try {
-          await sqliteService.linkExistingFile();
-          const loaded = await loadInventory(databaseMode);
-          if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
-            setInventory(loaded);
-            setIsDataLoaded(true);
-            setShowReconnectOverlay(false);
-          }
-        } catch (err) {
-          console.error("Falha ao re-vincular banco físico:", err);
-        }
+        // Se falhou ou usuário cancelou, não fazemos nada, o overlay permanece.
+        console.warn(">>> [DBA] Permissão não concedida ou negada.");
       }
     } catch (err) {
-      console.error("Erro no fluxo de reconexão:", err);
+      console.error('Erro ao reconectar arquivo:', err);
     } finally {
       setIsReconnecting(false);
     }
   };
+
   const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const [modalConfig, setModalConfig] = useState<ModalConfig>({
     isOpen: false,
@@ -512,6 +503,7 @@ const App: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
@@ -2527,7 +2519,9 @@ const App: React.FC = () => {
 
     // Commit definitivo com ou sem GPS (fallback garantido acima)
     commitAssetUpdate(assetWithHistory);
-    saveAssetIncremental(assetWithHistory);
+    saveAssetIncremental(assetWithHistory).then(() => {
+      setLastLocalSave(new Date().toISOString());
+    });
     
     // Adiciona à lista de sujos para garantir sync
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
@@ -2915,7 +2909,9 @@ const App: React.FC = () => {
           }
 
           // Persistência imediata para evitar perda de dados em lote
-          saveAssetIncremental(updates);
+          saveAssetIncremental(updates).then(() => {
+            setLastLocalSave(new Date().toISOString());
+          });
 
           return updates;
         }
@@ -4464,6 +4460,62 @@ const App: React.FC = () => {
           onClose={() => setIsPrivacyCenterOpen(false)} 
         />
 
+        {/* Indicador de Banco de Dados Local (Soberania) */}
+        {databaseMode === DatabaseMode.INTERNAL && user && screen !== AppScreen.LOGIN && (
+          <motion.div 
+            initial={{ x: -20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            className="fixed bottom-6 left-6 z-[50] flex flex-col gap-2"
+          >
+            <div className="bg-ink/80 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 shadow-2xl flex items-center gap-3">
+              <div className="relative">
+                {sqliteService.getStorageSource() === 'PHYSICAL' ? (
+                  <Database size={18} className="text-green-400" />
+                ) : sqliteService.getStorageSource() === 'CACHE' ? (
+                  <Database size={18} className="text-amber-400" />
+                ) : (
+                  <Database size={18} className="text-red-400" />
+                )}
+                {sqliteService.getStorageSource() === 'PHYSICAL' && (
+                  <motion.div 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute -top-1 -right-1"
+                  >
+                    <CheckCircle2 size={10} className="text-green-400 fill-ink" />
+                  </motion.div>
+                )}
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
+                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'Arquivo Conectado' : 
+                   sqliteService.getStorageSource() === 'CACHE' ? 'Cache Local Ativo' : 'Banco Temporário'}
+                  {sqliteService.getStorageSource() === 'PHYSICAL' && (
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                  )}
+                </span>
+                <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter mt-1 truncate max-w-[140px]">
+                  {sqliteService.getStorageSource() === 'PHYSICAL' 
+                    ? (fileStatus?.fileName || 'Sincronizado') 
+                    : sqliteService.getStorageSource() === 'CACHE'
+                      ? 'Fallback de Segurança'
+                      : 'Memória Volátil'}
+                </span>
+              </div>
+
+              {lastLocalSave && (
+                <div className="ml-2 pl-3 border-l border-white/10 flex flex-col">
+                   <span className="text-[7px] font-black text-white/40 uppercase tracking-widest leading-none">Último Salvamento</span>
+                   <span className="text-[8px] font-bold text-green-400 uppercase tracking-tighter mt-0.5">
+                     {new Date(lastLocalSave).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                   </span>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
         {/* Indicador de Sincronização Offline (Fotos) */}
         {syncQueueLength > 0 && (
           <motion.div 
@@ -4630,18 +4682,6 @@ const App: React.FC = () => {
                 Reconfirmar Permissão
               </>
             )}
-          </button>
-          
-          <button 
-            onClick={async () => {
-               if (window.confirm("Isso removerá o vínculo com a pasta atual. Você precisará vincular novamente. Deseja prosseguir?")) {
-                  await sqliteService.hardResetDatabase();
-                  window.location.reload();
-               }
-            }}
-            className="mt-4 text-[10px] text-red-400 font-bold uppercase tracking-widest hover:underline"
-          >
-            Desvincular e Reiniciar Sistema
           </button>
           
           <button 

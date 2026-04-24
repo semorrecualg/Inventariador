@@ -252,24 +252,22 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         // Antes de carregar, verificamos o status do arquivo
         const fileStatus = await sqliteService.getFileStatus();
         
-        // Se o arquivo estiver bloqueado ou aguardando permissão, NÃO prosseguimos para o cache.
-        // Admitimos 'linked' (sucesso total) ou 'granted' (permissão ok, handle pronto)
+        // Se o arquivo estiver bloqueado ou aguardando permissão, verificamos se o service está inicializado (via cache)
         const isAcessivel = fileStatus.status === 'linked' || fileStatus.status === 'granted';
+        const isInitialized = sqliteService.getIsInitialized();
         
-        if (!isAcessivel && (fileStatus.status === 'permission_denied' || fileStatus.status === 'prompt' || fileStatus.status === 'expired')) {
-          console.warn(`>>> [Persistence] SOBERANIA: Arquivo físico detectado mas bloqueado (${fileStatus.status}). Impedindo carga de cache.`);
+        if (!isAcessivel && !isInitialized && (fileStatus.status === 'permission_denied' || fileStatus.status === 'expired')) {
+          console.warn(`>>> [Persistence] SOBERANIA: Arquivo físico bloqueado (${fileStatus.status}) e sem cache inicializado. Impedindo carga.`);
           return {
             assets: [],
             companies: [],
             databaseMode: mode,
             status: DatabaseStatus.ERROR,
-            // v25.01: Não marcamos como integrity_failed se for apenas falta de permissão, 
-            // caso contrário o sistema exibe o alerta vermelho de corrupção indevidamente.
             _integrity_failed: false 
           } as unknown as InventoryState;
         }
 
-        // Buscamos ativos e config em paralelo do SQLite
+        // Buscamos ativos e config em paralelo do SQLite (Pode ser o físico ou o cache do Service)
         const [assets, config] = await Promise.all([
           sqliteService.getAllAssets(),
           sqliteService.getInventoryConfig()
@@ -279,12 +277,9 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         sqlConfig = config;
         
         if (sqlAssets.length > 0) {
-          console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do SQLite físico.`);
-          if (sqlAssets.length > 0) {
-            console.table(sqlAssets.slice(0, 3).map(a => ({ id: a.id, tag: a.ETIQUETA, desc: a.DESCRICAODOATIVO?.slice(0, 20) })));
-          }
+          console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);
         } else {
-          console.warn('>>> [Persistence] SQLite físico vazio ou sem ativos.');
+          console.warn('>>> [Persistence] SQLite físico/cache vazio ou sem ativos.');
         }
       } catch (sqlErr) {
         console.error('>>> [Persistence] Erro crítico ao ler SQLite físico:', sqlErr);
