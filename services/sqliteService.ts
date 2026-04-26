@@ -476,51 +476,67 @@ class SqliteService {
 
   // --- Bulk Ops ---
   async bulkInsertAssets(assets: Asset[], skipPersist = false) {
+    if (!this.db) return;
     console.log(`>>> [DBA] Iniciando Insert em Lote de ${assets.length} ativos...`);
-    const queries = assets.map(asset => ({
-      sql: `INSERT OR REPLACE INTO assets (
+    
+    this.db.run("BEGIN TRANSACTION");
+    try {
+      const sql = `INSERT OR REPLACE INTO assets (
         id, ETIQUETA, DESCRICAODOBEM, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, 
         CC_CUSTO, CONTA_CONTABIL, STATUS, DATA_HORA_CONFERENCIA, 
         LATITUDE, LONGITUDE, DATAAQUISIC, VLRAQUISIC, NOTAFISCAL, 
         NOMEFORNECEDOR, CNPJ, SERIAL, ENDERECO, REGISTRO, SUBREG,
         DATABAIXA, PRIMARYKEY, Sn1_recno, Sn3_recno,
         _unitid, _tenantid, _photoUrl, TAG_INVENTARIO, _lastUpdated, _conferido
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [
-        asset.id || crypto.randomUUID(), 
-        asset.ETIQUETA, 
-        asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM, 
-        asset.GRUPO_EMPRESARIAL, 
-        asset.UNIDADE_OPERACIONAL,
-        asset.CENTRODECUSTO || asset.CC_CUSTO,
-        asset.CONTACONTABIL || asset.CONTA_CONTABIL,
-        asset.STATUS,
-        asset.DATA_HORA_CONFERENCIA || asset._dataLeitura,
-        asset.LATITUDE || asset._lat,
-        asset.LONGITUDE || asset._lng,
-        asset.DATAAQUISIC,
-        asset.VLRAQUISIC,
-        asset.NOTAFISCAL,
-        asset.NOMEFORNECEDOR,
-        asset.CNPJ,
-        asset.SERIAL,
-        asset.ENDERECO,
-        asset.REGISTRO,
-        asset.SUBREG,
-        asset.DATABAIXA,
-        asset.PRIMARYKEY || asset.PK,
-        asset.Sn1_recno,
-        asset.Sn3_recno,
-        asset._unitid, 
-        asset._tenantid, 
-        asset._photoUrl, 
-        asset.TAG_INVENTARIO, 
-        asset._lastUpdated || new Date().toISOString(),
-        asset._conferido ? 1 : 0
-      ]
-    }));
-    await this.executeBatch(queries, skipPersist);
-    console.log(">>> [DBA] Insert em Lote concluído.");
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+      const stmt = this.db.prepare(sql);
+      
+      for (const asset of assets) {
+        stmt.run([
+          asset.id || (self.crypto?.randomUUID ? self.crypto.randomUUID() : Math.random().toString(36).substring(2)), 
+          asset.ETIQUETA, 
+          asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM, 
+          asset.GRUPO_EMPRESARIAL, 
+          asset.UNIDADE_OPERACIONAL,
+          asset.CENTRODECUSTO || asset.CC_CUSTO,
+          asset.CONTACONTABIL || asset.CONTA_CONTABIL,
+          asset.STATUS,
+          asset.DATA_HORA_CONFERENCIA || asset._dataLeitura,
+          asset.LATITUDE || asset._lat,
+          asset.LONGITUDE || asset._lng,
+          asset.DATAAQUISIC,
+          asset.VLRAQUISIC,
+          asset.NOTAFISCAL,
+          asset.NOMEFORNECEDOR,
+          asset.CNPJ,
+          asset.SERIAL,
+          asset.ENDERECO,
+          asset.REGISTRO,
+          asset.SUBREG,
+          asset.DATABAIXA,
+          asset.PRIMARYKEY || asset.PK,
+          asset.Sn1_recno,
+          asset.Sn3_recno,
+          asset._unitid, 
+          asset._tenantid, 
+          asset._photoUrl, 
+          asset.TAG_INVENTARIO, 
+          asset._lastUpdated || new Date().toISOString(),
+          asset._conferido ? 1 : 0
+        ]);
+      }
+      
+      stmt.free();
+      this.db.run("COMMIT");
+
+      if (!skipPersist) await this.persist();
+      console.log(">>> [DBA] Insert em Lote concluído.");
+    } catch (e) {
+      if (this.db) this.db.run("ROLLBACK");
+      console.error(">>> [DBA] Erro no bulkInsertAssets:", e);
+      throw e;
+    }
   }
 
   // --- Campaigns ---

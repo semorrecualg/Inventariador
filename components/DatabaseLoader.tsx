@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { sqliteService } from '../services/sqliteService';
 import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, FolderOpen, ChevronLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import * as XLSX from 'xlsx';
+import { formatErrorMessage } from '../utils/errorUtils';
 
-import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode, TagInventario } from '../types';
+import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode } from '../types';
 
 interface DatabaseLoaderProps {
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
@@ -35,7 +35,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const addLog = (msg: string) => {
     console.log(`[DatabaseLoader] ${msg}`);
-    setErrorLog(prev => [...prev.slice(-4), msg]);
+    setErrorLog(prev => [...prev.slice(-20), msg]);
   };
 
   const loadDataFlow = async (forceCache = false) => {
@@ -96,8 +96,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         addLog("Falha ao montar banco de dados.");
       }
     } catch (err: unknown) {
-      const error = err as Error;
-      addLog(`Erro: ${error.message}`);
+      const { message } = formatErrorMessage(err);
+      addLog(`Erro: ${message}`);
       setStatus('ERROR');
     }
   };
@@ -147,128 +147,124 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     addLog(`Lendo planilha: ${file.name}`);
 
     try {
-      // 0. Pre-flight check: Espaço em Disco (Mobile Reliability)
+      // 0. Espaço em Disco
       if (navigator.storage && navigator.storage.estimate) {
         const { quota, usage } = await navigator.storage.estimate();
         const available = (quota || 0) - (usage || 0);
-        const estimatedSizeNeeded = file.size * 10; // Estimativa conservadora (Excel -> SQLite)
-        
-        if (available < estimatedSizeNeeded) {
-          const proceed = window.confirm(
-            `Aviso de Armazenamento: O dispositivo possui pouco espaço livre (~${Math.round(available / 1024 / 1024)}MB). ` +
-            `A importação de grandes planilhas pode falhar. Deseja continuar mesmo assim?`
-          );
-          if (!proceed) {
-            setStatus('IDLE');
-            return;
-          }
+        if (available < file.size * 5) {
+          const proceed = window.confirm(`Espaço em disco baixo (~${Math.round(available/1024/1024)}MB). Continuar?`);
+          if (!proceed) { setStatus('IDLE'); return; }
         }
       }
 
-      // 1. Verificação de Permissão antes de começar
+      // 1. Verificação de Permissão
       const hasPermission = await sqliteService.verifyPermission();
       if (!hasPermission) {
-        addLog("Erro: Permissão de escrita negada pelo navegador.");
-        alert("Para realizar a Carga Expert, o navegador precisa de permissão de escrita no arquivo .db. Por favor, tente novamente e autorize o acesso.");
+        addLog("Erro: Permissão negada.");
         setStatus('IDLE');
         return;
       }
 
-      // 2. Inicialização
       await sqliteService.init(); 
 
       const reader = new FileReader();
       reader.onload = async (evt) => {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        
+        addLog("Iniciando Worker de Processamento...");
+        
         try {
-          const dataBuffer = evt.target?.result as ArrayBuffer;
-          const wb = XLSX.read(dataBuffer, { type: 'array' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const rawData = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[];
-
-          addLog(`${rawData.length} registros encontrados.`);
-          setImportProgress({ current: 0, total: rawData.length });
-
-          const CHUNK_SIZE = 100; // Reduzido de 200 para 100 (Melhor para 2GB/3GB RAM)
-          const total = rawData.length;
-          const CHECKPOINT_INTERVAL = 10; // A cada 10 lotes (1000 registros), fazemos um persist() físico
+          const worker = new Worker(new URL('../workers/excelWorker.ts', import.meta.url), { type: 'module' });
           
-          for (let i = 0; i < total; i += CHUNK_SIZE) {
-            const chunk = rawData.slice(i, i + CHUNK_SIZE);
+          worker.onmessage = async (e) => {
+            const { type, data, current, total, msg, stack, raw } = e.data;
             
-            // Mapeamento do lote
-            const assetsChunk: Asset[] = chunk.map((item) => {
-              const normalize = (val: unknown) => val === undefined || val === null ? '' : String(val);
-              return {
-                id: crypto.randomUUID(),
-                ETIQUETA: normalize(item.ETIQUETA || item.Etiqueta || item.Plaqueta).trim(),
-                DESCRICAODOATIVO: normalize(item.DESCRICAO || item.Descricao || item.DESCRICAODOBEM || item.N1_DESCRIC),
-                GRUPO_EMPRESARIAL: normalize(item.GRUPO_EMPRESARIAL || item.Empresa || item.N1_FILIAL),
-                UNIDADE_OPERACIONAL: normalize(item.UNIDADE_OPERACIONAL || item.Unidade || item.Local || item.C1_LOCAL),
-                CENTRODECUSTO: normalize(item.CUSTO || item.CC || item.N3_CCUSTO || item.CENTRODECUSTO),
-                CONTACONTABIL: normalize(item.CONTA || item.Conta || item.N1_CONTA || item.CONTACONTABIL),
-                STATUS: normalize(item.STATUS || item.Status || 'PENDENTE'),
-                DATAAQUISIC: normalize(item.DATA_AQ || item.DataAq || item.N1_DTACQUIS || item.DATAAQUISIC),
-                VLRAQUISIC: Number(item.VALOR || item.Valor || item.N1_VALOR || item.VLRAQUISIC || 0),
-                NOTAFISCAL: normalize(item.NF || item.NotaFiscal || item.N1_NFISCAL || item.NOTAFISCAL),
-                NOMEFORNECEDOR: normalize(item.FORNECEDOR || item.Fornecedor || item.NOMEFORNECEDOR),
-                CNPJ: normalize(item.CNPJ || item.Cnpj || item.CNPJ),
-                SERIAL: normalize(item.SERIAL || item.Serial || item.N1_SERIE || item.SERIAL),
-                ENDERECO: normalize(item.ENDERECO || item.Endereco || item.ENDERECO),
-                REGISTRO: normalize(item.REGISTRO || item.Registro || item.REGISTRO),
-                SUBREG: normalize(item.SUBREG || item.Subreg || item.SUBREG),
-                DATABAIXA: normalize(item.DATA_BAIXA || item.DataBaixa || item.N1_DTBAIXA || item.DATABAIXA),
-                PRIMARYKEY: normalize(item.PK || item.Pk || item.PRIMARYKEY),
-                Sn1_recno: Number(item.SN1_RECNO || item.RECNO || item.Sn1_recno || 0),
-                Sn3_recno: Number(item.SN3_RECNO || item.Sn3_recno || 0),
-                TAG_INVENTARIO: TagInventario.PENDENTE,
-                _conferido: false,
-                _lastUpdated: new Date().toISOString()
-              };
-            });
+            if (type === 'STATUS') {
+              addLog(msg);
+            } else if (type === 'CHUNK' || type === 'CHUNK_TRANSFER') {
+              let assetsToInsert: Asset[] = [];
+              
+              if (type === 'CHUNK_TRANSFER') {
+                const decoder = new TextDecoder();
+                const jsonString = decoder.decode(data);
+                assetsToInsert = JSON.parse(jsonString);
+              } else {
+                assetsToInsert = data;
+              }
 
-            // Persistência do lote (pulando gravação física intermediária na maioria das vezes)
-            await sqliteService.bulkInsertAssets(assetsChunk, true);
-            
-            // CHECKPOINT: A cada 1000 registros, garantimos a persistência física para resiliência
-            if ((i / CHUNK_SIZE) % CHECKPOINT_INTERVAL === 0 && i > 0) {
-              addLog(`Checkpoint de resiliência: Gravando ${i} registros no disco...`);
+              setImportProgress({ current, total });
+              
+              const CHECKPOINT_INTERVAL = 1000;
+              await sqliteService.bulkInsertAssets(assetsToInsert, true);
+              
+              if (current % CHECKPOINT_INTERVAL === 0 || current === total) {
+                addLog(`Sincronizando disco: ${current} / ${total}...`);
+                await sqliteService.persist();
+              }
+              
+              addLog(`Progresso: ${current} / ${total}`);
+              
+              // @ts-expect-error performance.memory is experimental and only available in Chromium
+              const memory = window.performance.memory;
+              if (memory) {
+                const used = Math.round(memory.usedJSHeapSize / 1024 / 1024);
+                addLog(`Heap: ${used}MB`);
+              }
+
+            } else if (type === 'COMPLETE') {
+              addLog("Finalizando...");
               await sqliteService.persist();
+              addLog("Sucesso!");
+              setStatus('IDLE');
+              worker.terminate();
+              if (showModal) showModal('Sucesso', 'Carga finalizada.', 'success');
+              await loadDataFlow();
+            } else if (type === 'ERROR') {
+              console.error("Worker Critical Failure:", { msg, stack, raw });
+              const { message, raw: formattedRaw } = formatErrorMessage({ message: msg, stack, raw });
+              addLog(`ERRO CRÍTICO: ${message}`);
+              
+              // Log stack and raw separately for deep debug
+              console.log("Full Stack:", stack);
+              console.log("Full Raw Error:", raw);
+
+              alert(`DEBUG CRÍTICO (Worker):\n\nMensagem: ${message}\n\nRaw Data (primeiros 200 chars): ${String(formattedRaw).substring(0, 200)}...`);
+              setStatus('ERROR');
+              worker.terminate();
             }
+          };
 
-            // Atualiza UI
-            const currentCount = Math.min(i + CHUNK_SIZE, total);
-            setImportProgress({ current: currentCount, total });
-            addLog(`Processado: ${currentCount} / ${total}`);
+          worker.onerror = (err) => {
+            console.error("Worker Global Error:", err);
+            addLog(`Worker Error: ${err.message}`);
+            setStatus('ERROR');
+            worker.terminate();
+          };
 
-            // YIELD: Aumentado para 20ms para garantir que o OS/Browser não bloqueie a thread em low-end
-            await new Promise(resolve => setTimeout(resolve, 20));
-          }
+          worker.postMessage({ dataBuffer });
 
-          addLog("Finalizando gravação física...");
-          await sqliteService.persist(); // Faz a gravação final de uma vez
-          addLog("Importação finalizada com sucesso!");
-          setStatus('IDLE');
-          
-          if (showModal) {
-            showModal('Carga Concluída', `${total} registros foram importados com sucesso.`, 'success');
-          }
-          
-          await loadDataFlow();
         } catch (err) {
-          console.error("Erro crítico no processamento:", err);
-          addLog(`ERRO: ${(err as Error).message}`);
-          alert(`Erro crítico durante a importação: ${(err as Error).message}\n\nTente reduzir o tamanho da planilha ou use um computador se o celular persistir no erro.`);
+          const { message, stack, raw } = formatErrorMessage(err);
+          console.error("Falha na Carga:", { message, stack, raw });
+          addLog(`ERRO: ${message}`);
+          alert(`Falha na importação: ${message}\n\nDebug: ${raw?.substring(0, 500)}`);
           setStatus('ERROR');
         }
       };
+      
+      reader.onerror = (err) => {
+        addLog(`Erro na leitura: ${err}`);
+        setStatus('ERROR');
+      };
+
       reader.readAsArrayBuffer(file);
     } catch (err) {
-       console.error("Erro ao iniciar importação:", err);
-       addLog(`Erro ao iniciar: ${(err as Error).message}`);
+       const { message } = formatErrorMessage(err);
+       addLog(`Erro ao iniciar: ${message}`);
        setStatus('ERROR');
     }
   };
+
 
   const handleExpertLoadClick = async () => {
     // Se temos um arquivo físico vinculado mas está sem permissão, pedimos primeiro
