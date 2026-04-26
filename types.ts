@@ -292,7 +292,8 @@ export enum AppScreen {
   SOFT_DELETE_REPORT = 'SOFT_DELETE_REPORT',
   IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT',
   UNIT_CONFIGURATOR = 'UNIT_CONFIGURATOR',
-  STRESS_TEST = 'STRESS_TEST'
+  STRESS_TEST = 'STRESS_TEST',
+  ASSET_REPORT_PRINT = 'ASSET_REPORT_PRINT'
 }
 
 export enum AppModule {
@@ -401,6 +402,30 @@ export interface InventoryCampaign {
   total_assets?: number;
   inventoried_assets?: number;
   divergence_count?: number;
+  closure_details?: {
+    snapshot_status: 'PENDING' | 'COMPLETED' | 'FAILED';
+    snapshot_size?: number;
+    closed_by?: string;
+    closed_at?: string;
+  };
+}
+
+export interface CampaignSnapshot {
+  id: string;
+  campaign_id: string;
+  snapshot_date: string;
+  assets_data: Asset[];
+  metadata: Record<string, unknown>;
+  closed_by: string;
+  _tenantid: string;
+}
+
+export interface NavigationParams {
+  assets?: Asset[];
+  unitName?: string;
+  campaign?: InventoryCampaign | null;
+  mode?: 'PARTIAL' | 'FINAL';
+  responsibleName?: string;
 }
 
 export interface UnitConfig {

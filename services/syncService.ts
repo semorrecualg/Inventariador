@@ -1,7 +1,8 @@
 
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { uploadAssetPhoto, updateAssetPhotoUrl } from './supabaseService';
+import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError } from './supabaseService';
+import { deleteLocalPhoto } from './photoService';
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 
@@ -52,8 +53,8 @@ export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
 export const processSyncQueue = async (onProgress?: (pendingCount: number) => void): Promise<void> => {
   // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
   const currentMode = localStorage.getItem('app_database_mode');
-  if (currentMode === 'INTERNAL') {
-    console.log('[Sync] Sincronização suspensa: Modo INTERNO ativo.');
+  if (currentMode?.startsWith('INTERNAL')) {
+    console.log('[Sync] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
     return;
   }
 
@@ -69,13 +70,17 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
       // Tenta o upload
       const photoUrl = await uploadAssetPhoto(item.assetId, item.photoBlob, item.tenantid);
       
-      if (photoUrl) {
-        // Atualiza o registro do ativo com a nova URL na nuvem
-        await updateAssetPhotoUrl(item.assetId, photoUrl, item.tenantid);
-
-        // Sucesso: Remove da fila
-        await queueStore.removeItem(item.id);
-        console.log(`[Sync] Foto do ativo ${item.assetId} sincronizada com sucesso.`);
+        if (photoUrl) {
+          // Atualiza o registro do ativo com a nova URL na nuvem
+          await updateAssetPhotoUrl(item.assetId, photoUrl, item.tenantid);
+  
+          // Sucesso: Remove da fila de sincronização
+          await queueStore.removeItem(item.id);
+          
+          // EXPURGO: Remove do armazenamento local pesado (IndexedDB) agora que está na nuvem
+          await deleteLocalPhoto(item.assetId);
+          
+          console.log(`[Sync] Foto do ativo ${item.assetId} sincronizada e expurgada localmente.`);
         
         // Dispara evento customizado para o app atualizar o estado local se necessário
         window.dispatchEvent(new CustomEvent('gbr_photo_synced', { 
@@ -93,7 +98,21 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
     } catch (err) {
       console.error(`[Sync] Erro ao sincronizar foto ${item.id}:`, err);
       
-      // Atualiza tentativas
+      // REGRA DE NEGÓCIO: Se a cota foi excedida, suspende tudo
+      if (isQuotaExceededError(err)) {
+        const errorMsg = 'LIMITE DE ARMAZENAMENTO ATINGIDO (Supabase Quota). Sincronização de fotos suspensa para evitar perda de dados. Contate o administrador.';
+        console.error(`[Sync] ${errorMsg}`);
+        
+        // Disparar evento para a UI mostrar um alerta persistente
+        window.dispatchEvent(new CustomEvent('gbr_sync_quota_error', { 
+          detail: { message: errorMsg } 
+        }));
+        
+        // Para o processamento IMEDIATAMENTE
+        break;
+      }
+      
+      // Atualiza tentativas para erros genéricos
       const updatedItem = {
         ...item,
         attempts: item.attempts + 1,

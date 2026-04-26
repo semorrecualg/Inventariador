@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole } from '../types';
+import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -10,6 +10,7 @@ import {
   ArrowLeft, 
   ClipboardList, 
   Download, 
+  FileText,
   Users,
   Settings,
   X,
@@ -48,7 +49,7 @@ import AIInsightCard from './AIInsightCard';
 import { sqliteService } from '../services/sqliteService';
 
 interface MainMenuProps {
-  onNavigate: (target: AppScreen) => void;
+  onNavigate: (target: AppScreen, params?: NavigationParams) => void;
   onLogout: () => void;
   onExport: () => void;
   onBackup: () => void;
@@ -194,7 +195,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     if (isDataMenuOpen) {
       import('../services/sqliteService').then(m => {
         m.sqliteService.getFileStatus().then(status => {
-          setDirStatus(status as any);
+          setDirStatus(status as { status: string; path: string; fileName?: string });
         });
       });
     }
@@ -1032,6 +1033,27 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Baixar base de dados</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Exportar XLS</p>
                 </div>
+              </button>
+
+              <button 
+                disabled={!hasData}
+                onClick={async () => { 
+                    setIsDataMenuOpen(false); 
+                    setIsAdminMenuOpen(false); 
+                    onNavigate(AppScreen.ASSET_REPORT_PRINT, {
+                        mode: 'PARTIAL',
+                        unitName: selectedUnit || 'GERAL',
+                        responsibleName: user?.name || user?.email || 'Auditor'
+                    }); 
+                }} 
+                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-white/20 text-white rounded-lg flex items-center justify-center mr-4 border border-white/30"><FileText size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Gerar Laudo (PDF)</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Estratégia Print-to-PDF (A4)</p>
+                </div>
+                <div className="bg-accent text-[7px] font-black px-1.5 py-0.5 rounded-full text-white uppercase animate-pulse">NOVO</div>
               </button>
 
               <button onClick={() => { onBackup(); }} className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] transition-all text-left">

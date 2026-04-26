@@ -274,6 +274,28 @@ const Inventory: React.FC<InventoryProps> = ({
   const [showScrollTop, setShowScrollTop] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
+  // v24.50: Restauração de Scroll (UX de Campo)
+  useEffect(() => {
+    const savedIndex = sessionStorage.getItem(`gbr_scroll_index_${selectedUnit}_${selectedLocation || 'all'}`);
+    if (savedIndex && virtuosoRef.current) {
+      const index = parseInt(savedIndex, 10);
+      if (index > 0) {
+        console.log(`>>> [UX] Restaurando posição de scroll para o índice: ${index}`);
+        // Pequeno delay para garantir que a renderização do Virtuoso completou
+        const timer = setTimeout(() => {
+          virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedUnit, selectedLocation]);
+
+  const handleRangeChanged = useCallback((range: { startIndex: number }) => {
+    if (range.startIndex > 0) {
+      sessionStorage.setItem(`gbr_scroll_index_${selectedUnit}_${selectedLocation || 'all'}`, range.startIndex.toString());
+    }
+  }, [selectedUnit, selectedLocation]);
+
   const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
   // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
@@ -1503,6 +1525,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 style={{ height: '100%' }}
                 data={filteredAssets}
                 increaseViewportBy={300}
+                rangeChanged={handleRangeChanged}
                 isScrolling={(scrolling) => {
                   if (scrolling && showNumericKeypad) {
                     setShowNumericKeypad(false);

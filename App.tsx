@@ -3,12 +3,12 @@
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 
 // Extend Window interface for pushScreen
 declare global {
   interface Window {
-    pushScreen?: (s: AppScreen) => void;
+    pushScreen?: (s: AppScreen, params?: NavigationParams) => void;
     clickResetTimeout?: ReturnType<typeof setTimeout>;
   }
 }
@@ -47,6 +47,7 @@ import PrivacyCenter from './components/PrivacyCenter';
 import OnboardingWizard from './components/OnboardingWizard';
 import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
+import AssetPrintView from './components/AssetPrintView';
 import SyncManager from './components/SyncManager';
 import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
@@ -313,13 +314,26 @@ const App: React.FC = () => {
     checkSyncQueue();
     const interval = setInterval(checkSyncQueue, 10000); // Check every 10s
 
-    const handleSynced = () => checkSyncQueue();
-    window.addEventListener('gbr_photo_synced', handleSynced);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('gbr_photo_synced', handleSynced);
-    };
+     const handleSynced = () => checkSyncQueue();
+     
+     const handleQuotaError = (e: Event) => {
+       const customEvent = e as CustomEvent<{ message: string }>;
+       setModalConfig({
+         isOpen: true,
+         title: 'Limite de Armazenamento',
+         message: customEvent.detail.message,
+         type: 'error'
+       });
+     };
+ 
+     window.addEventListener('gbr_photo_synced', handleSynced);
+     window.addEventListener('gbr_sync_quota_error', handleQuotaError);
+ 
+     return () => {
+       clearInterval(interval);
+       window.removeEventListener('gbr_photo_synced', handleSynced);
+       window.removeEventListener('gbr_sync_quota_error', handleQuotaError);
+     };
   }, [isSyncLocked]);
 
   // Rastreamento Autônomo v24.50
@@ -445,6 +459,8 @@ const App: React.FC = () => {
     } catch { return [AppScreen.LOGIN]; }
   });
 
+  const [screenParams, setScreenParams] = useState<NavigationParams | null>(null);
+
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
@@ -500,15 +516,13 @@ const App: React.FC = () => {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
-
+  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
   const [integrityFailed, setIntegrityFailed] = useState(false);
-  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
@@ -521,13 +535,13 @@ const App: React.FC = () => {
   useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL) {
       const checkFileStatus = async () => {
-        // Evita polling agressivo durante tentativa de reconexão ou link manual
-        if (isReconnecting || screen === AppScreen.DATABASE_MANAGER) return;
+        // Evita polling agressivo durante tentativa de reconexão ou link manual, ou quando na tela de carga dedicada
+        if (isReconnecting || screen === AppScreen.DATABASE_MANAGER || screen === AppScreen.LOAD_DATABASE) return;
 
         const result = await sqliteService.getFileStatus();
         if (result.status === 'busy') return; // Ignora pacificamente se houver gravação em curso
         
-        setFileStatus(result as any);
+        setFileStatus(result as { status: string; path: string; fileName?: string });
         
         const isRestricted = result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired';
         
@@ -630,8 +644,8 @@ const App: React.FC = () => {
     if (dirtyAssets.length > 0) {
       if (!skipLoadingState) setIsSyncing(true);
       try {
-        // Sincroniza os ativos e ESPERA a conclusão (Push)
-        await syncAssetsToCloud(dirtyAssets, effectiveTenantId);
+        // Sincroniza os ativos e recebe os IDs processados com sucesso (Push)
+        const syncedIds = await syncAssetsToCloud(dirtyAssets, effectiveTenantId);
         
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
@@ -639,9 +653,15 @@ const App: React.FC = () => {
         delete configToSync.assets;
         await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, effectiveTenantId);
 
-        dirtyAssetsRef.current.clear();
-        setLastSyncTime(new Date().toISOString());
-        setSyncError(null);
+        // Remove apenas os que foram sincronizados com sucesso (Resiliência)
+        syncedIds.forEach(id => dirtyAssetsRef.current.delete(id));
+        
+        if (syncedIds.length === dirtyAssets.length) {
+          setLastSyncTime(new Date().toISOString());
+          setSyncError(null);
+        } else {
+          setSyncError(`Sincronização parcial: ${syncedIds.length}/${dirtyAssets.length} enviados.`);
+        }
 
         // Log de Auditoria na Nuvem
         if (databaseMode === DatabaseMode.SUPABASE) {
@@ -916,10 +936,15 @@ const App: React.FC = () => {
       const customEvent = e as CustomEvent<{ assetId: string; photoUrl: string }>;
       const { assetId, photoUrl } = customEvent.detail;
       // Update local state with the real cloud URL
-      setInventory(prev => ({
-        ...prev,
-        assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
-      }));
+      setInventory(prev => {
+        const newState = {
+          ...prev,
+          assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
+        };
+        // Persist localmente para substituir o blob URL pela URL da nuvem no storage
+        saveInventory(newState).catch(err => console.error('[Sync] Erro ao persistir expurgo de foto:', err));
+        return newState;
+      });
       updatePendingCount();
     };
 
@@ -1846,7 +1871,7 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  const pushScreen = useCallback((s: AppScreen) => {
+  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
     if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
       setModalConfig({
         isOpen: true,
@@ -1856,6 +1881,8 @@ const App: React.FC = () => {
       });
       return;
     }
+
+    setScreenParams(params || null);
 
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
       console.log(`>>> [Navigation] Resetting history to: ${s}`);
@@ -3156,6 +3183,60 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Handlers de Transição e Workflow ---
+  const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
+    console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
+    
+    // 1. Extração de Unidades (Garantia)
+    const extractedCompanies = [...new Set(assets.map(a => {
+      const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+      return val;
+    }))].filter(Boolean);
+    const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
+
+    // 2. Atualização de Estado
+    const newInventory: InventoryState = { 
+      ...inventory, 
+      assets, 
+      companies: finalCompanies,
+      lastUpdated: new Date().toISOString(),
+      status: DatabaseStatus.LOADED
+    };
+    
+    setInventory(newInventory);
+    setIsDataLoaded(true);
+    setSqliteStatus('ACTIVE');
+    
+    // 3. Persistência de Segurança (Cache) - Importante para o modo Interno
+    try {
+      await saveInventory(newInventory, assets);
+      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
+    } catch (e) {
+      console.warn('>>> [App] Falha ao persistir cache após carga:', e);
+    }
+
+    // 4. Loop Guard: Evita que o redirect de "base vazia" dispare imediatamente ao voltar
+    sessionStorage.setItem('app_just_finished_load', 'true');
+    sessionStorage.removeItem('app_just_cleared_data');
+    
+    // 5. Navegação: Sempre retorna para a seleção de unidade (fluxo padrão)
+    console.log('>>> [App] Carga concluída. Retornando para Seleção de Unidade.');
+    setStartWithDataMenu(false);
+    
+    // Se estivermos em uma das telas de carga, limpamos o histórico e vamos para a seleção
+    if (history.includes(AppScreen.LOAD_DATABASE) || history.includes(AppScreen.DATABASE_MANAGER)) {
+      // Simplificamos: voltamos para a UNIT_SELECTION limpando o que houver acima
+      const newHistory = history.filter(s => s !== AppScreen.LOAD_DATABASE && s !== AppScreen.DATABASE_MANAGER);
+      if (newHistory[newHistory.length - 1] !== AppScreen.UNIT_SELECTION) {
+        newHistory.push(AppScreen.UNIT_SELECTION);
+      }
+      setHistory(newHistory);
+      localStorage.setItem('app_screen_history', safeStringify(newHistory));
+    } else {
+      pushScreen(AppScreen.UNIT_SELECTION);
+    }
+  }, [inventory, history, pushScreen]);
+
   const handleClearDatabase = async () => {
     try {
       const now = new Date();
@@ -3632,8 +3713,14 @@ const App: React.FC = () => {
       });
     } else if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
-      // Mas apenas se for realmente um administrador do sistema e os dados já foram carregados
-      const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
+      // Evita loop: utiliza sessionStorage para persistir o bloqueio mesmo após refresh ou pop
+      const hasJustFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
+      if (hasJustFinishedLoad) {
+        console.log('>>> [LoopGuard] Redirecionamento ignorado: Carga acabara de ser concluída.');
+        return;
+      }
+
+      const isSystemAdmin = checkIsAdmin(user);
       if (isSystemAdmin) {
         console.log('>>> [Redirect] Base vazia detectada após carregamento. Redirecionando para Carga Expert.');
         pushScreen(AppScreen.LOAD_DATABASE);
@@ -3938,7 +4025,6 @@ const App: React.FC = () => {
                 onOpenHelp={() => setIsHelpMenuOpen(true)}
                 onBack={popScreen} 
                 isSyncing={isSyncing}
-                syncProgress={syncProgress}
                 excludedAccounts={inventory.excludedAccounts}
                 campaigns={campaigns}
                 user={user}
@@ -3949,88 +4035,10 @@ const App: React.FC = () => {
                   popScreen();
                 }}
                 onClearDatabase={handleClearDatabase}
-                onDataLoaded={async (a: Asset[], c: string[]) => { 
-                  console.log('>>> [DatabaseLoader] Iniciando ativação do sistema...');
-                  console.log(`>>> [DatabaseLoader] Ativos: ${a.length}, Unidades: ${c.length}, Modo: ${databaseMode}`);
-                  
-                  const newInventory: InventoryState = { 
-                    ...inventory, 
-                    assets: a, 
-                    companies: c, 
-                    lastUpdated: new Date().toISOString(), 
-                    status: DatabaseStatus.LOADED,
-                    databaseMode: databaseMode // Garante que o modo atual seja preservado
-                  };
-                  
-                  // Mostra tela de sincronização imediatamente se for admin e NÃO estiver no modo INTERNO
-                  const shouldSync = isAdmin && databaseMode !== DatabaseMode.INTERNAL && !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-                  
-                  if (shouldSync) {
-                    console.log('>>> [DatabaseLoader] Sincronização necessária. Ativando isSyncing...');
-                    setIsSyncing(true);
-                    setSyncProgress({ current: 0, total: a.length });
-                  } else {
-                    console.log('>>> [DatabaseLoader] Sincronização ignorada (Modo INTERNO ou Supabase não configurado).');
-                  }
-
-                  try {
-                    console.log('>>> [DatabaseLoader] Salvando inventário localmente e marcando sistema como ATIVO...');
-                    setInventory(newInventory); 
-                    console.log('>>> [DatabaseLoader] Persistindo dados no SQLite físico (Modo Imobilização)...');
-                    await saveInventory(newInventory, a); 
-                    setIsDataLoaded(true); 
-                    
-                    if (databaseMode === DatabaseMode.INTERNAL && a.length > 0) {
-                      setSqliteStatus('ACTIVE');
-                      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
-                    }
-                    
-                    console.log('>>> [DatabaseLoader] Inventário local e físico (SQLite) salvos com sucesso.');
-                    
-                    if (shouldSync) {
-                      console.log('>>> [DatabaseLoader] Iniciando sincronização com Supabase...');
-                      try {
-                        const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-                        const forcedTenantId = user?.tenantid || (isGlobalAdmin ? undefined : 'default');
-                        
-                        console.log(`>>> [DatabaseLoader] Limpando nuvem para Tenant: ${forcedTenantId || 'GLOBAL'}...`);
-                        await clearCloudInventory(undefined, forcedTenantId);
-                        
-                        console.log(`>>> [DatabaseLoader] Enviando ${a.length} ativos para a nuvem...`);
-                        await syncAssetsToCloud(a, forcedTenantId);
-                        setSyncProgress({ current: a.length, total: a.length });
-
-                        const configToSync = { ...newInventory };
-                        // @ts-expect-error - assets is removed for sync
-                        delete configToSync.assets;
-                        console.log('>>> [DatabaseLoader] Sincronizando configurações...');
-                        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, forcedTenantId);
-                        
-                        setLastSyncTime(new Date().toISOString());
-                        setSyncError(null);
-                        console.log('>>> [DatabaseLoader] Sincronização concluída com sucesso.');
-                        
-                        sessionStorage.setItem('app_just_loaded_data', 'true');
-                        sessionStorage.removeItem('app_just_cleared_data');
-                      } catch (err) {
-                        console.error('>>> [DatabaseLoader] Erro ao sincronizar com a nuvem:', err);
-                        setSyncError('Erro no upload total');
-                      } finally {
-                        setIsSyncing(false);
-                        setSyncProgress(null);
-                      }
-                    }
-                    
-                    console.log('>>> [DatabaseLoader] Finalizando carga. Navegando para UNIT_SELECTION...');
-                    setStartWithDataMenu(false);
-                    pushScreen(AppScreen.UNIT_SELECTION); 
-                  } catch (error) {
-                    console.error('>>> [DatabaseLoader] Erro crítico na ativação:', error);
-                    setIsSyncing(false);
-                  }
-                }} 
+                onDataLoaded={handleDataLoaded} 
               />
             ) : (
+
               <div className="flex flex-col items-center justify-center h-full p-6 text-center">
                 <ShieldAlert size={48} className="text-red-500 mb-4" />
                 <p className="text-ink-muted uppercase font-black tracking-widest mb-2">Acesso Restrito</p>
@@ -4150,6 +4158,16 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
             />
           )}
+          {screen === AppScreen.ASSET_REPORT_PRINT && (
+            <AssetPrintView 
+              assets={screenParams?.assets || filteredAssetsByUnit} 
+              unitName={screenParams?.unitName || selectedUnit || 'UNIDADE GERAL'}
+              onBack={popScreen}
+              campaign={screenParams?.campaign}
+              mode={screenParams?.mode}
+              responsibleName={screenParams?.responsibleName || user?.name || user?.email}
+            />
+          )}
           {screen === AppScreen.SOFT_DELETE_REPORT && (
             <SoftDeleteReport 
               assets={inventory.assets}
@@ -4182,32 +4200,12 @@ const App: React.FC = () => {
               campaigns={campaigns}
               excludedAccounts={inventory.excludedAccounts}
               isSyncing={isSyncing}
-              syncProgress={syncProgress}
               onRestore={(state) => {
                 setInventory(state);
                 popScreen();
               }}
               onClearDatabase={handleClearDatabase}
-              onDataLoaded={async (assets, companies) => {
-                const extractedCompanies = [...new Set(assets.map(a => {
-                  const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
-                  return val;
-                }))].filter(Boolean);
-                const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
-                
-                setInventory(prev => ({ 
-                  ...prev, 
-                  assets, 
-                  companies: finalCompanies 
-                }));
-                
-                if (databaseMode === DatabaseMode.INTERNAL && assets.length > 0) {
-                  setSqliteStatus('ACTIVE');
-                  await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
-                }
-                
-                popScreen();
-              }} 
+              onDataLoaded={handleDataLoaded} 
             />
           )}
           {screen === AppScreen.SIGNATURE && (
@@ -4268,6 +4266,7 @@ const App: React.FC = () => {
                 setSelectedUnit(u); 
                 setIsInventorying(false); 
                 setInventoryLocation(null); 
+                sessionStorage.removeItem('app_just_finished_load');
                 
                 // Dispara o sync para a unidade selecionada se estiver no modo nuvem
                 // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)

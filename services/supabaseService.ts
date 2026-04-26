@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { deduplicateRedundantString } from '../utils/formatUtils';
 import { sanitizeForSupabase } from './utils';
@@ -528,67 +528,77 @@ export const signInWithMagicLink = async (email: string) => {
   return data;
 };
 
-export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]) => {
-  if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return;
+export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]): Promise<string[]> => {
+  if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return [];
 
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
-  console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos para o tenant: ${forcedTenantId || 'Global'}`);
+  console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
   
-  // Garante que todos os ativos tenham o tenantid antes de subir
-  // E remove URLs de blob locais que não devem ir para a nuvem
-  const assetsWithTenant = assets.map(a => {
-    const cleanAsset = { ...a };
-    // Remove URLs de blob locais e garante tipos corretos para o banco
-    if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
-      delete cleanAsset._photoUrl;
-    }
+  const CHUNK_SIZE = 200;
+  const total = assets.length;
+  const successfullySyncedIds: string[] = [];
+
+  for (let i = 0; i < total; i += CHUNK_SIZE) {
+    const chunk = assets.slice(i, i + CHUNK_SIZE);
     
-    // Garante que coordenadas sejam números ou null (evita strings vazias)
-    const lat = typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null;
-    const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
-    const conferido = Boolean(cleanAsset._conferido);
-
-    const assetEmpresa = (cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().replace(/_/g, ' ').trim();
-    const assetGrupo = (cleanAsset.GRUPO_EMPRESARIAL || cleanAsset._tenantid || '').trim().toUpperCase();
-
-    let finalTenantId = '';
-    if (tenantid) {
-      if (Array.isArray(tenantid)) {
-        // Se for um array (múltiplos tenants), tenta bater com a empresa do ativo
-        const match = tenantid.find(t => t.toUpperCase().replace(/_/g, ' ').trim() === assetGrupo);
-        finalTenantId = match || tenantid[0] || '';
-      } else {
-        finalTenantId = tenantid;
+    // Garante que todos os ativos tenham o tenantid antes de subir
+    const assetsWithTenant = chunk.map(a => {
+      const cleanAsset = { ...a };
+      // Remove URLs de blob locais
+      if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
+        delete cleanAsset._photoUrl;
       }
-    } else {
-      finalTenantId = assetGrupo || assetEmpresa || '';
-    }
+      
+      const lat = typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null;
+      const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
+      const conferido = Boolean(cleanAsset._conferido);
 
-    return {
-      ...cleanAsset,
-      _lat: lat,
-      _lng: lng,
-      _conferido: conferido,
-      _tenantid: finalTenantId,
-      _unitid: (cleanAsset._unitid || assetEmpresa || '').toUpperCase().replace(/_/g, ' ').trim() || null,
-      _version: cleanAsset._version || 1,
-      _is_deleted: cleanAsset._is_deleted || false,
-      UNIDADE_OPERACIONAL: assetEmpresa,
-      GRUPO_EMPRESARIAL: deduplicateRedundantString(finalTenantId)
-    };
-  });
+      const assetEmpresa = (cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().replace(/_/g, ' ').trim();
+      const assetGrupo = (cleanAsset.GRUPO_EMPRESARIAL || cleanAsset._tenantid || '').trim().toUpperCase();
 
-  console.log(`>>> [Supabase] Exemplo de _tenantid atribuído: ${assetsWithTenant[0]?._tenantid || 'Nenhum'}`);
-  
+      let finalTenantId = '';
+      if (tenantid) {
+        if (Array.isArray(tenantid)) {
+          const match = tenantid.find(t => t.toUpperCase().replace(/_/g, ' ').trim() === assetGrupo);
+          finalTenantId = match || tenantid[0] || '';
+        } else {
+          finalTenantId = tenantid;
+        }
+      } else {
+        finalTenantId = assetGrupo || assetEmpresa || '';
+      }
+
+      return {
+        ...cleanAsset,
+        _lat: lat,
+        _lng: lng,
+        _conferido: conferido,
+        _tenantid: finalTenantId,
+        _unitid: (cleanAsset._unitid || assetEmpresa || '').toUpperCase().replace(/_/g, ' ').trim() || null,
+        _version: cleanAsset._version || 1,
+        _is_deleted: cleanAsset._is_deleted || false,
+        UNIDADE_OPERACIONAL: assetEmpresa,
+        GRUPO_EMPRESARIAL: deduplicateRedundantString(finalTenantId)
+      };
+    });
+
+    console.log(`>>> [Supabase] Sincronizando lote ${Math.floor(i / CHUNK_SIZE) + 1} (${assetsWithTenant.length} itens)...`);
+    
     const { error } = await supabase
       .from('assets')
       .upsert(assetsWithTenant, { onConflict: 'id' });
 
     if (error) {
-      console.error('>>> [Supabase] Erro fatal na sincronização de ativos:', error);
-      throw error;
+      console.error(`>>> [Supabase] Erro no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, error);
+      // Retorna o que já foi sincronizado com sucesso ATÉ AGORA
+      return successfullySyncedIds;
     }
-  console.log('>>> [Supabase] Sincronização de ativos concluída com sucesso.');
+
+    successfullySyncedIds.push(...chunk.map(a => String(a.id)));
+  }
+
+  console.log('>>> [Supabase] Sincronização de todos os ativos concluída com sucesso.');
+  return successfullySyncedIds;
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
@@ -1058,39 +1068,63 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
   console.log(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(tenantid)}, unitid: ${unitid || 'GERAL'}`);
 
   try {
-    // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid
+    // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid (PAGINADO)
     let assets: Asset[] = [];
-    let assetsQuery = supabase.from('assets').select('*');
-    
-    if (tenantid) {
-      if (Array.isArray(tenantid)) assetsQuery = assetsQuery.in('_tenantid', tenantid);
-      else assetsQuery = assetsQuery.eq('_tenantid', tenantid);
-    }
-    
-    if (unitid && unitid !== '') {
-      const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
-      assetsQuery = assetsQuery.eq('_unitid', cleanUnitId);
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    let hasMore = true;
+
+    console.log(`>>> [Supabase] Iniciando busca paginada de ativos...`);
+
+    while (hasMore) {
+      let assetsQuery = supabase
+        .from('assets')
+        .select('*')
+        .range(from, from + PAGE_SIZE - 1);
+      
+      if (tenantid) {
+        if (Array.isArray(tenantid)) assetsQuery = assetsQuery.in('_tenantid', tenantid);
+        else assetsQuery = assetsQuery.eq('_tenantid', tenantid);
+      }
+      
+      if (unitid && unitid !== '') {
+        const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
+        assetsQuery = assetsQuery.eq('_unitid', cleanUnitId);
+      }
+
+      const { data: pageData, error: assetsError } = await assetsQuery;
+      
+      if (assetsError) {
+        console.error(`[Supabase] Erro em fetchFullInventory (Paginação ${from}): ${assetsError.code} - ${assetsError.message}`, assetsError);
+        throw assetsError;
+      }
+
+      if (pageData && pageData.length > 0) {
+        const mappedPage = pageData.map(a => ({
+          ...a,
+          id: a.id as string | number,
+          _tenantid: a._tenantid as string,
+          _unitid: a._unitid as string,
+          tenantid: a._tenantid as string, // Legado
+          unitid: a._unitid as string      // Legado
+        })) as Asset[];
+        
+        assets = [...assets, ...mappedPage];
+        console.log(`>>> [Supabase] Carregados ${assets.length} ativos...`);
+        
+        if (pageData.length < PAGE_SIZE) {
+          hasMore = false;
+        } else {
+          from += PAGE_SIZE;
+          // Yield to main thread to keep UI responsive
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      } else {
+        hasMore = false;
+      }
     }
 
-    const { data: initialAssets, error: assetsError } = await Promise.race([
-      assetsQuery,
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("FETCH_TIMEOUT")), 10000))
-    ]).catch(err => ({ data: null, error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    
-    if (!assetsError) {
-      const initialData = (initialAssets as unknown as Record<string, unknown>[]) || [];
-      assets = initialData.map(a => ({
-        ...a,
-        id: a.id as string | number,
-        _tenantid: a._tenantid as string,
-        _unitid: a._unitid as string,
-        tenantid: a._tenantid as string, // Legado
-        unitid: a._unitid as string      // Legado
-      })) as Asset[];
-    } else {
-      console.error(`[Supabase] Erro em fetchFullInventory (Assets): ${assetsError.code} - ${assetsError.message}`, assetsError);
-      throw assetsError;
-    }
+    console.log(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
     // 2. Busca a configuração
     const configId = tenantid 
@@ -1338,6 +1372,26 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     console.error('Erro inesperado ao limpar nuvem:', err);
     throw err;
   }
+};
+
+/**
+ * Verifica se um erro é relacionado ao limite de cota do Supabase (Storage/DB)
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const isQuotaExceededError = (err: any): boolean => {
+  if (!err) return false;
+  const msg = (err.message || '').toLowerCase();
+  const code = String(err.code || '');
+  return (
+    msg.includes('quota exceeded') || 
+    msg.includes('storage quota') || 
+    msg.includes('payload too large') ||
+    msg.includes('insufficient storage') ||
+    err.status === 413 ||
+    err.status === 507 ||
+    code === '507' ||
+    code === '413'
+  );
 };
 
 /**
@@ -1836,7 +1890,7 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
 /**
  * Atualiza o status de uma campanha
  */
-export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus): Promise<boolean> => {
+export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
   const mode = localStorage.getItem('app_database_mode');
   const isInternal = mode === 'INTERNAL';
 
@@ -1872,19 +1926,140 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   }
 
   if (!supabase) return false;
-  const { error } = await supabase
-    .from('inventory_campaigns')
-    .update({ 
+
+  try {
+    const updateData: Partial<InventoryCampaign> = { 
       status, 
-      end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : null 
-    })
-    .eq('id', campaignId);
-  
-  if (error) {
-    console.error('Erro ao atualizar status da campanha:', error);
+      end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : undefined 
+    };
+
+    if (status === CampaignStatus.CLOSED && closedBy) {
+        updateData.closure_details = {
+            closed_by: closedBy,
+            closed_at: new Date().toISOString(),
+            snapshot_status: 'PENDING'
+        };
+    }
+
+    const { error } = await supabase
+      .from('inventory_campaigns')
+      .update(updateData)
+      .eq('id', campaignId);
+    
+    if (error) {
+      console.error('Erro ao atualizar status da campanha:', error);
+      return false;
+    }
+
+    // Se estiver fechando, dispara o snapshot histórico (CPC 27)
+    if (status === CampaignStatus.CLOSED) {
+        console.log(`>>> [Audit] Iniciando processamento de Snapshot para Campanha: ${campaignId}`);
+        createCampaignSnapshot(campaignId, closedBy || 'admin').catch(console.error);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Erro ao atualizar status:', err);
     return false;
   }
-  return true;
+};
+
+/**
+ * Cria um Snapshot (Congelamento) de todos os ativos de uma campanha.
+ * Isso garante que o Laudo Final seja imutável conforme CPC 27.
+ */
+export const createCampaignSnapshot = async (campaignId: string, closedBy: string): Promise<boolean> => {
+    if (!supabase) return false;
+
+    try {
+        // 1. Busca os detalhes da campanha
+        const { data: campaign } = await supabase
+            .from('inventory_campaigns')
+            .select('*')
+            .eq('id', campaignId)
+            .single();
+
+        if (!campaign) return false;
+
+        const tenantId = campaign.tenant_id || campaign._tenantid;
+
+        // 2. Busca todos os ativos vinculados a esta unidade (Escopo da Campanha)
+        const { data: assets, error: assetError } = await supabase
+            .from('assets')
+            .select('*')
+            .eq('_tenantid', tenantId)
+            .eq('_unitid', campaign._unitid || campaign.unit_id);
+
+        if (assetError) throw assetError;
+
+        if (!assets || assets.length === 0) {
+            console.warn('>>> [Snapshot] Nenhum ativo encontrado para snapshot.');
+            return false;
+        }
+
+        // 3. Calcula metadados/stats para o laudo consolidado
+        const stats = {
+            total: assets.length,
+            inventoried: assets.filter(a => a._conferido).length,
+            divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
+            generated_at: new Date().toISOString(),
+            cpc_compliance: 'CPC 27 / NBC TG 27'
+        };
+
+        // 4. Salva o Snapshot em JSONB (Alta eficiência de armazenamento v24.50)
+        // Isso evita criar 12k linhas extras no banco, preservando o limite free de 500MB
+        const { error: snapshotError } = await supabase
+            .from('inventory_campaign_snapshots')
+            .insert([{
+                campaign_id: campaignId,
+                assets_data: assets as Asset[],
+                metadata: stats as Record<string, unknown>,
+                closed_at: new Date().toISOString(),
+                closed_by: closedBy,
+                tenant_id: tenantId
+            }]);
+
+        if (snapshotError) throw snapshotError;
+
+        // 5. Atualiza a campanha com o status do snapshot
+        await supabase
+            .from('inventory_campaigns')
+            .update({ 
+                closure_details: { 
+                    ...(campaign.closure_details || {}), 
+                    snapshot_status: 'COMPLETED',
+                    snapshot_size: assets.length 
+                } 
+            })
+            .eq('id', campaignId);
+
+        console.log(`>>> [Audit] Snapshot de ${assets.length} ativos finalizado para campanha ${campaignId}`);
+        return true;
+    } catch (err) {
+        console.error('Erro ao criar snapshot:', err);
+        return false;
+    }
+};
+
+/**
+ * Busca o Snapshot histórico de uma campanha encerrada.
+ */
+export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
+    if (!supabase) return null;
+    
+    try {
+        const { data, error } = await supabase
+            .from('inventory_campaign_snapshots')
+            .select('*')
+            .eq('campaign_id', campaignId)
+            .maybeSingle();
+
+        if (error) throw error;
+        return data as CampaignSnapshot;
+    } catch (err) {
+        console.error('Erro ao buscar snapshot:', err);
+        return null;
+    }
 };
 
 /**

@@ -14,10 +14,11 @@ import {
   ChevronDown,
   X,
   ArrowLeft,
-  Trash2
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
-import { User, InventoryCampaign, CampaignStatus } from '../types';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign } from '../services/supabaseService';
+import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot } from '../services/supabaseService';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -130,7 +131,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
-    const success = await updateCampaignStatus(id, status);
+    const success = await updateCampaignStatus(id, status, user?.email || 'admin');
     if (success) {
       setSuccessMessage('Status atualizado');
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -276,14 +277,44 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     {currentCampaignId === selectedCampaign.id ? 'Campanha Ativa' : 'Ativar para Inventário'}
                   </button>
                 )}
+
+                {selectedCampaign.status === CampaignStatus.CLOSED && (
+                  <button 
+                    onClick={async () => {
+                        const snapshot = await getCampaignSnapshot(selectedCampaign.id);
+                        if (snapshot && snapshot.assets_data) {
+                            if (window.pushScreen) {
+                                window.pushScreen(AppScreen.ASSET_REPORT_PRINT, { 
+                                    assets: snapshot.assets_data,
+                                    campaign: selectedCampaign,
+                                    mode: 'FINAL',
+                                    unitName: selectedCampaign._unitid || selectedCampaign.unit_id || 'UNIDADE GERAL',
+                                    responsibleName: snapshot.closed_by
+                                });
+                            }
+                        } else {
+                            alert('Snapshot não encontrado para esta campanha.');
+                        }
+                    }}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
+                  >
+                    <BarChart3 size={18} />
+                    <span>Gerar Laudo Final (Snapshot)</span>
+                  </button>
+                )}
                 
                 <div className="grid grid-cols-2 gap-3">
                   {selectedCampaign.status === CampaignStatus.ACTIVE ? (
                     <button 
-                      onClick={() => handleUpdateStatus(selectedCampaign.id, CampaignStatus.CLOSED)}
-                      className="py-3.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-bold text-xs hover:bg-white/10 transition-all"
+                      onClick={() => {
+                        if (window.confirm('ENCERRAMENTO DE CAMPANHA:\n\nAo encerrar, o sistema irá "Congelar" (Snapshot) o estado atual de todos os ativos para auditoria. Nenhuma alteração posterior afetará o Laudo Final.\n\nDeseja prosseguir com o encerramento?')) {
+                            handleUpdateStatus(selectedCampaign.id, CampaignStatus.CLOSED);
+                        }
+                      }}
+                      className="py-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold text-xs hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2"
                     >
-                      Encerrar
+                      <ShieldCheck size={14} />
+                      Encerrar e Congelar
                     </button>
                   ) : (
                     <button 

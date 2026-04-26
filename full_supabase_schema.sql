@@ -287,7 +287,11 @@ CREATE TABLE IF NOT EXISTS inventory_campaigns (
 
 -- 12. Índices para Performance
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets("ETIQUETA");
+CREATE INDEX IF NOT EXISTS idx_assets_status ON assets("STATUS");
+CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets("ENDERECO");
 CREATE INDEX IF NOT EXISTS idx_assets_tenant ON assets(_tenantid);
+CREATE INDEX IF NOT EXISTS idx_assets_unitid ON assets(_unitid);
+CREATE INDEX IF NOT EXISTS idx_assets_conferido ON assets(_conferido);
 CREATE INDEX IF NOT EXISTS idx_config_tenant ON inventory_config(_tenantid);
 CREATE INDEX IF NOT EXISTS idx_accounts_code ON chart_of_accounts(code);
 CREATE INDEX IF NOT EXISTS idx_groups_code ON asset_groups(group_code);

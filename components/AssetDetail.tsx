@@ -488,7 +488,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       const localUrl = URL.createObjectURL(compressedBlob);
       
       // Adiciona à fila de sincronização offline (se não for modo INTERNO)
-      if (databaseMode !== DatabaseMode.INTERNAL) {
+      if (!databaseMode.startsWith('INTERNAL')) {
         await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantid || '');
       }
 

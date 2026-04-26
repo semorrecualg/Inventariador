@@ -21,7 +21,16 @@ interface ActiveSearchProps {
 
 const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAsset }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [committedSearch, setCommittedSearch] = useState('');
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
+
+  // Debounce para o termo de busca para aliviar a CPU em grandes volumes
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setCommittedSearch(searchTerm);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // Filtra apenas os itens não conferidos
   const missingAssets = useMemo(() => {
@@ -51,8 +60,8 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
       list = list.filter(a => (a.ENDERECO || 'SEM LOCALIZAÇÃO') === selectedLocation);
     }
 
-    if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
+    if (committedSearch) {
+      const lower = committedSearch.toLowerCase();
       list = list.filter(a => 
         String(a.ETIQUETA || '').toLowerCase().includes(lower) ||
         String(a.DESCRICAODOATIVO || '').toLowerCase().includes(lower) ||
