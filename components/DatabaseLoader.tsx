@@ -174,50 +174,45 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         addLog("Iniciando Worker de Processamento...");
         
         try {
-          const worker = new Worker(new URL('../workers/excelWorker.ts', import.meta.url), { type: 'module' });
+          // Utiliza o Worker estático no-bundle para evitar erros de minificação
+          // Cache bust com timestamp para garantir que pegamos a versão corrigida
+          const worker = new Worker(`/workers/assetProcessor.js?v=${Date.now()}`);
           
-          worker.onmessage = async (e) => {
-            const { type, data, current, total, msg, stack, raw } = e.data;
+          // BroadcastChannel para comunicação de dados pesados
+          const channel = new BroadcastChannel('asset_worker_channel');
+          
+          worker.addEventListener('message', async (e) => {
+            const data = e.data;
+            const type = data.type;
+            const current = data.current;
+            const total = data.total;
+            const msg = data.msg;
+            const stack = data.stack;
+            const raw = data.raw;
+            const dbBuffer = data.dbBuffer;
             
             if (type === 'STATUS') {
               addLog(msg);
-            } else if (type === 'CHUNK' || type === 'CHUNK_TRANSFER') {
-              let assetsToInsert: Asset[] = [];
-              
-              if (type === 'CHUNK_TRANSFER') {
-                const decoder = new TextDecoder();
-                const jsonString = decoder.decode(data);
-                assetsToInsert = JSON.parse(jsonString);
-              } else {
-                assetsToInsert = data;
-              }
-
+            } else if (type === 'PROGRESS') {
               setImportProgress({ current, total });
+              addLog(`Gravando no SQLite Local: ${current} / ${total}`);
               
-              const CHECKPOINT_INTERVAL = 1000;
-              await sqliteService.bulkInsertAssets(assetsToInsert, true);
-              
-              if (current % CHECKPOINT_INTERVAL === 0 || current === total) {
-                addLog(`Sincronizando disco: ${current} / ${total}...`);
-                await sqliteService.persist();
-              }
-              
-              addLog(`Progresso: ${current} / ${total}`);
-              
-              // @ts-expect-error performance.memory is experimental and only available in Chromium
+              // @ts-expect-error performance.memory is experimental
               const memory = window.performance.memory;
               if (memory) {
                 const used = Math.round(memory.usedJSHeapSize / 1024 / 1024);
                 addLog(`Heap: ${used}MB`);
               }
-
             } else if (type === 'COMPLETE') {
-              addLog("Finalizando...");
-              await sqliteService.persist();
+              addLog("Exportando banco atualizado...");
+              if (dbBuffer) {
+                await sqliteService.importDatabase(new Uint8Array(dbBuffer));
+              }
               addLog("Sucesso!");
               setStatus('IDLE');
+              channel.close();
               worker.terminate();
-              if (showModal) showModal('Sucesso', 'Carga finalizada.', 'success');
+              if (showModal) showModal('Sucesso', 'Carga finalizada com persistência direta.', 'success');
               await loadDataFlow();
             } else if (type === 'ERROR') {
               console.error("Worker Critical Failure:", { msg, stack, raw });
@@ -230,18 +225,53 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
               alert(`DEBUG CRÍTICO (Worker):\n\nMensagem: ${message}\n\nRaw Data (primeiros 200 chars): ${String(formattedRaw).substring(0, 200)}...`);
               setStatus('ERROR');
+              channel.close();
               worker.terminate();
             }
-          };
+          });
 
-          worker.onerror = (err) => {
+          worker.addEventListener('error', (err) => {
             console.error("Worker Global Error:", err);
             addLog(`Worker Error: ${err.message}`);
             setStatus('ERROR');
             worker.terminate();
-          };
+          });
 
-          worker.postMessage({ dataBuffer });
+          const db = await sqliteService.getDb();
+          const dbData = db ? db.export() : null;
+
+          if (dbData) {
+            // Enviamos apenas buffers puros para evitar problemas de serialização de objetos complexos
+            const dataBuf = dataBuffer;
+            const dbBuf = dbData.buffer;
+            
+            const payload = { 
+              dataBuffer: dataBuf, 
+              dbBuffer: dbBuf 
+            };
+            
+            // Tenta postMessage (Transferable)
+            worker.postMessage(payload, [dataBuf, dbBuf]);
+            
+            // E também via Channel (não suporta Transferable da mesma forma em todos os browsers, mas serve como fallback)
+            // Nota: Se o postMessage falhar por conflito de constante, o channel pode salvar.
+            try {
+               channel.postMessage(payload);
+            } catch (chanErr) {
+               console.warn("BroadcastChannel postMessage failed:", chanErr);
+            }
+          } else {
+            const payload = { 
+              dataBuffer, 
+              dbBuffer: null 
+            };
+            worker.postMessage(payload, [dataBuffer]);
+            try {
+               channel.postMessage(payload);
+            } catch (chanErr) {
+               console.warn("BroadcastChannel postMessage failed:", chanErr);
+            }
+          }
 
         } catch (err) {
           const { message, stack, raw } = formatErrorMessage(err);

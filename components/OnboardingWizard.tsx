@@ -28,27 +28,27 @@ const steps = [
   },
   {
     title: "Modo Mobile Puro",
-    subtitle: "OPERAÇÃO OFFLINE TOTAL",
-    description: "Ideal para inventários rápidos ou locais sem conectividade. Todos os dados permanecem seguros no seu dispositivo.",
+    subtitle: "PADRÃO OFFLINE-FIRST",
+    description: "Configuração padrão para auditores. Todos os seus dados permanecem seguros no SQLite local do dispositivo, garantindo velocidade máxima e zero dependência de internet.",
     features: [
       "100% Offline e Seguro",
-      "Carga Expert via Excel",
+      "Login Direto via Banco Local",
       "Scanner de Alta Precisão",
-      "Relatórios Instantâneos"
+      "Processamento Instantâneo"
     ],
     icon: <Database size={48} className="text-white" />,
     gradient: "from-emerald-500 to-teal-600",
     lottiePlaceholder: "offline"
   },
   {
-    title: "Cloud Sync (Supabase)",
-    subtitle: "COLABORAÇÃO EM TEMPO REAL",
-    description: "Sincronize equipes inteiras. Dados consolidados na nuvem com segurança de nível bancário e auditoria em tempo real.",
+    title: "Infraestrutura Cloud",
+    subtitle: "OPCIONAL PARA GESTORES",
+    description: "Backup automático e colaboração multiusuário. Esta funcionalidade deve ser habilitada pelo administrador no painel de configurações avançadas.",
     features: [
-      "Multi-usuários Simultâneos",
-      "Backup Automático na Nuvem",
+      "Backup em Tempo Real",
+      "Equipes Multiusuário",
       "Dashboard de Gestão",
-      "Rastreabilidade Total"
+      "Configurado pelo Gestor"
     ],
     icon: <Cloud size={48} className="text-white" />,
     gradient: "from-purple-600 to-pink-600",

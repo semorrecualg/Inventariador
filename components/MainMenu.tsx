@@ -89,6 +89,7 @@ interface MainMenuProps {
   onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
   pendingPhotosCount?: number;
   syncQueueLength?: number;
+  unsyncedAssetsCount?: number;
   deletedAssetsCount?: number;
   impairmentAssetsCount?: number;
   excludedAccounts?: string[];
@@ -141,6 +142,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   mandatoryPhotoOnNewItem,
   onUpdateMandatoryPhotoOnNewItem,
   syncQueueLength = 0,
+  unsyncedAssetsCount = 0,
   deletedAssetsCount = 0,
   impairmentAssetsCount = 0,
   excludedAccounts = [],
@@ -266,7 +268,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
             }`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : syncError ? 'bg-red-500' : syncQueueLength > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               <span className="text-[9px] font-bold uppercase tracking-tight">
-                {isSyncing ? 'Sincronizando' : syncError ? 'Erro' : syncQueueLength > 0 ? `${syncQueueLength} Pendentes` : 'Online'}
+                {isSyncing ? 'Sincronizando' : syncError ? 'Erro' : (syncQueueLength + unsyncedAssetsCount) > 0 ? `${syncQueueLength + unsyncedAssetsCount} Pendentes` : 'Online'}
+              </span>
+            </div>
+          )}
+          {databaseMode === DatabaseMode.INTERNAL && (unsyncedAssetsCount > 0) && (
+            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border bg-amber-50 border-amber-100 text-amber-500">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-[9px] font-bold uppercase tracking-tight">
+                {unsyncedAssetsCount} Local-only
               </span>
             </div>
           )}
@@ -519,15 +529,44 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              {databaseMode !== DatabaseMode.INTERNAL && (
-                <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                  <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Cloud size={16} /></div>
+              {/* INFRAESTRUTURA CLOUD - NOVA SEÇÃO RESTRITA */}
+              <div className="w-full p-4 bg-blue-50 border border-blue-100 rounded-2xl shadow-sm">
+                <div className="flex items-center mb-3">
+                  <div className="w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><Cloud size={16} /></div>
                   <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Sincronização</h4>
-                    <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Fila Offline</p>
+                    <h4 className="text-[13px] font-bold text-blue-900 uppercase tracking-tight">Infraestrutura Cloud</h4>
+                    <p className="text-[8px] font-bold text-blue-400 uppercase tracking-widest mt-0.5">Sincronização e Backup</p>
                   </div>
-                </button>
-              )}
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-blue-100">
+                    <div>
+                      <span className="text-[10px] font-bold text-blue-900 uppercase tracking-widest block">Modo Cloud Sync</span>
+                      <span className="text-[8px] text-blue-400 uppercase font-medium">Backup em tempo real</span>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        const newMode = databaseMode === DatabaseMode.INTERNAL ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
+                        onUpdateDatabaseMode(newMode);
+                      }}
+                      className={`w-10 h-5 rounded-full relative transition-colors ${databaseMode === DatabaseMode.SUPABASE ? 'bg-blue-500' : 'bg-slate-200'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${databaseMode === DatabaseMode.SUPABASE ? 'left-6' : 'left-1'}`}  />
+                    </button>
+                  </div>
+
+                  {databaseMode === DatabaseMode.SUPABASE && (
+                    <button 
+                      onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }}
+                      className="w-full py-2.5 px-4 bg-blue-600 text-white rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+                    >
+                      <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
+                      Gerenciar Sincronização
+                    </button>
+                  )}
+                </div>
+              </div>
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">

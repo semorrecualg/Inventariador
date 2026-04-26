@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { SyncQueueItem } from '../types';
-import { getPendingSyncItems, processSyncQueue, removeItemFromQueue, clearSyncQueue } from '../services/syncService';
+import { getPendingSyncItems, processSyncQueue, removeItemFromQueue, clearSyncQueue, getUnsyncedAssetsCount, processDataSyncQueue } from '../services/syncService';
 import Modal from './Modal';
 
 interface SyncManagerProps {
@@ -32,6 +32,7 @@ const SyncManager: React.FC<SyncManagerProps> = ({
   onToggleFieldMode 
 }) => {
   const [items, setItems] = useState<SyncQueueItem[]>([]);
+  const [unsyncedAssets, setUnsyncedAssets] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -59,6 +60,10 @@ const SyncManager: React.FC<SyncManagerProps> = ({
     setLoading(true);
     const pendingItems = await getPendingSyncItems();
     setItems(pendingItems);
+    
+    const unsyncedCount = await getUnsyncedAssetsCount();
+    setUnsyncedAssets(unsyncedCount);
+    
     setLoading(false);
   };
 
@@ -66,11 +71,15 @@ const SyncManager: React.FC<SyncManagerProps> = ({
     if (!isOnline || isSyncing) return;
     setIsSyncing(true);
     try {
-      await processSyncQueue();
+      // Sincroniza fotos e dados
+      await Promise.all([
+        processSyncQueue(),
+        processDataSyncQueue()
+      ]);
       await loadItems();
       if (onSyncSuccess) onSyncSuccess();
     } catch (error) {
-      console.error('Erro ao processar fila:', error);
+      console.error('Erro ao processar sincronização:', error);
     } finally {
       setIsSyncing(false);
     }
@@ -154,21 +163,19 @@ const SyncManager: React.FC<SyncManagerProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-bg-main p-4 rounded-2xl border border-border">
-            <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Itens na Fila</p>
+            <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Fotos na Fila</p>
             <p className="text-2xl font-bold text-ink">{items.length}</p>
           </div>
           <div className="bg-bg-main p-4 rounded-2xl border border-border">
-            <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Status Global</p>
-            <p className={`text-xs font-bold uppercase tracking-widest ${items.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-              {items.length > 0 ? 'Aguardando' : 'Sincronizado'}
-            </p>
+            <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mb-1">Ativos Pendentes</p>
+            <p className="text-2xl font-bold text-ink">{unsyncedAssets}</p>
           </div>
         </div>
 
         <div className="flex gap-2">
           <button 
             onClick={handleSyncNow}
-            disabled={!isOnline || items.length === 0 || isSyncing}
+            disabled={!isOnline || (items.length === 0 && unsyncedAssets === 0) || isSyncing}
             className="flex-1 py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-30 flex items-center justify-center space-x-2"
           >
             {isSyncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}

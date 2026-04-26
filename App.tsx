@@ -69,7 +69,7 @@ import { requestPersistentStorage } from './services/localDbService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
-const MAX_SYNC_QUEUE_SIZE = 100; // Limite de segurança para fila de sincronização
+const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
 const checkIsAdmin = (u: User | null | undefined) => {
@@ -203,6 +203,7 @@ const App: React.FC = () => {
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
+  const [unsyncedAssetsCount, setUnsyncedAssetsCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     const saved = localStorage.getItem('app_database_mode');
@@ -293,12 +294,16 @@ const App: React.FC = () => {
     }
 
     const checkSyncQueue = async () => {
-      const { getSyncQueueLength } = await import('./services/syncService');
+      const { getSyncQueueLength, getUnsyncedAssetsCount } = await import('./services/syncService');
       const len = await getSyncQueueLength();
       setSyncQueueLength(len);
 
+      const unsyncedCount = await getUnsyncedAssetsCount();
+      setUnsyncedAssetsCount(unsyncedCount);
+
       // Ativa trava se exceder o limite de segurança
-      if (len >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
+      const totalPending = len + unsyncedCount;
+      if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
         setIsSyncLocked(true);
         setModalConfig({
           isOpen: true,
@@ -306,7 +311,7 @@ const App: React.FC = () => {
           message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Para garantir a integridade dos dados, novas operações de inventário estão suspensas até que a fila seja processada. Conecte-se a uma rede estável para sincronizar.`,
           type: 'error'
         });
-      } else if (len < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
+      } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
         setIsSyncLocked(false);
       }
     };
@@ -3858,7 +3863,7 @@ const App: React.FC = () => {
             <Login 
               users={users} 
               databaseMode={databaseMode}
-              onUpdateDatabaseMode={handleUpdateDatabaseMode}
+              isDatabaseEmpty={inventory.assets.length === 0}
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onUpdateScreen={(s) => setHistory([s])}
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
@@ -3994,6 +3999,7 @@ const App: React.FC = () => {
               hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
               pendingPhotosCount={pendingPhotosCount}
               syncQueueLength={syncQueueLength}
+              unsyncedAssetsCount={unsyncedAssetsCount}
               deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
               impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
               excludedAccounts={inventory.excludedAccounts}

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Server, Cloud, Eye, EyeOff, RefreshCw, ShieldCheck, Fingerprint, ShieldAlert } from 'lucide-react';
-import { supabase, ensureUserProfile, resetPassword, logAuditEvent, getEmailByUsername, signInWithMagicLink } from '../services/supabaseService';
+import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert } from 'lucide-react';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { APP_LOGO } from '../constants';
@@ -13,14 +13,22 @@ interface LoginProps {
   onLogin: (user: User) => void;
   users: User[];
   databaseMode: DatabaseMode;
-  onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   onOpenPrivacyCenter: () => void;
   onUpdateScreen: (screen: AppScreen) => void;
   onShowModal: (config: Partial<ModalConfig>) => void;
+  isDatabaseEmpty?: boolean;
 }
 
 // Login Component
-const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDatabaseMode, onOpenPrivacyCenter, onUpdateScreen, onShowModal }) => {
+const Login: React.FC<LoginProps> = ({ 
+  onLogin, 
+  users, 
+  databaseMode, 
+  onOpenPrivacyCenter, 
+  onUpdateScreen, 
+  onShowModal,
+  isDatabaseEmpty = false
+}) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,12 +42,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     setError(null);
   }, [databaseMode]);
 
-  const [isResetting, setIsResetting] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
-  const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [manualLink, setManualLink] = useState('');
-  const [showManualInput, setShowManualInput] = useState(false);
   const [hasBio, setHasBio] = useState(false);
 
   // Check for biometrics when username changes
@@ -97,76 +99,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
     }
   };
 
-  // Detectar erro de OTP expirado na URL
-  React.useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes('error_code=otp_expired')) {
-      setError("O link do e-mail expirou ou já foi usado. Por favor, solicite um NOVO link abaixo.");
-      // Limpa o hash para não ficar mostrando o erro se o usuário tentar outras coisas
-      window.history.replaceState(null, '', window.location.pathname);
-    }
-  }, []);
-
-  const handleManualLogin = async () => {
-    if (!manualLink.includes('#access_token=')) {
-      setError("Link inválido. Copie o link completo que deu erro (localhost).");
-      return;
-    }
-    
-    try {
-      setIsLoading(true);
-      // Extrai o hash do link (tudo após o #)
-      const hash = manualLink.split('#')[1];
-      const { data, error } = await supabase!.auth.setSession({
-        access_token: new URLSearchParams(hash).get('access_token') || '',
-        refresh_token: new URLSearchParams(hash).get('refresh_token') || '',
-      });
-
-      if (error) throw error;
-      if (data.user) {
-        const cloudUser = await ensureUserProfile(data.user.email!, data.user.user_metadata, data.user.id);
-        const loggedUser: User = {
-          id: data.user.id,
-          username: cloudUser.username,
-          email: cloudUser.email,
-          role: cloudUser.role as UserRole,
-          is_admin: cloudUser.is_admin || cloudUser.isAdmin || false,
-          isAdmin: cloudUser.is_admin || cloudUser.isAdmin || false,
-          mustChangePassword: false,
-          _tenantid: cloudUser._tenantid || cloudUser.tenantid || '',
-          tenantid: cloudUser._tenantid || cloudUser.tenantid || '',
-          tenants: cloudUser.tenants || [cloudUser.tenantid || '']
-        };
-        localStorage.setItem('app_current_user', safeStringify(loggedUser));
-        onLogin(loggedUser);
-      }
-    } catch (err: unknown) {
-      const error = err as Error;
-      setError("Erro ao processar link manual: " + error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    if (!username || !username.includes('@')) {
-      setError("Digite seu e-mail para redefinir a senha.");
-      return;
-    }
-    setIsResetting(true);
-    setError("");
-    try {
-      await resetPassword(username.trim().toLowerCase());
-      setResetSent(true);
-      setTimeout(() => setResetSent(false), 5000);
-    } catch (err) {
-      const error = err as { message?: string };
-      setError(error.message || "Erro ao enviar e-mail de redefinição.");
-    } finally {
-      setIsResetting(false);
-    }
-  };
-
   const handleClearSession = async () => {
     onShowModal({
       title: 'Limpar Sessão e Cache',
@@ -205,26 +137,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
         }
       }
     });
-  };
-
-  const handleMagicLink = async () => {
-    if (!username.includes('@')) {
-      setError("Por favor, insira um e-mail válido para o Magic Link.");
-      return;
-    }
-
-    setError(null);
-    setIsMagicLinkLoading(true);
-    
-    try {
-      await signInWithMagicLink(username.trim().toLowerCase());
-      setMagicLinkSent(true);
-    } catch (err: unknown) {
-      const error = err as Error;
-      setError(`Erro ao enviar link: ${error.message}`);
-    } finally {
-      setIsMagicLinkLoading(false);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -408,26 +320,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
   };
 
   const getFieldConfig = () => {
-    switch (databaseMode) {
-      case DatabaseMode.SUPABASE:
-        return {
-          userLabel: "Username ou e-mail",
-          userPlaceholder: "Digite seu usuário ou e-mail",
-          passLabel: "Senha cloud",
-          passPlaceholder: "••••••••",
-          accentColor: "text-accent",
-          focusColor: "focus:border-accent"
-        };
-      default:
-        return {
-          userLabel: "Usuário ou e-mail",
-          userPlaceholder: "Digite seu usuário ou e-mail",
-          passLabel: "Senha",
-          passPlaceholder: "••••••••",
-          accentColor: "text-accent",
-          focusColor: "focus:border-accent"
-        };
-    }
+    return {
+      userLabel: "Usuário ou e-mail",
+      userPlaceholder: "Digite seu usuário ou e-mail",
+      passLabel: "Senha",
+      passPlaceholder: "••••••••",
+      accentColor: "text-accent",
+      focusColor: "focus:border-accent"
+    };
   };
 
   const config = getFieldConfig();
@@ -498,31 +398,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
       </div>
 
       <div className="mb-4 max-w-sm mx-auto w-full">
-        <p className="text-[9px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2.5 ml-1">Modalidade de Acesso</p>
-        <div className="flex p-1.5 bg-slate-100/50 rounded-2xl border border-slate-200/60 shadow-inner backdrop-blur-sm">
-          <button 
-            onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-            className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-white text-accent shadow-lg shadow-accent/5 border border-accent/10' : 'text-slate-400 hover:text-slate-600'}`}
-          >
-            <Server size={14} />
-            <span>Mobile Puro</span>
-          </button>
-          <button 
-            onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-            className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${databaseMode === DatabaseMode.SUPABASE ? 'bg-white text-accent shadow-lg shadow-accent/5 border border-accent/10' : 'text-slate-400 hover:text-slate-600'}`}
-          >
-            <Cloud size={14} />
-            <span>Cloud Sync</span>
-          </button>
-        </div>
-
-        {databaseMode === DatabaseMode.INTERNAL && users.length <= 1 && (
-          <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-2xl animate-pulse">
-            <p className="text-[8px] font-black text-amber-700 uppercase tracking-tight leading-tight text-center">
-              ⚠️ Cache limpo detectado. No modo &quot;Mobile Puro&quot;, apenas o administrador padrão está disponível. 
-              Use &quot;Cloud Sync&quot; para restaurar seu acesso e baixar os dados.
-            </p>
-          </div>
+        {databaseMode === DatabaseMode.INTERNAL && (
+          isDatabaseEmpty ? (
+            <div className="mt-3 p-3 bg-blue-50/50 border border-blue-100 rounded-2xl">
+              <p className="text-[8px] font-black text-blue-700 uppercase tracking-tight leading-tight text-center">
+                ⚠️ Banco de dados local vazio. Aguardando carga inicial do administrador.
+              </p>
+            </div>
+          ) : users.length <= 1 ? (
+            <div className="mt-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
+              <p className="text-[8px] font-black text-emerald-700 uppercase tracking-tight leading-tight text-center">
+                ✅ Banco de dados carregado. Auditores: acessem com suas credenciais locais.
+              </p>
+            </div>
+          ) : null
         )}
       </div>
 
@@ -572,7 +461,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
 
         <button 
           type="submit"
-          disabled={isLoading || isMagicLinkLoading}
+          disabled={isLoading}
           className="w-full bg-accent text-white font-black py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-[0.98] hover:bg-accent-dark transition-all mt-6 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
         >
           {isLoading ? (
@@ -585,38 +474,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
           )}
         </button>
 
-        {databaseMode === DatabaseMode.SUPABASE && (
-          <>
-            <button 
-              type="button"
-              onClick={() => {
-                // Navega para a tela de registro
-                const pushScreen = window.pushScreen;
-                if (pushScreen) {
-                  pushScreen(AppScreen.REGISTER);
-                } else {
-                  // Fallback se pushScreen não estiver no window
-                  window.dispatchEvent(new CustomEvent('app_navigate', { detail: AppScreen.REGISTER }));
-                }
-              }}
-              className="w-full bg-white border border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
-            >
-              <span>Criar Nova Conta</span>
-            </button>
-
-            {/* Botão de Limpar Sessão (Recuperação) - Movido para maior visibilidade */}
-            <button
-              type="button"
-              onClick={handleClearSession}
-              className="w-full py-2 px-4 text-[9px] text-gray-400 hover:text-gray-600 flex items-center justify-center gap-2 transition-colors mt-2"
-              title="Use se o login estiver travado ou se mudou de projeto"
-            >
-              <RefreshCw className="w-3 h-3" />
-              Limpar Sessão e Cache (Recuperação)
-            </button>
-          </>
-        )}
-
         {hasBio && !isLoading && (
           <button 
             type="button"
@@ -626,48 +483,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             <Fingerprint size={18} />
             <span>Entrar com Biometria</span>
           </button>
-        )}
-
-        {databaseMode === DatabaseMode.SUPABASE && (
-          <div className="pt-2 space-y-2">
-            <button 
-              type="button"
-              onClick={handleResetPassword}
-              disabled={isResetting || isLoading}
-              className="w-full text-[9px] font-bold text-accent hover:text-accent-dark uppercase tracking-widest transition-colors flex items-center justify-center py-1"
-            >
-              {isResetting ? <RefreshCw size={10} className="mr-1 animate-spin" /> : <RefreshCw size={10} className="mr-1" />}
-              {resetSent ? "E-mail de redefinição enviado!" : "Esqueci minha senha"}
-            </button>
-
-            {supabase && (
-              magicLinkSent ? (
-                <div className="bg-green-50 border border-green-100 text-green-700 p-3 rounded-xl text-[10px] font-bold uppercase text-center animate-fadeIn">
-                  Link enviado! Verifique seu e-mail. <br/>
-                  <span className="text-[8px] opacity-80 mt-1 block">O link expira em 5 minutos e só pode ser usado uma vez.</span>
-                </div>
-              ) : (
-                <button 
-                  type="button"
-                  onClick={handleMagicLink}
-                  disabled={isMagicLinkLoading || isLoading}
-                  className="w-full bg-white border border-accent/20 text-accent font-bold py-3 rounded-xl active:scale-[0.98] transition-all uppercase tracking-[0.1em] text-[10px] flex items-center justify-center space-x-2 disabled:opacity-70"
-                >
-                  {isMagicLinkLoading ? (
-                    <>
-                      <Loader2 size={12} className="animate-spin" />
-                      <span>Enviando Link...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Cloud size={12} />
-                      <span>Entrar sem senha (Magic Link)</span>
-                    </>
-                  )}
-                </button>
-              )
-            )}
-          </div>
         )}
       </form>
 
@@ -688,51 +503,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             </div>
           )}
 
-          {/* Link de Resgate (Bypass para erro de localhost) - Disponível apenas se Supabase estiver configurado */}
-          {databaseMode !== DatabaseMode.INTERNAL && supabase && (
-            <div className="mt-4 pt-4 border-t border-accent/10">
-              {!showManualInput ? (
-                <button
-                  type="button"
-                  onClick={() => setShowManualInput(true)}
-                  className="text-[9px] font-bold text-ink-muted hover:text-accent flex items-center justify-center gap-1 mx-auto uppercase tracking-widest"
-                >
-                  <AlertCircle size={12} />
-                  Problemas com o link do e-mail?
-                </button>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-gray-400 text-center">
-                    Se o link do e-mail abriu uma página de erro (localhost), copie o link completo da barra de endereços e cole abaixo:
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={manualLink}
-                      onChange={(e) => setManualLink(e.target.value)}
-                      placeholder="Cole o link do localhost aqui..."
-                      className="flex-1 text-xs p-2 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleManualLogin}
-                      disabled={isLoading}
-                      className="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      {isLoading ? '...' : 'Logar'}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(false)}
-                    className="text-[10px] text-gray-400 hover:underline block mx-auto"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Botão de Emergência - Movido para local discreto e com lógica seletiva */}
+          <button
+            type="button"
+            onClick={handleClearSession}
+            className="text-[8px] font-black text-red-500 hover:text-red-700 uppercase tracking-widest flex items-center justify-center gap-2 transition-colors opacity-80 hover:opacity-100 mt-4 mx-auto"
+            title="Use se o login estiver travado ou se mudou de projeto"
+          >
+            <ShieldAlert className="w-3 h-3" />
+            Limpar Sessão e Cache (Recuperação)
+          </button>
         </div>
         
         <div className="pt-4 border-t border-accent/10">
@@ -746,17 +526,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, databaseMode, onUpdateDat
             >
               <ShieldCheck size={12} />
               <span>Privacidade e Segurança</span>
-            </button>
-            
-            {/* Botão de Emergência - Movido para local discreto e com lógica seletiva */}
-            <button
-              type="button"
-              onClick={handleClearSession}
-              className="text-[8px] font-black text-red-500 hover:text-red-700 uppercase tracking-widest flex items-center justify-center gap-2 transition-colors opacity-80 hover:opacity-100"
-              title="Use se o login estiver travado ou se mudou de projeto"
-            >
-              <ShieldAlert className="w-3 h-3" />
-              Limpar Sessão e Cache (Recuperação)
             </button>
           </div>
           <p className="text-[7px] text-slate-500 mt-4 font-mono break-all px-4">

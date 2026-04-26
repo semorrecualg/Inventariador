@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _is_deleted INTEGER DEFAULT 0,
     _lastUpdated TEXT,
     _conferido INTEGER DEFAULT 0,
+    _is_synced INTEGER DEFAULT 0,
     DATAAQUISIC TEXT,
     VLRAQUISIC REAL,
     NOTAFISCAL TEXT,
@@ -276,7 +277,8 @@ class SqliteService {
         { name: 'DATABAIXA', type: 'TEXT' },
         { name: 'PRIMARYKEY', type: 'TEXT' },
         { name: 'Sn1_recno', type: 'INTEGER' },
-        { name: 'Sn3_recno', type: 'INTEGER' }
+        { name: 'Sn3_recno', type: 'INTEGER' },
+        { name: '_is_synced', type: 'INTEGER' }
       ];
       
       for (const col of requiredCols) {
@@ -305,7 +307,8 @@ class SqliteService {
       const SQL = await initSqlJs({ 
         locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
       });
-      const handle = await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+      // Prioritize active handle (just created/linked) over localforage
+      const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
       this.currentDbStatus = await this.getSystemStatus();
 
       if (handle) {
@@ -379,6 +382,25 @@ class SqliteService {
   }
 
   // --- Persistence ---
+  async importDatabase(buffer: Uint8Array) {
+    if (!this.db) {
+       const SQL = await initSqlJs({ 
+         locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
+       });
+       this.db = new SQL.Database(buffer);
+    } else {
+       // Close current and swap
+       try { this.db.close(); } catch(e) { console.warn(e); }
+       const SQL = await initSqlJs({ 
+         locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
+       });
+       this.db = new SQL.Database(buffer);
+    }
+    this.isInitialized = true;
+    await this.persist();
+    console.log(">>> [DBA] Banco de dados importado e persistido com sucesso.");
+  }
+
   async persist() {
     if (!this.db) return;
     try {
@@ -479,21 +501,23 @@ class SqliteService {
     if (!this.db) return;
     console.log(`>>> [DBA] Iniciando Insert em Lote de ${assets.length} ativos...`);
     
+    /* eslint-disable no-var */
     this.db.run("BEGIN TRANSACTION");
     try {
-      const sql = `INSERT OR REPLACE INTO assets (
+    var sqlBulk = `INSERT OR REPLACE INTO assets (
         id, ETIQUETA, DESCRICAODOBEM, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, 
         CC_CUSTO, CONTA_CONTABIL, STATUS, DATA_HORA_CONFERENCIA, 
         LATITUDE, LONGITUDE, DATAAQUISIC, VLRAQUISIC, NOTAFISCAL, 
         NOMEFORNECEDOR, CNPJ, SERIAL, ENDERECO, REGISTRO, SUBREG,
         DATABAIXA, PRIMARYKEY, Sn1_recno, Sn3_recno,
-        _unitid, _tenantid, _photoUrl, TAG_INVENTARIO, _lastUpdated, _conferido
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        _unitid, _tenantid, _photoUrl, TAG_INVENTARIO, _lastUpdated, _conferido, _is_synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-      const stmt = this.db.prepare(sql);
+      var stmtBulk = this.db.prepare(sqlBulk);
       
-      for (const asset of assets) {
-        stmt.run([
+      for (var i = 0; i < assets.length; i++) {
+        var asset = assets[i];
+        stmtBulk.run([
           asset.id || (self.crypto?.randomUUID ? self.crypto.randomUUID() : Math.random().toString(36).substring(2)), 
           asset.ETIQUETA, 
           asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM, 
@@ -523,11 +547,12 @@ class SqliteService {
           asset._photoUrl, 
           asset.TAG_INVENTARIO, 
           asset._lastUpdated || new Date().toISOString(),
-          asset._conferido ? 1 : 0
+          asset._conferido ? 1 : 0,
+          asset._is_synced ?? 0
         ]);
       }
       
-      stmt.free();
+      stmtBulk.free();
       this.db.run("COMMIT");
 
       if (!skipPersist) await this.persist();

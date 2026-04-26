@@ -1,8 +1,9 @@
 
 import localforage from 'localforage';
-import { SyncQueueItem } from '../types';
-import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError } from './supabaseService';
+import { SyncQueueItem, Asset } from '../types';
+import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError, syncAssetsToCloud } from './supabaseService';
 import { deleteLocalPhoto } from './photoService';
+import { sqliteService } from './sqliteService';
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 
@@ -11,6 +12,71 @@ const queueStore = localforage.createInstance({
   name: 'GBR_Audit_v24',
   storeName: PHOTO_QUEUE_STORE
 });
+
+let isDataSyncRunning = false;
+
+/**
+ * Processa a sincronização de dados (registros de ativos) entre SQLite e Supabase
+ */
+export const processDataSyncQueue = async (): Promise<void> => {
+  if (isDataSyncRunning) return;
+  
+  const currentMode = localStorage.getItem('app_database_mode');
+  if (currentMode?.startsWith('INTERNAL')) return;
+  if (!navigator.onLine) return;
+
+  isDataSyncRunning = true;
+  
+  try {
+    const unsyncedResults = await sqliteService.query(
+      "SELECT * FROM assets WHERE _is_synced = 0 AND _is_deleted = 0 LIMIT 50"
+    );
+    
+    if (unsyncedResults.length === 0) {
+      isDataSyncRunning = false;
+      return;
+    }
+
+    console.log(`[Sync] Sincronizando ${unsyncedResults.length} ativos pendentes...`);
+    
+    const assets = unsyncedResults as unknown as Asset[];
+    const syncedIds = await syncAssetsToCloud(assets);
+
+    if (syncedIds.length > 0) {
+      // Marcar como sincronizado no SQLite
+      const placeholders = syncedIds.map(() => '?').join(',');
+      await sqliteService.execute(
+        `UPDATE assets SET _is_synced = 1 WHERE id IN (${placeholders})`,
+        syncedIds
+      );
+      console.log(`[Sync] ${syncedIds.length} ativos marcados como sincronizados.`);
+      
+      // Se sincronizou o lote todo, tenta o próximo imediatamente
+      if (syncedIds.length === unsyncedResults.length) {
+        isDataSyncRunning = false;
+        setTimeout(() => processDataSyncQueue(), 1000);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error('[Sync] Falha na sincronização de dados:', err);
+  } finally {
+    isDataSyncRunning = false;
+  }
+};
+
+/**
+ * Retorna o número de ativos aguardando sincronização com a nuvem
+ */
+export const getUnsyncedAssetsCount = async (): Promise<number> => {
+   try {
+     const result = await sqliteService.query("SELECT COUNT(*) as total FROM assets WHERE _is_synced = 0 AND _is_deleted = 0");
+     return Number(result[0]?.total || 0);
+   } catch (e) {
+     console.error(e);
+     return 0;
+   }
+};
 
 /**
  * Adiciona uma foto à fila de sincronização offline
@@ -154,7 +220,14 @@ export const clearSyncQueue = async (): Promise<void> => {
  */
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    console.log('[Sync] Conexão restaurada. Processando fila...');
+    console.log('[Sync] Conexão restaurada. Processando filas...');
     processSyncQueue().catch(console.error);
+    processDataSyncQueue().catch(console.error);
   });
+
+  // Intervalo de segurança para sincronização de dados (registros)
+  // Roda a cada 30 segundos
+  setInterval(() => {
+    processDataSyncQueue().catch(console.error);
+  }, 30000);
 }

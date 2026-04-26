@@ -133,6 +133,7 @@ export interface Asset {
   _campaignId?: string; // ID da Campanha de Inventário
   _version?: number; // Controle de versão para concorrência otimista
   _is_deleted?: boolean; // Soft delete para auditoria
+  _is_synced?: boolean; // Controle de sincronização local-first
   _parent_id?: string | number; // ID do ativo pai em caso de unitarização
   _is_unitized?: boolean; // Indica se o ativo foi desmembrado/unitarizado
   _is_divergent_baixa?: boolean; // Regra de Ouro: ATIVO com DATABAIXA preenchida
