@@ -216,6 +216,7 @@ class SqliteService {
         await localforage.setItem(this.keys.fileHandleKey, handle);
         this.activeFileHandle = handle;
         this.permissionGrantedSession = true;
+        this.storageSource = 'PHYSICAL';
         
         console.log(">>> [DBA] Novo arquivo criado e vinculado:", handle.name);
         return handle;
@@ -240,6 +241,7 @@ class SqliteService {
         await localforage.setItem(this.keys.fileHandleKey, handle);
         this.activeFileHandle = handle;
         this.permissionGrantedSession = true;
+        this.storageSource = 'PHYSICAL';
         console.log(">>> [DBA] Arquivo vinculado com sucesso:", handle.name);
         return handle;
       }
@@ -381,7 +383,7 @@ class SqliteService {
     }
   }
 
-  // --- Persistence ---
+  // --- Persistence & Export ---
   async importDatabase(buffer: Uint8Array) {
     if (!this.db) {
        const SQL = await initSqlJs({ 
@@ -399,6 +401,33 @@ class SqliteService {
     this.isInitialized = true;
     await this.persist();
     console.log(">>> [DBA] Banco de dados importado e persistido com sucesso.");
+  }
+
+  async exportDatabase(): Promise<Uint8Array | null> {
+    if (!this.db) return null;
+    return this.db.export();
+  }
+
+  async downloadDatabase() {
+    const binary = await this.exportDatabase();
+    if (!binary) return;
+    
+    const blob = new Blob([binary], { type: 'application/x-sqlite3' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup_inventario_${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log(">>> [DBA] Download do banco de dados iniciado.");
+  }
+
+  async forceSync() {
+    console.log(">>> [DBA] Forçando sincronização física manual...");
+    await this.persist();
+    return true;
   }
 
   async persist() {
