@@ -70,19 +70,5 @@ export function getAssetUnit(asset: any): string {
 }
 
 /**
- * Mapping of internal types to user-friendly labels
+ * Mapping of internal types to user-friendly labels (Already exported from constants/schema)
  */
-export const TYPE_LABELS: Record<string, string> = {
-  UNIT: 'Unidade Operacional',
-  DESCRIPTION: 'Descrição do Ativo',
-  TAG: 'Plaqueta Patrimonial',
-  COST_CENTER: 'Centro de Custo',
-  ACCOUNT: 'Conta Contábil',
-  DATE: 'Data de Aquisição',
-  VALUE: 'Valor de Aquisição',
-  INVOICE: 'Nota Fiscal',
-  VENDOR: 'Fornecedor',
-  SERIAL: 'Número de Série',
-  ADDRESS: 'Endereço / Localização',
-  GROUP: 'Grupo Empresarial'
-};

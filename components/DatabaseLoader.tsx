@@ -241,7 +241,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
                 // POPULAÇÃO DO REPOSITÓRIO DE ALTA PERFORMANCE (DEXIE)
                 addLog("Otimizando busca instantânea (Indexação)...");
-                const assetsToSync = await sqliteService.getAssets();
+                const assetsToSync = await sqliteService.getAllAssets();
                 if (assetsToSync && assetsToSync.length > 0) {
                   await assetRepository.bulkInsert(assetsToSync);
                   addLog(`${assetsToSync.length} ativos indexados no cache rápido.`);
