@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
+import { TYPE_LABELS } from '../utils/schema';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
 import BackButton from './BackButton';
@@ -369,15 +370,15 @@ const Consultation: React.FC<ConsultationProps> = ({
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {renderInput('ETIQUETA', 'Etiqueta', <Barcode size={16} />)}
-              {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={16} />)}
-              {renderInput('SERIAL', 'Serial', <Hash size={16} />)}
+              {renderInput('ETIQUETA', TYPE_LABELS.TAG, <Barcode size={16} />)}
+              {renderInput('DESCRICAODOATIVO', TYPE_LABELS.DESCRIPTION, <FileText size={16} />)}
+              {renderInput('SERIAL', TYPE_LABELS.SERIAL, <Hash size={16} />)}
               {renderInput('CNPJ', 'CNPJ', <Building2 size={16} />)}
-              {renderInput('NOMEFORNECEDOR', 'Fornecedor', <User size={16} />)}
-              {renderInput('NOTAFISCAL', 'Nota Fiscal', <FileText size={16} />)}
-              {renderInput('ENDERECO', 'Endereço', <MapPin size={16} />)}
-              {renderInput('CONTACONTABIL', 'Conta Contábil', <LayoutGrid size={16} />)}
-              {renderInput('CENTRODECUSTO', 'Centro de Custo', <Tag size={16} />)}
+              {renderInput('NOMEFORNECEDOR', TYPE_LABELS.VENDOR, <User size={16} />)}
+              {renderInput('NOTAFISCAL', TYPE_LABELS.INVOICE, <FileText size={16} />)}
+              {renderInput('ENDERECO', TYPE_LABELS.ADDRESS, <MapPin size={16} />)}
+              {renderInput('CONTACONTABIL', TYPE_LABELS.ACCOUNT, <LayoutGrid size={16} />)}
+              {renderInput('CENTRODECUSTO', TYPE_LABELS.COST_CENTER, <Tag size={16} />)}
               {renderInput('Sn1_recno', 'ID Protheus (SN1)', <Hash size={16} />)}
               {renderInput('Sn3_recno', 'ID Protheus (SN3)', <Hash size={16} />)}
               

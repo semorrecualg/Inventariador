@@ -1178,6 +1178,28 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              <button 
+                onClick={async () => { 
+                  const proceed = window.confirm("ATENÇÃO: Esta ação fará um HARD RESET no cache do navegador (LocalStorage, IndexedDB e Sessões). Todos os arquivos vinculados serão esquecidos. Deseja continuar?");
+                  if (proceed) {
+                    await sqliteService.purgeAllCache();
+                    window.location.reload();
+                  }
+                }} 
+                className="w-full flex items-center p-4 bg-orange-600/20 border border-orange-500/30 rounded-2xl active:scale-[0.98] transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-orange-600 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-orange-500/20">
+                  <Trash2 size={20} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-orange-500 uppercase tracking-tight">HARD RESET (LIMPAR CACHE)</h4>
+                  <p className="text-[8px] font-bold text-orange-400/60 uppercase tracking-widest mt-0.5 whitespace-pre-wrap">
+                    Limpar totalmente IndexedDB, LocalStorage e Sessão
+                  </p>
+                </div>
+                <ChevronRight size={20} className="text-white/20" />
+              </button>
+
               <button onClick={() => { 
                 setTempExcludedAccounts(excludedAccounts.join(', '));
                 setIsExcludedAccountsOpen(true);

@@ -386,6 +386,44 @@
             </div>
         </div>
 
+        <!-- Tópico 7: Guia de Boas Práticas -->
+        <div class="accordion-item">
+            <div class="accordion-header">7. Guia de Boas Práticas: App Inventariador</div>
+            <div class="accordion-content">
+                <div class="content-block">
+                    <p>Este guia garante que a sincronização entre o seu trabalho e o banco de dados do Administrador ocorra sem falhas.</p>
+                    
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">1. Início de um Novo Inventário</h4>
+                    <ul>
+                        <li><strong>Limpeza de Segurança:</strong> Sempre que receber um novo arquivo SQL do Administrador, utilize a opção "Mapeamento Exclusivo" (ou o botão de Hard Reset se disponível). Isso garante que dados de inventários passados não se misturem com o novo.</li>
+                        <li><strong>Confirmação Visual:</strong> Assim que o arquivo for carregado, verifique se a Unidade Operacional correta apareceu no topo da tela. Se o campo estiver vazio, o arquivo pode estar fora do padrão.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">2. Durante a Coleta (Bipagem/Digitação)</h4>
+                    <ul>
+                        <li><strong>Regra dos 5 Registros:</strong> O app agora salva fisicamente no celular a cada 5 alterações. Evite fechar o app bruscamente no exato momento em que acabar de digitar um item; aguarde 2 segundos para o sistema completar o "Flush" (gravação no disco).</li>
+                        <li><strong>Não use o botão "Voltar" do Android:</strong> Para navegar entre as telas do app, use sempre os botões internos da interface. O botão físico de voltar do sistema pode interromper processos de gravação em andamento.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">3. Continuidade do Trabalho</h4>
+                    <ul>
+                        <li><strong>Pausa e Retorno:</strong> Se precisar parar o inventário, você pode fechar o app normalmente. Ao abrir novamente, o sistema irá "Re-vincular" o arquivo automaticamente. Não use o Hard Reset neste momento, ou você apagará o que já coletou e ainda não enviou.</li>
+                        <li><strong>Alerta de Integridade:</strong> Se um alerta vermelho de integridade aparecer durante o trabalho, pare a coleta e verifique os logs ou contate o suporte. Isso indica que o arquivo físico pode ter sido movido ou renomeado fora do app.</li>
+                    </ul>
+
+                    <h4 style="color: var(--navy); margin: 15px 0 10px; font-size: 0.9rem; text-transform: uppercase;">4. Finalização e Backup</h4>
+                    <ul>
+                        <li><strong>Verificação de Tamanho:</strong> Antes de enviar o arquivo de volta ao Administrador, verifique se ele não apresenta um tamanho excessivo (o app agora faz a compactação automática para manter o arquivo leve).</li>
+                        <li><strong>Cópia de Segurança:</strong> Antes de carregar um novo banco, certifique-se de que o Administrador já recebeu o seu arquivo anterior. O processo de "Carga Nova" é definitivo e apaga o cache local por segurança.</li>
+                    </ul>
+
+                    <div class="alert-card info" style="padding: 10px; margin-top: 10px; border-left: 4px solid var(--accent);">
+                        <p style="font-size: 0.85rem; margin-bottom: 0;"><strong>Dica para o Administrador:</strong> Sempre nomeie os arquivos .db com a data e a unidade (ex: inventario_filial01_2026-04-27.db). Isso ajuda o auditor a identificar visualmente se está trabalhando no arquivo correto.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- FAQ -->
         <h2 style="margin: 30px 0 15px; font-size: 1.2rem; color: var(--navy); text-transform: uppercase; letter-spacing: 1px;">Perguntas Frequentes</h2>
 

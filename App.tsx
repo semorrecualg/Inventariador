@@ -4,6 +4,7 @@ console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supa
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
+import { SCHEMA_PRIORITY, normalizeHeader, getAssetUnit, findBestColumn } from './utils/schema';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -224,8 +225,11 @@ const App: React.FC = () => {
       const success = await sqliteService.requestFilePermission();
       
       if (success) {
+        // ESSENCIAL: Aguarda o serviço ler os dados do arquivo físico recém-liberado
+        await sqliteService.init(true);
+        
         // Aguarda um pequeno delay para o OS processar a permissão
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 800));
         
         // Recarrega os dados do inventário para o estado do React
         const loaded = await loadInventory(databaseMode);
@@ -234,17 +238,43 @@ const App: React.FC = () => {
         if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
           // Garantir que empresas estão extraídas
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
+             console.log(">>> [DBA] Extraindo unidades de " + loaded.assets.length + " ativos...");
              loaded.companies = [...new Set(loaded.assets.map(a => {
-               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
+          }
+          
+          if (loaded.assets.length > 0 && loaded.companies.length === 0) {
+            console.error(">>> [DBA] CRÍTICO: Ativos carregados mas nenhuma unidade operacional mapeada!");
+            alert("Atenção: Os dados foram carregados, mas nenhuma 'Unidade Operacional' foi identificada. Verifique se as colunas da planilha Excel estão corretas (Ex: UNIDADE, LOCAL, FILIAL).");
+          } else {
+            console.log(">>> [DBA] Carga de unidades OK: " + loaded.companies.length + " encontradas.");
+          }
+          
+          // v24.50.1: Refresh unit list using optimized query
+          if (loaded.assets.length > 0) {
+             const units = await sqliteService.getOperationalUnits();
+             if (units && units.length > 0) {
+                console.log(`>>> [DBA] Unidades sincronizadas via Query: ${units.length}`);
+                loaded.companies = units;
+             }
           }
           
           setInventory(loaded);
           setIsDataLoaded(true);
           setShowReconnectOverlay(false);
-          setIntegrityFailed(false); // Limpa o estado de falha se reconectou
+          setIntegrityFailed(false); 
           
-          if (loaded.assets.length > 0) {
+          // v24.50.5: Tenta extrair unidades mesmo que o fallback de assets tenha falhado
+          const units = await sqliteService.getOperationalUnits();
+          if (units && units.length > 0) {
+             console.log(`>>> [DBA] Unidades sincronizadas via Query Real-Time: ${units.length}`);
+             setInventory(prev => ({ ...prev, companies: units }));
+          } else {
+             console.warn(">>> [DBA] Nenhuma unidade encontrada via Query após reconexão.");
+          }
+          
+          if (loaded.assets.length > 0 || units.length > 0) {
             setSqliteStatus('ACTIVE');
             await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
           }
@@ -1150,13 +1180,8 @@ const App: React.FC = () => {
             const count = await sqliteService.getAssetCount();
             console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
             
-            // Se o SQLite reportar 0 mas o loadInventory retornou algo (fallback de cache),
-            // ou se o loadInventory sinalizou que está bloqueado (_integrity_failed), 
-            // tratamos como falha de integridade para forçar a re-permissão.
-            // Se detectamos que está simplesmente bloqueado por permissão (ERRO de acesso)...
             if (savedInventory.status === DatabaseStatus.ERROR) {
               console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
-              // NÃO ativamos IntegrityFailed se for apenas falta de permissão
               setShowReconnectOverlay(true);
               return; 
             }
@@ -1165,6 +1190,25 @@ const App: React.FC = () => {
             if (count === 0 && savedInventory.assets.length > 0) {
               console.warn(">>> [Auditoria] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO.");
               setIntegrityFailed(true);
+            } else if (count > 0) {
+              // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade se houver.
+              if (integrityFailed) {
+                 console.log(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
+                 setIntegrityFailed(false);
+              }
+            }
+
+            // Validação de Schema Detalhada em caso de falha
+            if (count > 0) {
+               const schema = await sqliteService.checkTableSchema('assets');
+               if (schema && Array.isArray(schema)) {
+                  const required = ['ETIQUETA', 'DESCRICAODOBEM', 'STATUS'];
+                  const missing = required.filter(col => !schema.find((s) => s['name'] === col));
+                  if (missing.length > 0) {
+                    console.error(">>> [Auditoria] FALHA DE SCHEMA: Colunas ausentes no arquivo físico:", missing);
+                    setIntegrityFailed(true);
+                  }
+               }
             }
           } catch (sqlErr) {
             console.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
@@ -3192,11 +3236,8 @@ const App: React.FC = () => {
   const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
     console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
     
-    // 1. Extração de Unidades (Garantia)
-    const extractedCompanies = [...new Set(assets.map(a => {
-      const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
-      return val;
-    }))].filter(Boolean);
+    // 1. Extração de Unidades (Garantia com Dicionário Global)
+    const extractedCompanies = [...new Set(assets.map(a => getAssetUnit(a)))].filter(Boolean);
     const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
 
     // 2. Atualização de Estado
@@ -3464,7 +3505,7 @@ const App: React.FC = () => {
     
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
-      const company = (a.UNIDADE_OPERACIONAL || a._unitid || '').trim().toUpperCase().replace(/_/g, ' ');
+      const company = getAssetUnit(a).replace(/_/g, ' ');
       if (!company) continue;
       
       let stats = companyStatsMap.get(company);

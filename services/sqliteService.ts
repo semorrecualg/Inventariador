@@ -1,6 +1,7 @@
 import initSqlJs, { Database } from 'sql.js';
 import localforage from 'localforage';
 import { DatabaseStatus, Asset, InventoryCampaign } from '../types';
+import { SCHEMA_PRIORITY, findBestColumn, normalizeHeader } from '../utils/schema';
 
 const FULL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS assets (
@@ -74,10 +75,14 @@ class SqliteService {
   private activeFileHandle: FileSystemFileHandle | null = null;
   private permissionGrantedSession = false;
   
-  private keys = {
+  // Soberania de Schema
+  private activeSchemaMappings: Record<string, string> = {};
+  
+  private storageKeys = {
     dbKey: 'sqlite_db_binary',
     fileHandleKey: 'sqlite_file_handle',
-    statusKey: 'sqlite_db_status'
+    statusKey: 'sqlite_db_status',
+    schemaMappingsKey: 'sqlite_schema_mappings'
   };
 
   // --- Singleton Management ---
@@ -90,16 +95,25 @@ class SqliteService {
     this.isInitialized = false;
     this.storageSource = 'NONE';
     this.permissionGrantedSession = false;
+    this.activeSchemaMappings = {};
+  }
+
+  async purgeAllCache() {
+    console.log(">>> [DBA] Purge de Cache solicitado...");
+    await this.reset();
+    sessionStorage.clear();
+    const keysToPurge = Object.values(this.storageKeys);
+    for (const key of keysToPurge) {
+      await localforage.removeItem(key);
+    }
+    // Limpar cache do auditor também
+    await localforage.removeItem('inventory_auditor_data');
+    console.log(">>> [DBA] Cache limpo com sucesso.");
   }
 
   async hardResetDatabase() {
-    console.log(">>> [DBA] Hard Reset solicitado...");
-    await this.reset();
-    await localforage.removeItem(this.keys.dbKey);
-    await localforage.removeItem(this.keys.fileHandleKey);
-    await localforage.removeItem(this.keys.statusKey);
+    await this.purgeAllCache();
     this.currentDbStatus = DatabaseStatus.EMPTY;
-    this.permissionGrantedSession = false;
   }
 
   getIsInitialized() { return this.isInitialized; }
@@ -112,18 +126,54 @@ class SqliteService {
 
   async setSystemStatus(status: DatabaseStatus) {
     this.currentDbStatus = status;
-    await localforage.setItem(this.keys.statusKey, status);
+    await localforage.setItem(this.storageKeys.statusKey, status);
   }
 
   async getSystemStatus(): Promise<DatabaseStatus> {
-    const status = await localforage.getItem<DatabaseStatus>(this.keys.statusKey);
+    const status = await localforage.getItem<DatabaseStatus>(this.storageKeys.statusKey);
     return status || DatabaseStatus.EMPTY;
+  }
+
+  // --- Schema Discovery ---
+  async detectAndPersistSchema() {
+    if (!this.db) return;
+    console.log(">>> [DBA] Detectando soberania de schema...");
+    
+    const info = await this.checkTableSchema('assets');
+    if (!info || info.length === 0) return;
+    
+    const existingCols = info.map((v: any) => v.name);
+    const newMappings: Record<string, string> = {};
+    
+    // Mapeamento prioritário para Unidade
+    const unitCol = findBestColumn(existingCols, SCHEMA_PRIORITY.UNIT);
+    if (unitCol) newMappings['UNIT'] = unitCol;
+    
+    // Mapeamento para Descrição
+    const descCol = findBestColumn(existingCols, SCHEMA_PRIORITY.DESCRIPTION);
+    if (descCol) newMappings['DESCRIPTION'] = descCol;
+
+    // Mapeamento para Centro de Custo
+    const ccCol = findBestColumn(existingCols, SCHEMA_PRIORITY.COST_CENTER);
+    if (ccCol) newMappings['COST_CENTER'] = ccCol;
+    
+    this.activeSchemaMappings = newMappings;
+    await localforage.setItem(this.storageKeys.schemaMappingsKey, newMappings);
+    console.log(">>> [DBA] Mapeamento de Schema consolidado:", newMappings);
+  }
+
+  async getMapping(type: 'UNIT' | 'DESCRIPTION' | 'COST_CENTER'): Promise<string | null> {
+    if (Object.keys(this.activeSchemaMappings).length === 0) {
+        const saved = await localforage.getItem<Record<string, string>>(this.storageKeys.schemaMappingsKey);
+        if (saved) this.activeSchemaMappings = saved;
+    }
+    return this.activeSchemaMappings[type] || null;
   }
 
   // --- Permission & Link Flow ---
   async getFileStatus() {
     try {
-      const handle = await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+      const handle = await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
       if (!handle) return { status: 'none', fileName: null, path: '' };
 
       if (this.permissionGrantedSession && this.activeFileHandle) {
@@ -159,7 +209,7 @@ class SqliteService {
       const result = await status.handle.requestPermission({ mode: 'readwrite' });
       if (result === 'granted') {
         this.permissionGrantedSession = true;
-        this.isInitialized = false; // Força re-init para ler os dados do arquivo físico
+        await this.init(true); // Força re-init para ler os dados do arquivo físico
         return true;
       }
     }
@@ -170,7 +220,7 @@ class SqliteService {
    * Verifica permissões de forma robusta antes de operações críticas.
    */
   async verifyPermission(handle?: FileSystemFileHandle): Promise<boolean> {
-    const targetHandle = handle || this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+    const targetHandle = handle || this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
     if (!targetHandle) return true; // Se não tem handle, assume modo cache/memória
 
     try {
@@ -213,7 +263,7 @@ class SqliteService {
         await writable.write(binary);
         await writable.close();
         
-        await localforage.setItem(this.keys.fileHandleKey, handle);
+        await localforage.setItem(this.storageKeys.fileHandleKey, handle);
         this.activeFileHandle = handle;
         this.permissionGrantedSession = true;
         this.storageSource = 'PHYSICAL';
@@ -238,7 +288,7 @@ class SqliteService {
       });
 
       if (handle) {
-        await localforage.setItem(this.keys.fileHandleKey, handle);
+        await localforage.setItem(this.storageKeys.fileHandleKey, handle);
         this.activeFileHandle = handle;
         this.permissionGrantedSession = true;
         this.storageSource = 'PHYSICAL';
@@ -251,13 +301,29 @@ class SqliteService {
     return null;
   }
 
-  async mapSpecificFile() {
-    return this.linkFile();
+  async hardLinkPick() {
+    return await this.linkFile();
   }
 
   async mapLocalFolder() {
-    // Para simplificar e evitar confusão, vamos usar apenas arquivo direto na v25
-    return this.linkFile();
+    return await this.linkFile();
+  }
+
+  async forceSync() {
+    await this.persist(true);
+    return true;
+  }
+
+  async downloadDatabase() {
+    const binary = await this.exportDatabase();
+    if (!binary) return;
+    const blob = new Blob([binary], { type: 'application/x-sqlite3' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup_${new Date().toISOString().split('T')[0]}.db`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // --- Migration & Schema Helpers ---
@@ -297,28 +363,29 @@ class SqliteService {
   }
 
   // --- Initialization Flow ---
-  async init() {
-    if (this.isInitialized && this.db) {
-      console.log(">>> [DBA] Sistema já inicializado. Reaproveitando instância.");
+  async init(force = false) {
+    if (this.isInitialized && this.db && !force) {
       return true;
     }
     
-    console.log(">>> [DBA] Passstep 1: Verificando handles persistidos...");
+    if (force) {
+      this.isInitialized = false;
+      if (this.db) {
+        try { this.db.close(); } catch(e) { console.warn(e); }
+        this.db = null;
+      }
+    }
     
     try {
       const SQL = await initSqlJs({ 
         locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
       });
-      // Prioritize active handle (just created/linked) over localforage
-      const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.keys.fileHandleKey);
+      const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
       this.currentDbStatus = await this.getSystemStatus();
 
       if (handle) {
-        console.log(">>> [DBA] Passo 2: Handle encontrado. Verificando permissão...");
         try {
-          // Utiliza cache de sessão ou checa no navegador
           let permission = this.permissionGrantedSession ? 'granted' : 'none';
-          
           if (permission !== 'granted') {
              // @ts-expect-error queryPermission is part of the experimental API
              permission = await handle.queryPermission({ mode: 'readwrite' });
@@ -326,64 +393,48 @@ class SqliteService {
           
           if (permission === 'granted') {
             this.permissionGrantedSession = true;
-            console.log(">>> [DBA] Passo 3: Permissão concedida. Lendo arquivo físico...");
             const file = await handle.getFile();
             const buffer = await file.arrayBuffer();
             
             this.db = new SQL.Database(new Uint8Array(buffer));
             this.db.run(FULL_SCHEMA);
             this.ensureRequiredColumns();
+            await this.detectAndPersistSchema(); // Detecta schema soberano
             
             this.storageSource = 'PHYSICAL';
             this.isInitialized = true;
             this.activeFileHandle = handle;
-            console.log(">>> [DBA] SUCESSO: Banco físico montado e pronto.");
             return true;
-          } else {
-            console.warn(">>> [DBA] Passo 3: Permissão pendente ou negada:", permission);
           }
-        } catch (err: unknown) {
-          const permErr = err as Error;
-          if (permErr.name === 'NotAllowedError') {
-            console.error(">>> [DBA] BLOQUEIO DE SEGURANÇA: Navegador negou acesso automático.");
-          } else {
-            console.error(">>> [DBA] Erro ao interagir com handle:", permErr);
-          }
+        } catch (err) {
+          console.error(">>> [DBA] Erro ao interagir com handle:", err);
         }
       }
 
-      // Fallback para Cache (Neutral State)
-      console.log(">>> [DBA] Tentando recuperar Cache Local (Fallback)...");
-      const binary = await localforage.getItem<Uint8Array>(this.keys.dbKey);
+      // Fallback para Cache
+      const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
       if (binary && binary.length > 4096) {
         this.db = new SQL.Database(binary);
         this.db.run(FULL_SCHEMA);
         this.ensureRequiredColumns();
+        await this.detectAndPersistSchema();
 
         this.storageSource = 'CACHE';
         this.isInitialized = true;
-        console.log(">>> [DBA] SUCESSO: Cache local carregado enquanto aguarda arquivo.");
         return true;
       }
 
-      // Último caso: Novo banco em memória
-      console.log(">>> [DBA] Inicializando novo banco padrão (Vazio)...");
       this.db = new SQL.Database();
       this.db.run(FULL_SCHEMA);
-      this.ensureRequiredColumns();
-
-      this.storageSource = 'MEMORY';
       this.isInitialized = true;
+      this.storageSource = 'MEMORY';
       return true;
-
     } catch (err) {
       console.error(">>> [DBA] FALHA CRÍTICA NA INICIALIZAÇÃO:", err);
-      this.isInitialized = false;
       return false;
     }
   }
 
-  // --- Persistence & Export ---
   async importDatabase(buffer: Uint8Array) {
     if (!this.db) {
        const SQL = await initSqlJs({ 
@@ -391,7 +442,6 @@ class SqliteService {
        });
        this.db = new SQL.Database(buffer);
     } else {
-       // Close current and swap
        try { this.db.close(); } catch(e) { console.warn(e); }
        const SQL = await initSqlJs({ 
          locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
@@ -399,8 +449,8 @@ class SqliteService {
        this.db = new SQL.Database(buffer);
     }
     this.isInitialized = true;
+    await this.detectAndPersistSchema();
     await this.persist();
-    console.log(">>> [DBA] Banco de dados importado e persistido com sucesso.");
   }
 
   async exportDatabase(): Promise<Uint8Array | null> {
@@ -408,47 +458,21 @@ class SqliteService {
     return this.db.export();
   }
 
-  async downloadDatabase() {
-    const binary = await this.exportDatabase();
-    if (!binary) return;
-    
-    const blob = new Blob([binary], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `backup_inventario_${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    console.log(">>> [DBA] Download do banco de dados iniciado.");
-  }
-
-  async forceSync() {
-    console.log(">>> [DBA] Forçando sincronização física manual...");
-    await this.persist();
-    return true;
-  }
-
-  async persist() {
+  async persist(force = false) {
     if (!this.db) return;
+    const shouldSyncPhysical = force || (this.storageSource === 'PHYSICAL' && !!this.activeFileHandle);
+
     try {
       const binary = this.db.export();
-      await localforage.setItem(this.keys.dbKey, binary);
+      await localforage.setItem(this.storageKeys.dbKey, binary);
       
-      if (this.storageSource === 'PHYSICAL' && this.activeFileHandle) {
+      if (shouldSyncPhysical && this.activeFileHandle) {
         try {
           const writable = await this.activeFileHandle.createWritable();
           await writable.write(binary);
           await writable.close();
-          console.log(">>> [DBA] Sincronização Física OK:", this.activeFileHandle.name);
-        } catch (err: unknown) {
-          const e = err as Error;
-          if (e.name === 'NotAllowedError') {
-            console.warn(">>> [DBA] Permissão de escrita expirou. Dados salvos apenas no cache.");
-          } else {
-            console.error(">>> [DBA] Falha na escrita física:", e);
-          }
+        } catch (err) {
+          console.error(">>> [DBA] Falha na escrita física persistente:", err);
         }
       }
     } catch (err) {
@@ -459,30 +483,12 @@ class SqliteService {
   // --- Helpers ---
   async execute(sql: string, params: unknown[] = []) {
     if (!this.db) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.db.run(sql, params as any[]);
     await this.persist();
   }
 
-  async executeBatch(queries: { sql: string; params: unknown[] }[], skipPersist = false) {
-    if (!this.db) return;
-    this.db.run("BEGIN TRANSACTION");
-    try {
-      for (const q of queries) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.db.run(q.sql, q.params as any[]);
-      }
-      this.db.run("COMMIT");
-      if (!skipPersist) await this.persist();
-    } catch (e) {
-      this.db.run("ROLLBACK");
-      throw e;
-    }
-  }
-
   async query(sql: string, params: unknown[] = []) {
     if (!this.db) return [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = this.db.exec(sql, params as any[]);
     if (res.length === 0) return [];
     
@@ -496,8 +502,48 @@ class SqliteService {
     });
   }
 
-  async getAllAssets() {
-    return this.query("SELECT * FROM assets WHERE _is_deleted = 0");
+  async getOperationalUnits(): Promise<string[]> {
+    if (!this.db) return [];
+    try {
+      // 1. Tenta usar mapeamento de soberania primeiro
+      const unitCol = await this.getMapping('UNIT');
+      if (unitCol) {
+        const sql = `SELECT DISTINCT TRIM(UPPER("${unitCol}")) as unit FROM assets`;
+        const res = await this.query(sql);
+        const units = res.map(r => String(r.unit || '').trim())
+                        .filter(u => u && u !== 'NULL' && u !== 'UNDEFINED' && u !== '0');
+        if (units.length > 0) return Array.from(new Set(units)).sort();
+      }
+
+      // 2. Fallback: Mapeamento exaustivo se não há soberania ou falhou
+      const allUnits = new Set<string>();
+      for (const col of SCHEMA_PRIORITY.UNIT) {
+        try {
+          const res = await this.query(`SELECT DISTINCT TRIM(UPPER("${col}")) as unit FROM assets`);
+          res.forEach(r => {
+            const val = String(r.unit || '').trim();
+            if (val && val !== 'NULL' && val !== 'UNDEFINED' && val !== '0') {
+              allUnits.add(val);
+            }
+          });
+        } catch { /* Ignora colunas inexistentes */ }
+      }
+      return Array.from(allUnits).sort();
+    } catch (e) {
+      console.error(">>> [DBA] Erro ao buscar unidades:", e);
+      return [];
+    }
+  }
+
+  async checkTableSchema(tableName: string) {
+    if (!this.db) return null;
+    try {
+      const info = await this.query(`PRAGMA table_info(${tableName})`);
+      return info;
+    } catch (e) {
+      console.error(`>>> [DBA] Erro ao checar schema de ${tableName}:`, e);
+      return null;
+    }
   }
 
   async getAssetCount(): Promise<number> {
@@ -505,35 +551,11 @@ class SqliteService {
     return Number(res[0]?.total || 0);
   }
 
-  // --- Inventory Config ---
-  async saveInventoryConfig(data: unknown) {
-    const tenantId = (data as { _tenantid?: string })._tenantid || 'default';
-    await this.execute(
-      "INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)",
-      [tenantId, tenantId, JSON.stringify(data)]
-    );
-  }
-
-  async getInventoryConfig(tenantId?: string): Promise<unknown | null> {
-    const tid = tenantId || 'default';
-    const res = await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tid]);
-    if (!res[0]?.data) return null;
-    try {
-      return JSON.parse(res[0].data as string);
-    } catch {
-      return null;
-    }
-  }
-
-  // --- Bulk Ops ---
   async bulkInsertAssets(assets: Asset[], skipPersist = false) {
     if (!this.db) return;
-    console.log(`>>> [DBA] Iniciando Insert em Lote de ${assets.length} ativos...`);
-    
-    /* eslint-disable no-var */
     this.db.run("BEGIN TRANSACTION");
     try {
-    var sqlBulk = `INSERT OR REPLACE INTO assets (
+      const sqlBulk = `INSERT OR REPLACE INTO assets (
         id, ETIQUETA, DESCRICAODOBEM, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, 
         CC_CUSTO, CONTA_CONTABIL, STATUS, DATA_HORA_CONFERENCIA, 
         LATITUDE, LONGITUDE, DATAAQUISIC, VLRAQUISIC, NOTAFISCAL, 
@@ -542,10 +564,9 @@ class SqliteService {
         _unitid, _tenantid, _photoUrl, TAG_INVENTARIO, _lastUpdated, _conferido, _is_synced
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-      var stmtBulk = this.db.prepare(sqlBulk);
-      
-      for (var i = 0; i < assets.length; i++) {
-        var asset = assets[i];
+      const stmtBulk = this.db.prepare(sqlBulk);
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
         stmtBulk.run([
           asset.id || (self.crypto?.randomUUID ? self.crypto.randomUUID() : Math.random().toString(36).substring(2)), 
           asset.ETIQUETA, 
@@ -580,20 +601,16 @@ class SqliteService {
           asset._is_synced ?? 0
         ]);
       }
-      
       stmtBulk.free();
       this.db.run("COMMIT");
-
       if (!skipPersist) await this.persist();
-      console.log(">>> [DBA] Insert em Lote concluído.");
     } catch (e) {
       if (this.db) this.db.run("ROLLBACK");
-      console.error(">>> [DBA] Erro no bulkInsertAssets:", e);
       throw e;
     }
   }
 
-  // --- Campaigns ---
+  // --- Outras Consultas ---
   async getCampaigns(tenantId: string): Promise<InventoryCampaign[]> {
     return await this.query("SELECT * FROM campaigns WHERE _tenantid = ?", [tenantId]) as unknown as InventoryCampaign[];
   }
@@ -607,6 +624,48 @@ class SqliteService {
 
   async deleteCampaignSql(id: string) {
     await this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
+    await this.execute("UPDATE assets SET _campaignId = NULL WHERE _campaignId = ?", [id]);
+  }
+
+  async executeBatch(commands: { sql: string, params: any[] }[]) {
+    if (!this.db) return;
+    this.db.run("BEGIN TRANSACTION");
+    try {
+      for (const cmd of commands) {
+        this.db.run(cmd.sql, (cmd.params || []) as any[]);
+      }
+      this.db.run("COMMIT");
+      await this.persist();
+    } catch (e) {
+      if (this.db) this.db.run("ROLLBACK");
+      throw e;
+    }
+  }
+
+  async saveInventoryConfig(data: any, tenantId?: string) {
+    const tid = tenantId || (data?._tenantid) || 'default';
+    await this.execute(
+      "INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)",
+      ['config_' + tid, tid, JSON.stringify(data)]
+    );
+  }
+
+  async getInventoryConfig(tenantId?: string | null) {
+    let sql = "SELECT data FROM inventory_config";
+    let params: any[] = [];
+    if (tenantId) {
+      sql += " WHERE _tenantid = ?";
+      params = [tenantId];
+    } else {
+      sql += " LIMIT 1";
+    }
+    const res = await this.query(sql, params);
+    if (res.length === 0) return null;
+    return JSON.parse(res[0].data as string);
+  }
+
+  async getAllAssets(): Promise<Asset[]> {
+    return await this.query("SELECT * FROM assets WHERE _is_deleted = 0") as unknown as Asset[];
   }
 }
 

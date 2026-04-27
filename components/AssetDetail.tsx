@@ -1,6 +1,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario, TransactionOrigin, AuditLogEntry, DatabaseMode } from '../types';
+import { SCHEMA_PRIORITY, getAssetUnit, TYPE_LABELS } from '../utils/schema';
+import { sqliteService } from '../services/sqliteService';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
@@ -301,14 +303,27 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return lines.join('\n');
   }, [workingAsset, qrCodeFields]);
 
-  const fieldGroups = [
+  const [unitMapping, setUnitMapping] = useState<string | null>(null);
+  const [ccMapping, setCcMapping] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchMappings = async () => {
+      const unit = await sqliteService.getMapping('UNIT');
+      const cc = await sqliteService.getMapping('COST_CENTER');
+      setUnitMapping(unit);
+      setCcMapping(cc);
+    };
+    fetchMappings();
+  }, []);
+
+  const fieldGroups = useMemo(() => [
     {
       title: 'IDENTIFICAÇÃO TÉCNICA',
       fields: [
-        { key: 'ETIQUETA', label: 'PLAQUETA PATRIMONIAL', icon: FileText },
-        { key: 'DESCRICAODOATIVO', label: 'DESCRIÇÃO DO BEM', icon: Info },
+        { key: 'ETIQUETA', label: TYPE_LABELS.TAG, icon: FileText },
+        { key: 'DESCRICAODOATIVO', label: TYPE_LABELS.DESCRIPTION, icon: Info },
         { key: 'QT', label: 'QUANTIDADE', icon: Hash },
-        { key: 'SERIAL', label: 'NÚMERO DE SÉRIE', icon: Hash },
+        { key: 'SERIAL', label: TYPE_LABELS.SERIAL, icon: Hash },
         { key: 'REGISTRO', label: 'REGISTRO MESTRE', icon: Hash },
         { key: 'SUBREG', label: 'SUB-REGISTRO', icon: Hash },
         { key: 'PRIMARYKEY', label: 'CHAVE PRIMÁRIA (PK)', icon: Lock }
@@ -317,19 +332,19 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     {
       title: 'LOCALIZAÇÃO E CUSTO',
       fields: [
-        { key: 'GRUPO_EMPRESARIAL', label: 'GRUPO EMPRESARIAL', icon: Building2 },
-        { key: 'UNIDADE_OPERACIONAL', label: 'UNIDADE OPERACIONAL', icon: Building2 },
-        { key: 'ENDERECO', label: 'ENDEREÇO FÍSICO', icon: MapPin },
-        { key: 'CENTRODECUSTO', label: 'CENTRO DE CUSTO', icon: Briefcase }
+        { key: 'GRUPO_EMPRESARIAL', label: TYPE_LABELS.GROUP, icon: Building2 },
+        { key: unitMapping || 'UNIDADE_OPERACIONAL', label: TYPE_LABELS.UNIT, icon: Building2 },
+        { key: 'ENDERECO', label: TYPE_LABELS.ADDRESS, icon: MapPin },
+        { key: ccMapping || 'CENTRODECUSTO', label: TYPE_LABELS.COST_CENTER, icon: Briefcase }
       ]
     },
     {
       title: 'DADOS DE AQUISIÇÃO',
       fields: [
-        { key: 'VLRAQUISIC', label: 'VALOR DE AQUISIÇÃO', icon: Wallet },
-        { key: 'DATAAQUISIC', label: 'DATA DE AQUISIÇÃO', icon: Calendar },
-        { key: 'NOTAFISCAL', label: 'NOTA FISCAL (NF)', icon: FileText },
-        { key: 'NOMEFORNECEDOR', label: 'FORNECEDOR', icon: User },
+        { key: 'VLRAQUISIC', label: TYPE_LABELS.VALUE, icon: Wallet },
+        { key: 'DATAAQUISIC', label: TYPE_LABELS.DATE, icon: Calendar },
+        { key: 'NOTAFISCAL', label: TYPE_LABELS.INVOICE, icon: FileText },
+        { key: 'NOMEFORNECEDOR', label: TYPE_LABELS.VENDOR, icon: User },
         { key: 'CNPJ', label: 'CNPJ FORNECEDOR', icon: Building2 }
       ]
     },
@@ -337,7 +352,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       title: 'CONTROLE CONTÁBIL',
       fields: [
         { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
-        { key: 'CONTACONTABIL', label: 'CONTA CONTÁBIL', icon: Briefcase },
+        { key: 'CONTACONTABIL', label: TYPE_LABELS.ACCOUNT, icon: Briefcase },
         { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
         { key: 'Sn1_recno', label: 'ID PROTHEUS (SN1)', icon: Hash },
         { key: 'Sn3_recno', label: 'ID PROTHEUS (SN3)', icon: Hash }
@@ -358,17 +373,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         { key: '_lng', label: 'LONGITUDE', icon: MapPin }
       ]
     }
-  ];
+  ], [unitMapping, ccMapping]);
 
   const suggestions = useMemo(() => {
     if (editingField === 'ENDERECO') {
       return uniqueEnderecos.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
     }
-    if (editingField === 'CENTRODECUSTO') {
+    if (editingField === 'CENTRODECUSTO' || editingField === ccMapping) {
       return uniqueCentrosDeCusto.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
     }
     return [];
-  }, [editingField, editValue, uniqueEnderecos, uniqueCentrosDeCusto]);
+  }, [editingField, editValue, uniqueEnderecos, uniqueCentrosDeCusto, ccMapping]);
 
   const applyFieldEdit = (val?: string) => {
     if (editingField) {

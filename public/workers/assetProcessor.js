@@ -69,6 +69,10 @@ var processData = async function(data) {
 
     sendStatus("Iniciando persistência no SQLite via Worker (Streaming)...");
 
+    // Clear existing data to avoid duplications
+    db.run("DELETE FROM assets");
+    console.log("[Worker] Tabela 'assets' limpa antes da carga.");
+
     var CHUNK_SIZE = 100;
     var processedCount = 0;
     var normalize = function(val) { 
@@ -105,22 +109,66 @@ var processData = async function(data) {
 
         var assetId = "ID_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
 
+        // Improved mappings based on SCHEMA_PRIORITY v24.50
+        var etiqueta = normalize(
+            row.ETIQUETA || row.PLAQUETA || row.CHAVE || row.CODIGO || row.ID || row.N1_CHAVE || ''
+        ).trim();
+        
+        var descricao = normalize(
+            row.DESCRICAODOBEM || row.DESCRICAO || row.DESCRICAODOATIVO || row.N1_DESCRIC || row.ITEM || ''
+        );
+        
+        var grupo = normalize(
+            row.GRUPO_EMPRESARIAL || row.EMPRESA || row.GRUPO || row.N1_FILIAL || ''
+        );
+
+        var unidade = normalize(
+            row.UNIDADE_OPERACIONAL || row.UNIDADE || row.FILIAL || row.LOCAL || 
+            row.LOCALIZACAO || row.N1_LOCAL || row.CENTRODECUSTO || row.CENTRO_DE_CUSTO || 
+            row.NOME_UNIDADE || row.LOJA || row.DEPARTAMENTO || row.ESTABELECIMENTO || 
+            row.AREA || row.SETOR || ''
+        ).trim();
+
+        var custo = normalize(
+            row.CENTRODECUSTO || row.CENTRO_DE_CUSTO || row.CC_CUSTO || row.CC || row.CUSTO || row.N3_CCUSTO || row.SETOR || ''
+        );
+
+        var conta = normalize(
+            row.CONTACONTABIL || row.CONTA_CONTABIL || row.CONTA || row.N1_CONTA || row.PLANO || ''
+        );
+
+        var data_aq = normalize(
+            row.DATAAQUSIC || row.DATAAQUISIC || row.DATA_AQ || row.DATA || row.N1_DTACQUIS || ''
+        );
+
+        var valor_aq = Number(
+            row.VLRAQUISIC || row.VALOR || row.N1_VALOR || row.PRECO || 0
+        );
+
+        var nf = normalize(
+            row.NOTAFISCAL || row.NF || row.N1_NFISCAL || row.FACTURA || ''
+        );
+
+        var fornecedor = normalize(
+            row.NOMEFORNECEDOR || row.FORNECEDOR || row.VENDOR || ''
+        );
+
         stmt.run([
             assetId,
-            normalize(row.ETIQUETA || row.PLAQUETA || row.CHAVE || row.ID || row.CODIGO).trim(),
-            normalize(row.DESCRICAO || row.DESCRICAODOBEM || row.N1_DESCRIC || row.DESCRICAODOATIVO || row.ITEM),
-            normalize(row.EMPRESA || row.N1_FILIAL || row.GRUPO_EMPRESARIAL || row.GRUPO),
-            normalize(row.UNIDADE || row.LOCAL || row.C1_LOCAL || row.UNIDADE_OPERACIONAL || row.LOJA),
-            normalize(row.CUSTO || row.CC || row.N3_CCUSTO || row.CENTRODECUSTO || row.SETOR),
-            normalize(row.CONTA || row.N1_CONTA || row.CONTACONTABIL || row.PLANO),
+            etiqueta,
+            descricao,
+            grupo,
+            unidade,
+            custo,
+            conta,
             normalize(row.STATUS || 'PENDENTE'),
             null, // DATA_HORA_CONFERENCIA
             null, // LATITUDE
             null, // LONGITUDE
-            normalize(row.DATA_AQ || row.N1_DTACQUIS || row.DATAAQUISIC || row.DATA),
-            Number(row.VALOR || row.N1_VALOR || row.VLRAQUISIC || row.PRECO || 0),
-            normalize(row.NF || row.N1_NFISCAL || row.NOTAFISCAL || row.FACTURA),
-            normalize(row.FORNECEDOR || row.NOMEFORNECEDOR || row.VENDOR),
+            data_aq,
+            valor_aq,
+            nf,
+            fornecedor,
             normalize(row.CNPJ || ''),
             normalize(row.SERIAL || row.N1_SERIE || row.S_N || ''),
             normalize(row.ENDERECO || row.SALA || row.LUGAR || ''),
@@ -150,6 +198,10 @@ var processData = async function(data) {
 
     db.run("COMMIT");
     stmt.free();
+
+    // Reclaim space and optimize
+    sendStatus("Otimizando banco de dados (VACUUM)...");
+    db.run("VACUUM");
 
     // Export Updated DB
     var finalExpBuffer = db.export();

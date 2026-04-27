@@ -122,6 +122,32 @@ Para que um auditor atenda aos requisitos de segurança, isolamento de dados (Mu
 ---
 
 *Documentação atualizada em: 20 de Março de 2026*
+---
+
+## 10. Guia de Boas Práticas: App Inventariador (Ambiente Interno)
+
+Este guia garante que a sincronização entre o seu trabalho e o banco de dados do Administrador ocorra sem falhas.
+
+### 10.1. Início de um Novo Inventário
+- **Limpeza de Segurança**: Sempre que receber um novo arquivo SQL do Administrador, utilize a opção "Mapeamento Exclusivo" (ou o botão de Hard Reset se disponível). Isso garante que dados de inventários passados não se misturem com o novo.
+- **Confirmação Visual**: Assim que o arquivo for carregado, verifique se a Unidade Operacional correta apareceu no topo da tela. Se o campo estiver vazio, o arquivo pode estar fora do padrão.
+
+### 10.2. Durante a Coleta (Bipagem/Digitação)
+- **Regra dos 5 Registros**: O app agora salva fisicamente no celular a cada 5 alterações. Evite fechar o app bruscamente no exato momento em que acabar de digitar um item; aguarde 2 segundos para o sistema completar o "Flush" (gravação no disco).
+- **Não use o botão "Voltar" do Android**: Para navegar entre as telas do app, use sempre os botões internos da interface. O botão físico de voltar do sistema pode interromper processos de gravação em andamento.
+
+### 10.3. Continuidade do Trabalho
+- **Pausa e Retorno**: Se precisar parar o inventário, você pode fechar o app normalmente. Ao abrir novamente, o sistema irá "Re-vincular" o arquivo automaticamente. Não use o Hard Reset neste momento, ou você apagará o que já coletou e ainda não enviou.
+- **Alerta de Integridade**: Se um alerta vermelho de integridade aparecer durante o trabalho, pare a coleta e verifique os logs ou contate o suporte. Isso indica que o arquivo físico pode ter sido movido ou renomeado fora do app.
+
+### 10.4. Finalização e Backup
+- **Verificação de Tamanho**: Antes de enviar o arquivo de volta ao Administrador, verifique se ele não apresenta um tamanho excessivo (o app agora faz a compactação automática para manter o arquivo leve).
+- **Cópia de Segurança**: Antes de carregar um novo banco, certifique-se de que o Administrador já recebeu o seu arquivo anterior. O processo de "Carga Nova" é definitivo e apaga o cache local por segurança.
+
+**Dica para o Administrador**: Sempre nomeie os arquivos .db com a data e a unidade (ex: `inventario_filial01_2026-04-27.db`). Isso ajuda o auditor a identificar visualmente se está trabalhando no arquivo correto.
+
+---
+
 *## 12. Modelos de Negócio e Versões
 
 O GBR v24.50 KARDEK opera em três níveis de serviço, cada um projetado para diferentes escalas de auditoria patrimonial:

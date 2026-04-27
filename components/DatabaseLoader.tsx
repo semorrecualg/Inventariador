@@ -26,10 +26,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   onBack,
   showModal
 }) => {
-  const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE'>('IDLE');
+  const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [errorLog, setErrorLog] = useState<string[]>([]);
+  const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
+  const [loadedData, setLoadedData] = useState<{ assets: Asset[]; companies: string[] } | null>(null);
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,22 +77,34 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
         if (assets.length === 0 && sqliteService.getStorageSource() === 'PHYSICAL') {
            addLog("Banco físico vinculado detectado (Vazio). Permanecendo para carga.");
-           // Não mostramos EMPTY_STATE se já temos um arquivo vinculado, 
-           // apenas permitimos que o usuário use o botão de carga na UnitSelector ou continue aqui.
-           // No entanto, para melhor UX, vamos mostrar o EMPTY_STATE mas salvar o status de carregado.
            setStatus('EMPTY_STATE');
            return;
         }
 
-        // Extração de empresas
-        const companies = [...new Set(assets.map((a: Asset) => 
-          (String(a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || 'OUTROS')).toUpperCase()
-        ))].filter(Boolean) as string[];
+        // Extração de unidades via Query Otimizada
+        const companies = await sqliteService.getOperationalUnits();
+
+        if (assets.length > 0 && companies.length === 0) {
+          addLog("AVISO: Ativos carregados mas nenhuma unidade identificada.");
+          if (showModal) {
+            showModal(
+              'Aviso de Mapeamento', 
+              'Os ativos foram carregados com sucesso, mas o sistema não conseguiu identificar a coluna de "Unidade Operacional" ou "Filial". \n\nO sistema tentará usar um identificador padrão ou você pode verificar se os nomes das colunas na sua planilha seguem os padrões esperados (UNIDADE, FILIAL, LOCAL, etc).', 
+              'warning'
+            );
+          }
+        }
 
         addLog(`Carga concluída. Ativos: ${assets.length}`);
-        sessionStorage.setItem('app_just_finished_load', 'true');
-        onDataLoaded(assets, companies);
-        setStatus('IDLE');
+        
+        if (assets.length > 0) {
+          setSummary({ assets: assets.length, units: companies.length, companies });
+          setLoadedData({ assets, companies });
+          setStatus('SUMMARY');
+        } else {
+          onDataLoaded(assets, companies);
+          setStatus('IDLE');
+        }
       } else {
         setStatus('ERROR');
         addLog("Falha ao montar banco de dados.");
@@ -118,8 +132,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const handleMapFolder = async () => {
-    addLog("Mapeando diretório de trabalho...");
-    const handle = await sqliteService.linkFile(); // Note: sqliteService.mapLocalFolder maps to linkFile in v25
+    addLog("Mapeando diretório de trabalho exclusivo...");
+    const handle = await sqliteService.hardLinkPick(); 
     if (handle) {
       loadDataFlow();
     }
@@ -204,15 +218,23 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 addLog(`Heap: ${used}MB`);
               }
             } else if (type === 'COMPLETE') {
-              addLog("Exportando banco atualizado...");
+              addLog("Exportando banco atualizado e forçando persistência física...");
               if (dbBuffer) {
-                await sqliteService.importDatabase(new Uint8Array(dbBuffer));
+                const u8Data = new Uint8Array(dbBuffer);
+                await sqliteService.importDatabase(u8Data);
+                // Garantia Extra: Força o sync físico com commit imediato no disco
+                await sqliteService.persist(true);
+                addLog("Persistência física confirmada.");
               }
               addLog("Sucesso!");
+              
+              // Pequena pausa para garantir que o OS liberou o arquivo
+              await new Promise(r => setTimeout(r, 1000));
+              
               setStatus('IDLE');
               channel.close();
               worker.terminate();
-              if (showModal) showModal('Sucesso', 'Carga finalizada com persistência direta.', 'success');
+              if (showModal) showModal('Sucesso', 'Carga finalizada com sucesso e sincronizada no arquivo .db.', 'success');
               await loadDataFlow();
             } else if (type === 'ERROR') {
               console.error("Worker Critical Failure:", { msg, stack, raw });
@@ -461,6 +483,60 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 Tentar carregar via Cache local
               </button>
             </div>
+          </motion.div>
+        )}
+
+        {status === 'SUMMARY' && summary && (
+          <motion.div 
+            key="summary"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center gap-6 text-center max-w-sm"
+          >
+            <div className="bg-emerald-100 p-5 rounded-[2rem] shadow-inner text-emerald-600">
+              <RefreshCw size={40} strokeWidth={2.5} className="animate-pulse" />
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Carga Concluída</h3>
+              <p className="text-[11px] text-slate-500 font-bold uppercase tracking-tight">O sistema identificou os seguintes dados:</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 w-full">
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ativos</p>
+                <p className="text-xl font-black text-slate-800 tracking-tight">{summary.assets.toLocaleString()}</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Unidades</p>
+                <p className="text-xl font-black text-slate-800 tracking-tight">{summary.units}</p>
+              </div>
+            </div>
+
+            {summary.units === 0 && (
+              <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-left">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
+                  <p className="text-[10px] text-amber-800 font-bold leading-tight uppercase">
+                    Aviso: Nenhuma unidade organizacional encontrada. O sistema usará uma unidade padrão. Verifique o mapeamento das colunas.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                if (loadedData) {
+                  sessionStorage.setItem('app_just_finished_load', 'true');
+                  onDataLoaded(loadedData.assets, loadedData.companies);
+                  setStatus('IDLE');
+                }
+              }}
+              className="w-full bg-emerald-600 text-white p-5 rounded-3xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"
+            >
+              <RefreshCw size={18} />
+              Ativar Sistema
+            </button>
           </motion.div>
         )}
 
