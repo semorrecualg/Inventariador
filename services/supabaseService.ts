@@ -2225,6 +2225,23 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       }
     }
 
+    // 1.1 Carrega do SQLite Físico se ainda estiver vazio e for modo interno
+    if (Object.keys(localData).length === 0 && isInternal) {
+      try {
+        const sqlConfig = await sqliteService.getInventoryConfig();
+        if (sqlConfig && sqlConfig.unitConfigs && Array.isArray(sqlConfig.unitConfigs)) {
+          console.log('>>> [Persistence] Recuperando UnitConfigs do SQLite físico...');
+          sqlConfig.unitConfigs.forEach((c: UnitConfig) => {
+            const key = `${c._tenantid || c.tenant_id}_${c._unitid || c.unit_id}`.replace(/\s+/g, '_');
+            localData[key] = c;
+          });
+          localStorage.setItem('local_unit_configs', JSON.stringify(localData));
+        }
+      } catch (err) {
+        console.warn('>>> [Persistence] Erro ao recuperar UnitConfigs do SQLite:', err);
+      }
+    }
+
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
       if (config.tenant_id === tenantid || config._tenantid === tenantid) {

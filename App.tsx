@@ -4,7 +4,7 @@ console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supa
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
-import { SCHEMA_PRIORITY, normalizeHeader, getAssetUnit, findBestColumn } from './utils/schema';
+import { getAssetUnit, normalizeKey } from './utils/schema';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -61,7 +61,7 @@ import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldA
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
@@ -619,7 +619,7 @@ const App: React.FC = () => {
   }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
 
   useEffect(() => {
-    if (user?.tenantid && databaseMode.startsWith('SUPABASE')) {
+    if (user?.tenantid) {
       fetchUnitConfigs(user.tenantid).then(configs => {
         setInventory(prev => ({ ...prev, unitConfigs: configs }));
       });
@@ -650,6 +650,48 @@ const App: React.FC = () => {
       }
     }
   }, [inventory.assets.length, inventory.unitConfigs?.length]);
+
+  const handleUpdateUnitConfig = async (unitId: string, lat: number, lng: number) => {
+    if (!user) return;
+    
+    const configToSave: UnitConfig = {
+      _tenantid: user.tenantid || 'default',
+      _unitid: unitId,
+      tenant_id: user.tenantid || 'default',
+      unit_id: unitId,
+      lat: lat,
+      lng: lng,
+      radius_meters: currentUnitConfig?.radius_meters || 500,
+      is_active: true,
+      updated_by: user.email,
+      updated_at: new Date().toISOString()
+    };
+
+    console.log('>>> [App] Atualizando Âncora GPS para Unidade:', unitId);
+    
+    try {
+      await saveUnitConfig(configToSave);
+      
+      // Atualiza o estado local imediatamente para refletir a mudança
+      const updatedConfigs = await fetchUnitConfigs(user.tenantid);
+      setInventory(prev => ({
+        ...prev,
+        unitConfigs: updatedConfigs,
+        lastUpdated: new Date().toISOString()
+      }));
+      
+      // Se estiver em modo interno, força salvamento no SQLite físico
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        saveInventory({
+          ...inventory,
+          unitConfigs: updatedConfigs,
+          lastUpdated: new Date().toISOString()
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao salvar configuração de GPS:', err);
+    }
+  };
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -1718,14 +1760,6 @@ const App: React.FC = () => {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [inventory]);
-
-  const normalizeKey = useCallback((s: unknown) => {
-    if (s === null || s === undefined) return '';
-    const str = String(s);
-    if (!str) return '';
-    // Cache simples para evitar re-processamento de strings idênticas
-    return str.toUpperCase().trim();
-  }, []);
 
   const [manualLocations, setManualLocations] = useState<string[]>(() => {
     try {
@@ -4156,6 +4190,7 @@ const App: React.FC = () => {
                   user={user}
                   currentCampaignId={inventory.currentCampaignId}
                   unitConfig={currentUnitConfig}
+                  onUpdateUnitConfig={handleUpdateUnitConfig}
                 />
               )}
             </GPSComplianceGuard>

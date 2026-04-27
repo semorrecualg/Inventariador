@@ -1,7 +1,7 @@
 import initSqlJs, { Database } from 'sql.js';
 import localforage from 'localforage';
 import { DatabaseStatus, Asset, InventoryCampaign } from '../types';
-import { SCHEMA_PRIORITY, findBestColumn, normalizeHeader } from '../utils/schema';
+import { SCHEMA_PRIORITY, findBestColumn } from '../utils/schema';
 
 const FULL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS assets (

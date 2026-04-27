@@ -4,94 +4,9 @@
  * Versão: v24.50.6 (GBR KARDEK)
  */
 
-export const SCHEMA_PRIORITY = {
-  UNIT: [
-    'UNIDADE_OPERACIONAL',
-    'UNIDADE',
-    'FILIAL',
-    'LOCAL',
-    'LOCALIZACAO',
-    'N1_LOCAL',
-    'CENTRODECUSTO',
-    'CENTRO_DE_CUSTO',
-    'NOME_UNIDADE',
-    'LOJA',
-    'DEPARTAMENTO',
-    'ESTABELECIMENTO',
-    'AREA',
-    'SETOR'
-  ],
-  DESCRIPTION: [
-    'DESCRICAODOBEM',
-    'DESCRICAO',
-    'DESCRICAODOATIVO',
-    'N1_DESCRIC',
-    'ITEM'
-  ],
-  TAG: [
-    'ETIQUETA',
-    'PLAQUETA',
-    'CHAVE',
-    'CODIGO',
-    'ID',
-    'N1_CHAVE'
-  ],
-  COST_CENTER: [
-    'CENTRODECUSTO',
-    'CENTRO_DE_CUSTO',
-    'CC_CUSTO',
-    'CC',
-    'CUSTO',
-    'N3_CCUSTO'
-  ],
-  ACCOUNT: [
-    'CONTACONTABIL',
-    'CONTA_CONTABIL',
-    'CONTA',
-    'N1_CONTA',
-    'PLANO'
-  ],
-  DATE: [
-    'DATAAQUSIC',
-    'DATAAQUISIC',
-    'DATA_AQ',
-    'DATA',
-    'N1_DTACQUIS'
-  ],
-  VALUE: [
-    'VLRAQUISIC',
-    'VALOR',
-    'N1_VALOR',
-    'PRECO'
-  ],
-  INVOICE: [
-    'NOTAFISCAL',
-    'NF',
-    'N1_NFISCAL',
-    'FACTURA'
-  ],
-  VENDOR: [
-    'NOMEFORNECEDOR',
-    'FORNECEDOR',
-    'VENDOR'
-  ],
-  SERIAL: [
-    'SERIAL',
-    'N1_SERIE',
-    'S_N'
-  ],
-  ADDRESS: [
-    'ENDERECO',
-    'SALA',
-    'LUGAR'
-  ],
-  GROUP: [
-    'GRUPO_EMPRESARIAL',
-    'EMPRESA',
-    'GRUPO',
-    'N1_FILIAL'
-  ]
-};
+import { SCHEMA_PRIORITY, TYPE_LABELS } from '../constants/schema';
+
+export { SCHEMA_PRIORITY, TYPE_LABELS };
 
 /**
  * Normaliza o cabeçalho para comparação (Uppercase, Trim)
@@ -100,6 +15,23 @@ export const SCHEMA_PRIORITY = {
 export const normalizeHeader = (header: string | null | undefined): string => {
   if (!header) return '';
   return header.toString().trim().toUpperCase().replace(/\s/g, '_');
+};
+
+/**
+ * Normaliza uma chave (Unidade, Etiqueta, etc) para comparação robusta.
+ * Versão v25.01: Trata '-', '_' e acentos para máxima resiliência de vinculação.
+ */
+export const normalizeKey = (s: unknown): string => {
+  if (s === null || s === undefined) return '';
+  const str = String(s);
+  if (!str) return '';
+  
+  return str.toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove acentos
+    .trim()
+    .replace(/[_-]/g, ' ') // Trata underscores e hifens como espaços
+    .replace(/\s+/g, ' ');  // Colapsa múltiplos espaços
 };
 
 /**

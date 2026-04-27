@@ -8,10 +8,12 @@ import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID, findAssetGlobally } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { assetRepository } from '../services/assetRepository';
+import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
+import { getCurrentLocation } from '../utils/gpsUtils';
 import { 
   MapPin, 
   Check,
@@ -35,7 +37,8 @@ import {
   Activity,
   WifiOff,
   Flashlight,
-  ArrowLeft
+  ArrowLeft,
+  Target
 } from 'lucide-react';
 
 import { QRCodeSVG } from 'qrcode.react';
@@ -145,6 +148,7 @@ interface InventoryProps {
   user: User | null;
   currentCampaignId?: string;
   unitConfig?: UnitConfig | null;
+  onUpdateUnitConfig?: (unitId: string, lat: number, lng: number) => Promise<void>;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -177,7 +181,8 @@ const Inventory: React.FC<InventoryProps> = ({
   databaseMode,
   user,
   currentCampaignId,
-  unitConfig
+  unitConfig,
+  onUpdateUnitConfig
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -295,8 +300,6 @@ const Inventory: React.FC<InventoryProps> = ({
       sessionStorage.setItem(`gbr_scroll_index_${selectedUnit}_${selectedLocation || 'all'}`, range.startIndex.toString());
     }
   }, [selectedUnit, selectedLocation]);
-
-  const normalizeKey = useCallback((s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
 
   // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
   const allAssetsRef = useRef(allAssets);
@@ -538,6 +541,22 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const triggerSmartOCR = () => {
     ocrInputRef.current?.click();
+  };
+
+  const handleForceLocation = async () => {
+    if (!selectedUnit) return;
+    setIsGeocoding(true);
+    try {
+      const loc = await getCurrentLocation(true);
+      if (loc && onUpdateUnitConfig) {
+        await onUpdateUnitConfig(selectedUnit, loc.lat, loc.lng);
+      }
+    } catch (err) {
+      console.error('Erro ao forçar localização:', err);
+      alert('Erro ao obter localização: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsGeocoding(false);
+    }
   };
 
   useEffect(() => {
@@ -1201,13 +1220,28 @@ const Inventory: React.FC<InventoryProps> = ({
             )}
 
             {!unitConfig && (
-              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2">
+              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2 animate-pulse">
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
                   <p className="text-[9px] text-red-600 font-bold uppercase leading-tight mt-1">
                     Configuração de GPS obrigatória para liberar o inventário.
                   </p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleForceLocation();
+                    }}
+                    disabled={isGeocoding}
+                    className="mt-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 shadow-lg shadow-red-500/20 disabled:opacity-50"
+                  >
+                    {isGeocoding ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Target size={12} />
+                    )}
+                    <span>Forçar Localização (Fix Âncora)</span>
+                  </button>
                 </div>
               </div>
             )}

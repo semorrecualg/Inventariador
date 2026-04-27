@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario, TransactionOrigin, AuditLogEntry, DatabaseMode } from '../types';
-import { SCHEMA_PRIORITY, getAssetUnit, TYPE_LABELS } from '../utils/schema';
+import { TYPE_LABELS } from '../utils/schema';
 import { sqliteService } from '../services/sqliteService';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
