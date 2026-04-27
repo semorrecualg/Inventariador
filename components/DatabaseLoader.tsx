@@ -31,7 +31,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
-  const [loadedData, setLoadedData] = useState<{ assets: Asset[]; companies: string[] } | null>(null);
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,23 +58,22 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         return;
       }
 
-      // 2. Inicializa o serviço (se forceCache for true, ele tentará o cache mesmo com status prompt)
-      // Passamos um flag interno no sqliteService se necessário, mas o init() já tem fallback.
-      // Vamos garantir que se forceCache for true, ele não tente o físico se soubermos que falhará.
+      // 2. Inicializa o serviço
       const success = await sqliteService.init();
       
       if (success) {
         addLog(`Inicializado via ${sqliteService.getStorageSource()}`);
-        const assetsRaw = await sqliteService.query("SELECT * FROM assets WHERE _is_deleted = 0");
-        const assets = assetsRaw as unknown as Asset[];
         
-        if (assets.length === 0 && sqliteService.getStorageSource() !== 'PHYSICAL') {
+        // OTIMIZAÇÃO: Busca apenas o count em vez de todos os objetos para o resumo
+        const assetCount = await sqliteService.getAssetCount();
+        
+        if (assetCount === 0 && sqliteService.getStorageSource() !== 'PHYSICAL') {
           addLog("Banco vazio detectado (Cache/Memória).");
           setStatus('EMPTY_STATE');
           return;
         }
 
-        if (assets.length === 0 && sqliteService.getStorageSource() === 'PHYSICAL') {
+        if (assetCount === 0 && sqliteService.getStorageSource() === 'PHYSICAL') {
            addLog("Banco físico vinculado detectado (Vazio). Permanecendo para carga.");
            setStatus('EMPTY_STATE');
            return;
@@ -84,7 +82,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         // Extração de unidades via Query Otimizada
         const companies = await sqliteService.getOperationalUnits();
 
-        if (assets.length > 0 && companies.length === 0) {
+        if (assetCount > 0 && companies.length === 0) {
           addLog("AVISO: Ativos carregados mas nenhuma unidade identificada.");
           if (showModal) {
             showModal(
@@ -95,14 +93,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           }
         }
 
-        addLog(`Carga concluída. Ativos: ${assets.length}`);
+        addLog(`Carga concluída. Ativos: ${assetCount}`);
         
-        if (assets.length > 0) {
-          setSummary({ assets: assets.length, units: companies.length, companies });
-          setLoadedData({ assets, companies });
-          setStatus('SUMMARY');
+        if (assetCount > 0) {
+          setSummary({ assets: assetCount, units: companies.length, companies });
+          // Damos um fôlego para o reprocessamento de UI
+          setTimeout(() => setStatus('SUMMARY'), 100);
         } else {
-          onDataLoaded(assets, companies);
+          onDataLoaded([], companies);
           setStatus('IDLE');
         }
       } else {
@@ -525,11 +523,22 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             )}
 
             <button
-              onClick={() => {
-                if (loadedData) {
-                  sessionStorage.setItem('app_just_finished_load', 'true');
-                  onDataLoaded(loadedData.assets, loadedData.companies);
-                  setStatus('IDLE');
+              onClick={async () => {
+                if (summary) {
+                  try {
+                    setStatus('LOADING');
+                    addLog("Preparando camada de memória para ativação...");
+                    // Pequena pausa para garantir que o loader apareça
+                    await new Promise(r => setTimeout(r, 100));
+                    
+                    const assets = await sqliteService.getAllAssets();
+                    sessionStorage.setItem('app_just_finished_load', 'true');
+                    onDataLoaded(assets, summary.companies);
+                    setStatus('IDLE');
+                  } catch (e) {
+                    addLog("Erro na ativação final.");
+                    setStatus('SUMMARY');
+                  }
                 }
               }}
               className="w-full bg-emerald-600 text-white p-5 rounded-3xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"

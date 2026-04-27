@@ -3236,9 +3236,8 @@ const App: React.FC = () => {
   const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
     console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
     
-    // 1. Extração de Unidades (Garantia com Dicionário Global)
-    const extractedCompanies = [...new Set(assets.map(a => getAssetUnit(a)))].filter(Boolean);
-    const finalCompanies = (companies && companies.length > 0) ? companies : extractedCompanies;
+    // 1. Unidades (Usamos as já calculadas via SQL pelo Loader para performance)
+    const finalCompanies = (companies && companies.length > 0) ? companies : [];
 
     // 2. Atualização de Estado
     const newInventory: InventoryState = { 
@@ -3266,22 +3265,24 @@ const App: React.FC = () => {
     sessionStorage.removeItem('app_just_cleared_data');
     
     // 5. Navegação: Sempre retorna para a seleção de unidade (fluxo padrão)
-    console.log('>>> [App] Carga concluída. Retornando para Seleção de Unidade.');
+    console.log('>>> [App] Iniciando transição de pós-carga...');
     setStartWithDataMenu(false);
     
-    // Se estivermos em uma das telas de carga, limpamos o histórico e vamos para a seleção
-    if (history.includes(AppScreen.LOAD_DATABASE) || history.includes(AppScreen.DATABASE_MANAGER)) {
-      // Simplificamos: voltamos para a UNIT_SELECTION limpando o que houver acima
-      const newHistory = history.filter(s => s !== AppScreen.LOAD_DATABASE && s !== AppScreen.DATABASE_MANAGER);
-      if (newHistory[newHistory.length - 1] !== AppScreen.UNIT_SELECTION) {
-        newHistory.push(AppScreen.UNIT_SELECTION);
+    // Defer para permitir que o sistema processe o estado grande
+    setTimeout(() => {
+      console.log('>>> [App] Executando redirecionamento para Seleção de Unidade.');
+      if (history.includes(AppScreen.LOAD_DATABASE) || history.includes(AppScreen.DATABASE_MANAGER)) {
+        const newHistory = history.filter(s => s !== AppScreen.LOAD_DATABASE && s !== AppScreen.DATABASE_MANAGER);
+        if (newHistory[newHistory.length - 1] !== AppScreen.UNIT_SELECTION) {
+          newHistory.push(AppScreen.UNIT_SELECTION);
+        }
+        setHistory(newHistory);
+        localStorage.setItem('app_screen_history', safeStringify(newHistory));
+      } else {
+        pushScreen(AppScreen.UNIT_SELECTION);
       }
-      setHistory(newHistory);
-      localStorage.setItem('app_screen_history', safeStringify(newHistory));
-    } else {
-      pushScreen(AppScreen.UNIT_SELECTION);
-    }
-  }, [inventory, history, pushScreen]);
+    }, 150);
+  }, [history, pushScreen]);
 
   const handleClearDatabase = async () => {
     try {
