@@ -142,7 +142,7 @@ class SqliteService {
     const info = await this.checkTableSchema('assets');
     if (!info || info.length === 0) return;
     
-    const existingCols = info.map((v: any) => v.name);
+    const existingCols = info.map((v: Record<string, unknown>) => v.name as string);
     const newMappings: Record<string, string> = {};
     
     // Mapeamento prioritário para Unidade
@@ -483,13 +483,15 @@ class SqliteService {
   // --- Helpers ---
   async execute(sql: string, params: unknown[] = []) {
     if (!this.db) return;
-    this.db.run(sql, params as any[]);
+    // @ts-expect-error - params needs to be cast to the specific type accepted by sql.js
+    this.db.run(sql, params);
     await this.persist();
   }
 
   async query(sql: string, params: unknown[] = []) {
     if (!this.db) return [];
-    const res = this.db.exec(sql, params as any[]);
+    // @ts-expect-error - params needs to be cast to the specific type accepted by sql.js
+    const res = this.db.exec(sql, params);
     if (res.length === 0) return [];
     
     const columns = res[0].columns;
@@ -627,12 +629,12 @@ class SqliteService {
     await this.execute("UPDATE assets SET _campaignId = NULL WHERE _campaignId = ?", [id]);
   }
 
-  async executeBatch(commands: { sql: string, params: any[] }[]) {
+  async executeBatch(commands: { sql: string, params: unknown[] }[]) {
     if (!this.db) return;
     this.db.run("BEGIN TRANSACTION");
     try {
       for (const cmd of commands) {
-        this.db.run(cmd.sql, (cmd.params || []) as any[]);
+        this.db.run(cmd.sql, (cmd.params || []) as (string | number | boolean | null | Uint8Array)[]);
       }
       this.db.run("COMMIT");
       await this.persist();
@@ -642,8 +644,8 @@ class SqliteService {
     }
   }
 
-  async saveInventoryConfig(data: any, tenantId?: string) {
-    const tid = tenantId || (data?._tenantid) || 'default';
+  async saveInventoryConfig(data: unknown, tenantId?: string) {
+    const tid = tenantId || (data as Record<string, string>)?._tenantid || 'default';
     await this.execute(
       "INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)",
       ['config_' + tid, tid, JSON.stringify(data)]
@@ -652,7 +654,7 @@ class SqliteService {
 
   async getInventoryConfig(tenantId?: string | null) {
     let sql = "SELECT data FROM inventory_config";
-    let params: any[] = [];
+    let params: (string | number | boolean | null | Uint8Array)[] = [];
     if (tenantId) {
       sql += " WHERE _tenantid = ?";
       params = [tenantId];

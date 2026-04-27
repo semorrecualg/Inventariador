@@ -3271,7 +3271,25 @@ const App: React.FC = () => {
     console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
     
     // 1. Unidades (Usamos as já calculadas via SQL pelo Loader para performance)
-    const finalCompanies = (companies && companies.length > 0) ? companies : [];
+    let finalCompanies = (companies && companies.length > 0) ? companies : [];
+    
+    // Regra v25.01: Se as empresas vieram vazias mas há ativos, tentamos extrair por Query SQL "Limpa"
+    if (finalCompanies.length === 0 && assets.length > 0) {
+      console.warn('>>> [App] handleDataLoaded: Unidades vazias. Tentando extração de emergência via SQL...');
+      try {
+        const sqlUnits = await sqliteService.getOperationalUnits();
+        if (sqlUnits && sqlUnits.length > 0) {
+          finalCompanies = sqlUnits;
+        } else {
+          // Fallback total se a query falhar: Extração direta dos objetos
+          finalCompanies = [...new Set(assets.map(a => 
+            (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase()
+          ))].filter(Boolean);
+        }
+      } catch (err) {
+        console.error('>>> [App] Erro na extração de emergência de unidades:', err);
+      }
+    }
 
     // 2. Atualização de Estado
     const newInventory: InventoryState = { 
@@ -3518,7 +3536,7 @@ const App: React.FC = () => {
 
   const fullCompaniesWithStatus = useMemo(() => {
     const userTenant = user?.tenantid || '';
-    const userUnits = user?.units || [userTenant];
+    const userUnits = user?.units || (userTenant ? [userTenant] : []);
     const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
     const assets = inventory.assets;
     
@@ -3549,7 +3567,11 @@ const App: React.FC = () => {
         companyStatsMap.set(company, stats);
       }
       
-      if (!stats.hasActiveAssets && String(a.STATUS || '').toUpperCase().includes('ATIVO')) {
+      const status = String(a.STATUS || '').toUpperCase();
+      // REGRA v25.01: Consideramos como ativo qualquer item que não esteja baixado ou que seja 'PENDENTE' (padrão de carga)
+      const isActiveStatus = status === '' || status === 'PENDENTE' || status.includes('ATIVO') || status.includes('USO') || status.includes('NOVO') || status.includes('CONFERIDO');
+      
+      if (!stats.hasActiveAssets && isActiveStatus) {
         stats.hasActiveAssets = true;
       }
       
@@ -3621,8 +3643,12 @@ const App: React.FC = () => {
       const norm = normalizeKey(rawName);
       if (!norm) return;
 
-      // Filtragem por permissão (Auditor)
-      const isAllowed = !isAuditor || userUnits.length === 0 || normalizedUserUnits.includes(norm);
+      // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
+      const isAllowed = !isAuditor || 
+                      inventory.databaseMode === DatabaseMode.INTERNAL || 
+                      userUnits.length === 0 || 
+                      normalizedUserUnits.includes(norm) ||
+                      (normalizedUserUnits.length === 1 && normalizedUserUnits[0] === '');
       
       const stats = companyStatsMap.get(rawName);
       
@@ -4309,14 +4335,18 @@ const App: React.FC = () => {
                   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
                   const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
                   
-                  // Regra: Mostrar apenas unidades que possuem ativos com status "ATIVO"
+                  // Regra: Mostrar apenas unidades que possuem ativos com status "ATIVO" ou "PENDENTE"
                   // Se a base estiver vazia (especialmente no modo nuvem), mostramos todas para permitir o primeiro sync
                   const hasAssets = inventory.assets.length > 0;
                   const hasActiveAssets = c.hasActiveAssets;
                   
+                  // Se acabamos de carregar dados, não queremos que o filtro suma com as unidades
+                  const justFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
+                  
                   // Se não há ativos carregados, mostramos a unidade para que o usuário possa selecioná-la e baixar os dados
                   // Se há ativos carregados, filtramos pelo status "ATIVO", a menos que estejamos no modo nuvem e a unidade ainda não tenha dados locais
-                  const shouldShowByStatus = !hasAssets || hasActiveAssets || (databaseMode !== DatabaseMode.INTERNAL && !c.hasData);
+                  // Adicionamos a permissão para ADMIN ver tudo se acabamos de carregar
+                  const shouldShowByStatus = !hasAssets || hasActiveAssets || justFinishedLoad || (databaseMode !== DatabaseMode.INTERNAL && !c.hasData);
 
                   if (isAdmin) return shouldShowByStatus;
                   

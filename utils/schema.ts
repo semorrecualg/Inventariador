@@ -5,6 +5,7 @@
  */
 
 import { SCHEMA_PRIORITY, TYPE_LABELS } from '../constants/schema';
+import { Asset } from '../types';
 
 export { SCHEMA_PRIORITY, TYPE_LABELS };
 
@@ -55,16 +56,16 @@ export function findBestColumn(keys: string[], priorities: string[]): string | n
 /**
  * Obtém o valor de um ativo tentando as chaves prioritárias
  */
-export function getAssetValueByPriority(asset: any, priorities: string[]): any {
+export function getAssetValueByPriority(asset: Asset | Record<string, unknown>, priorities: string[]): unknown {
   if (!asset) return null;
   const bestKey = findBestColumn(Object.keys(asset), priorities);
-  return bestKey ? asset[bestKey] : null;
+  return bestKey ? (asset as Record<string, unknown>)[bestKey] : null;
 }
 
 /**
  * Helper para extrair a unidade operacional de um ativo de forma soberana
  */
-export function getAssetUnit(asset: any): string {
+export function getAssetUnit(asset: Asset | Record<string, unknown>): string {
   const val = getAssetValueByPriority(asset, SCHEMA_PRIORITY.UNIT);
   return (val || '').toString().trim().toUpperCase() || 'UNIT_UNDEFINED';
 }
