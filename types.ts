@@ -381,6 +381,7 @@ export interface SyncQueueItem {
 }
 
 export enum CampaignStatus {
+  CREATED = 'CREATED',
   ACTIVE = 'ACTIVE',
   CLOSED = 'CLOSED',
   ARCHIVED = 'ARCHIVED'

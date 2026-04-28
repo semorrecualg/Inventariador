@@ -18,7 +18,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot } from '../services/supabaseService';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -29,6 +29,8 @@ interface CampaignManagerProps {
   campaigns?: InventoryCampaign[];
   onRefresh?: () => void;
   initialUnit?: string | null;
+  tenantId?: string | null;
+  unitId?: string | null;
 }
 
 const CampaignManager: React.FC<CampaignManagerProps> = ({ 
@@ -39,7 +41,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   availableUnits = [],
   campaigns = [],
   onRefresh,
-  initialUnit
+  initialUnit,
+  tenantId: propsTenantId,
+  unitId: propsUnitId
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -54,7 +58,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Use props if provided, otherwise fallback to user info
   const handleRefresh = async () => {
+
     if (!onRefresh) return;
     setIsRefreshing(true);
     try {
@@ -66,20 +72,27 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName) return;
+    
+    const isAdmin = !!(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
+    let tenantId = (propsTenantId || user?._tenantid || user?.tenantid || '').trim();
+    if (!tenantId && isAdmin) tenantId = 'CICOPAL';
+
+    if (!tenantId || tenantId === 'N/A') {
+      setErrorMessage('ERRO DE GOVERNANÇA: Tenant não identificado. Ação bloqueada.');
+      setTimeout(() => setErrorMessage(null), 5000);
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
-      let tenantId = (user?._tenantid || user?.tenantid || '').trim();
-      if (!tenantId && isAdmin) tenantId = 'CICOPAL';
-
       const newCampaign: Partial<InventoryCampaign> = {
         name: newCampaignName.trim(),
         description: newCampaignDesc.trim(),
-        status: CampaignStatus.ACTIVE,
+        status: CampaignStatus.CREATED,
         _tenantid: tenantId,
-        _unitid: (newCampaignUnit || user?._unitid || user?.unitid || 'MATRIZ').trim(),
+        _unitid: (newCampaignUnit || propsUnitId || user?._unitid || user?.unitid || 'MATRIZ').trim(),
         tenantid: tenantId,
-        unit_id: (newCampaignUnit || user?._unitid || user?.unitid || 'MATRIZ').trim(),
+        unit_id: (newCampaignUnit || propsUnitId || user?._unitid || user?.unitid || 'MATRIZ').trim(),
         created_by: (user?.email || 'admin').toLowerCase(),
         start_date: new Date().toISOString()
       };
@@ -116,7 +129,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setSuccessMessage('Campanha excluída');
         setTimeout(() => setSuccessMessage(null), 3000);
         setSelectedCampaign(null);
-        if (onRefresh) onRefresh();
+        if (onRefresh) await onRefresh();
       } else {
         setErrorMessage('Erro ao excluir campanha');
         setTimeout(() => setErrorMessage(null), 3000);
@@ -131,14 +144,39 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
-    const success = await updateCampaignStatus(id, status, user?.email || 'admin');
-    if (success) {
-      setSuccessMessage('Status atualizado');
-      setTimeout(() => setSuccessMessage(null), 3000);
-      if (onRefresh) onRefresh();
-      if (selectedCampaign?.id === id) {
-        setSelectedCampaign({ ...selectedCampaign, status });
+    console.log(`>>> [Campaigns] Solicitando mudança de status: ${id} -> ${status}`);
+    try {
+      // Regra: Se estiver fechando, cria o SNAPSHOT antes de mudar o status (Governança GBR)
+      if (status === CampaignStatus.CLOSED) {
+        console.log('>>> [Governance] Iniciando captura de Snapshot para encerramento...');
+        const snapSuccess = await createCampaignSnapshot(id, user?.email || 'admin');
+        if (!snapSuccess) {
+          console.warn('>>> [Governance] Falha ao criar snapshot. Continuando encerramento mas sem histórico imutável.');
+        }
       }
+
+      const success = await updateCampaignStatus(id, status, user?.email || 'admin');
+      if (success) {
+        console.log('>>> [Campaigns] Status atualizado no banco. Disparando refresh...');
+        setSuccessMessage('Status atualizado');
+        setTimeout(() => setSuccessMessage(null), 3000);
+        
+        // REFRESH OBRIGATÓRIO: Garante que a lista e as unidades reflitam a nova governança
+        if (onRefresh) await onRefresh();
+        
+        // Atualização local do estado para reatividade atômica
+        if (selectedCampaign?.id === id) {
+          setSelectedCampaign({ ...selectedCampaign, status });
+        }
+      } else {
+        console.error('>>> [Campaigns] Erro no retorno da função de status.');
+        setErrorMessage('Erro ao atualizar status no banco local');
+        setTimeout(() => setErrorMessage(null), 3000);
+      }
+    } catch (err) {
+      console.error('>>> [Campaigns] Erro técnico:', err);
+      setErrorMessage('Erro técnico na comunicação com o banco');
+      setTimeout(() => setErrorMessage(null), 3000);
     }
   };
 
@@ -158,10 +196,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const getStatusBadge = (status: CampaignStatus) => {
     switch (status) {
+      case CampaignStatus.CREATED:
+        return <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 text-[10px] font-bold border border-amber-500/20 uppercase tracking-tight">Criada</span>;
       case CampaignStatus.ACTIVE: 
-        return <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold border border-emerald-500/20">Ativa</span>;
+        return <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold border border-emerald-500/20 uppercase tracking-tight">Ativa</span>;
       case CampaignStatus.CLOSED: 
-        return <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 text-[10px] font-bold border border-blue-500/20">Encerrada</span>;
+        return <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 text-[10px] font-bold border border-blue-500/20 uppercase tracking-tight">Encerrada</span>;
       default: 
         return <span className="px-2 py-0.5 rounded-full bg-white/5 text-white/40 text-[10px] font-bold border border-white/10">{status}</span>;
     }
@@ -218,9 +258,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   exit={{ height: 0, opacity: 0 }}
                   className="px-4 pb-4 font-mono text-[9px] text-emerald-500/80 space-y-1"
                 >
-                  <p>TENANT: {user?._tenantid || user?.tenantid || 'N/A'}</p>
+                  <p>TENANT: {propsTenantId || user?._tenantid || user?.tenantid || 'N/A'}</p>
                   <p>COUNT: {campaigns.length}</p>
-                  <p>UNIT: {user?._unitid || user?.unitid || 'N/A'}</p>
+                  <p>UNIT: {propsUnitId || user?._unitid || user?.unitid || 'N/A'}</p>
+                  {errorMessage && <p className="text-rose-400 mt-2">ALERTA: {errorMessage}</p>}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -264,17 +305,25 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
               </div>
 
               <div className="space-y-3">
-                {selectedCampaign.status === CampaignStatus.ACTIVE && (
+                {(selectedCampaign.status === CampaignStatus.ACTIVE || selectedCampaign.status === CampaignStatus.CREATED) && (
                   <button 
-                    onClick={() => onActivate(selectedCampaign.id)}
+                    onClick={async () => {
+                      if (selectedCampaign.status === CampaignStatus.CREATED) {
+                        await handleUpdateStatus(selectedCampaign.id, CampaignStatus.ACTIVE);
+                      } else {
+                        onActivate(selectedCampaign.id);
+                      }
+                    }}
                     className={`w-full py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                      currentCampaignId === selectedCampaign.id 
-                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
-                        : 'bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 active:scale-[0.98]'
+                      selectedCampaign.status === CampaignStatus.CREATED
+                        ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20 hover:bg-amber-500'
+                        : currentCampaignId === selectedCampaign.id 
+                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                          : 'bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 active:scale-[0.98]'
                     }`}
                   >
-                    {currentCampaignId === selectedCampaign.id ? <CheckCircle2 size={18} /> : <Activity size={18} />}
-                    {currentCampaignId === selectedCampaign.id ? 'Campanha Ativa' : 'Ativar para Inventário'}
+                    {selectedCampaign.status === CampaignStatus.CREATED ? <ShieldCheck size={18} /> : currentCampaignId === selectedCampaign.id ? <CheckCircle2 size={18} /> : <Activity size={18} />}
+                    {selectedCampaign.status === CampaignStatus.CREATED ? 'Ativar Campanha' : currentCampaignId === selectedCampaign.id ? 'Campanha Ativa' : 'Ativar para Inventário'}
                   </button>
                 )}
 

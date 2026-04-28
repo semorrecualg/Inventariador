@@ -3,7 +3,7 @@
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams, CampaignStatus } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 
 // Extend Window interface for pushScreen
@@ -562,6 +562,30 @@ const App: React.FC = () => {
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
 
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  const currentTenantId = useMemo(() => {
+    // 1. Prioridade: Tenant do usuário logado
+    let t = (user?._tenantid || user?.tenantid || '').trim();
+    
+    // 2. Fallback: Se for Admin/Gestor e não tiver tenant, assume CICOPAL
+    const isAdmin = !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+    if (!t && isAdmin) t = 'CICOPAL';
+    
+    // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados, 
+    // tenta extrair o tenant do primeiro ativo válido para manter o contexto
+    if (!t && inventory.assets.length > 0) {
+      const firstValid = inventory.assets.find(a => a._tenantid || a.GRUPO_EMPRESARIAL);
+      if (firstValid) t = (firstValid._tenantid || firstValid.GRUPO_EMPRESARIAL || '').trim();
+    }
+
+    return t || '';
+  }, [user, inventory.assets]);
+
+  const currentUnitId = useMemo(() => {
+    return (selectedUnit || user?._unitid || user?.unitid || '').trim();
+  }, [selectedUnit, user]);
+
   useEffect(() => {
     inventoryRef.current = inventory;
   }, [inventory]);
@@ -618,6 +642,30 @@ const App: React.FC = () => {
     }
   }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
 
+  // Carregamento de Campanhas e Configurações de GPS para visibilidade global (Movido para cima para evitar TDZ)
+  const refreshCampaigns = useCallback(async () => {
+    const tenantId = currentTenantId;
+    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, Mode: ${databaseMode}`);
+    
+    if (!tenantId) return;
+
+    try {
+      // Configurações de GPS
+      const gpsData = await fetchUnitConfigs(tenantId);
+      setUnitConfigs(gpsData);
+
+      // Campanhas (Resiliência Total)
+      const campaignData = await fetchCampaigns(tenantId);
+      console.log(`>>> [App] Campanhas atualizadas: ${campaignData?.length || 0} encontradas.`);
+      
+      // Atualização atômica do estado para garantir reatividade
+      setCampaigns([...(campaignData || [])]);
+      setRefreshVersion(v => v + 1); // Força re-cálculo da memoização de unidades
+    } catch (err) {
+      console.error('>>> [App] Erro ao buscar campanhas:', err);
+    }
+  }, [currentTenantId, databaseMode]);
+
   useEffect(() => {
     if (user?.tenantid) {
       fetchUnitConfigs(user.tenantid).then(configs => {
@@ -625,6 +673,21 @@ const App: React.FC = () => {
       });
     }
   }, [user?.tenantid, databaseMode]);
+
+  // Sincronização Reativa Obrigatória no Foco (Governança GBR)
+  useEffect(() => {
+    const criticalScreens = [
+      AppScreen.MAIN_MENU, 
+      AppScreen.UNIT_SELECTION, 
+      AppScreen.CAMPAIGN_MANAGEMENT,
+      AppScreen.DASHBOARD
+    ];
+    
+    if (criticalScreens.includes(screen)) {
+      console.log(`>>> [Governance] Re-leitura obrigatória do banco ao focar: ${screen}`);
+      refreshCampaigns();
+    }
+  }, [screen, refreshCampaigns]);
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
@@ -1454,39 +1517,6 @@ const App: React.FC = () => {
     };
     init();
   }, []);
-
-  // Carregamento de Campanhas e Configurações de GPS para visibilidade global
-  const refreshCampaigns = useCallback(async () => {
-    let tenantId = user?._tenantid || user?.tenantid;
-    const isGestor = !tenantId && (user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
-    if (isGestor) tenantId = 'CICOPAL';
-
-    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, Mode: ${databaseMode}`);
-    
-    if (!tenantId) return;
-
-    try {
-      // Configurações de GPS
-      const gpsData = await fetchUnitConfigs(tenantId);
-      setUnitConfigs(gpsData);
-
-      // Campanhas (Resiliência Total)
-      const campaignData = await fetchCampaigns(tenantId);
-      console.log(`>>> [App] Campanhas atualizadas: ${campaignData?.length || 0} encontradas.`);
-      
-      // Atualização atômica do estado para garantir reatividade
-      setCampaigns([...(campaignData || [])]);
-    } catch (err) {
-      console.error('>>> [App] Erro ao buscar campanhas:', err);
-    }
-  }, [user?._tenantid, user?.tenantid, user?.role, user?.isAdmin, user?.email, databaseMode]);
-
-  useEffect(() => {
-    if (screen === AppScreen.CAMPAIGN_MANAGEMENT || screen === AppScreen.INVENTORY || screen === AppScreen.MODULE_SELECTION || screen === AppScreen.UNIT_SELECTION || screen === AppScreen.UNIT_CONFIGURATOR) {
-      console.log(`>>> [App] useEffect disparando refreshCampaigns para tela: ${screen}`);
-      refreshCampaigns();
-    }
-  }, [screen, user?._tenantid, user?.tenantid, databaseMode]);
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
 
@@ -3533,7 +3563,7 @@ const App: React.FC = () => {
       });
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
-
+  
   const fullCompaniesWithStatus = useMemo(() => {
     const userTenant = user?.tenantid || '';
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
@@ -3584,13 +3614,16 @@ const App: React.FC = () => {
       }
     }
 
-    // Pre-calculate units with direct campaigns for O(1) lookup
+    // Pre-calculate units with direct ACTIVE campaigns for O(1) lookup
     const unitsWithDirectCampaign = new Set<string>();
     campaigns.forEach(c => {
-      const uId = c._unitid || c.unit_id;
-      if (uId) {
-        const norm = normalizeKey(uId);
-        unitsWithDirectCampaign.add(norm);
+      // REGRA DE GOVERNANÇA: Apenas campanhas com status exatamente igual a 'ACTIVE' habilitam o botão visual
+      if (String(c.status) === 'ACTIVE') {
+        const uId = c._unitid || c.unit_id;
+        if (uId) {
+          const norm = normalizeKey(uId);
+          unitsWithDirectCampaign.add(norm);
+        }
       }
     });
 
@@ -3688,7 +3721,7 @@ const App: React.FC = () => {
         name: unit.name,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
-        hasCampaign: hasDirectCampaign || hasAssetCampaign,
+        hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table enables button
         hasGps
       };
     });
@@ -3720,7 +3753,7 @@ const App: React.FC = () => {
 
     console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
     return result;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion]);
 
   const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
@@ -4521,8 +4554,14 @@ const App: React.FC = () => {
             <CampaignManager 
               user={user} 
               onBack={popScreen} 
-              onActivate={(id) => {
-                setInventory(prev => ({ ...prev, currentCampaignId: id }));
+              onActivate={async (id) => {
+                setInventory(prev => ({ 
+                  ...prev, 
+                  currentCampaignId: id,
+                  status: DatabaseStatus.LOADED 
+                }));
+                // Força atualização das estatísticas e estado reactivo antes de navegar
+                await refreshCampaigns();
                 pushScreen(AppScreen.INVENTORY);
               }}
               currentCampaignId={inventory.currentCampaignId}
@@ -4530,6 +4569,8 @@ const App: React.FC = () => {
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
               initialUnit={selectedUnit}
+              tenantId={currentTenantId}
+              unitId={currentUnitId}
             />
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={popScreen} />}

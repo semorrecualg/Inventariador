@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _unitid TEXT,
     _unidade TEXT,
     _tenantid TEXT,
+    _campaignId TEXT,
     _is_deleted INTEGER DEFAULT 0,
     _lastUpdated TEXT,
     _conferido INTEGER DEFAULT 0,
@@ -62,6 +63,15 @@ CREATE TABLE IF NOT EXISTS inventory_config (
     id TEXT PRIMARY KEY,
     _tenantid TEXT,
     data TEXT
+);
+CREATE TABLE IF NOT EXISTS campaign_snapshots (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT,
+    assets_data TEXT,
+    metadata TEXT,
+    closed_at TEXT,
+    closed_by TEXT,
+    _tenantid TEXT
 );
 `;
 
@@ -346,6 +356,7 @@ class SqliteService {
         { name: 'PRIMARYKEY', type: 'TEXT' },
         { name: 'Sn1_recno', type: 'INTEGER' },
         { name: 'Sn3_recno', type: 'INTEGER' },
+        { name: '_campaignId', type: 'TEXT' },
         { name: '_is_synced', type: 'INTEGER' }
       ];
       
@@ -634,7 +645,8 @@ class SqliteService {
     this.db.run("BEGIN TRANSACTION");
     try {
       for (const cmd of commands) {
-        this.db.run(cmd.sql, (cmd.params || []) as (string | number | boolean | null | Uint8Array)[]);
+        // @ts-expect-error - params may contain booleans or unknown types that need to be bindable by sql.js
+        this.db.run(cmd.sql, cmd.params || []);
       }
       this.db.run("COMMIT");
       await this.persist();
@@ -654,7 +666,7 @@ class SqliteService {
 
   async getInventoryConfig(tenantId?: string | null) {
     let sql = "SELECT data FROM inventory_config";
-    let params: (string | number | boolean | null | Uint8Array)[] = [];
+    let params: unknown[] = [];
     if (tenantId) {
       sql += " WHERE _tenantid = ?";
       params = [tenantId];

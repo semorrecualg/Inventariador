@@ -1606,14 +1606,17 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   if (isInternal) {
     console.log('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
     try {
+      // 1. Deleta do SQLite (Source of Truth)
       await sqliteService.deleteCampaignSql(campaignId);
       
-      // Atualiza LS para redundância
+      // 2. Limpa cache apenas por segurança
       const cached = localStorage.getItem('inventory_campaigns_cache');
       if (cached) {
-        const campaigns = JSON.parse(cached) as InventoryCampaign[];
-        const filtered = campaigns.filter(c => c.id !== campaignId);
-        localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
+        try {
+          const campaigns = JSON.parse(cached) as InventoryCampaign[];
+          const filtered = campaigns.filter(c => c.id !== campaignId);
+          localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
+        } catch (e) { console.warn(e); }
       }
       return true;
     } catch (err) {
@@ -1891,38 +1894,68 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
  * Atualiza o status de uma campanha
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode');
+  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    console.log('>>> [SQLite] Atualizando status da campanha no banco físico:', campaignId);
+    console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
     try {
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      let campaignToUpdate: InventoryCampaign | undefined;
+      // Resiliência Total: Como não temos um "getCampaignById" simples, 
+      // usamos o saveCampaign do SQLite que faz INSERT OR REPLACE.
+      // Precisamos primeiro garantir que temos o objeto completo ou o SQLite vai apagar campos.
       
-      if (cached) {
-        const campaigns = JSON.parse(cached) as InventoryCampaign[];
-        campaignToUpdate = campaigns.find(c => c.id === campaignId);
+      // Tentativa 1: Buscar do SQLite
+      let currentCampaign: InventoryCampaign | null = null;
+      
+      // Recupera o tenant do objeto se possível (via cache/LS), ou usa o padrão CICOPAL
+      const cachedRef = localStorage.getItem('inventory_campaigns_cache');
+      if (cachedRef) {
+        try {
+          const campaigns = JSON.parse(cachedRef) as InventoryCampaign[];
+          currentCampaign = campaigns.find(c => c.id === campaignId) || null;
+        } catch (e) { console.warn(e); }
       }
 
-      if (campaignToUpdate) {
+      const tenantId = currentCampaign?.tenantid || currentCampaign?._tenantid || localStorage.getItem('app_last_tenant') || 'CICOPAL';
+      const allCampaigns = await sqliteService.getCampaigns(tenantId);
+      const sqlCampaign = allCampaigns.find(c => c.id === campaignId) || null;
+      
+      if (sqlCampaign) currentCampaign = sqlCampaign;
+
+      if (currentCampaign) {
         const updated: InventoryCampaign = { 
-          ...campaignToUpdate, 
+          ...currentCampaign, 
           status, 
-          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : undefined 
+          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : currentCampaign.end_date 
         };
+        
+        // Persiste no SQLite Físico
         await sqliteService.saveCampaign(updated);
         
-        // Atualiza LS
-        const campaigns = JSON.parse(cached!) as InventoryCampaign[];
-        const updatedList = campaigns.map(c => c.id === campaignId ? updated : c);
-        localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedList));
+        // Sincroniza Cache
+        const cached = localStorage.getItem('inventory_campaigns_cache');
+        if (cached) {
+          try {
+            const campaigns = JSON.parse(cached) as InventoryCampaign[];
+            const updatedList = campaigns.map(c => c.id === campaignId ? updated : c);
+            localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedList));
+          } catch(e) { console.warn(e); }
+        } else {
+          localStorage.setItem('inventory_campaigns_cache', JSON.stringify([updated]));
+        }
+        
+        console.log('>>> [SQLite] Status atualizado com sucesso.');
         return true;
+      } else {
+        console.warn('>>> [SQLite] Campanha não encontrada para atualização de status:', campaignId);
+        // Fallback: Se não achamos o objeto completo, criamos um esqueleto para não travar a UI
+        // mas o ideal é que ela já exista no banco.
+        return false;
       }
     } catch (err) {
-      console.error(">>> [SQLite] Falha ao atualizar status da campanha:", err);
+      console.error(">>> [SQLite] Erro ao atualizar status:", err);
+      return false;
     }
-    return false;
   }
 
   if (!supabase) return false;
@@ -1969,6 +2002,72 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
  * Isso garante que o Laudo Final seja imutável conforme CPC 27.
  */
 export const createCampaignSnapshot = async (campaignId: string, closedBy: string): Promise<boolean> => {
+    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+    const isInternal = mode === 'INTERNAL';
+
+    if (isInternal) {
+      console.log('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
+      try {
+        // 1. Localiza a campanha no SQLite
+        const cached = localStorage.getItem('inventory_campaigns_cache');
+        let currentCampaign: InventoryCampaign | null = null;
+        if (cached) {
+          const campaigns = JSON.parse(cached) as InventoryCampaign[];
+          currentCampaign = campaigns.find(c => c.id === campaignId) || null;
+        }
+
+        const tenantId = currentCampaign?._tenantid || currentCampaign?.tenantid || 'CICOPAL';
+        const allCampaigns = await sqliteService.getCampaigns(tenantId);
+        const sqlCampaign = allCampaigns.find(c => c.id === campaignId) || null;
+        if (sqlCampaign) currentCampaign = sqlCampaign;
+
+        if (!currentCampaign) {
+          console.error('>>> [SQLite] Campanha não encontrada para snapshot:', campaignId);
+          return false;
+        }
+
+        // 2. Busca ativos vinculados da unidade
+        const allAssets = await sqliteService.getAllAssets();
+        const unitId = currentCampaign._unitid || currentCampaign.unit_id;
+        const assets = allAssets.filter(a => (a._unitid || a.UNIDADE_OPERACIONAL) === unitId);
+
+        if (assets.length === 0) {
+          console.warn('>>> [SQLite] Nenhum ativo encontrado para o snapshot.');
+        }
+
+        // 3. Stats
+        const stats = {
+          total: assets.length,
+          inventoried: assets.filter(a => a._conferido || a.STATUS === 'CONFERIDO').length,
+          divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
+          generated_at: new Date().toISOString(),
+          cpc_compliance: 'CPC 27 / NBC TG 27 (MODO LOCAL)'
+        };
+
+        // 4. Salva no SQLite
+        const snapshot: CampaignSnapshot = {
+          id: `snap_${campaignId}_${Date.now()}`,
+          campaign_id: campaignId,
+          assets_data: assets,
+          metadata: stats,
+          snapshot_date: new Date().toISOString(),
+          closed_by: closedBy,
+          _tenantid: tenantId
+        };
+
+        await sqliteService.execute(
+          "INSERT OR REPLACE INTO campaign_snapshots (id, campaign_id, assets_data, metadata, closed_at, closed_by, _tenantid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [snapshot.id, snapshot.campaign_id, JSON.stringify(snapshot.assets_data), JSON.stringify(snapshot.metadata), snapshot.snapshot_date, snapshot.closed_by, snapshot._tenantid]
+        );
+
+        console.log('>>> [SQLite] Snapshot criado com sucesso.');
+        return true;
+      } catch (err) {
+        console.error('>>> [SQLite] Erro ao criar snapshot local:', err);
+        return false;
+      }
+    }
+
     if (!supabase) return false;
 
     try {
@@ -2045,6 +2144,31 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
  * Busca o Snapshot histórico de uma campanha encerrada.
  */
 export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
+    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+    const isInternal = mode === 'INTERNAL';
+
+    if (isInternal) {
+      console.log('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);
+      try {
+        const res = await sqliteService.query("SELECT * FROM campaign_snapshots WHERE campaign_id = ? ORDER BY closed_at DESC LIMIT 1", [campaignId]);
+        if (res.length === 0) return null;
+        
+        const row = res[0];
+        return {
+          id: row.id as string,
+          campaign_id: row.campaign_id as string,
+          assets_data: JSON.parse(row.assets_data as string),
+          metadata: JSON.parse(row.metadata as string),
+          snapshot_date: (row.closed_at || row.snapshot_date) as string,
+          closed_by: row.closed_by as string,
+          _tenantid: (row._tenantid || 'CICOPAL') as string
+        } as CampaignSnapshot;
+      } catch (err) {
+        console.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
+        return null;
+      }
+    }
+
     if (!supabase) return null;
     
     try {
