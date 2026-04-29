@@ -396,8 +396,9 @@ export interface InventoryCampaign {
   status: CampaignStatus;
   _tenantid: string;
   _unitid?: string; // ID ou Nome da Unidade Operacional vinculada
-  tenantid: string; // Deprecated: use _tenantid
-  unit_id?: string; // Deprecated: use _unitid
+  tenant_id: string; // Unificado
+  unit_id?: string;  // Unificado
+  tenantid: string; // Deprecated: use tenant_id or _tenantid
   created_by: string;
   created_at: string;
   // Estatísticas calculadas

@@ -3,7 +3,7 @@
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
-import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams, CampaignStatus } from './types';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 
 // Extend Window interface for pushScreen
@@ -59,7 +59,7 @@ import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
 import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveAssetIncremental, saveConfigOnly } from './services/persistenceService';
+import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
@@ -315,7 +315,6 @@ const App: React.FC = () => {
 
   // Monitor de Sincronização Offline
   useEffect(() => {
-    // No modo INTERNO (Mobile Puro), não monitoramos fila de sincronização com a nuvem
     if (databaseMode === DatabaseMode.INTERNAL) {
       setSyncQueueLength(0);
       setPendingPhotosCount(0);
@@ -324,52 +323,41 @@ const App: React.FC = () => {
     }
 
     const checkSyncQueue = async () => {
-      const { getSyncQueueLength, getUnsyncedAssetsCount } = await import('./services/syncService');
-      const len = await getSyncQueueLength();
-      setSyncQueueLength(len);
+      try {
+        const { getSyncQueueLength, getUnsyncedAssetsCount } = await import('./services/syncService');
+        const len = await getSyncQueueLength();
+        setSyncQueueLength(len);
 
-      const unsyncedCount = await getUnsyncedAssetsCount();
-      setUnsyncedAssetsCount(unsyncedCount);
+        const unsyncedCount = await getUnsyncedAssetsCount();
+        setUnsyncedAssetsCount(unsyncedCount);
 
-      // Ativa trava se exceder o limite de segurança
-      const totalPending = len + unsyncedCount;
-      if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
-        setIsSyncLocked(true);
-        setModalConfig({
-          isOpen: true,
-          title: 'Bloqueio de Segurança: Fila de Sincronização',
-          message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Para garantir a integridade dos dados, novas operações de inventário estão suspensas até que a fila seja processada. Conecte-se a uma rede estável para sincronizar.`,
-          type: 'error'
-        });
-      } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
-        setIsSyncLocked(false);
+        const totalPending = len + unsyncedCount;
+        if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
+          setIsSyncLocked(true);
+          setModalConfig({
+            isOpen: true,
+            title: 'Bloqueio de Segurança: Fila de Sincronização',
+            message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Sincronize antes de continuar.`,
+            type: 'error'
+          });
+        } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
+          setIsSyncLocked(false);
+        }
+      } catch (err) {
+        console.warn(">>> [Sync] Falha ao verificar fila:", err);
       }
     };
 
     checkSyncQueue();
-    const interval = setInterval(checkSyncQueue, 10000); // Check every 10s
+    const interval = setInterval(checkSyncQueue, 15000); // Polling menos agressivo
 
      const handleSynced = () => checkSyncQueue();
-     
-     const handleQuotaError = (e: Event) => {
-       const customEvent = e as CustomEvent<{ message: string }>;
-       setModalConfig({
-         isOpen: true,
-         title: 'Limite de Armazenamento',
-         message: customEvent.detail.message,
-         type: 'error'
-       });
-     };
- 
      window.addEventListener('gbr_photo_synced', handleSynced);
-     window.addEventListener('gbr_sync_quota_error', handleQuotaError);
- 
      return () => {
        clearInterval(interval);
        window.removeEventListener('gbr_photo_synced', handleSynced);
-       window.removeEventListener('gbr_sync_quota_error', handleQuotaError);
      };
-  }, [isSyncLocked]);
+  }, [isSyncLocked, databaseMode]);
 
   // Rastreamento Autônomo v24.50
   useEffect(() => {
@@ -481,6 +469,8 @@ const App: React.FC = () => {
     return () => clearInterval(monitorId);
   }, []);
 
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const [history, setHistory] = useState<AppScreen[]>(() => {
     try {
       const saved = localStorage.getItem('app_screen_history');
@@ -494,13 +484,38 @@ const App: React.FC = () => {
     } catch { return [AppScreen.LOGIN]; }
   });
 
-  const [screenParams, setScreenParams] = useState<NavigationParams | null>(null);
+  useEffect(() => {
+    localStorage.setItem('app_screen_history', JSON.stringify(history));
+  }, [history]);
+
+  const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_params');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  useEffect(() => {
+    if (screenParams) {
+      localStorage.setItem('app_screen_params', JSON.stringify(screenParams));
+    } else {
+      localStorage.removeItem('app_screen_params');
+    }
+  }, [screenParams]);
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
   const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
     return localStorage.getItem('app_selected_unit') || null;
   });
+
+  useEffect(() => {
+    if (selectedUnit) {
+      localStorage.setItem('app_selected_unit', selectedUnit);
+    } else {
+      localStorage.removeItem('app_selected_unit');
+    }
+  }, [selectedUnit]);
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -536,12 +551,7 @@ const App: React.FC = () => {
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [sqliteStatus, setSqliteStatus] = useState<DatabaseStatus | string>(DatabaseStatus.EMPTY);
-  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>(() => {
-    try {
-      const saved = localStorage.getItem('inventory_campaigns_cache');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -642,35 +652,59 @@ const App: React.FC = () => {
     }
   }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
 
-  // Carregamento de Campanhas e Configurações de GPS para visibilidade global (Movido para cima para evitar TDZ)
+  // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
-    const tenantId = currentTenantId;
-    console.log(`>>> [App] refreshCampaigns disparado. Tenant: ${tenantId}, Mode: ${databaseMode}`);
+    let tenantId = currentTenantId;
+    const unitId = currentUnitId;
     
-    if (!tenantId) return;
+    // Fallback de segurança para Tenant caso o useMemo esteja em delay
+    if (!tenantId) {
+      tenantId = (user?._tenantid || user?.tenantid || '').trim();
+      if (!tenantId && !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER)) {
+        tenantId = 'CICOPAL';
+      }
+    }
+
+    console.log(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
+    console.log(`>>> [Governance] Contexto: Tenant=${tenantId}, Unidade=${unitId || 'TODAS'}, Modo=${databaseMode}`);
+    
+    if (!tenantId) {
+      console.warn(">>> [Governance] refreshCampaigns ABORTADO: Sem TenantID!");
+      return;
+    }
 
     try {
+      // v25.60: Garantia de Soberania - Se banco local, força re-leitura do binário para evitar limbo de cache desincronizado
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        await sqliteService.forceSync();
+        console.log(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
+      }
+
       // Configurações de GPS
       const gpsData = await fetchUnitConfigs(tenantId);
       setUnitConfigs(gpsData);
+      setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-      // Campanhas (Resiliência Total)
-      const campaignData = await fetchCampaigns(tenantId);
-      console.log(`>>> [App] Campanhas atualizadas: ${campaignData?.length || 0} encontradas.`);
+    // Campanhas (Soberania SQL Local / Supabase)
+    // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
+    const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
+    const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
+    console.log(`>>> [Governance] Campanhas encontradas: ${campaignData?.length || 0} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
       
-      // Atualização atômica do estado para garantir reatividade
       setCampaigns([...(campaignData || [])]);
-      setRefreshVersion(v => v + 1); // Força re-cálculo da memoização de unidades
+      setRefreshVersion(prev => prev + 1);
     } catch (err) {
-      console.error('>>> [App] Erro ao buscar campanhas:', err);
+      console.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
     }
-  }, [currentTenantId, databaseMode]);
+  }, [currentTenantId, currentUnitId, databaseMode, user, screen]);
 
+  // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
     if (user?.tenantid) {
-      fetchUnitConfigs(user.tenantid).then(configs => {
-        setInventory(prev => ({ ...prev, unitConfigs: configs }));
-      });
+       fetchUnitConfigs(user.tenantid).then(configs => {
+         setUnitConfigs(configs);
+         setInventory(prev => ({ ...prev, unitConfigs: configs }));
+       }).catch(err => console.error(">>> [App] Erro ao carregar UnitConfigs:", err));
     }
   }, [user?.tenantid, databaseMode]);
 
@@ -2472,7 +2506,7 @@ const App: React.FC = () => {
     }
   }, [history, user, ADMIN_EMAIL]);
 
-  const commitAssetUpdate = useCallback((updatedAsset: Asset) => {
+  const commitAssetUpdate = useCallback(async (updatedAsset: Asset) => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
@@ -2488,92 +2522,100 @@ const App: React.FC = () => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    setInventory(prev => {
-      const newAssets = [...prev.assets];
-      const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
-      
-      const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
+    // PESIMISMO SAUDÁVEL: Tentamos salvar no banco PRIMEIRO
+    setIsProcessing(true);
+    try {
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        console.log(`>>> [DBA] Persistindo no SQLite ANTES de atualizar a UI...`);
+        // No modo interno, salvamos o registro no SQLite físico via bulkInsert que já trata a transação
+        await sqliteService.bulkInsertAssets([updatedAsset]);
+      } else {
+        await syncAssetsToCloud([updatedAsset], user?.tenantid);
+      }
 
-      const targetLoc = isReconciliationWorkflow
-        ? (updatedAsset.ENDERECO || "")
-        : (inventoryLocation 
-            ? inventoryLocation.toUpperCase().trim() 
-            : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
-      
-      const updates = { ...updatedAsset } as Asset;
-      updates._conferido = true;
-      updates._dataLeitura = new Date().toISOString();
-      updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-      updates._origemTransacao = origin; // Aplica o código fixo
-      
-      // Garantir que tenant e unit estão definidos
-      if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
-      if (!updates._unitid) updates._unitid = user?.unitid || '';
-      
-      // Log de Auditoria
-      const historyEntry: AuditLogEntry = {
-        timestamp: new Date().toISOString(),
-        user: user?.name || user?.username || user?.email || 'SISTEMA',
-        action: index === -1 ? 'CREATE' : 'UPDATE',
-        details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-        tenantid: user?.tenantid || '',
-        origin: origin // Aplica o código fixo no log
-      };
-      updates._history = [...(updates._history || []), historyEntry];
-      
-      const alteredFields = new Set<string>(updates._camposAlterados || []);
-      
-      const existingAsset = index !== -1 ? newAssets[index] : null;
-      const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
+      // SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
+      setInventory(prev => {
+        const newAssets = [...prev.assets];
+        const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
+        
+        const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
 
-      if (existingAsset) {
-        const wasLabelingCandidate = 
-          String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
-          String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
-          existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-          existingAsset._plaquetado === true;
+        const targetLoc = isReconciliationWorkflow
+          ? (updatedAsset.ENDERECO || "")
+          : (inventoryLocation 
+              ? inventoryLocation.toUpperCase().trim() 
+              : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
+        
+        const updates = { ...updatedAsset } as Asset;
+        updates._conferido = true;
+        updates._dataLeitura = new Date().toISOString();
+        updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+        updates._origemTransacao = origin; // Aplica o código fixo
+        
+        // Garantir que tenant e unit estão definidos
+        if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+        if (!updates._unitid) updates._unitid = user?.unitid || '';
+        
+        // Log de Auditoria
+        const historyEntry: AuditLogEntry = {
+          timestamp: new Date().toISOString(),
+          user: user?.name || user?.username || user?.email || 'SISTEMA',
+          action: index === -1 ? 'CREATE' : 'UPDATE',
+          details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
+          tenantid: user?.tenantid || '',
+          origin: origin // Aplica o código fixo no log
+        };
+        updates._history = [...(updates._history || []), historyEntry];
+        
+        const alteredFields = new Set<string>(updates._camposAlterados || []);
+        
+        const existingAsset = index !== -1 ? newAssets[index] : null;
+        const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
 
-        Object.keys(updates).forEach(key => {
-          if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-          if (String(updates[key]) !== String(existingAsset[key])) {
-            alteredFields.add(key);
-            if (originalValues[key] === undefined) {
-              originalValues[key] = existingAsset[key] as string | number | boolean | string[] | null | undefined;
+        if (existingAsset) {
+          const wasLabelingCandidate = 
+            String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+            String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
+            existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+            existingAsset._plaquetado === true;
+
+          Object.keys(updates).forEach(key => {
+            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+            if (String((updates as Record<string, any>)[key]) !== String((existingAsset as Record<string, any>)[key])) {
+              alteredFields.add(key);
+              if (originalValues[key] === undefined) {
+                originalValues[key] = (existingAsset as Record<string, any>)[key];
+              }
             }
+          });
+
+          if (wasLabelingCandidate) {
+            updates._plaquetado = true;
           }
-        });
-
-        if (wasLabelingCandidate) {
-          updates._plaquetado = true;
         }
-      }
-
-      const targetLocNormalized = normalizeKey(String(targetLoc || ''));
-      const existingLocNormalized = normalizeKey(String(existingAsset?.ENDERECO || ''));
-
-      if (!isReconciliationWorkflow && existingLocNormalized !== targetLocNormalized) {
-        alteredFields.add('ENDERECO');
-        if (originalValues['ENDERECO'] === undefined && existingAsset) {
-          originalValues['ENDERECO'] = existingAsset.ENDERECO;
+        
+        if (index !== -1) {
+          newAssets[index] = updates;
+        } else {
+          newAssets.push(updates);
         }
-      }
-
-      updates._valoresOriginais = originalValues;
-      updates._localMaster = targetLoc;
-      
-      const hasChanges = alteredFields.size > 0;
-      updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
-      
-      updates.TAG_INVENTARIO = determineTag(updates, targetLoc);
-      updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
-      updates._camposAlterados = Array.from(alteredFields);
-      
-      if (index === -1) newAssets.push(updates);
-      else newAssets[index] = updates;
-      
-      return { ...prev, assets: newAssets, lastUpdated: new Date().toISOString(), status: DatabaseStatus.IN_USE };
-    });
-  }, [inventoryLocation, determineTag, normalizeKey, history]);
+        
+        return {
+          ...prev,
+          assets: newAssets,
+          lastUpdated: new Date().toISOString()
+        };
+      });
+      setLastLocalSave(new Date().toISOString());
+      console.log(`>>> [DATABASE] Operação confirmada e UI sincronizada para id: ${updatedAsset.id}`);
+    } catch (err) {
+      console.error(">>> [DATABASE] Falha Crítica de Escrita:", err);
+      alert("ERRO SQL: " + (err instanceof Error ? err.message : String(err)));
+      // Não removemos do dirtyAssetsRef pois queremos tentar sync posterior
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [history, inventoryLocation, databaseMode, user?.tenantid]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -2658,14 +2700,11 @@ const App: React.FC = () => {
     }
 
     // Commit definitivo com ou sem GPS (fallback garantido acima)
-    commitAssetUpdate(assetWithHistory);
-    saveAssetIncremental(assetWithHistory).then(() => {
-      setLastLocalSave(new Date().toISOString());
-    });
+    await commitAssetUpdate(assetWithHistory);
     
     // Adiciona à lista de sujos para garantir sync
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
-  }, [inventory.assets, commitAssetUpdate, user, databaseMode, history]);
+  }, [inventory.assets, commitAssetUpdate, user, databaseMode, history, currentUnitConfig]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
     if (numberOfUnits < 2) return;
@@ -2779,32 +2818,38 @@ const App: React.FC = () => {
       newAssets.push(child);
     }
 
-    // 3. Atualizar estado
-    setInventory(prev => ({
-      ...prev,
-      assets: [
-        ...prev.assets.map(a => String(a.id) === String(parentAsset.id) ? updatedParent : a),
-        ...newAssets
-      ],
-      lastUpdated: timestamp
-    }));
-
-    // 4. Sincronizar se necessário
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      try {
+    // 3. Atualizar estado APÓS confirmação (Pesimismo Saudável)
+    setIsProcessing(true);
+    try {
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        // No modo interno salvamos os novos ativos 
+        await sqliteService.bulkInsertAssets([updatedParent, ...newAssets]);
+      } else {
         await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || '');
-      } catch (err) {
-        console.error('Erro ao sincronizar unitarização:', err);
       }
-    }
 
-    setModalConfig({
-      isOpen: true,
-      title: 'Unitarização Concluída',
-      message: `${numberOfUnits} novas fichas foram geradas com valores rateados (${percentages ? 'por percentual' : 'igualmente'}). O total dos filhos é 100% igual ao valor do pai.`,
-      type: 'success'
-    });
-  }, [user, databaseMode]);
+      setInventory(prev => ({
+        ...prev,
+        assets: [
+          ...prev.assets.map(a => String(a.id) === String(parentAsset.id) ? updatedParent : a),
+          ...newAssets
+        ],
+        lastUpdated: timestamp
+      }));
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Unitarização Concluída',
+        message: `${numberOfUnits} novas fichas foram geradas com valores rateados (${percentages ? 'por percentual' : 'igualmente'}). O total dos filhos é 100% igual ao valor do pai.`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('>>> [DATABASE] Erro ao unitarizar ativo:', err);
+      alert("ERRO SQL (Unitarização): " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [user, databaseMode, inventory.assets]);
 
   const restoreAsset = useCallback(async (assetId: string) => {
     const assetToRestore = inventory.assets.find(a => String(a.id) === String(assetId));
@@ -2896,16 +2941,14 @@ const App: React.FC = () => {
     };
     deletedAsset._history = [...(deletedAsset._history || []), auditEntry];
 
-    // Atualiza estado local (remove da lista visível)
-    setInventory(prev => ({
-      ...prev,
-      assets: prev.assets.filter(a => String(a.id) !== String(assetId)),
-      lastUpdated: new Date().toISOString()
-    }));
-
-    // Sincroniza com a nuvem (envia o flag _is_deleted)
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      try {
+    setIsProcessing(true);
+    try {
+      // 1. TENTA SALVAR NO BANCO PRIMEIRO
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        // No modo interno, salvamos o registro marcado como deletado no SQLite
+        await sqliteService.bulkInsertAssets([deletedAsset]);
+      } else {
+        // No modo Supabase, sincronizamos o flag _is_deleted
         await syncAssetsToCloud([deletedAsset], user?.tenantid);
         
         // Log de Auditoria Global
@@ -2918,28 +2961,31 @@ const App: React.FC = () => {
           details: `Exclusão lógica do ativo: ${assetToDelete.ETIQUETA} - ${assetToDelete.DESCRICAODOATIVO}`,
           _tenantid: user?.tenantid
         });
-      } catch (err) {
-        console.error('Erro ao sincronizar exclusão com Supabase:', err);
       }
-    } else {
-      // Modo INTERNO: Salva no localforage
-      const updatedInventory = {
-        ...inventory,
-        assets: inventory.assets.filter(a => String(a.id) !== String(assetId)),
-        lastUpdated: new Date().toISOString()
-      };
-      await saveInventory(updatedInventory);
-    }
 
-    // Se estiver no detalhe do ativo, volta
-    if (history[history.length - 1] === AppScreen.ASSET_DETAIL) {
-      popScreen();
+      // 2. SÓ ATUALIZA A UI APÓS CONFIRMAÇÃO DO BANCO
+      setInventory(prev => ({
+        ...prev,
+        assets: prev.assets.filter(a => String(a.id) !== String(assetId)),
+        lastUpdated: new Date().toISOString()
+      }));
+
+      // Se estiver no detalhe do ativo, volta
+      if (history[history.length - 1] === AppScreen.ASSET_DETAIL) {
+        popScreen();
+      }
+      
+      console.log(`>>> [DATABASE] Exclusão confirmada para id: ${assetId}`);
+    } catch (err) {
+      console.error('>>> [DATABASE] Falha ao excluir ativo:', err);
+      alert("ERRO SQL (Exclusão): " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsProcessing(false);
     }
   }, [inventory, user, databaseMode, history, popScreen]);
 
   const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
-    ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
@@ -2966,113 +3012,133 @@ const App: React.FC = () => {
       }
     }
 
-    setInventory(prev => ({
-      ...prev,
-      assets: prev.assets.map(a => {
-        if (idSet.has(String(a.id))) {
-          const updates = { 
-            ...a, 
-            ...(manualUpdates || {}), 
-            _lat: gpsCoords.lat, 
-            _lng: gpsCoords.lng,
-            _origemTransacao: origin // Aplica o código fixo
-          };
-          
-          // Garantir que tenant e unit estão definidos
-          if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
-          if (!updates._unitid) updates._unitid = user?.unitid || '';
-          
-          // Log de Auditoria para atualização em lote
-          const historyEntry: AuditLogEntry = {
-            timestamp: new Date().toISOString(),
-            user: user?.name || user?.username || user?.email || 'SISTEMA',
-            action: 'BULK_UPDATE',
-            details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-            tenantid: user?.tenantid || '',
-            origin: origin // Aplica o código fixo no log
-          };
-          updates._history = [...(updates._history || []), historyEntry];
-          
-          // REGRA DE OURO: Respeita o local do inventário se houver, senão mantém o do item (ou o manual)
-          const targetLoc = isReconciliationWorkflow
-            ? (a.ENDERECO || "")
-            : (inventoryLocation 
-                ? inventoryLocation.toUpperCase().trim() 
-                : (updates.ENDERECO || "").toString().toUpperCase().trim());
+    // 1. CALCULAMOS OS NOVOS OBJETOS (MERGE NÃO DESTRUTIVO)
+    const updatedAssetsList: Asset[] = [];
+    const allAssets = inventory.assets.map(a => {
+      if (idSet.has(String(a.id))) {
+        const updates = { 
+          ...a, 
+          ...(manualUpdates || {}), 
+          _lat: gpsCoords.lat, 
+          _lng: gpsCoords.lng,
+          _origemTransacao: origin // Aplica o código fixo
+        };
+        
+        // Garantir que tenant e unit estão definidos
+        if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+        if (!updates._unitid) updates._unitid = user?.unitid || '';
+        
+        // Log de Auditoria para atualização em lote
+        const historyEntry: AuditLogEntry = {
+          timestamp: new Date().toISOString(),
+          user: user?.name || user?.username || user?.email || 'SISTEMA',
+          action: 'BULK_UPDATE',
+          details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
+          tenantid: user?.tenantid || '',
+          origin: origin // Aplica o código fixo no log
+        };
+        updates._history = [...(updates._history || []), historyEntry];
+        
+        // REGRA DE OURO: Respeita o local do inventário se houver
+        const targetLoc = isReconciliationWorkflow
+          ? (a.ENDERECO || "")
+          : (inventoryLocation 
+              ? inventoryLocation.toUpperCase().trim() 
+              : (updates.ENDERECO || "").toString().toUpperCase().trim());
 
-          updates._conferido = true;
-          updates._dataLeitura = new Date().toISOString();
-          updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-          
-          // Se o item estava na condição de etiquetar (ou já foi etiquetado nesta sessão)
-          const wasLabelingCandidate = 
-            String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
-            String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
-            a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-            a._plaquetado === true;
+        updates._conferido = true;
+        updates._dataLeitura = new Date().toISOString();
+        updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+        
+        const wasLabelingCandidate = 
+          String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+          String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
+          a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+          a._plaquetado === true;
 
-          const alteredFields = new Set<string>(updates._camposAlterados || []);
-          const originalValues = { ...(a._valoresOriginais || {}) };
-
-          // Se houver manualUpdates, registramos os campos alterados
-          if (manualUpdates) {
-            Object.keys(manualUpdates).forEach(key => {
-              if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-              if (String(manualUpdates[key]) !== String(a[key])) {
-                alteredFields.add(key);
-                if (originalValues[key] === undefined) {
-                  originalValues[key] = a[key] as string | number | boolean | string[] | null | undefined;
-                }
-              }
-            });
-          }
-          
-          if (!isReconciliationWorkflow && normalizeKey(String(a.ENDERECO || '')) !== normalizeKey(String(targetLoc || ''))) {
-            alteredFields.add('ENDERECO');
-            if (originalValues['ENDERECO'] === undefined) {
-              originalValues['ENDERECO'] = a.ENDERECO;
-            }
-          }
-          updates._localMaster = targetLoc;
-          // updates.ENDERECO = targetLoc; // REMOVIDO: Não alteramos o endereço original
-          
-          const hasChanges = alteredFields.size > 0;
-          updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
-          
-          updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
-          updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
-          updates._camposAlterados = Array.from(alteredFields);
-          updates._valoresOriginais = originalValues;
-
-          if (wasLabelingCandidate) {
-            updates._plaquetado = true;
-          }
-
-          // Persistência imediata para evitar perda de dados em lote
-          saveAssetIncremental(updates).then(() => {
-            setLastLocalSave(new Date().toISOString());
-          });
-
-          return updates;
+        if (wasLabelingCandidate) {
+          updates._plaquetado = true;
         }
-        return a;
-      }),
-      lastUpdated: new Date().toISOString(),
-      status: DatabaseStatus.IN_USE
-    }));
 
-    // Log de Auditoria na Nuvem (se estiver em modo Supabase)
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      logAuditEvent({
-        user_email: user?.email || 'unknown',
-        action: 'BULK_UPDATE',
-        table_name: 'assets',
-        details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-        _tenantid: user?._tenantid || user?.tenantid,
-        origin: origin
-      });
+        const alteredFields = new Set<string>(updates._camposAlterados || []);
+        const originalValues = { ...(a._valoresOriginais || {}) };
+
+        if (manualUpdates) {
+          Object.keys(manualUpdates).forEach(key => {
+            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+            if (String((manualUpdates as Record<string, any>)[key]) !== String((a as Record<string, any>)[key])) {
+              alteredFields.add(key);
+              if (originalValues[key] === undefined) {
+                originalValues[key] = (a as Record<string, any>)[key];
+              }
+            }
+          });
+        }
+        
+        if (!isReconciliationWorkflow && normalizeKey(String(a.ENDERECO || '')) !== normalizeKey(String(targetLoc || ''))) {
+          alteredFields.add('ENDERECO');
+          if (originalValues['ENDERECO'] === undefined) {
+            originalValues['ENDERECO'] = a.ENDERECO;
+          }
+        }
+        updates._localMaster = targetLoc;
+        
+        const hasChanges = alteredFields.size > 0;
+        updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
+        
+        updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
+        updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
+        updates._camposAlterados = Array.from(alteredFields);
+        updates._valoresOriginais = originalValues;
+
+        updatedAssetsList.push(updates);
+        return updates;
+      }
+      return a;
+    });
+
+    // 2. PESIMISMO SAUDÁVEL: PERSISTÊNCIA ANTES DA UI
+    setIsProcessing(true);
+    try {
+      console.log(`>>> [DATABASE] Iniciando persistência em lote para ${updatedAssetsList.length} itens...`);
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        // SOBERANIA SQLITE: Transação atômica que NÃO sobrescreve dados antigos sem intenção (merge via spread)
+        await sqliteService.bulkInsertAssets(updatedAssetsList);
+      } else {
+        await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
+        
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'BULK_UPDATE',
+          table_name: 'assets',
+          details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
+          _tenantid: user?._tenantid || user?.tenantid,
+          origin: origin
+        });
+      }
+
+      // 3. SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
+      setInventory(prev => ({
+        ...prev,
+        assets: allAssets,
+        lastUpdated: new Date().toISOString(),
+        status: DatabaseStatus.IN_USE
+      }));
+      setLastLocalSave(new Date().toISOString());
+      
+      // MARCA IDs como sujos para back-sync
+      ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
+      
+      console.log(`>>> [DATABASE] Operação em lote concluída com sucesso.`);
+    } catch (err) {
+      console.error('>>> [DATABASE] Falha Crítica no Lote:', err);
+      // alert("ERRO SQL (Lote): " + (err instanceof Error ? err.message : String(err)));
+      // No mobile real, alerts são melhores para erros de banco
+      window.alert(`ERRO CRÍTICO NO BANCO:\n${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, normalizeKey, user, databaseMode, history]);
+  }, [inventoryLocation, determineTag, normalizeKey, user, databaseMode, history, currentUnitConfig, inventory.assets]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
@@ -3714,7 +3780,6 @@ const App: React.FC = () => {
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
       const hasDirectCampaign = unitsWithDirectCampaign.has(norm);
-      const hasAssetCampaign = unit.hasAssetCampaign;
       const hasGps = unitsWithGps.has(norm);
 
       return {
@@ -4365,39 +4430,21 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
               units={fullCompaniesWithStatus
                 .filter(c => {
+                  // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
+                  // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
+                  // No modo local, mostramos todas as unidades encontradas na base
                   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
                   const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
                   
-                  // Regra: Mostrar apenas unidades que possuem ativos com status "ATIVO" ou "PENDENTE"
-                  // Se a base estiver vazia (especialmente no modo nuvem), mostramos todas para permitir o primeiro sync
-                  const hasAssets = inventory.assets.length > 0;
-                  const hasActiveAssets = c.hasActiveAssets;
+                  if (isAdmin) return true; // Admin vê tudo que foi detectado
                   
-                  // Se acabamos de carregar dados, não queremos que o filtro suma com as unidades
-                  const justFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
-                  
-                  // Se não há ativos carregados, mostramos a unidade para que o usuário possa selecioná-la e baixar os dados
-                  // Se há ativos carregados, filtramos pelo status "ATIVO", a menos que estejamos no modo nuvem e a unidade ainda não tenha dados locais
-                  // Adicionamos a permissão para ADMIN ver tudo se acabamos de carregar
-                  const shouldShowByStatus = !hasAssets || hasActiveAssets || justFinishedLoad || (databaseMode !== DatabaseMode.INTERNAL && !c.hasData);
-
-                  if (isAdmin) return shouldShowByStatus;
-                  
-                  // Se for auditor (ou auxiliar), só vê as unidades autorizadas E que tenham ativos ativos
                   if (isAuditor) {
                     const authorizedUnits = user?.units || (user?.unitid ? [user.unitid] : []);
                     const normCName = normalizeKey(c.name);
-                    const isAuthorized = authorizedUnits.some(au => normalizeKey(au) === normCName);
-                    
-                    // Log para depuração se for felipe.messias
-                    if (user?.email.toLowerCase() === 'felipe.messias@gmail.com') {
-                      console.log(`[UnitFilter] Felipe: ${c.name} (${normCName}) | Authorized: ${JSON.stringify(authorizedUnits)} | isAuthorized: ${isAuthorized}`);
-                    }
-                    
-                    return isAuthorized && shouldShowByStatus;
+                    return authorizedUnits.some(au => normalizeKey(au) === normCName);
                   }
 
-                  return shouldShowByStatus;
+                  return true;
                 })
                 .map(c => ({ 
                   name: c.name, 
@@ -4571,6 +4618,7 @@ const App: React.FC = () => {
               initialUnit={selectedUnit}
               tenantId={currentTenantId}
               unitId={currentUnitId}
+              databaseMode={databaseMode}
             />
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={popScreen} />}
@@ -4645,16 +4693,16 @@ const App: React.FC = () => {
               
               <div className="flex flex-col min-w-[80px]">
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'Blindagem Ativa' : 
-                   sqliteService.getStorageSource() === 'CACHE' ? 'Cache Temporário' : 'Banco Volátil'}
-                  {sqliteService.getStorageSource() === 'PHYSICAL' && (
+                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA NATIVA' : 
+                   sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
+                  {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}
                 </span>
                 <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter mt-1 truncate max-w-[120px]">
                   {sqliteService.getStorageSource() === 'PHYSICAL' 
-                    ? (fileStatus?.fileName || 'Sincronizado') 
-                    : fileStatus?.status === 'expired' ? 'Permissão Expirada - Toque Aqui' : 'Aguardando Arquivo'}
+                    ? 'Disco Android (Nativo)' 
+                    : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
                 </span>
               </div>
 
@@ -4786,11 +4834,15 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Overlay de Reconexão de Banco Físico */}
-      {showReconnectOverlay && (
+      {/* Overlay de Reconexão e Processamento (Pessimismo Saudável) */}
+      {(showReconnectOverlay || isProcessing) && (
         <div className="fixed inset-0 z-[20000] bg-slate-900/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
           <div className="w-24 h-24 bg-blue-600 rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-blue-500/40 relative overflow-hidden">
-            <HardDrive className="text-white relative z-10" size={48} />
+            {isProcessing ? (
+              <Activity className="text-white relative z-10 animate-pulse" size={48} />
+            ) : (
+              <HardDrive className="text-white relative z-10" size={48} />
+            )}
             <motion.div 
               animate={{ rotate: 360 }}
               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
@@ -4799,21 +4851,28 @@ const App: React.FC = () => {
           </div>
           
           <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">
-            Reconectando ao Banco de Dados Local...
+            {isProcessing ? 'Persistindo no Banco SQL...' : 'Reconectando ao Banco de Dados Local...'}
           </h2>
           
           <p className="text-slate-400 text-sm max-w-md mb-10 leading-relaxed font-medium">
-            {fileStatus?.linkType === 'DIRECTORY' ? (
+            {isProcessing ? (
               <>
-                O navegador precisa de permissão para acessar a pasta:<br/>
-                <span className="text-blue-400 font-bold">&quot;{fileStatus?.folderName}&quot;</span><br/>
-                onde o arquivo <span className="text-slate-300 italic">{fileStatus?.fileName}</span> está localizado.
+                GBR Governança: Aguardando o <span className="text-blue-400 font-bold">COMMIT</span> físico no SQLite para garantir a integridade da auditoria. 
+                Sua interface será liberada somente após o sucesso operacional.
               </>
             ) : (
-              <>
-                O navegador perdeu o vínculo físico com o arquivo individual:<br/>
-                <span className="text-blue-400 font-bold">&quot;{fileStatus?.fileName}&quot;</span>.
-              </>
+              fileStatus?.linkType === 'DIRECTORY' ? (
+                <>
+                  O navegador precisa de permissão para acessar a pasta:<br/>
+                  <span className="text-blue-400 font-bold">&quot;{fileStatus?.folderName}&quot;</span><br/>
+                  onde o arquivo <span className="text-slate-300 italic">{fileStatus?.fileName}</span> está localizado.
+                </>
+              ) : (
+                <>
+                  O navegador perdeu o vínculo físico com o arquivo individual:<br/>
+                  <span className="text-blue-400 font-bold">&quot;{fileStatus?.fileName}&quot;</span>.
+                </>
+              )
             )}
           </p>
           

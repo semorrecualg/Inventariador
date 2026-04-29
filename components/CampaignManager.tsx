@@ -15,7 +15,8 @@ import {
   X,
   ArrowLeft,
   Trash2,
-  ShieldCheck
+  ShieldCheck,
+  Download
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
@@ -31,6 +32,7 @@ interface CampaignManagerProps {
   initialUnit?: string | null;
   tenantId?: string | null;
   unitId?: string | null;
+  databaseMode?: string;
 }
 
 const CampaignManager: React.FC<CampaignManagerProps> = ({ 
@@ -43,7 +45,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   onRefresh,
   initialUnit,
   tenantId: propsTenantId,
-  unitId: propsUnitId
+  unitId: propsUnitId,
+  databaseMode
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -51,12 +54,29 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newCampaignDesc, setNewCampaignDesc] = useState('');
   const [newCampaignUnit, setNewCampaignUnit] = useState<string>(initialUnit || '');
+
+  // Sincroniza unidade inicial quando o prop muda (ex: após refresh)
+  React.useEffect(() => {
+    if (initialUnit && !newCampaignUnit) {
+      setNewCampaignUnit(initialUnit);
+    }
+  }, [initialUnit]);
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [isDebugExpanded, setIsDebugExpanded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+
+  // Sincronização Local para Resposta Instantânea v25.50
+  const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
+
+  React.useEffect(() => {
+    if (campaigns && !isRefreshing && !isSaving) {
+      setLocalCampaigns(campaigns);
+    }
+  }, [campaigns, isRefreshing, isSaving]);
 
   // Use props if provided, otherwise fallback to user info
   const handleRefresh = async () => {
@@ -85,25 +105,31 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     setIsSaving(true);
     try {
+      const finalUnit = newCampaignUnit.trim();
+      console.log(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantId}, Unit: ${finalUnit || 'TODAS'}`);
+      
       const newCampaign: Partial<InventoryCampaign> = {
         name: newCampaignName.trim(),
         description: newCampaignDesc.trim(),
         status: CampaignStatus.CREATED,
         _tenantid: tenantId,
-        _unitid: (newCampaignUnit || propsUnitId || user?._unitid || user?.unitid || 'MATRIZ').trim(),
-        tenantid: tenantId,
-        unit_id: (newCampaignUnit || propsUnitId || user?._unitid || user?.unitid || 'MATRIZ').trim(),
+        _unitid: finalUnit,
+        tenant_id: tenantId,
+        unit_id: finalUnit,
         created_by: (user?.email || 'admin').toLowerCase(),
         start_date: new Date().toISOString()
       };
 
       const result = await createCampaign(newCampaign);
       if (result) {
+        // Atualização Otimista: garante que a UI reflita a criação ANTES do refresh terminar
+        setLocalCampaigns(prev => [result, ...prev]);
+        
         if (onRefresh) await onRefresh();
         setIsCreating(false);
         setNewCampaignName('');
         setNewCampaignDesc('');
-        setNewCampaignUnit('');
+        setNewCampaignUnit(''); 
         setSuccessMessage('Campanha criada com sucesso');
         setTimeout(() => setSuccessMessage(null), 3000);
       } else {
@@ -144,11 +170,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
-    console.log(`>>> [Campaigns] Solicitando mudança de status: ${id} -> ${status}`);
+    console.log(`>>> [Governance] Iniciando transição de status para ID: ${id}. Aguardando confirmação do banco...`);
+    setUpdatingStatusId(id);
+    
     try {
       // Regra: Se estiver fechando, cria o SNAPSHOT antes de mudar o status (Governança GBR)
       if (status === CampaignStatus.CLOSED) {
-        console.log('>>> [Governance] Iniciando captura de Snapshot para encerramento...');
         const snapSuccess = await createCampaignSnapshot(id, user?.email || 'admin');
         if (!snapSuccess) {
           console.warn('>>> [Governance] Falha ao criar snapshot. Continuando encerramento mas sem histórico imutável.');
@@ -157,26 +184,27 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       const success = await updateCampaignStatus(id, status, user?.email || 'admin');
       if (success) {
-        console.log('>>> [Campaigns] Status atualizado no banco. Disparando refresh...');
-        setSuccessMessage('Status atualizado');
-        setTimeout(() => setSuccessMessage(null), 3000);
-        
-        // REFRESH OBRIGATÓRIO: Garante que a lista e as unidades reflitam a nova governança
+        // REFRESH OBRIGATÓRIO: Buscamos a verdade do banco antes de qualquer mudança visual
         if (onRefresh) await onRefresh();
         
-        // Atualização local do estado para reatividade atômica
+        console.log('>>> [Database] Operação confirmada. Atualizando interface...');
+        setSuccessMessage('Operação confirmada no banco');
+        setTimeout(() => setSuccessMessage(null), 3000);
+        
+        // Atualizamos o selecionado apenas após o refresh para garantir consistência
         if (selectedCampaign?.id === id) {
           setSelectedCampaign({ ...selectedCampaign, status });
         }
       } else {
-        console.error('>>> [Campaigns] Erro no retorno da função de status.');
-        setErrorMessage('Erro ao atualizar status no banco local');
+        setErrorMessage('Erro ao persistir alteração no banco');
         setTimeout(() => setErrorMessage(null), 3000);
       }
     } catch (err) {
-      console.error('>>> [Campaigns] Erro técnico:', err);
-      setErrorMessage('Erro técnico na comunicação com o banco');
+      console.error('>>> [Database] Falha crítica na conexão:', err);
+      setErrorMessage('Erro de rede: Banco indisponível');
       setTimeout(() => setErrorMessage(null), 3000);
+    } finally {
+      setUpdatingStatusId(null);
     }
   };
 
@@ -220,18 +248,18 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
           </button>
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">
-              {selectedCampaign ? 'Detalhes' : 'Eventos de Inventário'}
+              {selectedCampaign ? 'Detalhes' : 'Eventos de Inventário v2.5'}
             </h1>
             {!selectedCampaign && (
-              <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Gestão de Campanhas</p>
+              <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">Gestão de Campanhas (Soberania de Dados Móvel)</p>
             )}
           </div>
         </div>
         <button 
           onClick={handleRefresh}
-          className={`p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`}
+          className={`p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 transition-all text-emerald-400`}
         >
-          <RefreshCw size={18} strokeWidth={1.5} />
+          <RefreshCw className={isRefreshing ? 'animate-spin' : ''} size={18} strokeWidth={1.5} />
         </button>
       </header>
 
@@ -258,9 +286,19 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   exit={{ height: 0, opacity: 0 }}
                   className="px-4 pb-4 font-mono text-[9px] text-emerald-500/80 space-y-1"
                 >
+                  <p>MODE: {databaseMode || 'INTERNAL'}</p>
                   <p>TENANT: {propsTenantId || user?._tenantid || user?.tenantid || 'N/A'}</p>
-                  <p>COUNT: {campaigns.length}</p>
+                  <p>COUNT: {localCampaigns.length}</p>
                   <p>UNIT: {propsUnitId || user?._unitid || user?.unitid || 'N/A'}</p>
+                  
+                  <button 
+                    onClick={() => sqliteService.downloadDatabase()}
+                    className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold rounded-lg border border-white/10 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Download size={12} />
+                    EXTRAIR ARQUIVO .DB (SISTEMA NATIVO)
+                  </button>
+
                   {errorMessage && <p className="text-rose-400 mt-2">ALERTA: {errorMessage}</p>}
                 </motion.div>
               )}
@@ -307,6 +345,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
               <div className="space-y-3">
                 {(selectedCampaign.status === CampaignStatus.ACTIVE || selectedCampaign.status === CampaignStatus.CREATED) && (
                   <button 
+                    disabled={updatingStatusId === selectedCampaign.id}
                     onClick={async () => {
                       if (selectedCampaign.status === CampaignStatus.CREATED) {
                         await handleUpdateStatus(selectedCampaign.id, CampaignStatus.ACTIVE);
@@ -315,15 +354,24 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                       }
                     }}
                     className={`w-full py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                      selectedCampaign.status === CampaignStatus.CREATED
-                        ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20 hover:bg-amber-500'
-                        : currentCampaignId === selectedCampaign.id 
-                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
-                          : 'bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 active:scale-[0.98]'
+                      updatingStatusId === selectedCampaign.id
+                        ? 'bg-slate-700 text-slate-500 cursor-wait'
+                        : selectedCampaign.status === CampaignStatus.CREATED
+                          ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20 hover:bg-amber-500'
+                          : currentCampaignId === selectedCampaign.id 
+                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                            : 'bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 active:scale-[0.98]'
                     }`}
                   >
-                    {selectedCampaign.status === CampaignStatus.CREATED ? <ShieldCheck size={18} /> : currentCampaignId === selectedCampaign.id ? <CheckCircle2 size={18} /> : <Activity size={18} />}
-                    {selectedCampaign.status === CampaignStatus.CREATED ? 'Ativar Campanha' : currentCampaignId === selectedCampaign.id ? 'Campanha Ativa' : 'Ativar para Inventário'}
+                    {updatingStatusId === selectedCampaign.id ? (
+                      <Loader2 className="animate-spin" size={18} />
+                    ) : (
+                      selectedCampaign.status === CampaignStatus.CREATED ? <ShieldCheck size={18} /> : currentCampaignId === selectedCampaign.id ? <CheckCircle2 size={18} /> : <Activity size={18} />
+                    )}
+                    {updatingStatusId === selectedCampaign.id 
+                      ? 'Processando no Banco...' 
+                      : (selectedCampaign.status === CampaignStatus.CREATED ? 'Ativar Campanha' : currentCampaignId === selectedCampaign.id ? 'Campanha Ativa' : 'Ativar para Inventário')
+                    }
                   </button>
                 )}
 
@@ -355,29 +403,44 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   {selectedCampaign.status === CampaignStatus.ACTIVE ? (
                     <button 
+                      disabled={updatingStatusId === selectedCampaign.id}
                       onClick={() => {
                         if (window.confirm('ENCERRAMENTO DE CAMPANHA:\n\nAo encerrar, o sistema irá "Congelar" (Snapshot) o estado atual de todos os ativos para auditoria. Nenhuma alteração posterior afetará o Laudo Final.\n\nDeseja prosseguir com o encerramento?')) {
                             handleUpdateStatus(selectedCampaign.id, CampaignStatus.CLOSED);
                         }
                       }}
-                      className="py-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold text-xs hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2"
+                      className={`py-3.5 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 flex-1 ${
+                        updatingStatusId === selectedCampaign.id
+                          ? 'bg-slate-700/50 border-slate-700 text-slate-500 animate-pulse'
+                          : 'bg-orange-500/10 border-orange-500/20 text-orange-500 hover:bg-orange-500/20'
+                      }`}
                     >
-                      <ShieldCheck size={14} />
+                      {updatingStatusId === selectedCampaign.id ? <Loader2 className="animate-spin" size={14} /> : <ShieldCheck size={14} />}
                       Encerrar e Congelar
                     </button>
                   ) : (
                     <button 
+                      disabled={updatingStatusId === selectedCampaign.id}
                       onClick={() => handleUpdateStatus(selectedCampaign.id, CampaignStatus.ACTIVE)}
-                      className="py-3.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-bold text-xs hover:bg-white/10 transition-all"
+                      className={`py-3.5 rounded-xl border font-bold text-xs transition-all flex-1 ${
+                        updatingStatusId === selectedCampaign.id
+                          ? 'bg-slate-700/50 border-slate-700 text-slate-500 animate-pulse'
+                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                      }`}
                     >
-                      Reabrir
+                      {updatingStatusId === selectedCampaign.id ? '...' : 'Reabrir'}
                     </button>
                   )}
                   <button 
+                    disabled={updatingStatusId === selectedCampaign.id}
                     onClick={() => handleUpdateStatus(selectedCampaign.id, CampaignStatus.ARCHIVED)}
-                    className="py-3.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-bold text-xs hover:bg-white/10 transition-all"
+                    className={`py-3.5 rounded-xl border font-bold text-xs transition-all flex-1 ${
+                      updatingStatusId === selectedCampaign.id
+                        ? 'bg-slate-700/50 border-slate-700 text-slate-500 animate-pulse'
+                        : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                    }`}
                   >
-                    Arquivar
+                    {updatingStatusId === selectedCampaign.id ? '...' : 'Arquivar'}
                   </button>
                 </div>
 
@@ -396,7 +459,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
           </motion.div>
         ) : (
           <div className="space-y-4">
-            {campaigns.length === 0 ? (
+            {localCampaigns.length === 0 ? (
               <div className="py-20 flex flex-col items-center text-center space-y-6">
                 <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-slate-700">
                   <BarChart3 size={40} strokeWidth={1} />
@@ -410,7 +473,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {campaigns.map(campaign => (
+                {localCampaigns.map(campaign => (
                   <motion.div 
                     key={campaign.id}
                     initial={{ opacity: 0, y: 10 }}
@@ -449,10 +512,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         <div className="p-6 bg-[#0F172A]/80 backdrop-blur-md border-t border-white/5">
           <button 
             onClick={() => setIsCreating(true)}
-            className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-600/20 hover:from-blue-500 hover:to-blue-400 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
             <Plus size={18} strokeWidth={2.5} />
-            <span>Nova Campanha</span>
+            <span className="uppercase tracking-widest font-black">Iniciar Nova Auditoria</span>
           </button>
         </div>
       )}
@@ -518,9 +581,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                 <button 
                   onClick={handleCreateCampaign}
                   disabled={!newCampaignName || isSaving}
-                  className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-600/20 hover:bg-blue-500 transition-all disabled:opacity-30 flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all disabled:opacity-30 flex items-center justify-center gap-2"
                 >
-                  {isSaving ? <Loader2 className="animate-spin" size={18} /> : <span>Criar Campanha</span>}
+                  {isSaving ? <Loader2 className="animate-spin" size={18} /> : <span className="uppercase tracking-widest font-black">Gravar Campanha (Disco Físico)</span>}
                 </button>
               </div>
             </motion.div>

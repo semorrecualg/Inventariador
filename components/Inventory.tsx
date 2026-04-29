@@ -421,7 +421,7 @@ const Inventory: React.FC<InventoryProps> = ({
         
         if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
           // Caso seja de outra empresa, adota
-          onUpdateAssetRef.current({ 
+          await onUpdateAssetRef.current({ 
             ...foundAsset, 
             UNIDADE_OPERACIONAL: selectedUnitRef.current || foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid,
             _conferido: true,
@@ -430,7 +430,7 @@ const Inventory: React.FC<InventoryProps> = ({
           });
         } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
           // Caso seja da mesma empresa mas outro endereço, adota como sobra física
-          onUpdateAssetRef.current({
+          await onUpdateAssetRef.current({
             ...foundAsset,
             _conferido: true,
             TAG_INVENTARIO: TagInventario.ADOTADO,
@@ -438,7 +438,7 @@ const Inventory: React.FC<InventoryProps> = ({
           });
         } else {
           // Caso seja da mesma empresa e mesmo endereço
-          onUpdateAssetRef.current({
+          await onUpdateAssetRef.current({
             ...foundAsset,
             _conferido: true,
             _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
@@ -643,18 +643,18 @@ const Inventory: React.FC<InventoryProps> = ({
     return pendingInSearch.every(a => normalizeKey(a.ETIQUETA || "") === firstEtq);
   }, [committedSearch, filteredAssets, normalizeKey]);
 
-  const handleConfirmSearchBatch = () => {
+  const handleConfirmSearchBatch = async () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
     
     const ids = pendingInSearch.map(a => String(a.id));
-    onBulkUpdateAssets(ids);
+    await onBulkUpdateAssets(ids);
     
     setCommittedSearch('');
     setDisplayValue('');
   };
 
-  const handleMakeDecision = useCallback((id: string, decision: 'YES' | 'NO') => {
+  const handleMakeDecision = useCallback(async (id: string, decision: 'YES' | 'NO') => {
     if (decision === 'NO') return;
 
     const asset = allAssets.find(a => String(a.id) === id);
@@ -676,13 +676,13 @@ const Inventory: React.FC<InventoryProps> = ({
 
       if (related.length > 1) {
         const ids = related.map(a => String(a.id));
-        onBulkUpdateAssets(ids);
+        await onBulkUpdateAssets(ids);
         setDisplayValue('');
         return;
       }
     }
     
-    onUpdateAsset({
+    await onUpdateAsset({
       ...asset,
       _conferido: true,
       _localMaster: selectedLocation || asset.ENDERECO
@@ -690,7 +690,7 @@ const Inventory: React.FC<InventoryProps> = ({
     setDisplayValue('');
   }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
-  const handleAssetClick = useCallback((asset: Asset) => {
+  const handleAssetClick = useCallback(async (asset: Asset) => {
     setShowNumericKeypad(false);
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
@@ -705,7 +705,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      onUpdateAsset({ 
+      await onUpdateAsset({ 
         ...asset, 
         UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL || asset._unitid,
         _conferido: true,
@@ -726,7 +726,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
       if (related.length > 1) {
         const ids = related.map(a => String(a.id));
-        onBulkUpdateAssets(ids);
+        await onBulkUpdateAssets(ids);
         return;
       }
     }
@@ -742,7 +742,7 @@ const Inventory: React.FC<InventoryProps> = ({
     });
   }, []);
 
-  const handleBatchConfirm = () => {
+  const handleBatchConfirm = async () => {
     if (selectedIds.size === 0) return;
     
     // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
@@ -752,7 +752,7 @@ const Inventory: React.FC<InventoryProps> = ({
     });
 
     if (ids.length > 0) {
-      onBulkUpdateAssets(ids);
+      await onBulkUpdateAssets(ids);
     }
     
     setSelectedIds(new Set());

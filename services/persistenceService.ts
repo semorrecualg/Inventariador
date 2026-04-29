@@ -150,6 +150,8 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
     console.log(`>>> [Persistence] Ativo ${asset.ETIQUETA} salvo incrementalmente.`);
   } catch (error) {
     console.error('Erro no salvamento incremental:', error);
+    // Re-throw to allow the caller to handle the "Healthy Pessimism" logic
+    throw new Error(`Erro SQL no salvamento local: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
 

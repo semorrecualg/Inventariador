@@ -4,12 +4,18 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --mode development",
-    "build": "tsc && vite build --mode development",
+    "dev": "vite",
+    "build": "vite build",
+    "cap:sync": "npx cap copy && npx cap sync android",
+    "cap:open": "npx cap open android",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/filesystem": "^8.1.2",
     "@deck.gl/aggregation-layers": "^9.2.11",
     "@deck.gl/core": "^9.2.11",
     "@deck.gl/google-maps": "^9.2.11",

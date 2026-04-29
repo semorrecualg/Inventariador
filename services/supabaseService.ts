@@ -1606,18 +1606,7 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   if (isInternal) {
     console.log('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
     try {
-      // 1. Deleta do SQLite (Source of Truth)
       await sqliteService.deleteCampaignSql(campaignId);
-      
-      // 2. Limpa cache apenas por segurança
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      if (cached) {
-        try {
-          const campaigns = JSON.parse(cached) as InventoryCampaign[];
-          const filtered = campaigns.filter(c => c.id !== campaignId);
-          localStorage.setItem('inventory_campaigns_cache', JSON.stringify(filtered));
-        } catch (e) { console.warn(e); }
-      }
       return true;
     } catch (err) {
       console.error(">>> [SQLite] Falha ao excluir campanha:", err);
@@ -1627,11 +1616,13 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
 
   if (!supabase) return false;
   
-  // Tenta excluir em ambas as tabelas possíveis
-  const { error: err1 } = await supabase.from('campaigns_v2').delete().eq('id', campaignId);
-  const { error: err2 } = await supabase.from('inventory_campaigns').delete().eq('id', campaignId);
+  const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+  if (error) {
+    console.error('>>> [Supabase] Erro ao excluir campanha:', error);
+    return false;
+  }
   
-  return !err1 || !err2;
+  return true;
 };
 
 /**
@@ -1648,246 +1639,141 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
 };
 
 /**
- * Busca todas as campanhas de um tenant com resiliência total
+ * Busca todas as campanhas de um tenant/unidade na tabela única oficial
  */
-export const fetchCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
+export const fetchCampaigns = async (tenantid: string, unitid?: string | null): Promise<InventoryCampaign[]> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
   if (isInternal) {
-    console.log('>>> [SQLite] Buscando campanhas físicas...');
     try {
       const sqlCampaigns = await sqliteService.getCampaigns(tenantid);
-      if (sqlCampaigns && sqlCampaigns.length > 0) {
-        return sqlCampaigns as unknown as InventoryCampaign[];
-      }
+      let list = (sqlCampaigns || []) as unknown as InventoryCampaign[];
       
-      // Fallback para cache legado se o SQL estiver vazio (Migração Silenciosa)
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached) as InventoryCampaign[];
-          console.log(`>>> [Migração] Migrando ${parsed.length} campanhas do LS para SQLite...`);
-          for (const c of parsed) {
-            await sqliteService.saveCampaign(c);
-          }
-          // Uma vez migrado, podemos opcionalmente limpar o LS, mas manteremos por segurança por enquanto
-          return parsed;
-        } catch (e) {
-          console.error("Falha ao parsear cache de campanhas:", e);
-        }
+      console.log(`>>> [Governance] fetchCampaigns (Local): Encontradas ${list.length} no banco bruto para tenant ${tenantid}`);
+
+      // Normalização Crítica para SQLite
+      list = list.map(c => ({
+        ...c,
+        _tenantid: c.tenant_id || c._tenantid || tenantid,
+        _unitid: c.unit_id || c._unitid,
+        tenant_id: c.tenant_id || c._tenantid || tenantid,
+        unit_id: c.unit_id || c._unitid,
+        tenantid: c.tenant_id || c._tenantid || tenantid,
+      }));
+
+      if (unitid) {
+        const cleanUnitId = unitid.trim().toUpperCase();
+        const beforeFilterCount = list.length;
+        list = list.filter(c => {
+          const cUnit = (c.unit_id || c._unitid || '').trim().toUpperCase();
+          return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
+        });
+        console.log(`>>> [Governance] Filtro de Unidade: ${cleanUnitId}. Antes: ${beforeFilterCount}, Depois: ${list.length}`);
       }
-      return [];
+      return list;
     } catch (err) {
       console.error(">>> [SQLite] Erro ao buscar campanhas:", err);
-      // Fallback desesperado para localStorage
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      return cached ? JSON.parse(cached) : [];
+      return [];
     }
   }
 
-  if (!supabase) {
-    console.warn('[Supabase] fetchCampaigns abortado: Cliente Supabase não inicializado.');
-    return [];
-  }
+  if (!supabase) return [];
   
   const cleanTenantId = (tenantid || '').trim();
-  
-  // Debug de Autenticação
-  const { data: { user: sbUser } } = await supabase.auth.getUser();
-  console.log(`>>> [Supabase] fetchCampaigns INICIADO. Tenant: "${cleanTenantId}", Auth: ${sbUser?.email || 'ANÔNIMO'}`);
-  
-  if (!cleanTenantId) {
-    console.warn('[Supabase] fetchCampaigns cancelado: tenantId vazio.');
-    return [];
-  }
+  if (!cleanTenantId) return [];
 
-  // Tenta buscar usando _tenantid primeiro na nova tabela campaigns_v2
-  console.log(`>>> [Supabase] Tentando campaigns_v2 (eq _tenantid: ${cleanTenantId})...`);
-  let { data, error } = await supabase
-    .from('campaigns_v2')
+  let query = supabase
+    .from('campaigns')
     .select('*')
-    .eq('_tenantid', cleanTenantId)
-    .order('start_date', { ascending: false });
+    .eq('tenant_id', cleanTenantId);
   
-  if (error) {
-    console.warn(`>>> [Supabase] Falha na campaigns_v2 (Code: ${error.code}): ${error.message}`);
-  } else {
-    console.log(`>>> [Supabase] Sucesso na campaigns_v2: ${data?.length || 0} registros encontrados.`);
+  if (unitid) {
+    // No Supabase, fazemos uma lógica similar: unidade match OU unidade nula (global)
+    // Infelizmente o .eq não suporta OR diretamente de forma simples se quisermos um filtro limpo
+    // Mas podemos usar .or(`unit_id.eq.${unitid},unit_id.is.null`)
+    query = query.or(`unit_id.eq.${unitid},unit_id.is.null`);
   }
 
-  // Fallback para a tabela antiga se a nova ainda não estiver pronta ou se houver erro de cache
-  if ((error && (error.code === 'PGRST204' || error.code === '42P01')) || (!data || data.length === 0)) {
-    console.warn('[Supabase] Tentando fallback para inventory_campaigns...');
-    const oldTable = await supabase
-      .from('inventory_campaigns')
-      .select('*')
-      .eq('_tenantid', cleanTenantId)
-      .order('start_date', { ascending: false });
-    
-    if (!oldTable.error && oldTable.data && oldTable.data.length > 0) {
-      console.log(`>>> [Supabase] Sucesso na inventory_campaigns: ${oldTable.data.length} registros.`);
-      data = oldTable.data;
-      error = null;
-    }
-  }
-  
-  // Se ainda falhar ou estiver vazio, tenta tenant_id (legado/alternativo)
-  if ((error || !data || data.length === 0)) {
-    console.warn('[Supabase] Tentando fallback com tenant_id...');
-    const fallback = await supabase
-      .from('inventory_campaigns')
-      .select('*')
-      .eq('tenant_id', cleanTenantId)
-      .order('start_date', { ascending: false });
-    
-    if (!fallback.error && fallback.data && fallback.data.length > 0) {
-      data = fallback.data;
-      error = null;
-    }
-  }
-
-  // Se ainda falhar ou estiver vazio e for o usuário master, tenta uma busca sem filtro de tenant como último recurso
-  const isMaster = cleanTenantId === 'CICOPAL' || cleanTenantId.includes('semorr') || (sbUser?.email?.toLowerCase() === 'semorr@gmail.com');
-  if (isMaster && (!data || data.length === 0)) {
-    console.warn('[Supabase] Emergency Fallback: Buscando TODAS as campanhas para o Master...');
-    const emergency = await supabase
-      .from('campaigns_v2')
-      .select('*')
-      .order('start_date', { ascending: false })
-      .limit(20);
-    
-    if (!emergency.error && emergency.data && emergency.data.length > 0) {
-      console.log(`>>> [Supabase] Sucesso no Emergency Fallback (v2): ${emergency.data.length} registros.`);
-      data = emergency.data;
-      error = null;
-    } else {
-      const emergencyOld = await supabase
-        .from('inventory_campaigns')
-        .select('*')
-        .order('start_date', { ascending: false })
-        .limit(20);
-      if (!emergencyOld.error && emergencyOld.data) {
-        console.log(`>>> [Supabase] Sucesso no Emergency Fallback (Old): ${emergencyOld.data.length} registros.`);
-        data = emergencyOld.data;
-        error = null;
-      }
-    }
-  }
+  const { data, error } = await query.order('start_date', { ascending: false });
 
   if (error) {
-    console.error('>>> [Supabase] Erro final ao buscar campanhas:', error);
+    console.error('>>> [Supabase] Erro ao buscar campanhas na tabela campaigns:', error);
     return [];
   }
 
-  const result = (data || []).map((c: Record<string, unknown>) => ({
+  return (data || []).map((c: any) => ({
     ...c,
-    _unitid: (c._unitid || c.unit_id || c.unitid) as string,
-    _tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string,
-    unit_id: (c._unitid || c.unit_id || c.unitid) as string,
-    tenantid: (c._tenantid || c.tenant_id || c.tenantid) as string
+    _unitid: c.unit_id || c._unitid,
+    _tenantid: c.tenant_id || c._tenantid,
+    unit_id: c.unit_id || c._unitid,
+    tenant_id: c.tenant_id || c._tenantid,
+    tenantid: c.tenant_id || c._tenantid
   })) as InventoryCampaign[];
-
-  console.log(`>>> [Supabase] Retornando ${result.length} campanhas processadas.`);
-  return result;
 };
 
 /**
- * Cria uma nova campanha com resiliência a nomes de colunas
+ * Cria uma nova campanha na tabela oficial única
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
+  const tenantVal = campaign._tenantid || campaign.tenant_id || campaign.tenantid || '';
+  const unitVal = campaign._unitid || campaign.unit_id || '';
+
   if (isInternal) {
-    console.log('>>> [SQLite] Criando campanha no banco físico...');
     const newCampaign = {
       ...campaign,
-      id: campaign.id || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: campaign.id || generateUUID(),
+      tenant_id: tenantVal,
+      unit_id: String(unitVal || '').trim(),
+      _tenantid: tenantVal,
+      _unitid: String(unitVal || '').trim(),
       created_at: new Date().toISOString()
     } as InventoryCampaign;
 
     try {
-      await sqliteService.saveCampaign(newCampaign);
-      
-      // Mantém o LS atualizado para redundância
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      const campaigns = cached ? JSON.parse(cached) : [];
-      localStorage.setItem('inventory_campaigns_cache', JSON.stringify([newCampaign, ...campaigns]));
-      
-      return newCampaign;
+      const saved = await sqliteService.saveCampaign(newCampaign);
+      await sqliteService.persist(); // Garantia de Soberania SQL
+      return saved;
     } catch (err) {
-      console.error(">>> [SQLite] Erro ao salvar campanha:", err);
-      // Fallback para LS
-      const cached = localStorage.getItem('inventory_campaigns_cache');
-      const campaigns = cached ? JSON.parse(cached) : [];
-      localStorage.setItem('inventory_campaigns_cache', JSON.stringify([newCampaign, ...campaigns]));
-      return newCampaign;
+      console.error(">>> [SQLite] Erro fatal ao salvar campanha no banco local:", err);
+      return null;
     }
   }
 
   if (!supabase) return null;
   
-  const tenantVal = campaign._tenantid || campaign.tenantid;
-  const unitVal = campaign._unitid || campaign.unit_id;
-
-  const payload: Record<string, unknown> = {
+  const payload = {
+    id: campaign.id || generateUUID(),
     name: campaign.name,
     description: campaign.description,
-    status: campaign.status,
-    _tenantid: tenantVal,
-    _unitid: unitVal,
+    status: campaign.status || 'ACTIVE',
+    tenant_id: tenantVal,
+    unit_id: unitVal,
     created_by: campaign.created_by,
     start_date: campaign.start_date || new Date().toISOString()
   };
 
-  console.log('[Supabase] Tentando criar campanha com payload:', payload);
-
-  // Tenta via RPC v5 (JSONB) na nova tabela campaigns_v2
-  const rpcResult = await supabase.rpc('create_campaign_v5', {
-    p_payload: payload
-  });
-
-  let data = null;
-  let error = null;
-
-  if (!rpcResult.error) {
-    data = rpcResult.data;
-  } else {
-    console.warn('[Supabase] Falha via RPC v5, tentando inserção direta na campaigns_v2...');
-    const directInsert = await supabase
-      .from('campaigns_v2')
-      .insert([payload])
-      .select()
-      .single();
-    
-    if (!directInsert.error) {
-      data = directInsert.data;
-    } else {
-      error = directInsert.error;
-    }
-  }
+  const { data, error } = await supabase
+    .from('campaigns')
+    .insert([payload])
+    .select()
+    .single();
 
   if (error) {
-    const err = error as { code: string, message: string };
-    if (err.code === 'PGRST204') {
-      console.error('[Supabase] Erro de Cache de Schema (PGRST204). A coluna _tenantid não foi encontrada no cache da API.');
-    }
-    console.error('Erro ao criar campanha:', err);
-    throw err;
+    console.error('>>> [Supabase] Erro definitivo ao criar campanha:', error);
+    throw error;
   }
 
-  if (data) {
-    return {
-      ...data,
-      _unitid: (data._unitid || data.unit_id) as string,
-      _tenantid: (data._tenantid || data.tenant_id || data.tenantid) as string,
-      unit_id: (data._unitid || data.unit_id) as string,
-      tenantid: (data._tenantid || data.tenant_id || data.tenantid) as string
-    } as InventoryCampaign;
-  }
-  
-  return null;
+  return {
+    ...data,
+    _unitid: data.unit_id,
+    _tenantid: data.tenant_id,
+    unit_id: data.unit_id,
+    tenantid: data.tenant_id
+  } as InventoryCampaign;
 };
 
 /**
@@ -1900,58 +1786,32 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   if (isInternal) {
     console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
     try {
-      // Resiliência Total: Como não temos um "getCampaignById" simples, 
-      // usamos o saveCampaign do SQLite que faz INSERT OR REPLACE.
-      // Precisamos primeiro garantir que temos o objeto completo ou o SQLite vai apagar campos.
+      const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]) as any[];
       
-      // Tentativa 1: Buscar do SQLite
-      let currentCampaign: InventoryCampaign | null = null;
-      
-      // Recupera o tenant do objeto se possível (via cache/LS), ou usa o padrão CICOPAL
-      const cachedRef = localStorage.getItem('inventory_campaigns_cache');
-      if (cachedRef) {
-        try {
-          const campaigns = JSON.parse(cachedRef) as InventoryCampaign[];
-          currentCampaign = campaigns.find(c => c.id === campaignId) || null;
-        } catch (e) { console.warn(e); }
-      }
+      if (allRows && allRows.length > 0) {
+        // O sqliteService.getCampaigns já aplica normalizeCampaign, 
+        // mas aqui estamos pegando o row diretamente, então vamos normalizar manualmente ou via saveCampaign
+        const row = allRows[0];
+        const currentCampaign: InventoryCampaign = {
+          ...row,
+          tenant_id: row.tenant_id || row._tenantid,
+          unit_id: row.unit_id || row._unitid,
+          _tenantid: row.tenant_id || row._tenantid,
+          _unitid: row.unit_id || row._unitid
+        };
 
-      const tenantId = currentCampaign?.tenantid || currentCampaign?._tenantid || localStorage.getItem('app_last_tenant') || 'CICOPAL';
-      const allCampaigns = await sqliteService.getCampaigns(tenantId);
-      const sqlCampaign = allCampaigns.find(c => c.id === campaignId) || null;
-      
-      if (sqlCampaign) currentCampaign = sqlCampaign;
-
-      if (currentCampaign) {
         const updated: InventoryCampaign = { 
           ...currentCampaign, 
           status, 
-          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : currentCampaign.end_date 
+          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || null)
         };
         
-        // Persiste no SQLite Físico
+        // saveCampaign já faz persist() se necessário, mas chamamos explicitamente para soberania
         await sqliteService.saveCampaign(updated);
-        
-        // Sincroniza Cache
-        const cached = localStorage.getItem('inventory_campaigns_cache');
-        if (cached) {
-          try {
-            const campaigns = JSON.parse(cached) as InventoryCampaign[];
-            const updatedList = campaigns.map(c => c.id === campaignId ? updated : c);
-            localStorage.setItem('inventory_campaigns_cache', JSON.stringify(updatedList));
-          } catch(e) { console.warn(e); }
-        } else {
-          localStorage.setItem('inventory_campaigns_cache', JSON.stringify([updated]));
-        }
-        
-        console.log('>>> [SQLite] Status atualizado com sucesso.');
+        await sqliteService.persist();
         return true;
-      } else {
-        console.warn('>>> [SQLite] Campanha não encontrada para atualização de status:', campaignId);
-        // Fallback: Se não achamos o objeto completo, criamos um esqueleto para não travar a UI
-        // mas o ideal é que ela já exista no banco.
-        return false;
       }
+      return false;
     } catch (err) {
       console.error(">>> [SQLite] Erro ao atualizar status:", err);
       return false;
@@ -1975,7 +1835,7 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
     }
 
     const { error } = await supabase
-      .from('inventory_campaigns')
+      .from('campaigns')
       .update(updateData)
       .eq('id', campaignId);
     
@@ -2009,17 +1869,10 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
       console.log('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
       try {
         // 1. Localiza a campanha no SQLite
-        const cached = localStorage.getItem('inventory_campaigns_cache');
-        let currentCampaign: InventoryCampaign | null = null;
-        if (cached) {
-          const campaigns = JSON.parse(cached) as InventoryCampaign[];
-          currentCampaign = campaigns.find(c => c.id === campaignId) || null;
-        }
-
-        const tenantId = currentCampaign?._tenantid || currentCampaign?.tenantid || 'CICOPAL';
+        // Buscamos o tenantId preferencial do localStorage ou um fallback
+        const tenantId = localStorage.getItem('app_last_tenant') || 'CICOPAL';
         const allCampaigns = await sqliteService.getCampaigns(tenantId);
-        const sqlCampaign = allCampaigns.find(c => c.id === campaignId) || null;
-        if (sqlCampaign) currentCampaign = sqlCampaign;
+        const currentCampaign = allCampaigns.find(c => c.id === campaignId) || null;
 
         if (!currentCampaign) {
           console.error('>>> [SQLite] Campanha não encontrada para snapshot:', campaignId);
@@ -2029,7 +1882,11 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         // 2. Busca ativos vinculados da unidade
         const allAssets = await sqliteService.getAllAssets();
         const unitId = currentCampaign._unitid || currentCampaign.unit_id;
-        const assets = allAssets.filter(a => (a._unitid || a.UNIDADE_OPERACIONAL) === unitId);
+        const assets = allAssets.filter(a => {
+            const aUnit = (a._unitid || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase();
+            const cUnit = (unitId || '').trim().toUpperCase();
+            return cUnit === '' || aUnit === cUnit;
+        });
 
         if (assets.length === 0) {
           console.warn('>>> [SQLite] Nenhum ativo encontrado para o snapshot.');
@@ -2073,7 +1930,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
     try {
         // 1. Busca os detalhes da campanha
         const { data: campaign } = await supabase
-            .from('inventory_campaigns')
+            .from('campaigns')
             .select('*')
             .eq('id', campaignId)
             .single();
@@ -2087,7 +1944,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             .from('assets')
             .select('*')
             .eq('_tenantid', tenantId)
-            .eq('_unitid', campaign._unitid || campaign.unit_id);
+            .eq('_unitid', campaign.unit_id || campaign._unitid);
 
         if (assetError) throw assetError;
 
@@ -2108,7 +1965,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         // 4. Salva o Snapshot em JSONB (Alta eficiência de armazenamento v24.50)
         // Isso evita criar 12k linhas extras no banco, preservando o limite free de 500MB
         const { error: snapshotError } = await supabase
-            .from('inventory_campaign_snapshots')
+            .from('campaign_snapshots')
             .insert([{
                 campaign_id: campaignId,
                 assets_data: assets as Asset[],
@@ -2122,7 +1979,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
 
         // 5. Atualiza a campanha com o status do snapshot
         await supabase
-            .from('inventory_campaigns')
+            .from('campaigns')
             .update({ 
                 closure_details: { 
                     ...(campaign.closure_details || {}), 
@@ -2173,7 +2030,7 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
     
     try {
         const { data, error } = await supabase
-            .from('inventory_campaign_snapshots')
+            .from('campaign_snapshots')
             .select('*')
             .eq('campaign_id', campaignId)
             .maybeSingle();

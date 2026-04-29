@@ -233,19 +233,28 @@ const Scanner: React.FC<ScannerProps> = ({
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
-      const onScanSuccess = (decodedText: string) => {
+      const onScanSuccess = async (decodedText: string) => {
         if (isMounted.current) {
           resetInactivityTimeout();
-          playBeep();
-          setIsFlashing(true);
-          setShowSuccess(true);
-          setTimeout(() => {
-            if (isMounted.current) {
-              setIsFlashing(false);
-              setTimeout(() => setShowSuccess(false), 1000);
-            }
-          }, 150);
-          onScan(decodedText);
+          
+          // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
+          try {
+            await onScan(decodedText);
+            
+            // FEEDBACK CONFIRMADO PELO BANCO
+            playBeep();
+            setIsFlashing(true);
+            setShowSuccess(true);
+            setTimeout(() => {
+              if (isMounted.current) {
+                setIsFlashing(false);
+                setTimeout(() => setShowSuccess(false), 1000);
+              }
+            }, 150);
+          } catch (err) {
+            console.error(">>> [SCAN] Falha na persistência pós-scan:", err);
+            // Aqui poderíamos ter um feedback de erro visual se necessário
+          }
         }
       };
 
