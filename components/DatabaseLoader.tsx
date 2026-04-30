@@ -223,6 +223,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             
             if (type === 'STATUS') {
               addLog(msg);
+            } else if (type === 'LOG_REJECTION') {
+              const cols = data.columns || [];
+              if (cols.length > 0) {
+                const logMsg = `MAPEAMENTO: ${cols.length} colunas ignoradas (ex: ${cols.slice(0, 3).join(', ')}...)`;
+                addLog(logMsg);
+                console.warn("[Loader Audit] Colunas Ignoradas:", cols);
+              }
             } else if (type === 'PROGRESS') {
               setImportProgress({ current, total });
               addLog(`Gravando no SQLite Local: ${current} / ${total}`);

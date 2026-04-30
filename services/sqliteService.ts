@@ -4,52 +4,66 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { DatabaseStatus, Asset, InventoryCampaign } from '../types';
 import { SCHEMA_PRIORITY, findBestColumn } from '../utils/schema';
+import { DB_ASSET_COLUMNS } from '../constants/schema';
 
 const FULL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
     ETIQUETA TEXT,
-    DESCRICAODOBEM TEXT,
+    REGISTRO TEXT,
+    DESCRICAODOATIVO TEXT,
+    VLRAQUISIC REAL,
+    DATAAQUISIC TEXT,
+    CENTRODECUSTO TEXT,
+    CONTACONTABIL TEXT,
+    TAG_INVENTARIO TEXT,
+    ESTADO_CONSERVACAO TEXT,
     GRUPO_EMPRESARIAL TEXT,
     UNIDADE_OPERACIONAL TEXT,
-    CC_CUSTO TEXT,
-    CONTA_CONTABIL TEXT,
-    STATUS TEXT,
-    AUDITOR_NOME TEXT,
-    AUDITOR_STATUS_CONFERENCIA TEXT,
-    DATA_HORA_CONFERENCIA TEXT,
-    LATITUDE TEXT,
-    LONGITUDE TEXT,
-    OBSERVACAO TEXT,
-    TAG_INVENTARIO TEXT,
-    _photoUrl TEXT,
-    _is_unitized INTEGER DEFAULT 0,
-    _parent_id TEXT,
-    _localMaster TEXT,
-    _unitid TEXT,
-    _unidade TEXT,
-    _tenantid TEXT,
-    _campaignId TEXT,
-    _is_deleted INTEGER DEFAULT 0,
-    _lastUpdated TEXT,
-    _conferido INTEGER DEFAULT 0,
-    _is_synced INTEGER DEFAULT 0,
-    DATAAQUISIC TEXT,
-    VLRAQUISIC REAL,
-    NOTAFISCAL TEXT,
-    NOMEFORNECEDOR TEXT,
-    CNPJ TEXT,
+    UNIDADE TEXT,
+    QT TEXT,
     SERIAL TEXT,
+    CNPJ TEXT,
+    NOMEFORNECEDOR TEXT,
+    NOTAFISCAL TEXT,
     ENDERECO TEXT,
-    REGISTRO TEXT,
     SUBREG TEXT,
     DATABAIXA TEXT,
     PRIMARYKEY TEXT,
+    _tenantid TEXT,
+    _unitid TEXT,
+    _unidade TEXT,
+    _conferido INTEGER DEFAULT 0,
+    _localMaster TEXT,
+    _lastUpdated TEXT,
+    _dataLeitura TEXT,
+    _auditor TEXT,
+    _photoUrl TEXT,
+    _lat REAL,
+    _lng REAL,
+    _campaignId TEXT,
+    _version INTEGER DEFAULT 1,
+    _is_deleted INTEGER DEFAULT 0,
+    _plaquetado INTEGER DEFAULT 0,
+    _plaquetaMaster TEXT,
+    _descricaoMaster TEXT,
+    _aprovado INTEGER DEFAULT 0,
+    _dataAprovacao TEXT,
+    _aprovador TEXT,
+    _assinatura TEXT,
+    _isNew INTEGER DEFAULT 0,
+    _is_unitized INTEGER DEFAULT 0,
+    _is_divergent_baixa INTEGER DEFAULT 0,
+    _parent_id TEXT,
+    _is_synced INTEGER DEFAULT 0,
     Sn1_recno INTEGER,
-    Sn3_recno INTEGER
+    Sn3_recno INTEGER,
+    DE_PARA TEXT,
+    AUDITOR_STATUS_CONFERENCIA TEXT,
+    _origemTransacao TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets (ETIQUETA);
-CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (STATUS);
+CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (TAG_INVENTARIO);
 CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets (ENDERECO);
 
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -230,14 +244,46 @@ class SqliteService {
       const res = this.db.exec(`PRAGMA table_info(${table})`);
       if (res && res.length > 0) {
         const columns = res[0].values.map(v => v[1] as string);
+        
         if (table === 'campaigns') {
           if (!columns.includes('tenant_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN tenant_id TEXT");
           if (!columns.includes('unit_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN unit_id TEXT");
+          if (!columns.includes('_tenantid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
+          if (!columns.includes('_unitid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
         }
+        
         if (table === 'assets') {
-          if (!columns.includes('_campaignId')) this.db.run("ALTER TABLE assets ADD COLUMN _campaignId TEXT");
-          if (!columns.includes('_tenantid')) this.db.run("ALTER TABLE assets ADD COLUMN _tenantid TEXT");
-          if (!columns.includes('_unitid')) this.db.run("ALTER TABLE assets ADD COLUMN _unitid TEXT");
+          const required = [
+            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'CONTACONTABIL', 'QT',
+            '_campaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
+            '_conferido', '_lastUpdated', '_is_synced', '_parent_id',
+            '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
+            '_is_unitized', '_is_divergent_baixa', '_isNew', 'DE_PARA', 
+            'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
+          ];
+          
+          for (const col of required) {
+            if (!columns.includes(col)) {
+              const type = col.startsWith('_is') || col === '_version' || col === '_conferido' ? 'INTEGER DEFAULT 0' : 'TEXT';
+              this.db.run(`ALTER TABLE assets ADD COLUMN ${col} ${type}`);
+              
+              // Migração de Legado (Se existirem colunas antigas)
+              if (col === 'DESCRICAODOATIVO' && columns.includes('DESCRICAODOBEM')) {
+                this.db.run("UPDATE assets SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL");
+              }
+              if (col === 'CENTRODECUSTO' && columns.includes('CC_CUSTO')) {
+                this.db.run("UPDATE assets SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL");
+              }
+              if (col === 'CONTACONTABIL' && columns.includes('CONTA_CONTABIL')) {
+                this.db.run("UPDATE assets SET CONTACONTABIL = CONTA_CONTABIL WHERE CONTACONTABIL IS NULL");
+              }
+            }
+          }
+          
+          // Garantir valores padrão para colunas vitais
+          if (columns.includes('_version')) {
+             this.db.run("UPDATE assets SET _version = 1 WHERE _version IS NULL");
+          }
         }
       }
     }
@@ -393,15 +439,15 @@ class SqliteService {
     }
   }
 
-  async query(sql: string, params: any[] = []): Promise<any[]> {
+  async query(sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, string | number | boolean | null>[]> {
     if (!this.db) await this.init();
     if (!this.db) return [];
     try {
       const stmt = this.db.prepare(sql);
-      stmt.bind(params);
+      stmt.bind(params as (string | number | boolean | null)[]);
       const rows = [];
       while (stmt.step()) {
-        rows.push(stmt.getAsObject());
+        rows.push(stmt.getAsObject() as Record<string, string | number | boolean | null>);
       }
       stmt.free();
       return rows;
@@ -411,11 +457,11 @@ class SqliteService {
     }
   }
 
-  async execute(sql: string, params: any[] = []) {
+  async execute(sql: string, params: (string | number | boolean | null)[] = []) {
     if (!this.db) await this.init();
     if (!this.db) return;
     try {
-      this.db.run(sql, params);
+      this.db.run(sql, params as (string | number | boolean | null)[]);
       await this.saveDatabase();
     } catch (err) {
       console.error("Execute failed:", sql, err);
@@ -426,7 +472,7 @@ class SqliteService {
   // --- Ativos ---
   async getAssets(tenantId: string, unitId?: string | null): Promise<Asset[]> {
     let sql = "SELECT * FROM assets WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";
-    const params = [tenantId, tenantId];
+    const params: (string | number | boolean | null)[] = [tenantId, tenantId];
     if (unitId) {
       sql += " AND (_unitid = ? OR UNIDADE_OPERACIONAL = ?)";
       params.push(unitId, unitId);
@@ -435,9 +481,10 @@ class SqliteService {
   }
 
   async saveAsset(asset: Asset) {
-    const cols = Object.keys(asset).join(', ');
-    const placeholders = Object.keys(asset).map(() => '?').join(', ');
-    const values = Object.values(asset);
+    const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
+    const cols = validKeys.join(', ');
+    const placeholders = validKeys.map(() => '?').join(', ');
+    const values = validKeys.map(k => asset[k as keyof Asset]);
     await this.execute(`INSERT OR REPLACE INTO assets (${cols}) VALUES (${placeholders})`, values);
   }
 
@@ -446,9 +493,10 @@ class SqliteService {
     try {
       this.db.run("BEGIN TRANSACTION");
       for (const asset of assets) {
-        const cols = Object.keys(asset).join(', ');
-        const placeholders = Object.keys(asset).map(() => '?').join(', ');
-        const values = Object.values(asset);
+        const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
+        const cols = validKeys.join(', ');
+        const placeholders = validKeys.map(() => '?').join(', ');
+        const values = validKeys.map(k => asset[k as keyof Asset]);
         this.db.run(`INSERT OR REPLACE INTO assets (${cols}) VALUES (${placeholders})`, values);
       }
       this.db.run("COMMIT");
@@ -464,25 +512,25 @@ class SqliteService {
   }
 
   // --- Campanhas ---
-  private normalizeCampaign(row: any): InventoryCampaign {
-    if (!row) return row;
+  private normalizeCampaign(row: Record<string, string | number | boolean | null>): InventoryCampaign {
+    if (!row) return row as unknown as InventoryCampaign;
     return {
       ...row,
       // Normalização de Unidade
-      unit_id: (row.unit_id || row._unitid || '').trim(),
-      _unitid: (row.unit_id || row._unitid || '').trim(),
+      unit_id: (String(row.unit_id || row._unitid || '')).trim(),
+      _unitid: (String(row.unit_id || row._unitid || '')).trim(),
       // Normalização de Tenant
-      tenant_id: (row.tenant_id || row._tenantid || '').trim(),
-      _tenantid: (row.tenant_id || row._tenantid || '').trim(),
-      tenantId: (row.tenant_id || row._tenantid || '').trim(),
+      tenant_id: (String(row.tenant_id || row._tenantid || '')).trim(),
+      _tenantid: (String(row.tenant_id || row._tenantid || '')).trim(),
+      tenantId: (String(row.tenant_id || row._tenantid || '')).trim(),
       // Garantia de Status
-      status: row.status || 'CREATED'
-    } as InventoryCampaign;
+      status: (row.status as string) || 'CREATED'
+    } as unknown as InventoryCampaign;
   }
 
   async getCampaigns(tenantId: string): Promise<InventoryCampaign[]> {
     console.log(`>>> [Governance] SQL Query: SELECT * FROM campaigns WHERE tenant_id = '${tenantId}'`);
-    const rows = await this.query("SELECT * FROM campaigns WHERE tenant_id = ? OR _tenantid = ?", [tenantId, tenantId]) as any[];
+    const rows = await this.query("SELECT * FROM campaigns WHERE tenant_id = ? OR _tenantid = ?", [tenantId, tenantId]);
     const result = (rows || []).map(row => this.normalizeCampaign(row));
     if (result.length > 0) {
       console.table(result.map(c => ({ id: c.id, name: c.name, tenant: c.tenant_id, unit: c.unit_id })));
@@ -526,13 +574,13 @@ class SqliteService {
   }
 
   // --- Configurações ---
-  async getUnitConfigs(tenantId: string): Promise<any[]> {
+  async getUnitConfigs(tenantId: string): Promise<Record<string, string | number | boolean | null>[]> {
     return await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tenantId]);
   }
 
   async getAssetCount(): Promise<number> {
     const res = await this.query("SELECT COUNT(*) as count FROM assets WHERE _is_deleted = 0");
-    return res[0]?.count || 0;
+    return (res[0]?.count as number) || 0;
   }
 
   async getOperationalUnits(): Promise<string[]> {
@@ -540,7 +588,7 @@ class SqliteService {
     return res.map(row => row.UNIDADE_OPERACIONAL as string);
   }
 
-  async checkTableSchema(tableName: string): Promise<any[]> {
+  async checkTableSchema(tableName: string): Promise<Record<string, string | number | boolean | null>[]> {
     return await this.query(`PRAGMA table_info(${tableName})`);
   }
 
@@ -552,8 +600,8 @@ class SqliteService {
     return await this.query("SELECT * FROM assets WHERE _is_deleted = 0") as unknown as Asset[];
   }
 
-  async saveUnitConfigSql(config: any) {
-    const tenantId = config._tenantid || 'CICOPAL';
+  async saveUnitConfigSql(config: Record<string, unknown>) {
+    const tenantId = (config._tenantid as string) || 'CICOPAL';
     await this.execute("INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)", 
       [tenantId, tenantId, JSON.stringify(config)]);
   }
@@ -643,12 +691,12 @@ class SqliteService {
     URL.revokeObjectURL(url);
   }
 
-  async executeBatch(queries: {sql: string, params: any[]}[]) {
+  async executeBatch(queries: {sql: string, params: (string | number | boolean | null)[]}[]) {
     if (!this.db) return;
     try {
       this.db.run("BEGIN TRANSACTION");
       for (const q of queries) {
-        this.db.run(q.sql, q.params);
+        this.db.run(q.sql, q.params as (string | number | boolean | null)[]);
       }
       this.db.run("COMMIT");
       await this.saveDatabase();
@@ -658,18 +706,18 @@ class SqliteService {
     }
   }
 
-  async getInventoryConfig(tenantId?: string): Promise<any> {
+  async getInventoryConfig(tenantId?: string): Promise<InventoryState | null> {
     const tid = tenantId || localStorage.getItem('app_last_tenant') || 'CICOPAL';
     const res = await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tid]);
     if (res.length > 0 && res[0].data) {
       try {
-        return JSON.parse(res[0].data);
+        return JSON.parse(res[0].data as string);
       } catch { return null; }
     }
     return null;
   }
 
-  async saveInventoryConfig(config: any) {
+  async saveInventoryConfig(config: InventoryState) {
     await this.saveUnitConfigSql(config);
   }
 

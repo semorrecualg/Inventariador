@@ -2,7 +2,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
-import { deduplicateRedundantString } from '../utils/formatUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
 import { sqliteService } from './sqliteService';
@@ -529,75 +528,94 @@ export const signInWithMagicLink = async (email: string) => {
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[]): Promise<string[]> => {
-  if (!supabase || !assets || assets.length === 0 || !navigator.onLine) return [];
+  if (!supabase || !assets || assets.length === 0 || !navigator.onLine) {
+    if (assets.length > 0) console.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
+    return [];
+  }
 
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
   
-  const CHUNK_SIZE = 200;
+  const CHUNK_SIZE = 100; // Reduzi o tamanho do lote para maior estabilidade em redes 4G
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
 
   for (let i = 0; i < total; i += CHUNK_SIZE) {
     const chunk = assets.slice(i, i + CHUNK_SIZE);
     
-    // Garante que todos os ativos tenham o tenantid antes de subir
+    // Preparação de dados (Sanitização)
     const assetsWithTenant = chunk.map(a => {
       const cleanAsset = { ...a };
-      // Remove URLs de blob locais
       if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
         delete cleanAsset._photoUrl;
       }
       
-      const lat = typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null;
-      const lng = typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null;
-      const conferido = Boolean(cleanAsset._conferido);
-
-      const assetEmpresa = (cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().replace(/_/g, ' ').trim();
       const assetGrupo = (cleanAsset.GRUPO_EMPRESARIAL || cleanAsset._tenantid || '').trim().toUpperCase();
-
       let finalTenantId = '';
       if (tenantid) {
         if (Array.isArray(tenantid)) {
-          const match = tenantid.find(t => t.toUpperCase().replace(/_/g, ' ').trim() === assetGrupo);
+          const match = tenantid.find(t => t.toUpperCase().trim() === assetGrupo);
           finalTenantId = match || tenantid[0] || '';
         } else {
           finalTenantId = tenantid;
         }
       } else {
-        finalTenantId = assetGrupo || assetEmpresa || '';
+        finalTenantId = assetGrupo || '';
       }
 
       return {
         ...cleanAsset,
-        _lat: lat,
-        _lng: lng,
-        _conferido: conferido,
+        _lat: typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null,
+        _lng: typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null,
+        _conferido: Boolean(cleanAsset._conferido),
         _tenantid: finalTenantId,
-        _unitid: (cleanAsset._unitid || assetEmpresa || '').toUpperCase().replace(/_/g, ' ').trim() || null,
+        _unitid: (cleanAsset._unitid || cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().trim() || null,
         _version: cleanAsset._version || 1,
-        _is_deleted: cleanAsset._is_deleted || false,
-        UNIDADE_OPERACIONAL: assetEmpresa,
-        GRUPO_EMPRESARIAL: deduplicateRedundantString(finalTenantId)
+        _is_deleted: cleanAsset._is_deleted || false
       };
     });
 
-    console.log(`>>> [Supabase] Sincronizando lote ${Math.floor(i / CHUNK_SIZE) + 1} (${assetsWithTenant.length} itens)...`);
-    
-    const { error } = await supabase
-      .from('assets')
-      .upsert(assetsWithTenant, { onConflict: 'id' });
+    // SISTEMA DE RETRY EXPONENCIAL (Resiliência Sênior)
+    let retryCount = 0;
+    const MAX_RETRIES = 2;
+    let success = false;
 
-    if (error) {
-      console.error(`>>> [Supabase] Erro no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, error);
-      // Retorna o que já foi sincronizado com sucesso ATÉ AGORA
-      return successfullySyncedIds;
+    while (retryCount <= MAX_RETRIES && !success) {
+      try {
+        const { error } = await supabase
+          .from('assets')
+          .upsert(assetsWithTenant, { onConflict: 'id' });
+
+        if (error) {
+          throw error;
+        }
+
+        success = true;
+        successfullySyncedIds.push(...chunk.map(a => String(a.id)));
+      } catch (err: unknown) {
+        const error = err as { message?: string, code?: string };
+        const isNetworkError = error.message?.includes('Failed to fetch') || error.message?.includes('network') || error.code === 'ERR_NAME_NOT_RESOLVED';
+        
+        if (isNetworkError) {
+          retryCount++;
+          if (retryCount <= MAX_RETRIES) {
+            const delay = Math.pow(2, retryCount) * 1000;
+            console.warn(`>>> [Supabase] Erro de rede no lote ${Math.floor(i / CHUNK_SIZE) + 1}. Tentativa ${retryCount}/${MAX_RETRIES} em ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            console.error(`>>> [Supabase] Falha definitiva por conectividade no lote ${Math.floor(i / CHUNK_SIZE) + 1}. O dado permanece salvo LOCALMENTE.`);
+          }
+        } else {
+          console.error(`>>> [Supabase] Erro de integridade no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, err);
+          break; // Erros de lógica ou schema não devem ter retry
+        }
+      }
     }
-
-    successfullySyncedIds.push(...chunk.map(a => String(a.id)));
+    
+    // Se falhou definitivamente após retries, interrompemos a sincronização da nuvem mas mantemos o local estável
+    if (!success) break;
   }
 
-  console.log('>>> [Supabase] Sincronização de todos os ativos concluída com sucesso.');
   return successfullySyncedIds;
 };
 
@@ -1644,72 +1662,80 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
 export const fetchCampaigns = async (tenantid: string, unitid?: string | null): Promise<InventoryCampaign[]> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
-
-  if (isInternal) {
-    try {
-      const sqlCampaigns = await sqliteService.getCampaigns(tenantid);
-      let list = (sqlCampaigns || []) as unknown as InventoryCampaign[];
-      
-      console.log(`>>> [Governance] fetchCampaigns (Local): Encontradas ${list.length} no banco bruto para tenant ${tenantid}`);
-
-      // Normalização Crítica para SQLite
-      list = list.map(c => ({
-        ...c,
-        _tenantid: c.tenant_id || c._tenantid || tenantid,
-        _unitid: c.unit_id || c._unitid,
-        tenant_id: c.tenant_id || c._tenantid || tenantid,
-        unit_id: c.unit_id || c._unitid,
-        tenantid: c.tenant_id || c._tenantid || tenantid,
-      }));
-
-      if (unitid) {
-        const cleanUnitId = unitid.trim().toUpperCase();
-        const beforeFilterCount = list.length;
-        list = list.filter(c => {
-          const cUnit = (c.unit_id || c._unitid || '').trim().toUpperCase();
-          return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
-        });
-        console.log(`>>> [Governance] Filtro de Unidade: ${cleanUnitId}. Antes: ${beforeFilterCount}, Depois: ${list.length}`);
-      }
-      return list;
-    } catch (err) {
-      console.error(">>> [SQLite] Erro ao buscar campanhas:", err);
-      return [];
-    }
-  }
-
-  if (!supabase) return [];
-  
   const cleanTenantId = (tenantid || '').trim();
-  if (!cleanTenantId) return [];
 
-  let query = supabase
-    .from('campaigns')
-    .select('*')
-    .eq('tenant_id', cleanTenantId);
-  
-  if (unitid) {
-    // No Supabase, fazemos uma lógica similar: unidade match OU unidade nula (global)
-    // Infelizmente o .eq não suporta OR diretamente de forma simples se quisermos um filtro limpo
-    // Mas podemos usar .or(`unit_id.eq.${unitid},unit_id.is.null`)
-    query = query.or(`unit_id.eq.${unitid},unit_id.is.null`);
+  // 1. SEMPRE BUSCA NO SQLITE PRIMEIRO (Soberania Local)
+  let localCampaigns: InventoryCampaign[] = [];
+  try {
+    const sqlCampaigns = await sqliteService.getCampaigns(cleanTenantId);
+    localCampaigns = (sqlCampaigns || []).map(c => ({
+      ...c,
+      _tenantid: c.tenant_id || c._tenantid || cleanTenantId,
+      _unitid: c.unit_id || c._unitid,
+      tenant_id: c.tenant_id || c._tenantid || cleanTenantId,
+      unit_id: c.unit_id || c._unitid,
+      tenantid: c.tenant_id || c._tenantid || cleanTenantId,
+      status: c.status || 'ACTIVE'
+    })) as InventoryCampaign[];
+  } catch (err) {
+    console.error(">>> [Local-First] Erro ao ler SQLite:", err);
   }
 
-  const { data, error } = await query.order('start_date', { ascending: false });
-
-  if (error) {
-    console.error('>>> [Supabase] Erro ao buscar campanhas na tabela campaigns:', error);
-    return [];
+  // Se for apenas interno, filtramos e retornamos
+  if (isInternal) {
+    if (unitid) {
+      const cleanUnitId = unitid.trim().toUpperCase();
+      return localCampaigns.filter(c => {
+        const cUnit = (String(c.unit_id || c._unitid || '')).trim().toUpperCase();
+        return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
+      });
+    }
+    return localCampaigns;
   }
 
-  return (data || []).map((c: any) => ({
-    ...c,
-    _unitid: c.unit_id || c._unitid,
-    _tenantid: c.tenant_id || c._tenantid,
-    unit_id: c.unit_id || c._unitid,
-    tenant_id: c.tenant_id || c._tenantid,
-    tenantid: c.tenant_id || c._tenantid
-  })) as InventoryCampaign[];
+  // 2. TENTA BUSCAR NA NUVEM (Enriquecimento)
+  if (!supabase || !cleanTenantId) return localCampaigns;
+
+  try {
+    let query = supabase
+      .from('campaigns')
+      .select('*')
+      .eq('tenant_id', cleanTenantId);
+    
+    if (unitid) {
+      query = query.or(`unit_id.eq.${unitid},unit_id.is.null`);
+    }
+
+    const { data: cloudData, error } = await query.order('start_date', { ascending: false });
+
+    if (error) {
+      console.warn('>>> [Supabase] Falha ao buscar nuvem (mantendo local):', error);
+      return localCampaigns;
+    }
+
+    // 3. MERGE INTELIGENTE (Prioridade para os dados mais recentes de IDs únicos)
+    const cloudCampaigns = (cloudData || []).map((c: Record<string, unknown>) => ({
+      ...c,
+      _unitid: (c.unit_id || c._unitid) as string,
+      _tenantid: (c.tenant_id || c._tenantid) as string,
+      unit_id: (c.unit_id || c._unitid) as string,
+      tenant_id: (c.tenant_id || c._tenantid) as string,
+      tenantid: (c.tenant_id || c._tenantid) as string
+    })) as InventoryCampaign[];
+
+    // Cria um mapa para evitar duplicatas, priorizando Cloud se houver conflito de ID
+    const campaignMap = new Map<string, InventoryCampaign>();
+    localCampaigns.forEach(c => campaignMap.set(c.id, c));
+    cloudCampaigns.forEach(c => campaignMap.set(c.id, c));
+
+    const merged = Array.from(campaignMap.values());
+    console.log(`>>> [Governance] Merge concluído: ${localCampaigns.length} locais, ${cloudCampaigns.length} nuvem. Total: ${merged.length}`);
+    return merged;
+
+  } catch (err) {
+    console.warn('>>> [Supabase] Erro de rede ao buscar campanhas. Retornando apenas locais.', err);
+    return localCampaigns;
+  }
 };
 
 /**
@@ -1722,58 +1748,59 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   const tenantVal = campaign._tenantid || campaign.tenant_id || campaign.tenantid || '';
   const unitVal = campaign._unitid || campaign.unit_id || '';
 
-  if (isInternal) {
-    const newCampaign = {
-      ...campaign,
-      id: campaign.id || generateUUID(),
-      tenant_id: tenantVal,
-      unit_id: String(unitVal || '').trim(),
-      _tenantid: tenantVal,
-      _unitid: String(unitVal || '').trim(),
-      created_at: new Date().toISOString()
-    } as InventoryCampaign;
+  // 1. DADO LOCAL PRIMEIRO (Soberania SQL)
+  const newCampaign = {
+    ...campaign,
+    id: campaign.id || generateUUID(),
+    tenant_id: tenantVal,
+    unit_id: String(unitVal || '').trim(),
+    _tenantid: tenantVal,
+    _unitid: String(unitVal || '').trim(),
+    created_at: new Date().toISOString(),
+    status: campaign.status || 'ACTIVE'
+  } as InventoryCampaign;
 
+  try {
+    console.log(">>> [Local-First] Persistindo campanha no SQLite antes da nuvem...");
+    await sqliteService.saveCampaign(newCampaign);
+    await sqliteService.persist(); 
+  } catch (err) {
+    console.error(">>> [Local-First] Erro ao salvar localmente. Abortando.", err);
+    return null;
+  }
+
+  // 2. SINCRONIZAÇÃO EM NUVEM (Resiliência Distribuída)
+  if (!isInternal && supabase) {
+    console.log(">>> [Hybrid] Tentando subir campanha para nuvem...");
+    const payload = {
+      id: newCampaign.id,
+      name: newCampaign.name,
+      description: newCampaign.description,
+      status: newCampaign.status,
+      tenant_id: tenantVal,
+      unit_id: unitVal,
+      created_by: campaign.created_by,
+      start_date: newCampaign.start_date || new Date().toISOString()
+    };
+
+    // Usamos try-catch isolado para que erro de rede não mate o fluxo
     try {
-      const saved = await sqliteService.saveCampaign(newCampaign);
-      await sqliteService.persist(); // Garantia de Soberania SQL
-      return saved;
+      const { error } = await supabase
+        .from('campaigns')
+        .insert([payload]);
+      
+      if (error) {
+        console.warn(">>> [Supabase] Aviso ao inserir campanha na nuvem (será sincronizada depois):", error);
+      } else {
+        console.log(">>> [Supabase] Campanha sincronizada com sucesso.");
+      }
     } catch (err) {
-      console.error(">>> [SQLite] Erro fatal ao salvar campanha no banco local:", err);
-      return null;
+      console.warn(">>> [Supabase] Falha de conectividade detectada. O dado permanece seguro no SQLite Local.");
     }
   }
 
-  if (!supabase) return null;
-  
-  const payload = {
-    id: campaign.id || generateUUID(),
-    name: campaign.name,
-    description: campaign.description,
-    status: campaign.status || 'ACTIVE',
-    tenant_id: tenantVal,
-    unit_id: unitVal,
-    created_by: campaign.created_by,
-    start_date: campaign.start_date || new Date().toISOString()
-  };
-
-  const { data, error } = await supabase
-    .from('campaigns')
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error('>>> [Supabase] Erro definitivo ao criar campanha:', error);
-    throw error;
-  }
-
-  return {
-    ...data,
-    _unitid: data.unit_id,
-    _tenantid: data.tenant_id,
-    unit_id: data.unit_id,
-    tenantid: data.tenant_id
-  } as InventoryCampaign;
+  // Retorna o objeto local independente do sucesso da nuvem
+  return newCampaign;
 };
 
 /**
@@ -1786,7 +1813,7 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   if (isInternal) {
     console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
     try {
-      const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]) as any[];
+      const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]);
       
       if (allRows && allRows.length > 0) {
         // O sqliteService.getCampaigns já aplica normalizeCampaign, 

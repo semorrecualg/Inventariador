@@ -102,6 +102,7 @@ interface MainMenuProps {
   isAIAssistantOpen: boolean;
   setIsAIAssistantOpen: (val: boolean) => void;
   onOpenHelp?: () => void;
+  campaignsCount?: number;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -154,7 +155,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   showModal,
   isAIAssistantOpen,
   setIsAIAssistantOpen,
-  onOpenHelp
+  onOpenHelp,
+  campaignsCount
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -381,12 +383,21 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
         {/* AI INSIGHT CARD */}
-        <AIInsightCard 
-          title="Insights de Auditoria"
-          suggestion={`Detectamos ${inventoryInfo.totalDatabase - inventoryInfo.count} itens pendentes na unidade ${selectedUnit || 'atual'}. Deseja iniciar a conferência inteligente?`}
-          onAction={() => onNavigate(AppScreen.INVENTORY)}
-          actionLabel="Iniciar Agora"
-        />
+        {(campaignsCount || 0) > 0 ? (
+          <AIInsightCard 
+            title="Insights de Auditoria"
+            suggestion={`Detectamos ${inventoryInfo.totalDatabase - inventoryInfo.count} itens pendentes na unidade ${selectedUnit || 'atual'}. Deseja iniciar a conferência inteligente?`}
+            onAction={() => onNavigate(AppScreen.INVENTORY)}
+            actionLabel="Iniciar Agora"
+          />
+        ) : (
+          <AIInsightCard 
+            title="Planejamento de Auditoria"
+            suggestion={`Não há campanhas ativas para ${selectedUnit || 'esta unidade'}. É necessário criar um evento de inventário para iniciar.`}
+            onAction={() => onNavigate(AppScreen.CAMPAIGN_MANAGEMENT)}
+            actionLabel="Criar Campanha"
+          />
+        )}
 
         <button
           disabled={!hasData}

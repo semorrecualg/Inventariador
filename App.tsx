@@ -565,6 +565,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
@@ -723,7 +724,9 @@ const App: React.FC = () => {
     // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
     const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
     const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
-    console.log(`>>> [Governance] Campanhas encontradas: ${campaignData?.length || 0} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
+    const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
+    console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
+    setLastQueryLog(resultMsg);
       
       setCampaigns([...(campaignData || [])]);
       setRefreshVersion(prev => prev + 1);
@@ -2615,10 +2618,11 @@ const App: React.FC = () => {
 
           Object.keys(updates).forEach(key => {
             if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-            if (String((updates as Record<string, any>)[key]) !== String((existingAsset as Record<string, any>)[key])) {
+            const k = key as keyof Asset;
+            if (String(updates[k]) !== String(existingAsset[k])) {
               alteredFields.add(key);
               if (originalValues[key] === undefined) {
-                originalValues[key] = (existingAsset as Record<string, any>)[key];
+                originalValues[key] = existingAsset[k] as string | number | boolean | null;
               }
             }
           });
@@ -3100,10 +3104,11 @@ const App: React.FC = () => {
         if (manualUpdates) {
           Object.keys(manualUpdates).forEach(key => {
             if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-            if (String((manualUpdates as Record<string, any>)[key]) !== String((a as Record<string, any>)[key])) {
+            const k = key as keyof Asset;
+            if (String((manualUpdates as Record<string, unknown>)[key]) !== String(a[k])) {
               alteredFields.add(key);
               if (originalValues[key] === undefined) {
-                originalValues[key] = (a as Record<string, any>)[key];
+                originalValues[key] = a[k] as string | number | boolean | null;
               }
             }
           });
@@ -4257,6 +4262,7 @@ const App: React.FC = () => {
               onCheckIntegrity={handleCheckIntegrity}
               isAIAssistantOpen={isAIAssistantOpen}
               setIsAIAssistantOpen={setIsAIAssistantOpen}
+              campaignsCount={campaigns.length}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -4733,11 +4739,18 @@ const App: React.FC = () => {
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}
                 </span>
-                <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter mt-1 truncate max-w-[120px]">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' 
-                    ? 'Disco Android (Nativo)' 
-                    : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
-                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter truncate max-w-[120px]">
+                    {sqliteService.getStorageSource() === 'PHYSICAL' 
+                      ? 'Disco Android (Nativo)' 
+                      : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
+                  </span>
+                  {lastQueryLog && (
+                    <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest border-l border-white/10 pl-2">
+                       {lastQueryLog}
+                    </span>
+                  )}
+                </div>
                 {sqliteService.getNativePath() && (
                   <span className="text-[7px] font-mono text-emerald-400 truncate max-w-[140px] mt-1 opacity-80">
                     {sqliteService.getNativePath()}

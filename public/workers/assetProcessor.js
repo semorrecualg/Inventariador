@@ -80,16 +80,52 @@ var processData = async function(data) {
     };
 
     var insertSqlValue = "INSERT OR REPLACE INTO assets ( " +
-      "id, ETIQUETA, DESCRICAODOBEM, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, " +
-      "CC_CUSTO, CONTA_CONTABIL, STATUS, DATA_HORA_CONFERENCIA, " +
-      "LATITUDE, LONGITUDE, DATAAQUISIC, VLRAQUISIC, NOTAFISCAL, " +
+      "id, ETIQUETA, DESCRICAODOATIVO, GRUPO_EMPRESARIAL, UNIDADE_OPERACIONAL, " +
+      "CENTRODECUSTO, CONTACONTABIL, TAG_INVENTARIO, _dataLeitura, " +
+      "_lat, _lng, DATAAQUISIC, VLRAQUISIC, NOTAFISCAL, " +
       "NOMEFORNECEDOR, CNPJ, SERIAL, ENDERECO, REGISTRO, SUBREG, " +
       "DATABAIXA, PRIMARYKEY, Sn1_recno, Sn3_recno, " +
-      "_unitid, _tenantid, _photoUrl, TAG_INVENTARIO, _lastUpdated, _conferido, _is_synced " +
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      "_unitid, _tenantid, _photoUrl, _lastUpdated, _conferido, _is_synced " +
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     var stmt = db.prepare(insertSqlValue);
     db.run("BEGIN TRANSACTION");
+
+    // 4. Log de Rejeição de Colunas (Audit)
+    var knownFields = [
+      'ETIQUETA', 'PLAQUETA', 'CHAVE', 'CODIGO', 'ID', 'N1_CHAVE',
+      'DESCRICAODOBEM', 'DESCRICAO', 'DESCRICAODOATIVO', 'N1_DESCRIC', 'ITEM',
+      'GRUPO_EMPRESARIAL', 'EMPRESA', 'GRUPO', 'N1_FILIAL',
+      'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL', 'LOCAL', 'LOCALIZACAO', 'N1_LOCAL',
+      'CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC_CUSTO', 'CC', 'CUSTO', 'N3_CCUSTO', 'SETOR',
+      'CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA', 'N1_CONTA', 'PLANO',
+      'DATAAQUSIC', 'DATAAQUISIC', 'DATA_AQ', 'DATA', 'N1_DTACQUIS',
+      'VLRAQUISIC', 'VALOR', 'N1_VALOR', 'PRECO',
+      'NOTAFISCAL', 'NF', 'N1_NFISCAL', 'FACTURA',
+      'NOMEFORNECEDOR', 'FORNECEDOR', 'VENDOR',
+      'CNPJ', 'SERIAL', 'N1_SERIE', 'S_N', 'SERIE',
+      'ENDERECO', 'SALA', 'LUGAR',
+      'REGISTRO', 'N1_CODIGO', 'SUBREG', 'SUBREGISTRO',
+      'DATA_BAIXA', 'N1_DTBAIXA', 'DATABAIXA',
+      'PK', 'PRIMARYKEY', 'RECNO', 'SN1_RECNO', 'SN3_RECNO'
+    ];
+
+    var ignoredColumns = headers.filter(function(h) {
+      return !knownFields.includes(h) && !h.startsWith('_');
+    });
+
+    if (ignoredColumns.length > 0) {
+      console.warn("[Worker Audit] Colunas ignoradas por não pertencerem ao Schema:", ignoredColumns);
+      self.postMessage({ 
+        type: 'STATUS', 
+        msg: "IMPORTAÇÃO SELETIVA: " + ignoredColumns.length + " colunas ignoradas (fora do padrão)." 
+      });
+      // Envia log detalhado para o frontend se ele estiver ouvindo logs específicos
+      self.postMessage({
+        type: 'LOG_REJECTION',
+        columns: ignoredColumns
+      });
+    }
 
     for (var i = 1; i < totalRows; i++) {
         var rawRow = rawRows[i];
@@ -161,10 +197,10 @@ var processData = async function(data) {
             unidade,
             custo,
             conta,
-            normalize(row.STATUS || 'PENDENTE'),
-            null, // DATA_HORA_CONFERENCIA
-            null, // LATITUDE
-            null, // LONGITUDE
+            'PENDENTE', // TAG_INVENTARIO
+            null, // _dataLeitura
+            null, // _lat
+            null, // _lng
             data_aq,
             valor_aq,
             nf,
@@ -178,10 +214,9 @@ var processData = async function(data) {
             normalize(row.PK || row.PRIMARYKEY || row.RECNO || ''),
             Number(row.SN1_RECNO || row.RECNO || 0),
             Number(row.SN3_RECNO || 0),
-            null, // _unitid
-            null, // _tenantid
+            unidade, // _unitid
+            grupo,   // _tenantid
             null, // _photoUrl
-            'PENDENTE', // TAG_INVENTARIO
             new Date().toISOString(), // _lastUpdated
             0, // _conferido (false)
             0  // _is_synced (false)

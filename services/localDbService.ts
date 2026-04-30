@@ -2,20 +2,10 @@
 import { sqliteService } from './sqliteService';
 import { Asset, UnitConfig, AuditLogEntry } from '../types';
 import { SqlValue } from 'sql.js';
+import { DB_ASSET_COLUMNS } from '../constants/schema';
 
 // Colunas válidas para a tabela assets (conforme definido em sqliteService.ts)
-const ASSET_COLUMNS = [
-  'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'VLRAQUISIC', 'DATAAQUISIC',
-  'CENTRODECUSTO', 'CONTACONTABIL', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
-  'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
-  'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'SUBREG', 'DATABAIXA',
-  'PRIMARYKEY', '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
-  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
-  '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
-  '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
-  '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',
-  'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
-];
+const ASSET_COLUMNS = DB_ASSET_COLUMNS;
 
 // Helper para converter objeto em colunas e valores SQL, filtrando chaves inválidas
 const getUpsertSql = (table: string, obj: Record<string, unknown>) => {

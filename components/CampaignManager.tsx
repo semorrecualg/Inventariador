@@ -465,9 +465,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   <BarChart3 size={40} strokeWidth={1} />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-lg font-bold text-white">Nenhuma campanha</p>
-                  <p className="text-sm text-slate-500 max-w-[240px] font-medium">
-                    Inicie um novo evento de inventário para começar a coletar dados.
+                  <p className="text-xl font-black text-white uppercase tracking-tight">Nenhuma campanha</p>
+                  <p className="text-sm text-slate-400 max-w-[280px] font-medium leading-relaxed">
+                    Não há campanhas ativas. Crie um novo evento de inventário abaixo para iniciar a coleta de dados.
                   </p>
                 </div>
               </div>
