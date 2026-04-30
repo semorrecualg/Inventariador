@@ -565,6 +565,40 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
+    const setupKeyboardListeners = async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard');
+        
+        const showListener = await Keyboard.addListener('keyboardWillShow', () => {
+          setIsKeyboardVisible(true);
+        });
+        
+        const hideListener = await Keyboard.addListener('keyboardWillHide', () => {
+          setIsKeyboardVisible(false);
+        });
+        
+        return () => {
+          showListener.remove();
+          hideListener.remove();
+        };
+      } catch {
+        // Provavelmente não estamos em ambiente Capacitor Nativo, ignorar
+        return undefined;
+      }
+    };
+    
+    let cleanup: (() => void) | undefined;
+    setupKeyboardListeners().then(cb => { cleanup = cb; });
+    
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, []);
+
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
   const [integrityFailed, setIntegrityFailed] = useState(false);
@@ -3977,9 +4011,9 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col">
+      <div className="w-full h-full min-h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col safe-area-p">
         {showCompanyHeader && (
-          <div className="bg-white border-b border-slate-100 z-[200]">
+          <div className="bg-white border-b border-slate-100 z-[200] flex-shrink-0">
             <div className="px-5 py-3 flex items-center justify-between">
                <div className="flex flex-col">
                  <div className="flex items-center space-x-2">
@@ -4022,7 +4056,7 @@ const App: React.FC = () => {
           </div>
         )}
         
-        <div className="flex-1 relative overflow-hidden z-[500]">
+        <div className="flex-1 relative overflow-y-auto z-[500] no-scrollbar">
           {integrityFailed && (
         <div className="fixed top-20 left-4 right-4 z-[100] bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-white/20 animate-bounce flex items-center space-x-3">
           <AlertTriangle className="flex-shrink-0" size={24} />
@@ -4662,11 +4696,11 @@ const App: React.FC = () => {
         />
 
         {/* Indicador de Banco de Dados Local (Soberania) */}
-        {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || fileStatus?.status === 'expired') && (
+        {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || fileStatus?.status === 'expired') && !isKeyboardVisible && (
           <motion.div 
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            className="fixed bottom-6 left-6 z-[60] flex flex-col gap-2"
+            className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1.5rem,env(safe-area-inset-left))] z-[60] flex flex-col gap-2"
           >
             <div 
               onClick={handleReconnectFile}
@@ -4704,6 +4738,11 @@ const App: React.FC = () => {
                     ? 'Disco Android (Nativo)' 
                     : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
                 </span>
+                {sqliteService.getNativePath() && (
+                  <span className="text-[7px] font-mono text-emerald-400 truncate max-w-[140px] mt-1 opacity-80">
+                    {sqliteService.getNativePath()}
+                  </span>
+                )}
               </div>
 
               {lastLocalSave && (
@@ -4719,11 +4758,11 @@ const App: React.FC = () => {
         )}
 
         {/* Indicador de Sincronização Offline (Fotos) */}
-        {syncQueueLength > 0 && (
+        {syncQueueLength > 0 && !isKeyboardVisible && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] bg-ink text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
+            className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-[50] bg-ink text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
           >
             <div className="relative">
               <RefreshCw size={16} className="animate-spin text-accent" />

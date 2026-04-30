@@ -72,7 +72,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const success = await sqliteService.init();
       
       if (success) {
-        addLog(`Inicializado via ${sqliteService.getStorageSource()}`);
+        const source = sqliteService.getStorageSource();
+        const nativePath = sqliteService.getNativePath();
+        addLog(`Inicializado via ${source}`);
+        if (nativePath) addLog(`Caminho Real: ${nativePath}`);
         
         // OTIMIZAÇÃO: Busca apenas o count em vez de todos os objetos para o resumo
         const assetCount = await sqliteService.getAssetCount();
@@ -360,7 +363,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   return (
-    <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[300px]">
+    <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[300px] safe-area-p">
       <AnimatePresence mode="wait">
         {status === 'LOADING' && (
           <motion.div 

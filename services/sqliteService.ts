@@ -96,8 +96,12 @@ class SqliteService {
     fileHandleKey: 'sqlite_file_handle',
     statusKey: 'sqlite_db_status',
     schemaMappingsKey: 'sqlite_schema_mappings',
-    nativeFileName: 'auditoria_soberana.db'
+    nativeFileName: 'auditoria_soberana.db',
+    nativePathKey: 'sqlite_native_path'
   };
+
+  private nativePath: string | null = null;
+
 
   constructor() {
     localforage.config({
@@ -267,7 +271,8 @@ class SqliteService {
             await this.ensureRequiredColumns();
             this.storageSource = 'PHYSICAL'; // No nativo, o cache é físico
             this.isInitialized = true;
-            console.log(">>> [NativeBridge] Banco de Dados NATIVO carregado do disco Android.");
+            this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
+            console.log(`>>> [NativeBridge] Banco de Dados NATIVO carregado: ${this.nativePath}`);
             return true;
           }
         } catch (err) {
@@ -351,7 +356,9 @@ class SqliteService {
             data: base64Data,
             directory: Directory.Data
           });
-          console.log(">>> [NativeBridge] SINCRO NATIVA: Sucesso. O dado reside agora no armazenamento interno seguro do Android.");
+          this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
+          console.log(`>>> [NativeBridge] SINCRO NATIVA: Sucesso em ${this.nativePath}`);
+          this.storageSource = 'PHYSICAL';
         } catch (err) {
           console.error(">>> [NativeBridge] FALHA na gravação nativa:", err);
         }
@@ -553,6 +560,8 @@ class SqliteService {
 
   async getDb() { return this.db; }
 
+  getNativePath() { return this.nativePath; }
+
   async persist(force = false) {
     if (force) console.log(">>> [Governance] Persistência FORÇADA solicitada.");
     await this.saveDatabase();
@@ -600,6 +609,13 @@ class SqliteService {
   }
 
   async createPhysicalFile(handle?: FileSystemFileHandle) {
+    if (Capacitor.isNativePlatform()) {
+      console.log(">>> [NativeBridge] Criando base nativa automática no Android...");
+      await this.init(true); // Inicializa novo banco em memória
+      await this.saveDatabase(); // Persiste no sistema de arquivos nativo
+      return true;
+    }
+
     if (handle) {
       await this.linkFile(handle);
       return true;

@@ -236,7 +236,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0F172A] text-slate-200 font-sans overflow-hidden">
+    <div className="flex flex-col h-full bg-[#0F172A] text-slate-200 font-sans overflow-hidden safe-area-p">
       {/* Header Compacto */}
       <header className="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-[#0F172A]/80 backdrop-blur-md sticky top-0 z-20">
         <div className="flex items-center gap-4">
@@ -533,7 +533,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-[#1E293B] rounded-t-[2.5rem] sm:rounded-3xl p-8 shadow-2xl border-t border-white/10"
+              className="w-full max-w-lg bg-[#1E293B] rounded-t-[2.5rem] sm:rounded-3xl p-8 shadow-2xl border-t border-white/10 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-xl font-bold text-white tracking-tight">Nova Campanha</h2>
@@ -550,7 +550,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     value={newCampaignName}
                     onChange={(e) => setNewCampaignName(e.target.value)}
                     placeholder="Ex: Inventário Geral 2024"
-                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600"
+                    className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600 appearance-none"
                   />
                 </div>
 
@@ -569,7 +569,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   <select 
                     value={newCampaignUnit}
                     onChange={(e) => setNewCampaignUnit(e.target.value)}
-                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 appearance-none transition-all"
+                    className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 appearance-none transition-all"
                   >
                     <option value="">Todas as Unidades</option>
                     {availableUnits.map(unit => (
