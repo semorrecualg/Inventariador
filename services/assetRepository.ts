@@ -34,6 +34,57 @@ export const assetRepository = {
   },
 
   /**
+   * Busca um ativo pelo código de patrimônio dentro de uma unidade específica (Nível 1)
+   */
+  async findByEtiquetaInUnit(etiqueta: string, unitId: string): Promise<Asset | undefined> {
+    const rawTerm = etiqueta.trim();
+    const upperTerm = rawTerm.toUpperCase();
+    const upperUnit = unitId.toUpperCase();
+    
+    // Tenta busca exata na unidade
+    let asset = await localDb.assets
+      .where('[ETIQUETA+UNIDADE_OPERACIONAL]')
+      .equals([upperTerm, upperUnit])
+      .first();
+    
+    // Se não encontrou e for numérico curto, tenta com padding
+    if (!asset && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
+      const padded = rawTerm.padStart(6, '0');
+      asset = await localDb.assets
+        .where('[ETIQUETA+UNIDADE_OPERACIONAL]')
+        .equals([padded, upperUnit])
+        .first();
+    }
+    
+    // Fallback para _unitid se UNIDADE_OPERACIONAL falhar (compatibilidade legado)
+    if (!asset) {
+       asset = await localDb.assets
+         .where('[ETIQUETA+_unitid]')
+         .equals([upperTerm, upperUnit])
+         .first();
+    }
+    
+    return asset || undefined;
+  },
+
+  /**
+   * Busca todos os ativos com a etiqueta em QUALQUER unidade (Nível 3)
+   */
+  async findAllByEtiqueta(etiqueta: string): Promise<Asset[]> {
+    const rawTerm = etiqueta.trim();
+    const upperTerm = rawTerm.toUpperCase();
+    
+    const assets = await localDb.assets.where('ETIQUETA').equals(upperTerm).toArray();
+    
+    if (assets.length === 0 && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
+      const padded = rawTerm.padStart(6, '0');
+      return await localDb.assets.where('ETIQUETA').equals(padded).toArray();
+    }
+    
+    return assets;
+  },
+
+  /**
    * Atualiza o status de um ativo
    */
   async updateStatus(id: string, conferido: boolean, tag: TagInventario): Promise<void> {

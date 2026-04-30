@@ -5,9 +5,10 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
-import { generateUUID, findAssetGlobally } from '../services/supabaseService';
+import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { assetRepository } from '../services/assetRepository';
+import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 
@@ -164,7 +165,6 @@ const Inventory: React.FC<InventoryProps> = ({
   setIsInventorying, 
   selectedUnit, 
   onAddNewLocation, 
-  locationsWithStats, 
   scannerMode, 
   searchMode, 
   onUpdateSearchMode, 
@@ -267,12 +267,18 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
+  const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
+  const [isLocSearching, setIsLocSearching] = useState(false);
+  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
+  const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
+  const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
   const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -294,6 +300,31 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [selectedUnit, selectedLocation]);
+
+  // v25.01: Busca de Localidades com Debounce e SQLite
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedLocTerm(locationSearchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [locationSearchTerm]);
+
+  useEffect(() => {
+    const performSearch = async () => {
+      if (!selectedUnit) return;
+      setIsLocSearching(true);
+      try {
+        const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedLocTerm);
+        setDbLocations(results || []);
+      } catch (err) {
+        console.error(">>> [DBA] Erro ao buscar localidades:", err);
+      } finally {
+        setIsLocSearching(false);
+      }
+    };
+
+    performSearch();
+  }, [debouncedLocTerm, selectedUnit, allAssets.length]);
 
   const handleRangeChanged = useCallback((range: { startIndex: number }) => {
     if (range.startIndex > 0) {
@@ -392,80 +423,217 @@ const Inventory: React.FC<InventoryProps> = ({
       telemetryService.logTelemetry(user.id || 'unknown', extractedEtiqueta || null, torch === 'on');
     }
     
-    // Buscar o ativo no banco local (SQLite-like) para máxima performance
-    let foundAsset = await assetRepository.findByEtiqueta(term);
-    
-    // Se não encontrou localmente e estamos em modo nuvem, tenta busca global no Supabase
-    if (!foundAsset && databaseMode.startsWith('SUPABASE') && user?.tenantid) {
-      console.log(`>>> [Inventory] Ativo não encontrado localmente. Iniciando busca global na nuvem para: ${term}`);
-      const cloudAsset = await findAssetGlobally(term, user.tenantid);
-      if (cloudAsset) {
-        console.log(`>>> [Inventory] Ativo localizado globalmente na nuvem!`);
-        foundAsset = cloudAsset;
-      }
-    }
-    
-    // REGRA: Se já foi inventariado, avisa (Sempre mostra modal de duplicidade)
-    if (foundAsset && foundAsset._conferido) {
-      setDuplicateAsset(foundAsset);
-      return;
-    }
-
-    if (autoConfirmOnScanRef.current) {
+    setIsHierarchyLoading(true);
+    try {
+      // NÍVEL 1 - Busca Local (Automática)
+      // Filtra ETIQUETA + UNIDADE_OPERACIONAL atual
+      const currentUnit = selectedUnitRef.current || '';
+      const foundAsset = await assetRepository.findByEtiquetaInUnit(term, currentUnit);
+      
+      // Se encontrou localmente, abre o registro diretamente (mantendo lógica de duplicidade)
       if (foundAsset) {
-        // Se encontrou, confirma automaticamente na localização atual
-        const currentCompKey = normalizeKey(selectedUnitRef.current || '');
-        const assetCompKey = normalizeKey(foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid || '');
-        const currentLocKey = normalizeKey(selectedLocationRef.current || '');
-        const assetLocKey = normalizeKey(foundAsset._localMaster || foundAsset.ENDERECO || '');
-        
-        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-          // Caso seja de outra empresa, adota
-          await onUpdateAssetRef.current({ 
-            ...foundAsset, 
-            UNIDADE_OPERACIONAL: selectedUnitRef.current || foundAsset.UNIDADE_OPERACIONAL || foundAsset._unitid,
-            _conferido: true,
-            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
-          });
-        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
-          // Caso seja da mesma empresa mas outro endereço, adota como sobra física
-          await onUpdateAssetRef.current({
-            ...foundAsset,
-            _conferido: true,
-            TAG_INVENTARIO: TagInventario.ADOTADO,
-            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
-          });
-        } else {
-          // Caso seja da mesma empresa e mesmo endereço
-          await onUpdateAssetRef.current({
-            ...foundAsset,
-            _conferido: true,
-            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
-          });
+        setIsHierarchyLoading(false);
+        if (foundAsset._conferido) {
+          setDuplicateAsset(foundAsset);
+          return;
         }
         
-        // Limpa busca para próxima leitura contínua
-        setCommittedSearch('');
-        setDisplayValue('');
-      } else {
-        // Se não encontrou e está em auto-confirm, mostra modal de "Não Localizado"
-        setScannedResult(result);
+        if (autoConfirmOnScanRef.current) {
+          await onUpdateAssetRef.current({
+            ...foundAsset,
+            _conferido: true,
+            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
+          });
+          setCommittedSearch('');
+          setDisplayValue('');
+        } else {
+          const statusUpper = String(foundAsset.STATUS || '').toUpperCase();
+          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!foundAsset.DATABAIXA;
+          setScannedAsset({ ...foundAsset, _is_divergent_baixa: isGoldenRuleDivergent });
+        }
+        return;
       }
-    } else {
-      // Se NÃO for auto-conferência (NÃO), deve mostrar o item e aguardar confirmação
-      if (foundAsset) {
-        // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA na base
-        const statusUpper = String(foundAsset.STATUS || '').toUpperCase();
-        const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!foundAsset.DATABAIXA;
-        const assetWithDivergence = { ...foundAsset, _is_divergent_baixa: isGoldenRuleDivergent };
-        
-        setScannedAsset(assetWithDivergence);
-      } else {
-        setScannedResult(result);
-      }
+
+      // NÍVEL 2 - Bem não encontrado Localmente (Interação)
+      // Se não houver match local, apresenta opções ao auditor
+      setIsHierarchyLoading(false);
+      setShowGlobalSearchResolution(extractedEtiqueta);
+      
+    } catch (err) {
+      console.error(">>> [Inventory] Erro na busca hierárquica:", err);
+      setIsHierarchyLoading(false);
+      setScannedResult(result); // Fallback
     }
   }, [normalizeKey]);
+
+  const handlePerformGlobalSearch = async () => {
+    if (!showGlobalSearchResolution) return;
+    setIsHierarchyLoading(true);
+    try {
+      const results = await assetRepository.findAllByEtiqueta(showGlobalSearchResolution);
+      setGlobalSearchResults(results);
+      if (results.length === 0) {
+        // Se não achou nada globalmente também, vai para inclusão direta
+        handleCreateNewFromHierarchy();
+      }
+    } catch (err) {
+      console.error(">>> [Inventory] Erro na busca global:", err);
+    } finally {
+      setIsHierarchyLoading(false);
+    }
+  };
+
+  const handleCreateNewFromHierarchy = () => {
+    const etiqueta = showGlobalSearchResolution || '';
+    setShowGlobalSearchResolution(null);
+    setGlobalSearchResults([]);
+    setManualAsset({
+      ETIQUETA: etiqueta,
+      UNIDADE_OPERACIONAL: selectedUnit || "",
+      STATUS: "ATIVO",
+      DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
+      AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
+      TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+      QT: 1,
+      DESCRICAODOATIVO: '',
+      SERIAL: '',
+      ENDERECO: selectedLocation || ""
+    });
+    setIsManualEntryOpen(true);
+  };
+
+  const handleLinkToUnit = async (asset: Asset) => {
+    try {
+      setIsHierarchyLoading(true);
+      const updatedAsset = {
+        ...asset,
+        UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL,
+        _unitid: selectedUnit || asset._unitid,
+        _conferido: true,
+        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+        _localMaster: selectedLocation || asset.ENDERECO,
+        _dataLeitura: new Date().toISOString(),
+        _origemTransacao: TransactionOrigin.INVENTORY
+      };
+      
+      await onUpdateAssetRef.current(updatedAsset);
+      
+      // Limpa estados
+      setShowGlobalSearchResolution(null);
+      setGlobalSearchResults([]);
+      setCommittedSearch('');
+      setDisplayValue('');
+    } catch (err) {
+      console.error(">>> [Inventory] Erro ao vincular ativo:", err);
+    } finally {
+      setIsHierarchyLoading(false);
+    }
+  };
+
+  const renderHierarchyResolutionModals = () => {
+    if (!showGlobalSearchResolution) return null;
+
+    return createPortal(
+      <div className="fixed inset-0 z-[11000] flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
+        <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
+          {/* Header */}
+          <div className="bg-slate-900 p-8 text-white text-center relative shrink-0">
+             <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/20">
+               <Database size={32} className="text-white" />
+             </div>
+             <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none">Bem não localizado</h3>
+             <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest mt-2 px-4 italic leading-relaxed">
+               A etiqueta <span className="text-amber-400">{showGlobalSearchResolution}</span> não pertence à unidade atual.
+             </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {globalSearchResults.length === 0 ? (
+              // NÍVEL 2 - Escolha inicial
+              <div className="space-y-3">
+                <button 
+                  onClick={handlePerformGlobalSearch}
+                  disabled={isHierarchyLoading}
+                  className="w-full p-6 bg-blue-600 text-white rounded-3xl flex flex-col items-center text-center space-y-2 active:scale-95 transition-all shadow-xl hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isHierarchyLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Search size={18} />
+                  )}
+                  <span className="text-[10px] font-black uppercase tracking-widest">Pesquisar em outras Unidades</span>
+                  <span className="text-[8px] opacity-70 font-bold uppercase">Busca global em todo o banco de dados</span>
+                </button>
+
+                <button 
+                  onClick={handleCreateNewFromHierarchy}
+                  className="w-full p-6 bg-emerald-600 text-white rounded-3xl flex flex-col items-center text-center space-y-2 active:scale-95 transition-all shadow-xl hover:bg-emerald-700"
+                >
+                  <FilePlus2 size={18} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Item Novo / Não Cadastrado</span>
+                  <span className="text-[8px] opacity-70 font-bold uppercase">Incluir novo registro nesta unidade</span>
+                </button>
+
+                <div className="pt-4">
+                  <button 
+                    onClick={() => setShowGlobalSearchResolution(null)}
+                    className="w-full py-4 text-slate-400 font-black uppercase text-[9px] tracking-[0.2em] hover:text-slate-600 transition-colors"
+                  >
+                    Cancelar / Voltar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // NÍVEL 3 - Resultados da Busca Global
+              <div className="space-y-4">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Registros Encontrados ({globalSearchResults.length})</p>
+                
+                <div className="space-y-2">
+                  {globalSearchResults.map((asset) => (
+                    <div key={String(asset.id)} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest">{asset.UNIDADE_OPERACIONAL || asset._unitid || 'SEM UNIDADE'}</p>
+                          <h4 className="text-[11px] font-bold text-slate-800 line-clamp-2 mt-0.5">{asset.DESCRICAODOATIVO}</h4>
+                        </div>
+                        <span className="text-[9px] font-black text-slate-400 ml-2">#{String(asset.REGISTRO || '').slice(-4)}</span>
+                      </div>
+                      
+                      <div className="flex space-x-2 pt-1">
+                        <button 
+                          onClick={() => handleLinkToUnit(asset)}
+                          className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-md"
+                        >
+                          Vincular a esta Unidade
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-4 space-y-2">
+                  <button 
+                    onClick={handleCreateNewFromHierarchy}
+                    className="w-full py-4 bg-emerald-600/10 text-emerald-600 border border-emerald-600/20 rounded-2xl flex items-center justify-center space-x-2 active:scale-95 transition-all font-black uppercase text-[9px] tracking-widest"
+                  >
+                    <Plus size={14} />
+                    <span>Ignorar e Criar Novo</span>
+                  </button>
+                  <button 
+                    onClick={() => { setGlobalSearchResults([]); setShowGlobalSearchResolution(null); }}
+                    className="w-full py-3 text-slate-400 font-bold uppercase text-[9px] tracking-widest"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
 
   const handleSmartOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1246,26 +1414,31 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             )}
 
-            {Object.keys(locationsWithStats)
-              .filter(locKey => normalizeKey(locationsWithStats[locKey].displayName).includes(normalizeKey(locationSearchTerm)))
-              .sort((a, b) => locationsWithStats[a].displayName.localeCompare(locationsWithStats[b].displayName))
-              .map(locKey => {
-                const stats = locationsWithStats[locKey];
-                const loc = stats.displayName;
-                const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
+            {isLocSearching && (
+              <div className="flex items-center justify-center py-4 space-x-2 animate-pulse">
+                <Loader2 size={14} className="animate-spin text-accent" />
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Filtrando Banco de Dados...</span>
+              </div>
+            )}
+
+            {dbLocations.length > 0 ? (
+              dbLocations
+              .map((loc: { displayName: string; total: number; checked: number; locKey: string }) => {
+                const progress = loc.total > 0 ? Math.round((loc.checked / loc.total) * 100) : 0;
                 const isCompleted = progress === 100;
+                const locStr = String(loc.displayName || '');
                 
                 // Extrair código e nome (assumindo formato "CODIGO NOME")
-                const parts = loc.split(' ');
+                const parts = locStr.split(' ');
                 const code = parts[0];
-                const name = parts.slice(1).join(' ') || loc;
+                const name = parts.slice(1).join(' ') || locStr;
               
                 return (
                   <button 
-                    key={locKey} 
+                    key={loc.locKey} 
                     disabled={!unitConfig}
                     onClick={() => { 
-                      setSelectedLocation(loc); 
+                      setSelectedLocation(loc.displayName); 
                       setIsInventorying(true); 
                       if (immersiveMode && !document.fullscreenElement) {
                         onToggleFullscreen();
@@ -1289,7 +1462,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="space-y-2">
                       <div className="flex justify-between items-end">
                         <span className={`text-[10px] font-bold uppercase tracking-tight ${isCompleted ? 'text-[#10B981]' : 'text-[#64748B]'}`}>
-                          {stats.checked} / {stats.total} ITENS
+                          {loc.checked} / {loc.total} ITENS
                         </span>
                         <span className={`text-[10px] font-black ${isCompleted ? 'text-[#10B981]' : 'text-[#2563EB]'}`}>
                           {progress}%
@@ -1304,7 +1477,20 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                   </button>
                 );
-              })}
+              })
+            ) : (
+                !isLocSearching && (
+                  <div className="py-20 text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto">
+                      <Search size={24} className="text-slate-300" />
+                    </div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-loose">
+                      Nenhuma localidade localizada<br/>
+                      <span className="text-[10px] opacity-60">Tente buscar por outro termo ou descrição</span>
+                    </p>
+                  </div>
+                )
+            )}
           </div>
 
           {/* FAB - Criar Nova Localidade */}
@@ -1512,7 +1698,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     onModeChange={handleUpdateScannerModeLocal}
                     onScan={handleScan}
                     onClose={handleScannerClose}
-                    isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
+                    isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
                     scanFeedbackMode={scanFeedbackMode}
                     batterySaver={batterySaver}
                     torch={torch}
@@ -1633,7 +1819,7 @@ const Inventory: React.FC<InventoryProps> = ({
             setIsSearchVisible(true);
             setTimeout(() => searchInputRef.current?.focus(), 100);
           }}
-          isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset)}
+          isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
           torch={torch}
@@ -1694,6 +1880,8 @@ const Inventory: React.FC<InventoryProps> = ({
 
       {/* Modais de Confirmação e Erro de Leitura */}
       {renderConfirmationModals()}
+
+      {renderHierarchyResolutionModals()}
 
       {isOCRProcessing && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">

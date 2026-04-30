@@ -4103,6 +4103,7 @@ const App: React.FC = () => {
               users={users} 
               databaseMode={databaseMode}
               isDatabaseEmpty={inventory.assets.length === 0}
+              isKeyboardVisible={isKeyboardVisible}
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onUpdateScreen={(s) => setHistory([s])}
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}

@@ -5,7 +5,6 @@ import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { APP_LOGO } from '../constants';
-import { getAppBaseUrl } from '../utils/urlUtils';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 
@@ -17,6 +16,7 @@ interface LoginProps {
   onUpdateScreen: (screen: AppScreen) => void;
   onShowModal: (config: Partial<ModalConfig>) => void;
   isDatabaseEmpty?: boolean;
+  isKeyboardVisible?: boolean;
 }
 
 // Login Component
@@ -27,7 +27,8 @@ const Login: React.FC<LoginProps> = ({
   onOpenPrivacyCenter, 
   onUpdateScreen, 
   onShowModal,
-  isDatabaseEmpty = false
+  isDatabaseEmpty = false,
+  isKeyboardVisible = false
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -101,11 +102,11 @@ const Login: React.FC<LoginProps> = ({
 
   const handleClearSession = async () => {
     onShowModal({
-      title: 'Limpar Sessão e Cache',
-      message: 'Isso limpará logs e configurações temporárias para resolver travamentos, mas preservará o inventário principal. Deseja continuar?',
+      title: 'Redefinir Acesso Local',
+      message: 'Esta ação deslogará o usuário e redefinirá as configurações de acesso. Seus dados de auditoria salvos no SQLite permanecerão intactos. Deseja continuar?',
       type: 'confirm',
       showCancel: true,
-      confirmText: 'Sim, Limpar',
+      confirmText: 'Redefinir Agora',
       cancelText: 'Cancelar',
       onConfirm: async () => {
         try {
@@ -366,36 +367,47 @@ const Login: React.FC<LoginProps> = ({
   };
 
   return (
-    <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
-      {/* Header com Logotipo */}
-      <div className="mb-4 text-center relative flex flex-col items-center">
-        {/* Indicador de Plataforma */}
-        <div className="absolute top-0 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
-          <span className="text-[6px] font-black text-accent uppercase tracking-widest">
-            {databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'MOBILE' : 'DESKTOP')}
-          </span>
-        </div>
+    <div className="p-4 min-h-screen h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-safe pb-safe">
+      {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
+      {!isKeyboardVisible && (
+        <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
+          {/* Indicador de Plataforma */}
+          <div className="absolute top-0 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
+            <span className="text-[6px] font-black text-accent uppercase tracking-widest">
+              {databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'MOBILE' : 'DESKTOP')}
+            </span>
+          </div>
 
-        <div className="w-24 h-24 bg-white border border-border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main">
-          <img 
-            src={APP_LOGO} 
-            alt="GBR Auditoria Logo" 
-            className="w-full h-full object-cover rounded-full"
-            referrerPolicy="no-referrer"
-          />
+          <div className="w-24 h-24 bg-white border border-border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main">
+            <img 
+              src={APP_LOGO} 
+              alt="GBR Auditoria Logo" 
+              className="w-full h-full object-cover rounded-full"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          
+          <h1 
+            id="login-title"
+            onClick={handleTitleClick}
+            className="text-lg font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
+          >
+            SISTEMA <span className="text-accent">AUDITORIA</span>
+          </h1>
+          <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-1 opacity-70">
+            INVENTÁRIO DE ATIVO IMOBILIZADO
+          </p>
         </div>
-        
-        <h1 
-          id="login-title"
-          onClick={handleTitleClick}
-          className="text-lg font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
-        >
-          SISTEMA <span className="text-accent">AUDITORIA</span>
-        </h1>
-        <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-1 opacity-70">
-          INVENTÁRIO DE ATIVO IMOBILIZADO
-        </p>
-      </div>
+      )}
+
+      {/* Se o teclado estiver visível, mostramos uma versão compacta do título */}
+      {isKeyboardVisible && (
+        <div className="mb-4 text-center animate-slideUp">
+           <h1 className="text-sm font-black text-ink tracking-tighter uppercase italic">
+            SISTEMA <span className="text-accent text-xs">AUDITORIA</span>
+          </h1>
+        </div>
+      )}
 
       <div className="mb-4 max-w-sm mx-auto w-full">
         {databaseMode === DatabaseMode.INTERNAL && (
@@ -511,7 +523,7 @@ const Login: React.FC<LoginProps> = ({
             title="Use se o login estiver travado ou se mudou de projeto"
           >
             <ShieldAlert className="w-3 h-3" />
-            Limpar Sessão e Cache (Recuperação)
+            Redefinir Acesso Local
           </button>
         </div>
         
@@ -528,8 +540,8 @@ const Login: React.FC<LoginProps> = ({
               <span>Privacidade e Segurança</span>
             </button>
           </div>
-          <p className="text-[7px] text-slate-500 mt-4 font-mono break-all px-4">
-            URL: {getAppBaseUrl()}
+          <p className="text-[7px] font-black text-slate-400 mt-4 uppercase tracking-[0.2em]">
+            Versão 2.6 - GBR Native Ready
           </p>
         </div>
       </div>

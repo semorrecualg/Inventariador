@@ -5,12 +5,13 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png'],
       manifest: {
         name: 'GBR Auditoria Patrimonial',
         short_name: 'GBR Auditor',
@@ -18,15 +19,15 @@ export default defineConfig({
         theme_color: '#0a0f1e',
         background_color: '#0a0f1e',
         display: 'standalone',
-        start_url: '/',
+        start_url: './index.html',
         icons: [
           {
-            src: 'https://picsum.photos/seed/gbr/192/192',
+            src: 'logo.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: 'https://picsum.photos/seed/gbr/512/512',
+            src: 'logo.png',
             sizes: '512x512',
             type: 'image/png'
           }

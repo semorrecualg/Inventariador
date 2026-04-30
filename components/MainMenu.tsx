@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
@@ -212,6 +213,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   const handlePickDirectory = async () => {
     try {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteService.mapLocalFolder();
+        const status = await sqliteService.getFileStatus();
+        setDirStatus(status as { status: string; path: string; fileName?: string });
+        
+        showModal(
+          "Soberania Nativa Ativa",
+          "O banco de dados está imobilizado com sucesso no armazenamento seguro do dispositivo. O mapeamento físico é automático nesta plataforma.",
+          "success"
+        );
+        return;
+      }
+
       if (window.self !== window.top) {
         showModal(
           "Restrição de Navegador",
@@ -948,14 +962,20 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
                   >
                     <FolderOpen size={12} />
-                    <span>ALTERAR PASTA</span>
+                    <span>{Capacitor.isNativePlatform() ? 'VALIDAR SOBERANIA' : 'ALTERAR PASTA'}</span>
                   </button>
                   <button 
-                    onClick={() => import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission())}
+                    onClick={() => {
+                      if (Capacitor.isNativePlatform()) {
+                        sqliteService.downloadDatabase();
+                      } else {
+                        import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission());
+                      }
+                    }}
                     className="w-12 py-2.5 bg-blue-700 text-white rounded-xl flex items-center justify-center hover:bg-blue-800 transition-all border border-white/10"
-                    title="Autorizar Acesso"
+                    title={Capacitor.isNativePlatform() ? "Exportar Backup" : "Autorizar Acesso"}
                   >
-                    <RefreshCw size={14} />
+                    {Capacitor.isNativePlatform() ? <Download size={14} /> : <RefreshCw size={14} />}
                   </button>
                 </div>
               </div>

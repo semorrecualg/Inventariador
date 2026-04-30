@@ -1795,7 +1795,7 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
         console.log(">>> [Supabase] Campanha sincronizada com sucesso.");
       }
     } catch (err) {
-      console.warn(">>> [Supabase] Falha de conectividade detectada. O dado permanece seguro no SQLite Local.");
+      console.warn(">>> [Supabase] Falha de conectividade detectada. O dado permanece seguro no SQLite Local.", err);
     }
   }
 

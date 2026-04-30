@@ -81,16 +81,65 @@ export const localDb = {
       });
     },
     where: (field: string) => ({
-      equals: (value: SqlValue) => ({
+      equals: (value: SqlValue | SqlValue[]) => ({
         first: async () => {
+          if (Array.isArray(value)) {
+            // Suporte para chaves compostas ex: [ETIQUETA+UNIDADE_OPERACIONAL]
+            const fields = field.replace('[', '').replace(']', '').split('+');
+            const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
+            const res = await sqliteService.query(`SELECT * FROM assets WHERE ${whereClause} LIMIT 1`, value);
+            return res[0] as unknown as Asset || null;
+          }
           const res = await sqliteService.query(`SELECT * FROM assets WHERE ${field} = ? LIMIT 1`, [value]);
           return res[0] as unknown as Asset || null;
         },
         toArray: async () => {
+          if (Array.isArray(value)) {
+            const fields = field.replace('[', '').replace(']', '').split('+');
+            const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
+            return await sqliteService.query(`SELECT * FROM assets WHERE ${whereClause}`, value) as unknown as Asset[];
+          }
           return await sqliteService.query(`SELECT * FROM assets WHERE ${field} = ?`, [value]) as unknown as Asset[];
         }
       })
-    })
+    }),
+    getLocationsWithStats: async (unitId: string, searchTerm = '') => {
+      let sql = `
+        SELECT 
+          COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') as displayName,
+          COUNT(*) as total,
+          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
+        FROM assets
+        WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ? OR GRUPO_EMPRESARIAL = ?)
+          AND _is_deleted = 0
+      `;
+      const params: SqlValue[] = [
+        unitId.toUpperCase(), 
+        unitId.toUpperCase(), 
+        unitId.toUpperCase()
+      ];
+
+      if (searchTerm) {
+        sql += ` AND (COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') LIKE ? COLLATE NOCASE)`;
+        params.push(`%${searchTerm}%`);
+      }
+
+      sql += ` GROUP BY COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') ORDER BY displayName COLLATE NOCASE`;
+      
+      const results = await sqliteService.query(sql, params) as { displayName: string; total: number; checked: number }[];
+      return results.map(r => ({
+        displayName: r.displayName,
+        total: r.total,
+        checked: r.checked,
+        locKey: r.displayName.toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
+      }));
+    }
+  },
+  localidades: {
+    search: async (term: string) => {
+      const sql = "SELECT * FROM localidades WHERE DESCRICAO LIKE ? COLLATE NOCASE ORDER BY DESCRICAO";
+      return await sqliteService.query(sql, [`%${term}%`]) as { ID: string; DESCRICAO: string }[];
+    }
   },
   auditLogs: {
     add: async (log: AuditLogEntry) => {

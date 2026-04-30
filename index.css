@@ -139,6 +139,8 @@
 
   .safe-area-top { padding-top: var(--ion-safe-area-top); }
   .safe-area-bottom { padding-bottom: var(--ion-safe-area-bottom); }
+  .pt-safe { padding-top: var(--ion-safe-area-top); }
+  .pb-safe { padding-bottom: var(--ion-safe-area-bottom); }
   .safe-area-p { 
     padding-top: var(--ion-safe-area-top); 
     padding-bottom: var(--ion-safe-area-bottom);

@@ -63,8 +63,20 @@ CREATE TABLE IF NOT EXISTS assets (
     _origemTransacao TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets (ETIQUETA);
+CREATE INDEX IF NOT EXISTS idx_assets_etiqueta_unit ON assets (ETIQUETA, UNIDADE_OPERACIONAL);
+CREATE INDEX IF NOT EXISTS idx_assets_etiqueta_unitid ON assets (ETIQUETA, _unitid);
 CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (TAG_INVENTARIO);
 CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets (ENDERECO);
+CREATE INDEX IF NOT EXISTS idx_assets_localmaster ON assets (_localMaster);
+
+CREATE TABLE IF NOT EXISTS localidades (
+    id TEXT PRIMARY KEY,
+    DESCRICAO TEXT,
+    CODIGO TEXT,
+    _tenantid TEXT,
+    _unitid TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_localidades_descricao ON localidades (DESCRICAO COLLATE NOCASE);
 
 CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY,
@@ -198,6 +210,14 @@ class SqliteService {
   }
 
   async getFileStatus() {
+    if (Capacitor.isNativePlatform()) {
+      return { 
+        status: 'linked', 
+        fileName: this.storageKeys.nativeFileName, 
+        path: `Directory.Data/${this.storageKeys.nativeFileName}` 
+      };
+    }
+    
     try {
       const handle = await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
       if (!handle) return { status: 'none', fileName: null, path: '' };
@@ -625,9 +645,15 @@ class SqliteService {
 
   // --- File Link Methods ---
   async linkFile(handle?: FileSystemFileHandle): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      return await this.init(true);
+    }
     let targetHandle = handle;
     if (!targetHandle) {
       try {
+        if (typeof window.showOpenFilePicker !== 'function') {
+           throw new Error("API showOpenFilePicker não disponível.");
+        }
         // @ts-expect-error showOpenFilePicker is experimental
         const [picked] = await window.showOpenFilePicker({
           types: [{ description: 'SQLite Database', accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] } }],
@@ -646,7 +672,9 @@ class SqliteService {
   }
 
   async hardLinkPick() {
+    if (Capacitor.isNativePlatform()) return false;
     try {
+      if (typeof window.showOpenFilePicker !== 'function') return false;
       // @ts-expect-error showOpenFilePicker is experimental
       const [handle] = await window.showOpenFilePicker({
         types: [{ description: 'SQLite Database', accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] } }],
@@ -722,8 +750,24 @@ class SqliteService {
   }
 
   async mapLocalFolder() {
-    // Simulação ou placeholder para API experimental de diretórios
-    alert("Funcionalidade de mapeamento de pasta disponível apenas em navegadores com suporte a File System Access API.");
+    if (Capacitor.isNativePlatform()) {
+      // No Android/iOS, o mapeamento é automático para o diretório de dados seguro.
+      // Apenas confirmamos a saúde do banco.
+      if (this.isInitialized && this.db) {
+        return true;
+      }
+      return await this.init();
+    }
+
+    // Código legado para Web (FileSystem Access API)
+    if (typeof window.showDirectoryPicker === 'function') {
+        await window.showDirectoryPicker();
+        // Implementar lógica de busca por arquivo específico ou criação se necessário
+        // Por enquanto mantemos como estava no MainMenu para evitar quebra mas 
+        // a intenção é migrar.
+    } else {
+        throw new Error("Funcionalidade de mapeamento de pasta disponível apenas em navegadores com suporte a File System Access API.");
+    }
   }
 
   async forceSync(): Promise<boolean> {
@@ -744,6 +788,33 @@ class SqliteService {
   async downloadDatabase() {
     if (!this.db) return;
     const data = this.db.export();
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        let binary = "";
+        const bytes = new Uint8Array(data);
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Data = btoa(binary);
+        const fileName = `auditoria_backup_${new Date().getTime()}.db`;
+
+        await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Documents
+        });
+        
+        console.log(`>>> [NativeBridge] Backup exportado para Documentos: ${fileName}`);
+        alert(`Backup exportado com sucesso para a pasta Documentos do celular: ${fileName}`);
+        return;
+      } catch (err) {
+        console.error(">>> [NativeBridge] Erro ao exportar backup nativo:", err);
+        alert("Erro ao exportar backup: " + String(err));
+        return;
+      }
+    }
+
     const blob = new Blob([data], { type: 'application/x-sqlite3' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
