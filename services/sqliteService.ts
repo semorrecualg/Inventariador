@@ -130,6 +130,20 @@ CREATE TABLE IF NOT EXISTS campaign_snapshots (
     closed_by TEXT,
     _tenantid TEXT
 );
+
+CREATE TABLE IF NOT EXISTS unit_configs (
+    id TEXT PRIMARY KEY,
+    unit_id TEXT,
+    tenant_id TEXT,
+    _unitid TEXT,
+    _tenantid TEXT,
+    lat REAL,
+    lng REAL,
+    radius_meters INTEGER,
+    is_active INTEGER,
+    updated_by TEXT,
+    updated_at TEXT
+);
 `;
 
 export type StorageSource = 'PHYSICAL' | 'CACHE' | 'MEMORY' | 'NONE';

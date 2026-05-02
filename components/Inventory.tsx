@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
@@ -11,6 +11,7 @@ import { assetRepository } from '../services/assetRepository';
 import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
+import { sqliteService, FileStatus } from '../services/sqliteService';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
@@ -41,8 +42,9 @@ import {
   ArrowLeft,
   Target,
   AlertCircle,
-  Compass,
-  BookOpen
+  BookOpen,
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 import POPGuide from './POPGuide';
 
@@ -207,6 +209,35 @@ const Inventory: React.FC<InventoryProps> = ({
   const [lastActivityTime, setLastActivityTime] = useState(Date.now());
   const [isScannerPaused, setIsScannerPaused] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
+
+  // v2.7: Soberania de Dados - Status do Link Físico
+  const [dbStatus, setDbStatus] = useState<FileStatus | null>(null);
+
+  useEffect(() => {
+    const updateStats = async () => {
+      const status = await sqliteService.getFileStatus();
+      setDbStatus(status);
+    };
+    updateStats();
+    
+    // Sincroniza com o serviço de Soberania
+    const originalListener = sqliteService.onStatusChange;
+    sqliteService.onStatusChange = (status: FileStatus) => {
+      setDbStatus(status);
+      if (originalListener) originalListener(status);
+    };
+    
+    return () => {
+       sqliteService.onStatusChange = originalListener;
+    };
+  }, []);
+
+  const navStatus = useMemo(() => {
+    if (!dbStatus) return 'yellow'; // PENDING
+    if (dbStatus.status === 'linked' || dbStatus.status === 'granted') return 'green'; // CONCLUIDO
+    if (dbStatus.status === 'prompt') return 'yellow'; // PENDING
+    return 'red'; // CACHED
+  }, [dbStatus]);
 
   // Monitoramento de Telemetria (Native Module Simulation)
   useEffect(() => {
@@ -1540,7 +1571,7 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
 
             <div className="flex items-center space-x-2">
-              {/* Indicador de Estabilidade de Sensores (v2.6) */}
+              {/* Indicador de Estabilidade de Sensores (v2.6) - Migrado para v2.7 Soberania */}
               <div className={`hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter border ${
                 navStatus === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :
                 navStatus === 'yellow' ? 'bg-amber-50 border-amber-200 text-amber-600' :
@@ -1551,8 +1582,14 @@ const Inventory: React.FC<InventoryProps> = ({
                   navStatus === 'yellow' ? 'bg-amber-500' :
                   'bg-red-500'
                 }`} />
-                <span>{navStatus === 'green' ? 'SENSORES OK' : navStatus === 'yellow' ? 'OCIOSO' : 'RECIBRAR'}</span>
-                <Compass size={10} className={navStatus === 'red' ? 'animate-spin' : ''} />
+                <span>{navStatus === 'green' ? 'CONCLUÍDO' : navStatus === 'yellow' ? 'PENDENTE' : 'CACHED'}</span>
+                {navStatus === 'green' ? (
+                  <ShieldCheck size={10} className="text-emerald-500" />
+                ) : navStatus === 'yellow' ? (
+                  <RefreshCw size={10} className="text-amber-500 animate-spin" />
+                ) : (
+                  <Database size={10} className="text-red-500" />
+                )}
               </div>
 
               {isBatchMode && (

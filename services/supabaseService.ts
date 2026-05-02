@@ -2142,16 +2142,18 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   localConfigs[unitKey] = payload;
   localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
 
-  // Mirroring in Dexie for durability
+  // Mirroring in Dexie/SQLite for durability
   try {
+    const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
     await localDb.unitConfigs.put({
       ...payload,
+      id: unitKey, // Garantir ID para o Primary Key do SQLite
       unit_id: unitId,
       tenant_id: tenantId
     } as UnitConfig);
-    console.log('>>> [Persistence] GPS espelhado no Dexie.');
+    console.log('>>> [Persistence] GPS espelhado no banco local (SQLite/Dexie).');
   } catch (dexieErr) {
-    console.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
+    console.warn('>>> [Persistence] Falha ao espelhar GPS no banco local:', dexieErr);
   }
 
   // Se for modo INTERNO, encerramos aqui (Isolamento Total)
