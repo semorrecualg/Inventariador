@@ -80,6 +80,38 @@ export const localDb = {
         return asset as unknown as Asset;
       });
     },
+    getByLocationExact: async (unitId: string, location: string) => {
+      const trimmedLoc = location.trim();
+      const isOrphanVirtual = trimmedLoc === "PENDENTES DE ETIQUETAGEM / SEM ENDEREÇO";
+      
+      let sql;
+      let params: SqlValue[];
+
+      if (isOrphanVirtual) {
+        sql = "SELECT * FROM assets WHERE (ENDERECO IS NULL OR trim(ENDERECO) = '') AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?) AND _is_deleted = 0 ORDER BY CENTRODECUSTO ASC";
+        params = [unitId.toUpperCase(), unitId.toUpperCase()];
+      } else {
+        sql = "SELECT * FROM assets WHERE ENDERECO = ? AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?) AND _is_deleted = 0";
+        params = [trimmedLoc, unitId.toUpperCase(), unitId.toUpperCase()];
+      }
+      
+      console.log(`>>> [DBA] EXECUTANDO QUERY DE ATIVOS (${isOrphanVirtual ? 'ÓRFÃOS' : 'EXATA'}):`);
+      console.log(`>>> [DBA] SQL: ${sql}`);
+      console.log(`>>> [DBA] PARAMS:`, params);
+      
+      const results = await sqliteService.query(sql, params) as Record<string, unknown>[];
+      console.log(`>>> [DBA] RESULTADO DA QUERY: ${results.length} registros encontrados.`);
+      
+      return results.map(row => {
+        const asset = { ...row } as Record<string, unknown>;
+        ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
+          if (Object.prototype.hasOwnProperty.call(asset, key)) {
+            asset[key] = asset[key] === 1;
+          }
+        });
+        return asset as unknown as Asset;
+      });
+    },
     where: (field: string) => ({
       equals: (value: SqlValue | SqlValue[]) => ({
         first: async () => {
@@ -104,35 +136,73 @@ export const localDb = {
       })
     }),
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
+      // 1. Busca localidades normais
       let sql = `
         SELECT 
-          COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') as displayName,
+          ENDERECO as displayName,
           COUNT(*) as total,
           SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
         FROM assets
-        WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ? OR GRUPO_EMPRESARIAL = ?)
+        WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?)
           AND _is_deleted = 0
+          AND ENDERECO IS NOT NULL AND trim(ENDERECO) != ''
       `;
       const params: SqlValue[] = [
-        unitId.toUpperCase(), 
         unitId.toUpperCase(), 
         unitId.toUpperCase()
       ];
 
       if (searchTerm) {
-        sql += ` AND (COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') LIKE ? COLLATE NOCASE)`;
+        sql += ` AND (ENDERECO LIKE ? COLLATE NOCASE)`;
         params.push(`%${searchTerm}%`);
       }
 
-      sql += ` GROUP BY COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') ORDER BY displayName COLLATE NOCASE`;
+      sql += ` GROUP BY ENDERECO ORDER BY ENDERECO COLLATE NOCASE`;
       
       const results = await sqliteService.query(sql, params) as { displayName: string; total: number; checked: number }[];
-      return results.map(r => ({
-        displayName: r.displayName,
+      
+      // 2. Busca órfãos (Sem Endereço)
+      const orphanSql = `
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
+        FROM assets
+        WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?)
+          AND _is_deleted = 0
+          AND (ENDERECO IS NULL OR trim(ENDERECO) = '')
+      `;
+      const orphanParams: SqlValue[] = [unitId.toUpperCase(), unitId.toUpperCase()];
+      const orphanResults = await sqliteService.query(orphanSql, orphanParams) as { total: number; checked: number }[];
+      
+      const finalResults = results.map(r => ({
+        displayName: r.displayName || 'SEM ENDERECO',
         total: r.total,
         checked: r.checked,
-        locKey: r.displayName.toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
+        locKey: (r.displayName || 'SEM_ENDERECO').toString().toUpperCase().replace(/[^A-Z0-9]/g, ''),
+        status: 'normal'
       }));
+
+      // Adiciona o local virtual se houver órfãos
+      if (orphanResults.length > 0 && orphanResults[0].total > 0) {
+        const orphanCount = orphanResults[0].total;
+        const orphanChecked = orphanResults[0].checked;
+        
+        // Verifica se o termo de busca bate com o nome virtual
+        const virtualName = "PENDENTES DE ETIQUETAGEM / SEM ENDEREÇO";
+        if (!searchTerm || virtualName.toUpperCase().includes(searchTerm.toUpperCase())) {
+          finalResults.unshift({
+            displayName: virtualName,
+            total: orphanCount,
+            checked: orphanChecked,
+            locKey: 'PENDENTES_ORFAOS',
+            status: 'attention'
+          });
+        }
+      }
+
+      console.log(`>>> [DBA] Localidades carregadas do banco. Total: ${finalResults.length} (incluindo órfãos se existirem)`);
+      
+      return finalResults;
     }
   },
   localidades: {

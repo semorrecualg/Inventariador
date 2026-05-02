@@ -295,6 +295,25 @@ const Login: React.FC<LoginProps> = ({
       }
 
       if (loggedUser) {
+        // v2.7: Verifica certificação no SQLite se for Auditor
+        if (loggedUser.role === UserRole.AUDITOR || (loggedUser.profile && loggedUser.profile.toUpperCase() === 'AUDITOR')) {
+          try {
+            const dbUsers = await sqliteService.query('SELECT is_certified FROM users WHERE email = ? OR username = ?', [loggedUser.email, loggedUser.username]);
+            if (dbUsers && dbUsers.length > 0) {
+              loggedUser.isCertified = dbUsers[0].is_certified === 1;
+            } else {
+              // Se não existe no SQLite, registra como não certificado
+              await sqliteService.execute(
+                'INSERT OR IGNORE INTO users (id, username, email, profile, is_certified) VALUES (?, ?, ?, ?, 0)',
+                [loggedUser.id || loggedUser.username, loggedUser.username, loggedUser.email, loggedUser.profile || 'AUDITOR']
+              );
+              loggedUser.isCertified = false;
+            }
+          } catch (e) {
+            console.error("Erro ao verificar certificação no SQLite:", e);
+          }
+        }
+
         console.log('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
         
         // Salva no localStorage para persistência (Token Local)

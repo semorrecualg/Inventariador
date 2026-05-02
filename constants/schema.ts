@@ -14,7 +14,8 @@ export const DB_ASSET_COLUMNS = [
   '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
   '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',
-  'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', '_parent_id', '_is_synced'
+  'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', '_parent_id', '_is_synced', 
+  '_gps_accuracy', '_ocr_verified'
 ];
 
 export const SCHEMA_PRIORITY = {

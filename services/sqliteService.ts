@@ -60,13 +60,39 @@ CREATE TABLE IF NOT EXISTS assets (
     Sn3_recno INTEGER,
     DE_PARA TEXT,
     AUDITOR_STATUS_CONFERENCIA TEXT,
-    _origemTransacao TEXT
+    _origemTransacao TEXT,
+    _gps_accuracy REAL,
+    _ocr_verified INTEGER DEFAULT 0,
+    _altitude_level INTEGER DEFAULT 0,
+    _pos_timestamp TEXT
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE,
+    password TEXT,
+    email TEXT,
+    profile TEXT,
+    is_certified INTEGER DEFAULT 0,
+    _tenantid TEXT,
+    _unitid TEXT,
+    isAdmin INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS session_tokens (
+    unit_id TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets (ETIQUETA);
+CREATE INDEX IF NOT EXISTS idx_assets_registro ON assets (REGISTRO);
+CREATE INDEX IF NOT EXISTS idx_assets_serial ON assets (SERIAL);
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta_unit ON assets (ETIQUETA, UNIDADE_OPERACIONAL);
 CREATE INDEX IF NOT EXISTS idx_assets_etiqueta_unitid ON assets (ETIQUETA, _unitid);
 CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (TAG_INVENTARIO);
 CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets (ENDERECO);
+CREATE INDEX IF NOT EXISTS idx_ativos_endereco ON assets (ENDERECO);
 CREATE INDEX IF NOT EXISTS idx_assets_localmaster ON assets (_localMaster);
 
 CREATE TABLE IF NOT EXISTS localidades (
@@ -108,6 +134,14 @@ CREATE TABLE IF NOT EXISTS campaign_snapshots (
 
 export type StorageSource = 'PHYSICAL' | 'CACHE' | 'MEMORY' | 'NONE';
 
+export interface FileStatus {
+  status: string;
+  fileName: string | null;
+  path: string;
+  source: StorageSource;
+  handle?: FileSystemFileHandle;
+}
+
 class SqliteService {
   private db: Database | null = null;
   private isInitialized = false;
@@ -116,6 +150,8 @@ class SqliteService {
   private activeFileHandle: FileSystemFileHandle | null = null;
   private permissionGrantedSession = false;
   private activeSchemaMappings: Record<string, string> = {};
+  
+  public onStatusChange: ((status: FileStatus) => void) | null = null;
   
   private storageKeys = {
     dbKey: 'sqlite_db_binary',
@@ -214,22 +250,37 @@ class SqliteService {
       return { 
         status: 'linked', 
         fileName: this.storageKeys.nativeFileName, 
-        path: `Directory.Data/${this.storageKeys.nativeFileName}` 
+        path: `Directory.Data/${this.storageKeys.nativeFileName}`,
+        source: 'PHYSICAL'
       };
     }
     
     try {
       const handle = await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
-      if (!handle) return { status: 'none', fileName: null, path: '' };
+      if (!handle) return { status: 'none', fileName: null, path: '', source: this.storageSource };
+      
+      let currentPerm = 'prompt';
       if (this.permissionGrantedSession && this.activeFileHandle) {
-        return { status: 'granted', fileName: this.activeFileHandle.name, path: this.activeFileHandle.name, handle: this.activeFileHandle };
+        currentPerm = 'granted';
+      } else {
+        // @ts-expect-error mode property is experimental
+        currentPerm = await handle.queryPermission({ mode: 'readwrite' });
       }
-      // @ts-expect-error mode property is experimental
-      const currentPerm = await handle.queryPermission({ mode: 'readwrite' });
-      if (currentPerm === 'granted') this.permissionGrantedSession = true;
-      return { status: currentPerm as string, fileName: handle.name, path: handle.name, handle };
+
+      if (currentPerm === 'granted') {
+        this.permissionGrantedSession = true;
+        this.activeFileHandle = handle;
+      }
+
+      return { 
+        status: currentPerm as string, 
+        fileName: handle.name, 
+        path: handle.name, 
+        handle,
+        source: handle ? 'PHYSICAL' : this.storageSource
+      };
     } catch {
-      return { status: 'error', fileName: null, path: '' };
+      return { status: 'error', fileName: null, path: '', source: this.storageSource };
     }
   }
 
@@ -635,6 +686,16 @@ class SqliteService {
     await this.saveDatabase();
   }
 
+  async vacuum() {
+    if (!this.db) return;
+    try {
+      this.db.run("VACUUM");
+      console.log(">>> [Persistence] VACUUM executado com sucesso.");
+    } catch (err) {
+      console.error(">>> [Persistence] Erro ao executar VACUUM:", err);
+    }
+  }
+
   async importDatabase(binary: Uint8Array) {
     const SQL = await initSqlJs({ locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` });
     this.db = new SQL.Database(binary);
@@ -656,10 +717,13 @@ class SqliteService {
         }
         // @ts-expect-error showOpenFilePicker is experimental
         const [picked] = await window.showOpenFilePicker({
-          types: [{ description: 'SQLite Database', accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] } }],
+          types: [{ description: 'SQLite Database', accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3', '.sql'] } }],
         });
         targetHandle = picked;
-      } catch { return false; }
+      } catch (err) { 
+        console.warn("User cancelled or picker failed", err);
+        return false; 
+      }
     }
     
     if (!targetHandle) return false;
@@ -668,7 +732,16 @@ class SqliteService {
     await localforage.setItem(this.storageKeys.fileHandleKey, targetHandle);
     this.permissionGrantedSession = true;
     await this.init(true);
+    if (this.onStatusChange) this.onStatusChange(await this.getFileStatus());
     return true;
+  }
+
+  async unlinkExternalFile() {
+    await localforage.removeItem(this.storageKeys.fileHandleKey);
+    this.activeFileHandle = null;
+    this.permissionGrantedSession = false;
+    await this.init(true);
+    if (this.onStatusChange) this.onStatusChange(await this.getFileStatus());
   }
 
   async hardLinkPick() {
@@ -705,18 +778,6 @@ class SqliteService {
       if (newHandle) await this.linkFile(newHandle);
       return !!newHandle;
     } catch { return false; }
-  }
-
-  async downloadDatabase() {
-    if (!this.db) return;
-    const binary = this.db.export();
-    const blob = new Blob([binary], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `backup_${new Date().toISOString().split('T')[0]}.db`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   async executeBatch(queries: {sql: string, params: (string | number | boolean | null)[]}[]) {

@@ -99,7 +99,7 @@ export const assetRepository = {
    * Lista todos os ativos de uma unidade/localização
    */
   async listByLocation(location: string): Promise<Asset[]> {
-    return await localDb.assets.where('_localMaster').equals(location).toArray();
+    return await localDb.assets.where('ENDERECO').equals(location).toArray();
   },
 
   /**

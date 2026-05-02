@@ -26,7 +26,7 @@ import {
   Wallet,
   QrCode,
   Loader2,
-  Camera,
+  Camera as CameraIcon,
   X,
   ChevronRight,
   ArrowDown,
@@ -36,10 +36,11 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { deleteAssetPhoto } from '../services/supabaseService';
-import { compressImage } from '../utils/imageUtils';
 import { addToSyncQueue } from '../services/syncService';
 import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
 import { createWorker } from 'tesseract.js';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { indoorNavigation } from '../services/indoorNavigationService';
 
 import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata } from '../services/tagService';
@@ -107,7 +108,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [ocrResults, setOcrResults] = useState<string[]>([]);
-  const ocrInputRef = React.useRef<HTMLInputElement>(null);
   const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
   const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
   const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
@@ -136,43 +136,65 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     }
   }, [unitizeCount, unitizeMethod, unitizePercentages.length]);
 
-  const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !ocrTargetField) return;
+  const handleOCR = async (field: string) => {
+    if (!field) return;
 
-    setIsOCRProcessing(true);
-    setOcrResults([]);
     try {
-      // Usar português e inglês para melhor reconhecimento de caracteres
-      const worker = await createWorker('por+eng');
-      const { data: { text } } = await worker.recognize(file);
+      // 1. Prova de Vida: Captura de Foto Apenas via Câmera (Sem Galeria)
+      const image = await Camera.getPhoto({
+        quality: 60, // Otimização WhatsApp
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Camera, // Obrigatório: Apenas Câmera
+        width: 1600, // Padrão WhatsApp
+        promptLabelHeader: 'PROVA DE VIDA DO ATIVO',
+        promptLabelPhoto: 'Capturar Etiqueta Patrimonial',
+        promptLabelPicture: 'Foque na etiqueta patrimonial já colada no bem. A posição geográfica será registrada para fins de auditoria.'
+      });
+
+      if (!image.base64String) return;
+
+      setIsOCRProcessing(true);
+      setOcrResults([]);
+
+      // Converter base64 para Blob para o Tesseract
+      const byteCharacters = atob(image.base64String);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+      // 2. Processamento OCR (Modo 100% Offline v2.6)
+      const worker = await createWorker('por+eng', 1, {
+        workerPath: '/assets/tesseract/worker.min.js',
+        langPath: '/assets/tesseract/lang-data',
+        corePath: '/assets/tesseract/tesseract-core.wasm.js',
+        logger: m => console.log(`>>> [OCR] ${m.status}: ${Math.round(m.progress * 100)}%`)
+      });
+      const { data: { text } } = await worker.recognize(blob);
       await worker.terminate();
 
-      // 1. Limpeza e Normalização
       const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
       
-      // 2. Extração Inteligente com Regex (Filtro de Ruído)
       const patterns = {
-        plaqueta: /\b\d{6}\b/g, // Padrão GBR: 6 dígitos numéricos
-        serial: /\b[A-Z0-9-]{6,20}\b/g, // Alfanumérico longo para Seriais
-        geral: /\b[A-Z0-9]{4,}\b/g // Qualquer termo com 4+ caracteres (ignora ruídos pequenos)
+        plaqueta: /\b\d{6}\b/g, 
+        serial: /\b[A-Z0-9-]{6,20}\b/g,
+        geral: /\b[A-Z0-9]{4,}\b/g
       };
 
       const foundMatches: string[] = [];
-      
-      // Prioridade por contexto do campo alvo
-      if (ocrTargetField === 'ETIQUETA') {
+      if (field === 'ETIQUETA') {
         const plaquetaMatches = cleanedText.match(patterns.plaqueta);
         if (plaquetaMatches) foundMatches.push(...plaquetaMatches);
-      } else if (ocrTargetField === 'SERIAL') {
+      } else if (field === 'SERIAL') {
         const serialMatches = cleanedText.match(patterns.serial);
         if (serialMatches) foundMatches.push(...serialMatches);
       }
 
-      // Adicionar matches genéricos se não houver específicos ou para dar opções
       const genericMatches = cleanedText.match(patterns.geral);
       if (genericMatches) {
-        // Filtrar matches genéricos que já estão na lista ou que parecem ruído excessivo
         genericMatches.forEach(m => {
           if (!foundMatches.includes(m) && m.length < 25) {
             foundMatches.push(m);
@@ -182,46 +204,127 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       const uniqueMatches = Array.from(new Set(foundMatches));
 
+      // 3. Validação Anti-Fraude e Coordenadas (Odometria Indoor)
+      const validateAndFinalize = async (recognizedVal: string) => {
+        try {
+          setIsGeocoding(true);
+          
+          // REQUISITO v25.02: Coordenadas calculadas via sensores (Indoor Navigation)
+          const indoorPos = indoorNavigation.getCurrentPosition();
+          const { lat, lng, accuracy, altitude } = indoorPos;
+
+          // Se for ETIQUETA, obriga o cruzamento OCR x Registro
+          if (field === 'ETIQUETA' || field === 'SERIAL') {
+            const currentVal = (workingAsset[field] || editValue || "").toString().trim();
+            if (currentVal && recognizedVal !== currentVal) {
+               alert(`BLOQUEIO DE SEGURANÇA: Divergência detectada!\n\nOCR: ${recognizedVal}\nDigitado: ${currentVal}\n\nA etiqueta deve ser fotografada in loco e corresponder exatamente ao registro.`);
+               setIsGeocoding(false);
+               setIsOCRProcessing(false);
+               return;
+            }
+          }
+
+          const updates = { 
+            ...workingAsset,
+            [field]: recognizedVal,
+            _lat: lat,
+            _lng: lng,
+            _altitude_level: altitude || 0,
+            _pos_timestamp: new Date().toISOString(),
+            _gps_accuracy: accuracy,
+            _ocr_verified: true,
+            _dataLeitura: new Date().toISOString(),
+            _conferido: true
+          };
+
+          // Tenta Geocoding reverso silencioso
+          try {
+            const geoResult = await reverseGeocode(lat, lng);
+            updates._localMaster = geoResult.address;
+            if (field === 'ENDERECO') updates.ENDERECO = geoResult.address;
+          } catch {
+            console.warn('Geocoding falhou, continuando apenas com coordenadas');
+          }
+
+          setWorkingAsset(updates);
+          if (editingField === field) setEditValue(recognizedVal);
+          onUpdate(updates);
+          alert('Presença física autenticada via OCR e Sensores.');
+
+        } catch (err) {
+          console.error('Erro na navegação indoor:', err);
+          alert("Erro ao calcular posição indoor. Verifique se a unidade está validada.");
+        } finally {
+          setIsGeocoding(false);
+          setIsOCRProcessing(false);
+        }
+      };
+
       if (uniqueMatches.length === 1) {
-        // Único resultado: Aplicar direto (Preenchimento Automático)
-        const result = uniqueMatches[0];
-        const updates = { ...workingAsset };
-        updates[ocrTargetField] = result;
-        setWorkingAsset(updates);
-        if (editingField === ocrTargetField) setEditValue(result);
-        setOcrTargetField(null);
+        await validateAndFinalize(uniqueMatches[0]);
       } else if (uniqueMatches.length > 1) {
-        // Múltiplos resultados: Abrir interface de escolha
+        setOcrTargetField(field);
         setOcrResults(uniqueMatches);
       } else {
-        // Nenhum padrão: Usar o texto bruto limpo
-        const updates = { ...workingAsset };
-        updates[ocrTargetField] = cleanedText.substring(0, 50);
-        setWorkingAsset(updates);
-        if (editingField === ocrTargetField) setEditValue(cleanedText.substring(0, 50));
-        setOcrTargetField(null);
+        // Se não achou nada via OCR, solicita nova foto ou avisa que falhou
+        alert('Não foi possível identificar a etiqueta ou serial na foto. Certifique-se de que a foto está nítida e que a etiqueta está centralizada.');
+        setIsOCRProcessing(false);
       }
+
     } catch (err) {
-      console.error('Erro no OCR:', err);
-    } finally {
+      console.error('Erro na captura/OCR:', err);
       setIsOCRProcessing(false);
-      if (ocrInputRef.current) ocrInputRef.current.value = '';
     }
   };
 
   const selectOCRResult = (val: string) => {
     if (!ocrTargetField) return;
-    const updates = { ...workingAsset };
-    updates[ocrTargetField] = val;
-    setWorkingAsset(updates);
-    if (editingField === ocrTargetField) setEditValue(val);
+    // Dispara a validação para o resultado selecionado
+    // Como a foto já foi tirada e o OCR processado, poderíamos simplificar, 
+    // mas a regra pede GPS no momento do OCR OK.
+    
+    // Por simplicidade, vamos apenas chamar a função de finalização que já definimos se pudermos
+    // Ou replicar a lógica aqui
     setOcrResults([]);
-    setOcrTargetField(null);
+    // Chamar um helper que faz o GPS
+    finalizeOCRSelectionWithGPS(ocrTargetField, val);
+  };
+
+  const finalizeOCRSelectionWithGPS = async (field: string, val: string) => {
+    try {
+      setIsOCRProcessing(true);
+      setIsGeocoding(true);
+      
+      const indoorPos = indoorNavigation.getCurrentPosition();
+      const { lat, lng, accuracy, altitude } = indoorPos;
+
+      const updates = { 
+        ...workingAsset,
+        [field]: val,
+        _lat: lat,
+        _lng: lng,
+        _altitude_level: altitude || 0,
+        _pos_timestamp: new Date().toISOString(),
+        _gps_accuracy: accuracy,
+        _ocr_verified: true,
+        _dataLeitura: new Date().toISOString()
+      };
+
+      setWorkingAsset(updates);
+      if (editingField === field) setEditValue(val);
+      onUpdate(updates);
+      setOcrTargetField(null);
+      alert('Presença física validada via sensores indoor.');
+    } catch {
+      alert("Falha ao calcular posição indoor para validação.");
+    } finally {
+      setIsGeocoding(false);
+      setIsOCRProcessing(false);
+    }
   };
 
   const triggerOCR = (field: string) => {
-    setOcrTargetField(field);
-    ocrInputRef.current?.click();
+    handleOCR(field); // Agora chama direto a nova função que usa Capacitor
   };
 
   const handleReverseGeocoding = async (field: string) => {
@@ -248,8 +351,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           
           // Feedback visual de sucesso (opcional, mas bom para UX)
           console.log('Endereço capturado:', result.address);
-        } catch (err) {
-          console.error('Erro ao obter endereço:', err);
+        } catch {
+          console.error('Erro ao obter endereço');
           alert('Não foi possível obter o endereço automaticamente. Verifique sua conexão.');
         } finally {
           setIsGeocoding(false);
@@ -419,6 +522,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       return;
     }
 
+    // Validação de Prova de Vida (Anti-Fraude)
+    if ((isDivergence || isNew) && !finalAsset._ocr_verified) {
+      alert('BLOQUEIO: A regularização exige prova de presença física. Utilize a câmera no campo ETIQUETA ou SERIAL para validar o ativo in loco.');
+      return;
+    }
+
     if (isBatch) {
       // Para lote, se houve alteração em algum campo no finalAsset, aplicamos a todos os itens do lote.
       const manualUpdates: Partial<Asset> = {};
@@ -481,39 +590,84 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     }
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || isBatch) return;
+  const handlePhotoUpload = async () => {
+    if (isBatch) return;
 
-    setIsUploadingPhoto(true);
     try {
-      // Se já existe uma foto, vamos deletar a antiga do storage para economizar espaço
-      // Mas apenas se não for uma URL local (blob:)
+      // 1. Prova de Vida: Captura de Foto Apenas via Câmera (Sem Galeria)
+      const image = await Camera.getPhoto({
+        quality: 60, // Otimização WhatsApp
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Camera, // Obrigatório: Apenas Câmera
+        width: 1600, // Padrão WhatsApp
+        promptLabelHeader: 'EVIDÊNCIA FOTOGRÁFICA',
+        promptLabelPicture: 'Foque no ativo e na etiqueta patrimonial instalada. A geolocalização será capturada para autenticidade.'
+      });
+
+      if (!image.base64String) return;
+
+      setIsUploadingPhoto(true);
+      
+      // Captura de Posição via Sensores (Metadata da Foto)
+      let gpsData = null;
+      try {
+        const indoorPos = indoorNavigation.getCurrentPosition();
+        gpsData = {
+          latitude: indoorPos.lat,
+          longitude: indoorPos.lng,
+          accuracy: indoorPos.accuracy,
+          altitude: indoorPos.altitude
+        };
+      } catch {
+        console.warn('GPS Indoor não capturado para foto.');
+      }
+
+      // Converter base64 para Blob
+      const byteCharacters = atob(image.base64String);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+      // Se já existe uma foto, vamos deletar a antiga
       if (workingAsset._photoUrl && !workingAsset._photoUrl.startsWith('blob:')) {
         await deleteAssetPhoto(workingAsset._photoUrl);
       }
 
-      // Comprime a imagem antes de subir (Perfil WhatsApp: ~1600px e ~200KB)
-      const compressedBlob = await compressImage(file);
+      // Salva localmente
+      await saveLocalPhoto(String(workingAsset.id), blob);
       
-      // Salva localmente para persistência offline e modo INTERNO
-      await saveLocalPhoto(String(workingAsset.id), compressedBlob as Blob);
+      // Cria URL local
+      const localUrl = URL.createObjectURL(blob);
       
-      // Cria URL local para visualização imediata
-      const localUrl = URL.createObjectURL(compressedBlob);
-      
-      // Adiciona à fila de sincronização offline (se não for modo INTERNO)
+      // Adiciona à fila de sincronização
       if (!databaseMode.startsWith('INTERNAL')) {
-        await addToSyncQueue(String(workingAsset.id), compressedBlob as Blob, tenantid || '');
+        await addToSyncQueue(String(workingAsset.id), blob, tenantid || '');
       }
 
-      // Atualiza o estado local imediatamente com a URL do blob
-      const updated = { ...workingAsset, _photoUrl: localUrl };
+      // Atualiza o estado
+      const updated: Asset = { 
+        ...workingAsset, 
+        _photoUrl: localUrl,
+        _conferido: true // Foto de evidência conta como conferência
+      };
+
+      if (gpsData) {
+        updated._lat = gpsData.latitude;
+        updated._lng = gpsData.longitude;
+        updated._gps_accuracy = gpsData.accuracy;
+        updated._altitude_level = gpsData.altitude || 0;
+        updated._pos_timestamp = new Date().toISOString();
+      }
+
       setWorkingAsset(updated);
       onUpdate(updated);
       
     } catch (err) {
-      console.error('Erro ao processar foto:', err);
+      console.error('Erro ao capturar foto via Capacitor:', err);
     } finally {
       setIsUploadingPhoto(false);
     }
@@ -640,10 +794,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                 </div>
                 {!readOnly && (
                   <div className="absolute -bottom-2 -right-2 flex space-x-1">
-                    <label className="w-8 h-8 bg-white text-slate-900 rounded-lg flex items-center justify-center shadow-lg cursor-pointer active:scale-90 transition-all">
-                      <Camera size={16} />
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-                    </label>
+                    <button onClick={handlePhotoUpload} className="w-8 h-8 bg-white text-slate-900 rounded-lg flex items-center justify-center shadow-lg cursor-pointer active:scale-90 transition-all">
+                      <CameraIcon size={16} />
+                    </button>
                     {workingAsset._photoUrl && (
                       <button onClick={removePhoto} className="w-8 h-8 bg-red-500 text-white rounded-lg flex items-center justify-center shadow-lg active:scale-90 transition-all">
                         <Trash2 size={16} />
@@ -875,14 +1028,24 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                   if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
                   const canEdit = !readOnly && editableFields.includes(key);
+                  const isEmptyAddress = key === 'ENDERECO' && (!rawVal || String(rawVal).trim() === '');
                   if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor')) return null;
 
                   return (
                     <div 
                       key={key} 
                       onClick={(e) => { e.stopPropagation(); if (canEdit) { setEditingField(key); setEditValue(String(rawVal || '')); } }} 
-                      className={`px-4 py-3 flex flex-col transition-all active:bg-bg-main ${editingField === key ? 'bg-accent-soft ring-1 ring-inset ring-accent' : ''}`}
+                      className={`px-4 py-3 flex flex-col transition-all active:bg-bg-main relative ${
+                        editingField === key ? 'bg-accent-soft ring-1 ring-inset ring-accent' : 
+                        isEmptyAddress ? 'bg-amber-50 border-x-4 border-amber-400' : ''
+                      }`}
                     >
+                      {isEmptyAddress && (
+                        <div className="absolute top-1 right-2 flex items-center space-x-1">
+                          <span className="text-[7px] font-black text-amber-600 uppercase tracking-tighter">Definir Endereço</span>
+                          <AlertTriangle size={10} className="text-amber-500" />
+                        </div>
+                      )}
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center space-x-1.5">
                           {Icon && <Icon size={10} className="text-ink-muted/30" />}
@@ -913,7 +1076,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                                 className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30"
                                 title="Ler texto da câmera (OCR)"
                               >
-                                <Camera size={18} />
+                                <CameraIcon size={18} />
                               </button>
                             )}
                             {(key === 'ENDERECO' || key === '_localMaster') && (

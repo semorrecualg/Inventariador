@@ -26,6 +26,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { indoorNavigation } from './services/indoorNavigationService';
 import UnitSelector from './components/UnitSelector';
 import Dashboard from './components/Dashboard';
 import UserManagement from './components/UserManagement';
@@ -542,6 +543,13 @@ const App: React.FC = () => {
     hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
   });
 
+  // Limpeza preventiva v2.6
+  useEffect(() => {
+    if (sqliteService) {
+      sqliteService.vacuum();
+    }
+  }, []);
+
   const [inventory, setInventory] = useState<InventoryState>(() => {
     const mode = (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL;
     return getInitialInventoryState(mode);
@@ -831,6 +839,20 @@ const App: React.FC = () => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
     return inventory.unitConfigs.find(c => c.unit_id === selectedUnit) || null;
   }, [inventory.unitConfigs, selectedUnit]);
+
+  // Gestão do Ciclo de Vida da Navegação Indoor
+  useEffect(() => {
+    if (selectedUnit) {
+      // O início já é feito no onSelect do UnitSelector com validação de perímetro
+      // mas garantimos que pare ao sair da unidade
+    } else {
+      indoorNavigation.stopTracking();
+    }
+    
+    return () => {
+      indoorNavigation.stopTracking();
+    };
+  }, [selectedUnit]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (!skipLoadingState && isSyncing) return;
@@ -3612,17 +3634,65 @@ const App: React.FC = () => {
 
   const filteredAssetsByLocation = useMemo(() => {
     if (!inventoryLocation) return [];
-    const locKey = normalizeKey(inventoryLocation);
+    
+    const virtualName = "PENDENTES DE ETIQUETAGEM / SEM ENDEREÇO";
+    const isOrphanVirtual = inventoryLocation.trim() === virtualName;
+    const exactLoc = inventoryLocation.trim();
     const result = [];
+    
+    console.log(`>>> [UX] Executando filtro por Localidade ${isOrphanVirtual ? 'ORFA' : 'EXATA'}: '${exactLoc}'`);
+    
     for (let i = 0; i < filteredAssetsByUnit.length; i++) {
       const a = filteredAssetsByUnit[i];
-      const effectiveLoc = a._localMaster || a.ENDERECO || "";
-      if (normalizeKey(effectiveLoc) === locKey) {
+      // Comparação rigorosa mantendo espaços e caracteres, conforme solicitado
+      const assetLoc = (a.ENDERECO || "").toString().trim();
+      
+      if (isOrphanVirtual) {
+        if (!assetLoc) {
+          result.push(a);
+        }
+      } else if (assetLoc === exactLoc) {
         result.push(a);
       }
     }
+
+    // Se for virtual, ordena por Centro de Custo e injeta cabeçalhos para agrupamento visual
+    if (isOrphanVirtual) {
+       result.sort((a, b) => (a.CENTRODECUSTO || "").localeCompare(b.CENTRODECUSTO || ""));
+       
+       const groupedResult = [];
+       let currentCC = null;
+       
+       for (let j = 0; j < result.length; j++) {
+         const asset = result[j];
+         const cc = asset.CENTRODECUSTO || "CENTRO DE CUSTO NÃO DEFINIDO";
+         
+         if (cc !== currentCC) {
+           groupedResult.push({ 
+             isHeader: true, 
+             title: cc, 
+             id: `header-${cc}`,
+             _is_header: true // Adicional para garantir detecção
+           });
+           currentCC = cc;
+         }
+         groupedResult.push(asset);
+       }
+       
+       console.log(`>>> [UX] Filtro concluído (COM AGRUPAMENTO). Total itens: ${groupedResult.length}`);
+       return groupedResult;
+    }
+    
+    console.log(`>>> [UX] Filtro concluído. Encontrados: ${result.length} ativos para o endereço '${exactLoc}'`);
+    if (result.length === 0 && filteredAssetsByUnit.length > 0 && !isOrphanVirtual) {
+      console.warn(`>>> [UX] ALERTA: Nenhum ativo encontrado para '${exactLoc}'. Verifique se no banco a coluna ENDERECO contém exatamente este valor.`);
+      // Log extra para depuração profunda das strings se vier vazio
+      const sample = filteredAssetsByUnit.slice(0, 5).map(a => `'${(a.ENDERECO || "").toString()}'`);
+      console.log(`>>> [UX] Amostra de ENDERECOs na unidade atual:`, sample);
+    }
+    
     return result;
-  }, [filteredAssetsByUnit, inventoryLocation, normalizeKey]);
+  }, [filteredAssetsByUnit, inventoryLocation]);
 
   const handleSignatureConfirm = useCallback(async (signature: string) => {
     if (!selectedUnit) return;
@@ -4496,16 +4566,54 @@ const App: React.FC = () => {
                   hasGps: c.hasGps
                 }))
               } 
-              onSelect={(u) => { 
+              onSelect={async (u) => { 
+                // 1. Validação de Âncora (GPS) - Entrada no Perímetro da Unidade
+                const config = inventory.unitConfigs[u];
+                const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === 'semorr@gmail.com';
+                
+                // Ignora validação rigorosa se for Admin em modo dev ou se a unidade não tiver GPS configurado
+                if (config && config.lat && config.lng && !isFieldMode && !isAdmin) {
+                  try {
+                    setIsLoading(true);
+                    console.log(`>>> [GPS] Validando perímetro para unidade: ${u}`);
+                    const currentPos = await getCurrentLocation(true);
+                    const isValid = indoorNavigation.validatePerimeter(currentPos, { lat: config.lat, lng: config.lng });
+                    
+                    if (!isValid) {
+                      alert(`BLOQUEIO DE SEGURANÇA: Você está fora do perímetro autorizado para a unidade ${u}.\n\nPresença física obrigatória para iniciar o inventário.`);
+                      setIsLoading(false);
+                      return;
+                    }
+                    
+                    // Sucesso: Define a Âncora e inicia o sistema de odometria indoor
+                    indoorNavigation.setAnchor({ lat: config.lat, lng: config.lng });
+                    indoorNavigation.startTracking();
+                    
+                    // Token de Sessão Offline (Validade 12h)
+                    const sessionToken = `session_${u}_${Date.now()}`;
+                    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+                    await sqliteService.execute('INSERT OR REPLACE INTO session_tokens (unit_id, token, expires_at) VALUES (?, ?, ?)', [u, sessionToken, expiresAt]);
+                    
+                    console.log('>>> [INDOOR] Sessão validada e âncora ativada.');
+                  } catch {
+                    alert('GPS OBRIGATÓRIO: Não conseguimos validar sua posição. Verifique se o GPS está ligado.');
+                    setIsLoading(false);
+                    return;
+                  } finally {
+                    setIsLoading(false);
+                  }
+                } else if (config && config.lat && config.lng) {
+                   // Se for admin ou field mode, apenas seta a âncora sem bloquear
+                   indoorNavigation.setAnchor({ lat: config.lat, lng: config.lng });
+                   indoorNavigation.startTracking();
+                }
+
                 setSelectedUnit(u); 
                 setIsInventorying(false); 
                 setInventoryLocation(null); 
                 sessionStorage.removeItem('app_just_finished_load');
                 
-                // Dispara o sync para a unidade selecionada se estiver no modo nuvem
-                // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
                 if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
-                  // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
                   syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
                 }
                 

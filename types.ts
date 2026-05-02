@@ -126,6 +126,10 @@ export interface Asset {
   _photoUrl?: string;
   _lat?: number;
   _lng?: number;
+  _altitude_level?: number; // Nível/Andar para mezaninos
+  _pos_timestamp?: string; // Momento exato da captura da posição
+  _gps_accuracy?: number; // Precisão do GPS em metros
+  _ocr_verified?: boolean; // Indica se a etiqueta foi validada via OCR in loco
   _aprovado?: boolean;
   _dataAprovacao?: string;
   _aprovador?: string;

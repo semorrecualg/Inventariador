@@ -39,8 +39,12 @@ import {
   WifiOff,
   Flashlight,
   ArrowLeft,
-  Target
+  Target,
+  AlertCircle,
+  Compass,
+  BookOpen
 } from 'lucide-react';
+import POPGuide from './POPGuide';
 
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -152,6 +156,8 @@ interface InventoryProps {
   onUpdateUnitConfig?: (unitId: string, lat: number, lng: number) => Promise<void>;
 }
 
+type InventoryListItem = Asset | { isHeader: boolean; title: string; id: string; _is_header: boolean };
+
 const Inventory: React.FC<InventoryProps> = ({ 
   assets, 
   allAssets, 
@@ -189,6 +195,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
   
   const [isBatchMode, setIsBatchMode] = useState(false);
+  const [isPOPGuideOpen, setIsPOPGuideOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
@@ -269,7 +276,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
   const [isLocSearching, setIsLocSearching] = useState(false);
-  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
+  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string; status?: string }[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
@@ -1423,15 +1430,16 @@ const Inventory: React.FC<InventoryProps> = ({
 
             {dbLocations.length > 0 ? (
               dbLocations
-              .map((loc: { displayName: string; total: number; checked: number; locKey: string }) => {
+              .map((loc: { displayName: string; total: number; checked: number; locKey: string; status?: string }) => {
                 const progress = loc.total > 0 ? Math.round((loc.checked / loc.total) * 100) : 0;
                 const isCompleted = progress === 100;
+                const isAttention = loc.status === 'attention';
                 const locStr = String(loc.displayName || '');
                 
                 // Extrair código e nome (assumindo formato "CODIGO NOME")
                 const parts = locStr.split(' ');
-                const code = parts[0];
-                const name = parts.slice(1).join(' ') || locStr;
+                const code = isAttention ? 'PANDENTE' : parts[0];
+                const name = isAttention ? locStr : (parts.slice(1).join(' ') || locStr);
               
                 return (
                   <button 
@@ -1444,33 +1452,42 @@ const Inventory: React.FC<InventoryProps> = ({
                         onToggleFullscreen();
                       }
                     }} 
-                    className="w-full bg-white rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group"
+                    className={`w-full rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group ${isAttention ? 'bg-amber-50 border-2 border-amber-200' : 'bg-white'}`}
                   >
+                    {isAttention && (
+                      <div className="absolute top-0 right-0 px-3 py-1 bg-amber-500 text-[8px] font-black text-white uppercase tracking-tighter rounded-bl-lg">
+                        Regularização Necessária
+                      </div>
+                    )}
                     <div className="flex items-start space-x-4 mb-4">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${isCompleted ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#2563EB]/15 text-[#2563EB]'}`}>
-                        <MapPin size={22} strokeWidth={2.5} />
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${
+                        isAttention ? 'bg-amber-500/15 text-amber-600' : 
+                        isCompleted ? 'bg-[#10B981]/15 text-[#10B981]' : 
+                        'bg-[#2563EB]/15 text-[#2563EB]'
+                      }`}>
+                        {isAttention ? <AlertCircle size={22} strokeWidth={2.5} /> : <MapPin size={22} strokeWidth={2.5} />}
                       </div>
                       <div className="text-left flex-1 min-w-0">
-                        <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest block mb-1">{code}</span>
-                        <h4 className="text-sm font-bold text-[#1E293B] leading-tight line-clamp-2">
+                        <span className={`text-[10px] font-bold uppercase tracking-widest block mb-1 ${isAttention ? 'text-amber-600' : 'text-[#64748B]'}`}>{code}</span>
+                        <h4 className={`text-sm font-bold leading-tight line-clamp-2 ${isAttention ? 'text-amber-900' : 'text-[#1E293B]'}`}>
                           {name}
                         </h4>
                       </div>
-                      <ChevronRight size={18} className="text-slate-300 mt-1" />
+                      <ChevronRight size={18} className={`${isAttention ? 'text-amber-300' : 'text-slate-300'} mt-1`} />
                     </div>
 
                     <div className="space-y-2">
                       <div className="flex justify-between items-end">
-                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isCompleted ? 'text-[#10B981]' : 'text-[#64748B]'}`}>
+                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isAttention ? 'text-amber-600' : isCompleted ? 'text-[#10B981]' : 'text-[#64748B]'}`}>
                           {loc.checked} / {loc.total} ITENS
                         </span>
-                        <span className={`text-[10px] font-black ${isCompleted ? 'text-[#10B981]' : 'text-[#2563EB]'}`}>
+                        <span className={`text-[10px] font-black ${isAttention ? 'text-amber-600' : isCompleted ? 'text-[#10B981]' : 'text-[#2563EB]'}`}>
                           {progress}%
                         </span>
                       </div>
                       <div className="h-[6px] w-full bg-slate-100 rounded-full overflow-hidden">
                         <div 
-                          className={`h-full transition-all duration-700 ease-out rounded-full ${isCompleted ? 'bg-[#10B981]' : 'bg-[#2563EB]'}`}
+                          className={`h-full transition-all duration-700 ease-out rounded-full ${isAttention ? 'bg-amber-500' : isCompleted ? 'bg-[#10B981]' : 'bg-[#2563EB]'}`}
                           style={{ width: `${progress}%` }}
                         />
                       </div>
@@ -1523,6 +1540,21 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
 
             <div className="flex items-center space-x-2">
+              {/* Indicador de Estabilidade de Sensores (v2.6) */}
+              <div className={`hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter border ${
+                navStatus === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :
+                navStatus === 'yellow' ? 'bg-amber-50 border-amber-200 text-amber-600' :
+                'bg-red-50 border-red-200 text-red-600'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                  navStatus === 'green' ? 'bg-emerald-500' :
+                  navStatus === 'yellow' ? 'bg-amber-500' :
+                  'bg-red-500'
+                }`} />
+                <span>{navStatus === 'green' ? 'SENSORES OK' : navStatus === 'yellow' ? 'OCIOSO' : 'RECIBRAR'}</span>
+                <Compass size={10} className={navStatus === 'red' ? 'animate-spin' : ''} />
+              </div>
+
               {isBatchMode && (
                 <button 
                   onClick={toggleSelectAll} 
@@ -1549,11 +1581,27 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
 
               <button 
+                onClick={() => setIsPOPGuideOpen(true)}
+                className="w-10 h-10 flex items-center justify-center text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
+                title="Guia POP"
+              >
+                <BookOpen size={20} />
+              </button>
+
+              <button 
                 onClick={handleScannerClose} 
                 className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
                 title="Busca por Teclado"
               >
                 <Keyboard size={20} />
+              </button>
+
+              <button 
+                onClick={() => setIsPOPGuideOpen(true)} 
+                className="w-10 h-10 flex items-center justify-center text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
+                title="Guia POP"
+              >
+                <BookOpen size={20} />
               </button>
 
               <button 
@@ -1755,20 +1803,28 @@ const Inventory: React.FC<InventoryProps> = ({
                 components={{
                   Footer: () => <div className="h-28" />
                 }}
-                itemContent={(index, asset) => (
+                itemContent={(index, item: InventoryListItem) => (
                   <div className="px-4 pt-1.5">
-                    <AssetCard 
-                      asset={asset} 
-                      selectedLocation={selectedLocation} 
-                      onSelect={() => handleAssetClick(asset)} 
-                      onMakeDecision={handleMakeDecision} 
-                      selectedUnit={selectedUnit} 
-                      isBatchMode={isBatchMode} 
-                      isSelected={selectedIds.has(String(asset.id))} 
-                      onToggleSelect={toggleSelect} 
-                      hasLocalPhoto={localPhotoIds.has(String(asset.id))}
-                      onShowQr={(a) => setQrModalAsset(a)}
-                    />
+                    {'isHeader' in item || '_is_header' in item ? (
+                      <div className="py-4 px-2 flex items-center space-x-3 sticky top-0 bg-white/80 backdrop-blur-md z-10">
+                        <div className="h-[1px] flex-1 bg-slate-100" />
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">{'title' in item ? item.title : ''}</span>
+                        <div className="h-[1px] flex-1 bg-slate-100" />
+                      </div>
+                    ) : (
+                      <AssetCard 
+                        asset={item as Asset} 
+                        selectedLocation={selectedLocation} 
+                        onSelect={() => handleAssetClick(item as Asset)} 
+                        onMakeDecision={handleMakeDecision} 
+                        selectedUnit={selectedUnit} 
+                        isBatchMode={isBatchMode} 
+                        isSelected={selectedIds.has(String((item as Asset).id))} 
+                        onToggleSelect={toggleSelect} 
+                        hasLocalPhoto={localPhotoIds.has(String((item as Asset).id))}
+                        onShowQr={(a) => setQrModalAsset(a)}
+                      />
+                    )}
                   </div>
                 )}
               />
@@ -1877,6 +1933,11 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>
         </Scanner>
       )}
+
+      <POPGuide 
+        isOpen={isPOPGuideOpen}
+        onClose={() => setIsPOPGuideOpen(false)}
+      />
 
       {/* Modais de Confirmação e Erro de Leitura */}
       {renderConfirmationModals()}

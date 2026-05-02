@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { Capacitor } from '@capacitor/core';
 import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
 import Modal from './Modal';
@@ -35,16 +36,16 @@ import {
   Map as MapIcon,
   RefreshCw,
   ShieldAlert,
-  ExternalLink,
   Activity,
   Calendar,
   FolderOpen,
-  HardDrive,
-  HelpCircle
+  HelpCircle,
+  Layers
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
 import AIChatModal from './AIChatModal';
+import POPGuide from './POPGuide';
 
 import AIInsightCard from './AIInsightCard';
 import { sqliteService } from '../services/sqliteService';
@@ -164,6 +165,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isPOPGuideVisible, setIsPOPGuideVisible] = useState(false);
   const [isSelectiveClearOpen, setIsSelectiveClearOpen] = useState(false);
   const [isExcludedAccountsOpen, setIsExcludedAccountsOpen] = useState(false);
   const [tempExcludedAccounts, setTempExcludedAccounts] = useState<string>('');
@@ -192,18 +194,40 @@ const MainMenu: React.FC<MainMenuProps> = ({
   };
 
   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || user?.email.toLowerCase() === "semorr@gmail.com" || user?.email.toLowerCase() === "semorr@gmail.com.br";
+  const isAuditor = user?.role === UserRole.AUDITOR || (user?.profile && user?.profile.toUpperCase() === 'AUDITOR');
+  const isCertified = user?.isCertified === true || isAdmin;
   const hasData = inventoryInfo.totalDatabase > 0;
 
-  const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);
+  const handleStartInventory = () => {
+    if (isAuditor && !isCertified) {
+      showModal(
+        "Acesso Bloqueado",
+        "Auditor não certificado. Você precisa concluir o treinamento no GUIA POP para liberar o acesso ao inventário de campo.",
+        "warning"
+      );
+      setIsPOPGuideVisible(true);
+      return;
+    }
+    onNavigate(AppScreen.INVENTORY);
+  };
+
+  const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string, source?: string} | null>(null);
 
   React.useEffect(() => {
-    if (isDataMenuOpen) {
-      import('../services/sqliteService').then(m => {
-        m.sqliteService.getFileStatus().then(status => {
-          setDirStatus(status as { status: string; path: string; fileName?: string });
-        });
+    const updateStatus = () => {
+      sqliteService.getFileStatus().then(status => {
+        setDirStatus(status as { status: string; path: string; fileName?: string; source?: string });
       });
+    };
+    
+    if (isDataMenuOpen) {
+      updateStatus();
+      sqliteService.onStatusChange = updateStatus;
     }
+    
+    return () => {
+      sqliteService.onStatusChange = null;
+    };
   }, [isDataMenuOpen]);
 
   const handleSecureAction = (action: () => void) => {
@@ -214,7 +238,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const handlePickDirectory = async () => {
     try {
       if (Capacitor.isNativePlatform()) {
-        await sqliteService.mapLocalFolder();
+        await sqliteService.linkFile(); // No nativo, linkFile lida com a inicialização
         const status = await sqliteService.getFileStatus();
         setDirStatus(status as { status: string; path: string; fileName?: string });
         
@@ -229,25 +253,27 @@ const MainMenu: React.FC<MainMenuProps> = ({
       if (window.self !== window.top) {
         showModal(
           "Restrição de Navegador",
-          "O navegador impede a seleção de pastas dentro de janelas de visualização (iframes). Por favor, abra o aplicativo em uma nova aba para vincular sua pasta física permanentemente.",
+          "O navegador impede a abertura do seletor de arquivos dentro de janelas de visualização (iframes). Por favor, abra o aplicativo em uma nova aba para vincular seu arquivo físico permanentemente.",
           "warning"
         );
         return;
       }
       
-      await sqliteService.mapLocalFolder();
-      const status = await sqliteService.getFileStatus();
-      setDirStatus(status as { status: string; path: string; fileName?: string });
-      
-      showModal(
-        "Sucesso",
-        "Diretório de trabalho vinculado com sucesso. Seus dados agora estão imobilizados fisicamente neste local.",
-        "success"
-      );
+      const success = await sqliteService.linkFile();
+      if (success) {
+        const status = await sqliteService.getFileStatus();
+        setDirStatus(status as { status: string; path: string; fileName?: string });
+        
+        showModal(
+          "Sucesso",
+          "Arquivo .SQL vinculado com sucesso. Seus dados agora estão imobilizados fisicamente e desacoplados do cache volátil.",
+          "success"
+        );
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error(err);
-      showModal("Erro", "Não foi possível vincular a pasta: " + (err instanceof Error ? err.message : String(err)), "error");
+      showModal("Erro", "Não foi possível vincular o arquivo: " + (err instanceof Error ? err.message : String(err)), "error");
     }
   };
 
@@ -397,6 +423,28 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
         {/* AI INSIGHT CARD */}
+        {isAuditor && !isCertified && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-center space-x-3 shadow-sm mb-4"
+          >
+            <div className="w-10 h-10 bg-amber-500 text-white rounded-xl flex items-center justify-center shrink-0">
+              <ShieldAlert size={20} />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-[11px] font-black text-amber-900 uppercase tracking-tight">Treinamento Pendente</h4>
+              <p className="text-[9px] font-bold text-amber-700/80 uppercase leading-tight">Conclua o Guia POP para liberar o campo.</p>
+            </div>
+            <button 
+              onClick={() => setIsPOPGuideVisible(true)}
+              className="px-3 py-1.5 bg-amber-600 text-white text-[8px] font-black uppercase rounded-lg shadow-md active:scale-95 transition-all"
+            >
+              TREINAR
+            </button>
+          </motion.div>
+        )}
+
         {(campaignsCount || 0) > 0 ? (
           <AIInsightCard 
             title="Insights de Auditoria"
@@ -414,15 +462,24 @@ const MainMenu: React.FC<MainMenuProps> = ({
         )}
 
         <button
-          disabled={!hasData}
-          onClick={() => onNavigate(AppScreen.INVENTORY)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+          onClick={handleStartInventory}
+          className={`w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group relative ${
+            isAuditor && !isCertified ? 'opacity-60 cursor-not-allowed border-2 border-amber-100' : ''
+          }`}
         >
-          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+          {isAuditor && !isCertified && (
+            <div className="absolute top-2 right-2 flex items-center space-x-1 bg-amber-500 text-white px-2 py-0.5 rounded-full z-10 scale-75 origin-top-right">
+              <ShieldAlert size={10} />
+              <span className="text-[6px] font-black uppercase tracking-widest">Bloqueado</span>
+            </div>
+          )}
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center mr-5 transition-colors ${
+            isAuditor && !isCertified ? 'bg-amber-50 text-amber-400' : 'bg-accent-soft text-accent group-hover:bg-accent group-hover:text-white'
+          }`}>
             <ClipboardList size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">INVENTÁRIO</h3>
+            <h3 className={`text-base font-bold tracking-tight ${isAuditor && !isCertified ? 'text-slate-400' : 'text-ink'}`}>INVENTÁRIO</h3>
             <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conferência Física</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
@@ -483,6 +540,26 @@ const MainMenu: React.FC<MainMenuProps> = ({
         isOpen={isAIAssistantOpen}
         onClose={() => setIsAIAssistantOpen(false)}
         username={user?.username || 'Operador'}
+      />
+
+      <POPGuide 
+        isOpen={isPOPGuideVisible}
+        onClose={() => setIsPOPGuideVisible(false)}
+        onCertified={async () => {
+          if (user) {
+            try {
+              await sqliteService.execute('UPDATE users SET is_certified = 1 WHERE username = ? OR email = ?', [user.username, user.email]);
+              // Atualiza localmente o objeto user na sessão
+              const updatedUser = { ...user, isCertified: true };
+              localStorage.setItem('app_current_user', JSON.stringify(updatedUser));
+              showModal("Certificação Concluída", "Sua permissão foi liberada. Você já pode iniciar o inventário.", "success");
+              // Podemos forçar um reload ou apenas atualizar o estado local se vier do componente pai
+              setTimeout(() => window.location.reload(), 2000);
+            } catch (e) {
+              console.error("Erro ao salvar certificação:", e);
+            }
+          }
+        }}
       />
 
       {isAdminMenuOpen && (
@@ -808,10 +885,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </button>
 
                 <button 
-                  onClick={() => window.open('/ajuda_sistema.html', '_blank')}
+                  onClick={() => setIsPOPGuideVisible(true)}
                   className="flex flex-col items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-center shadow-sm"
                 >
-                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-2 border border-indigo-100"><ExternalLink size={20} /></div>
+                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-2 border border-indigo-100"><BookOpen size={20} /></div>
                   <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">Guia POP</h4>
                 </button>
               </div>
@@ -873,11 +950,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
               >
                 <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
-                  <MapIcon size={20} />
+                  <Layers size={20} />
                 </div>
                 <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Mapa de Calor</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Geotagging de Ativos</p>
+                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Mapa Patrimonial</h4>
+                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Cartografia e Geotagging de Ativos</p>
                 </div>
                 <ChevronRight size={14} className="text-white/20" />
               </button>
@@ -924,7 +1001,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
-              {/* Working Directory Status Card */}
+              {/* Working Directory Status Card - RE-DESIGNED AS SOBERANIA DE DADOS */}
               <div className="w-full p-5 bg-blue-600 rounded-2xl shadow-xl shadow-blue-500/20 mb-4 border border-blue-400 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                   <FolderOpen size={64} className="text-white" />
@@ -932,51 +1009,69 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
                 <div className="flex items-center space-x-3 mb-4">
                   <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-white backdrop-blur-sm border border-white/30">
-                    <HardDrive size={20} />
+                    <ShieldCheck size={20} />
                   </div>
                   <div>
-                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">Vínculo de Diretório</h4>
-                    <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Soberania Local Permanente</p>
+                    <h4 className="text-[13px] font-black text-white uppercase tracking-tight">Soberania de Dados</h4>
+                    <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest">Base SQLite Desacoplada</p>
                   </div>
                 </div>
 
                 <div className="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/10 mb-4">
                   <div className="flex justify-between items-center mb-1.5">
-                    <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Caminho do Banco:</span>
-                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${dirStatus?.status === 'linked' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
-                      {dirStatus?.status === 'linked' ? 'ATIVO' : 'DESCONECTADO'}
+                    <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Status do Link:</span>
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${dirStatus?.status === 'linked' || dirStatus?.status === 'granted' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                      {dirStatus?.status === 'linked' || dirStatus?.status === 'granted' ? 'CONCLUÍDO' : (dirStatus?.status === 'prompt' ? 'PENDENTE' : 'CACHED')}
                     </span>
                   </div>
                   <p className="text-[10px] font-mono font-bold text-white break-all leading-tight">
-                    {dirStatus?.path || 'Nenhum diretório selecionado'}
+                    {dirStatus?.path || 'Usando diretório privado (Volátil)'}
                   </p>
                   <div className="mt-2 flex items-center space-x-2">
                     <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: {dirStatus?.fileName || 'Aguardando...'}</span>
+                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: {dirStatus?.fileName || 'Soberania não ativa'}</span>
                   </div>
                 </div>
 
                 <div className="flex space-x-2">
-                  <button 
-                    onClick={handlePickDirectory}
-                    className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
-                  >
-                    <FolderOpen size={12} />
-                    <span>{Capacitor.isNativePlatform() ? 'VALIDAR SOBERANIA' : 'ALTERAR PASTA'}</span>
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (Capacitor.isNativePlatform()) {
-                        sqliteService.downloadDatabase();
-                      } else {
-                        import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission());
-                      }
-                    }}
-                    className="w-12 py-2.5 bg-blue-700 text-white rounded-xl flex items-center justify-center hover:bg-blue-800 transition-all border border-white/10"
-                    title={Capacitor.isNativePlatform() ? "Exportar Backup" : "Autorizar Acesso"}
-                  >
-                    {Capacitor.isNativePlatform() ? <Download size={14} /> : <RefreshCw size={14} />}
-                  </button>
+                  {(!dirStatus?.status || dirStatus.status === 'none') ? (
+                    <button 
+                      onClick={handlePickDirectory}
+                      className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
+                    >
+                      <FolderOpen size={12} />
+                      <span>APONTAR LOCAL (.SQL)</span>
+                    </button>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={async () => {
+                          if (dirStatus.status === 'prompt') {
+                            const success = await sqliteService.requestFilePermission();
+                            if (success) showModal("Permissão Concedida", "O link com o banco externo foi restaurado.", "success");
+                          } else {
+                            handlePickDirectory();
+                          }
+                        }}
+                        className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
+                      >
+                        {dirStatus.status === 'prompt' ? <ShieldCheck size={12} /> : <RefreshCw size={12} />}
+                        <span>{dirStatus.status === 'prompt' ? 'CONFIRMAR ACESSO' : 'REFAZER LINK'}</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => {
+                          if (window.confirm("Deseja realmente desacoplar o banco externo? O sistema voltará a utilizar o cache interno (Volátil).")) {
+                            sqliteService.unlinkExternalFile();
+                          }
+                        }}
+                        className="w-12 py-2.5 bg-red-600 text-white rounded-xl flex items-center justify-center hover:bg-red-700 transition-all border border-white/10"
+                        title="Desacoplar Banco"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
