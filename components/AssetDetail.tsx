@@ -652,6 +652,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       const updated: Asset = { 
         ...workingAsset, 
         _photoUrl: localUrl,
+        FOTO_PATH: localUrl, // Armazena o path local (blob URL ou reference)
         _conferido: true // Foto de evidência conta como conferência
       };
 
@@ -748,7 +749,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md flex items-center space-x-2">
               {readOnly && <Lock size={14} className="text-white/70" />}
               <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">
-                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'KARDEK v24.50')}
+                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'NATIVE v2.6')}
               </span>
             </div>
           </div>
@@ -1231,7 +1232,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                 ) : (
                   <ShieldCheck size={20} strokeWidth={3} />
                 )}
-                <span>{isSyncingProtheus ? 'SINCRONIZANDO...' : 'SINCRONIZAR PROTHEUS'}</span>
+                <span>{isSyncingProtheus ? 'INTEGRANDO...' : 'INTEGRAR COM ERP'}</span>
               </button>
             </div>
           )}
@@ -1239,7 +1240,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
+              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">NATIVE v2.6</span>
             </div>
             <div className="flex items-center space-x-2">
               {!isBatch && onUnitize && (

@@ -50,10 +50,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'DIVERGÊNCIA',
     description: 'Etiqueta física encontrada difere do registro mestre no sistema.',
     color: {
-      bg: 'bg-orange-950/30',
-      text: 'text-orange-400',
-      border: 'border-orange-500/30',
-      badge: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+      bg: 'bg-orange-50',
+      text: 'text-orange-500',
+      border: 'border-orange-200',
+      badge: 'bg-orange-500 text-white font-black',
       button: 'bg-orange-600 hover:bg-orange-700 text-white',
       icon: 'text-orange-500'
     },
@@ -80,12 +80,12 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'NOVO ITEM',
     description: 'Ativo não encontrado na base mestre, cadastrado durante o inventário.',
     color: {
-      bg: 'bg-purple-950/30',
-      text: 'text-purple-400',
-      border: 'border-purple-500/30',
-      badge: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-      button: 'bg-purple-600 hover:bg-purple-700 text-white',
-      icon: 'text-purple-500'
+      bg: 'bg-violet-50',
+      text: 'text-violet-500',
+      border: 'border-violet-200',
+      badge: 'bg-violet-500 text-white font-black',
+      button: 'bg-violet-600 hover:bg-violet-700 text-white',
+      icon: 'text-violet-500'
     },
     icon: PlusCircle,
     priority: 4
@@ -95,10 +95,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'RE-ADOTADO',
     description: 'Ativo já conferido anteriormente em um local e agora encontrado em outro local.',
     color: {
-      bg: 'bg-fuchsia-950/30',
-      text: 'text-fuchsia-400',
-      border: 'border-fuchsia-500/30',
-      badge: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30',
+      bg: 'bg-fuchsia-50',
+      text: 'text-fuchsia-500',
+      border: 'border-fuchsia-200',
+      badge: 'bg-fuchsia-500 text-white font-black',
       button: 'bg-fuchsia-600 hover:bg-fuchsia-700 text-white',
       icon: 'text-fuchsia-500'
     },
@@ -110,10 +110,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'ADOTADO',
     description: 'Ativo encontrado em endereço diferente do registro original.',
     color: {
-      bg: 'bg-blue-950/30',
-      text: 'text-blue-400',
-      border: 'border-blue-500/30',
-      badge: 'bg-blue-600 text-white font-black',
+      bg: 'bg-blue-50',
+      text: 'text-blue-500',
+      border: 'border-blue-200',
+      badge: 'bg-blue-500 text-white font-black',
       button: 'bg-blue-600 hover:bg-blue-700 text-white',
       icon: 'text-blue-500'
     },
@@ -125,10 +125,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'CONFERIDO',
     description: 'Ativo encontrado exatamente no endereço original da base mestre.',
     color: {
-      bg: 'bg-emerald-950/30',
-      text: 'text-emerald-400',
-      border: 'border-emerald-500/30',
-      badge: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      bg: 'bg-emerald-50',
+      text: 'text-emerald-500',
+      border: 'border-emerald-200',
+      badge: 'bg-emerald-500 text-white font-black',
       button: 'bg-emerald-600 hover:bg-emerald-700 text-white',
       icon: 'text-emerald-500'
     },
@@ -140,10 +140,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'PENDENTE',
     description: 'Ativo disponível para ser inventariado na base campo STATUS igual a [ATIVO].',
     color: {
-      bg: 'bg-slate-900',
-      text: 'text-slate-400',
-      border: 'border-slate-800',
-      badge: 'bg-slate-800 text-slate-400 border-slate-700',
+      bg: 'bg-slate-50',
+      text: 'text-[#64748B]',
+      border: 'border-slate-200',
+      badge: 'bg-[#64748B] text-white font-black',
       button: 'bg-slate-700 hover:bg-slate-600 text-white',
       icon: 'text-slate-500'
     },
@@ -155,10 +155,10 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'FALTA ETIQUETAR',
     description: 'Ativo marcado para receber nova etiqueta física.',
     color: {
-      bg: 'bg-rose-950/30',
-      text: 'text-rose-400',
-      border: 'border-rose-500/30',
-      badge: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+      bg: 'bg-rose-50',
+      text: 'text-rose-500',
+      border: 'border-rose-200',
+      badge: 'bg-rose-500 text-white font-black',
       button: 'bg-rose-600 hover:bg-rose-700 text-white',
       icon: 'text-rose-500'
     },

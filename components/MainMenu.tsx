@@ -79,8 +79,6 @@ interface MainMenuProps {
   onSyncCloud?: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
-  syncError?: string | null;
-  hasSupabase?: boolean;
   protheusIntegrationEnabled: boolean;
   onUpdateProtheusIntegration: (val: boolean) => void;
   protheusApiUrl: string;
@@ -90,8 +88,6 @@ interface MainMenuProps {
   mandatoryPhotoOnNewItem: boolean;
   onUpdateMandatoryPhotoOnNewItem: (val: boolean) => void;
   pendingPhotosCount?: number;
-  syncQueueLength?: number;
-  unsyncedAssetsCount?: number;
   deletedAssetsCount?: number;
   impairmentAssetsCount?: number;
   excludedAccounts?: string[];
@@ -133,8 +129,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateBatterySaver,
   onSyncCloud,
   isSyncing = false,
-  syncError,
-  hasSupabase = false,
   protheusIntegrationEnabled,
   onUpdateProtheusIntegration,
   protheusApiUrl,
@@ -144,8 +138,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateMandatoryPhotoOnDivergence,
   mandatoryPhotoOnNewItem,
   onUpdateMandatoryPhotoOnNewItem,
-  syncQueueLength = 0,
-  unsyncedAssetsCount = 0,
   deletedAssetsCount = 0,
   impairmentAssetsCount = 0,
   excludedAccounts = [],
@@ -298,37 +290,17 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
-            <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border ${
-              isSyncing 
-                ? 'bg-blue-50 border-blue-100 text-blue-500' 
-                : syncError 
-                  ? 'bg-red-50 border-red-100 text-red-500' 
-                  : syncQueueLength > 0
-                    ? 'bg-amber-50 border-amber-100 text-amber-500'
-                    : 'bg-emerald-50 border-emerald-100 text-emerald-500'
-            }`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : syncError ? 'bg-red-500' : syncQueueLength > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-              <span className="text-[9px] font-bold uppercase tracking-tight">
-                {isSyncing ? 'Sincronizando' : syncError ? 'Erro' : (syncQueueLength + unsyncedAssetsCount) > 0 ? `${syncQueueLength + unsyncedAssetsCount} Pendentes` : 'Online'}
-              </span>
-            </div>
-          )}
-          {databaseMode === DatabaseMode.INTERNAL && (unsyncedAssetsCount > 0) && (
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border bg-amber-50 border-amber-100 text-amber-500">
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              <span className="text-[9px] font-bold uppercase tracking-tight">
-                {unsyncedAssetsCount} Local-only
-              </span>
-            </div>
-          )}
+          <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border bg-emerald-50 border-emerald-100 text-emerald-500">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span className="text-[9px] font-bold uppercase tracking-tight">Soberania Ativa</span>
+          </div>
           <button 
             onClick={() => onOpenHelp?.()}
             className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"
           >
             <HelpCircle size={20} />
           </button>
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md"><Activity size={20} /></div>
+          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-md"><ShieldCheck size={20} /></div>
         </div>
       </div>
 
@@ -414,8 +386,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
             {hasData ? `${inventoryInfo.count} Ativos` : 'Vazio'}
           </span>
           <div className="flex items-center space-x-1 mt-1">
-            <div className={`w-1.5 h-1.5 rounded-full ${hasData ? 'bg-success' : 'bg-slate-300'}`} />
-            <span className="text-[8px] font-medium text-ink-muted uppercase">Base Local</span>
+            <div className={`w-1.5 h-1.5 rounded-full ${hasData ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Soberania Nativa</span>
           </div>
         </div>
       </div>
@@ -533,7 +505,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
       <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center">
-        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.4em]">Auditoria Inteligente • SaaS</span>
+        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.4em]">Auditoria Inteligente • Native Engine</span>
       </div>
 
       <AIChatModal 

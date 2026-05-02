@@ -144,6 +144,12 @@ CREATE TABLE IF NOT EXISTS unit_configs (
     updated_by TEXT,
     updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS config_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT
+);
 `;
 
 export type StorageSource = 'PHYSICAL' | 'CACHE' | 'MEMORY' | 'NONE';
@@ -692,6 +698,16 @@ class SqliteService {
   }
 
   async getDb() { return this.db; }
+
+  async saveConfig(key: string, value: string) {
+    await this.execute("INSERT OR REPLACE INTO config_meta (key, value, updated_at) VALUES (?, ?, ?)", 
+      [key, value, new Date().toISOString()]);
+  }
+
+  async getConfig(key: string): Promise<string | null> {
+    const res = await this.query("SELECT value FROM config_meta WHERE key = ?", [key]);
+    return (res[0]?.value as string) || null;
+  }
 
   getNativePath() { return this.nativePath; }
 

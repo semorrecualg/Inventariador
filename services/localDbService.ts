@@ -88,11 +88,11 @@ export const localDb = {
       let params: SqlValue[];
 
       if (isOrphanVirtual) {
-        sql = "SELECT * FROM assets WHERE (ENDERECO IS NULL OR trim(ENDERECO) = '') AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?) AND _is_deleted = 0 ORDER BY CENTRODECUSTO ASC";
-        params = [unitId.toUpperCase(), unitId.toUpperCase()];
+        sql = "SELECT * FROM assets WHERE (ENDERECO IS NULL OR trim(ENDERECO) = '') AND (trim(UNIDADE_OPERACIONAL) = trim(?) COLLATE NOCASE OR trim(_unitid) = trim(?) COLLATE NOCASE) AND _is_deleted = 0 ORDER BY CENTRODECUSTO ASC";
+        params = [unitId, unitId];
       } else {
-        sql = "SELECT * FROM assets WHERE ENDERECO = ? AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?) AND _is_deleted = 0";
-        params = [trimmedLoc, unitId.toUpperCase(), unitId.toUpperCase()];
+        sql = "SELECT * FROM assets WHERE trim(ENDERECO) = trim(?) COLLATE NOCASE AND (trim(UNIDADE_OPERACIONAL) = trim(?) COLLATE NOCASE OR trim(_unitid) = trim(?) COLLATE NOCASE) AND _is_deleted = 0";
+        params = [trimmedLoc, unitId, unitId];
       }
       
       console.log(`>>> [DBA] EXECUTANDO QUERY DE ATIVOS (${isOrphanVirtual ? 'ÓRFÃOS' : 'EXATA'}):`);
@@ -143,13 +143,13 @@ export const localDb = {
           COUNT(*) as total,
           SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
         FROM assets
-        WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?)
+        WHERE (trim(UNIDADE_OPERACIONAL) = trim(?) COLLATE NOCASE OR trim(_unitid) = trim(?) COLLATE NOCASE)
           AND _is_deleted = 0
           AND ENDERECO IS NOT NULL AND trim(ENDERECO) != ''
       `;
       const params: SqlValue[] = [
-        unitId.toUpperCase(), 
-        unitId.toUpperCase()
+        unitId, 
+        unitId
       ];
 
       if (searchTerm) {

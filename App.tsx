@@ -510,13 +510,27 @@ const App: React.FC = () => {
     return localStorage.getItem('app_selected_unit') || null;
   });
 
+  const [currentCampaignId, setCurrentCampaignId] = useState<string | null>(() => {
+    return localStorage.getItem('app_current_campaign_id') || null;
+  });
+
   useEffect(() => {
     if (selectedUnit) {
       localStorage.setItem('app_selected_unit', selectedUnit);
+      sqliteService.saveConfig('selectedUnit', selectedUnit);
     } else {
       localStorage.removeItem('app_selected_unit');
     }
   }, [selectedUnit]);
+
+  useEffect(() => {
+    if (currentCampaignId) {
+      localStorage.setItem('app_current_campaign_id', currentCampaignId);
+      sqliteService.saveConfig('currentCampaignId', currentCampaignId);
+    } else {
+      localStorage.removeItem('app_current_campaign_id');
+    }
+  }, [currentCampaignId]);
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -813,6 +827,10 @@ const App: React.FC = () => {
     
     try {
       await saveUnitConfig(configToSave);
+      
+      // PERSISTÊNCIA SOBERANA (v2.6)
+      await sqliteService.saveConfig(`gps_ref_${unitId}_lat`, String(lat));
+      await sqliteService.saveConfig(`gps_ref_${unitId}_lng`, String(lng));
       
       // Atualiza o estado local imediatamente para refletir a mudança
       const updatedConfigs = await fetchUnitConfigs(user.tenantid);
@@ -1360,6 +1378,25 @@ const App: React.FC = () => {
       await requestPersistentStorage();
       
       console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
+      
+      // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
+      try {
+        const savedUnit = await sqliteService.getConfig('selectedUnit');
+        const savedCampaign = await sqliteService.getConfig('currentCampaignId');
+        
+        if (savedUnit && !selectedUnit) {
+          console.log(`>>> [Boot] Restaurando Unidade Operacional: ${savedUnit}`);
+          setSelectedUnit(savedUnit);
+        }
+        
+        if (savedCampaign && !currentCampaignId) {
+          console.log(`>>> [Boot] Restaurando Campanha Ativa: ${savedCampaign}`);
+          setCurrentCampaignId(savedCampaign);
+        }
+      } catch (err) {
+        console.warn(">>> [Boot] Falha ao restaurar meta-configurações:", err);
+      }
+
       let savedInventory: InventoryState | null = null;
       try {
         savedInventory = await loadInventory(databaseMode);
@@ -4111,14 +4148,14 @@ const App: React.FC = () => {
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
-                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">v24.50.2</span>
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Native v2.6</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
                     className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
                   >
-                    <Activity size={10} />
-                    <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
+                    <ShieldCheck size={10} />
+                    <span className="text-[7px] font-black uppercase tracking-widest">Sovereign</span>
                   </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
                     <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
@@ -4423,7 +4460,7 @@ const App: React.FC = () => {
                   databaseMode={inventory.databaseMode}
                   onSyncFromCloud={syncFromCloud}
                   user={user}
-                  currentCampaignId={inventory.currentCampaignId}
+                  currentCampaignId={currentCampaignId || undefined}
                   unitConfig={currentUnitConfig}
                   onUpdateUnitConfig={handleUpdateUnitConfig}
                 />
@@ -4667,7 +4704,7 @@ const App: React.FC = () => {
             <Dashboard 
               assets={filteredAssetsByUnit} 
               allAssets={inventory.assets}
-              currentCampaignId={inventory.currentCampaignId}
+              currentCampaignId={currentCampaignId || undefined}
               onBack={popScreen} 
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
@@ -4751,16 +4788,16 @@ const App: React.FC = () => {
               user={user} 
               onBack={popScreen} 
               onActivate={async (id) => {
+                setCurrentCampaignId(id);
                 setInventory(prev => ({ 
                   ...prev, 
-                  currentCampaignId: id,
                   status: DatabaseStatus.LOADED 
                 }));
                 // Força atualização das estatísticas e estado reactivo antes de navegar
                 await refreshCampaigns();
                 pushScreen(AppScreen.INVENTORY);
               }}
-              currentCampaignId={inventory.currentCampaignId}
+              currentCampaignId={currentCampaignId || undefined}
               availableUnits={fullCompaniesWithStatus.map(c => c.name)}
               campaigns={campaigns}
               onRefresh={refreshCampaigns}

@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { motion, AnimatePresence } from 'motion/react';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
@@ -13,7 +14,6 @@ import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 import { sqliteService, FileStatus } from '../services/sqliteService';
 
-import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
 import { getCurrentLocation } from '../utils/gpsUtils';
 import { 
@@ -22,29 +22,23 @@ import {
   CheckCircle2,
   Zap, 
   ChevronRight,
-  Square,
-  CheckSquare,
   Plus,
   Search,
   X,
   AlertTriangle,
   FilePlus2,
-  FileText,
   Camera,
-  Keyboard,
   Loader2,
   Database,
   Mic,
   ShieldAlert,
   Activity,
   WifiOff,
-  Flashlight,
   ArrowLeft,
   Target,
   AlertCircle,
   BookOpen,
-  ShieldCheck,
-  RefreshCw
+  ShieldCheck
 } from 'lucide-react';
 import POPGuide from './POPGuide';
 
@@ -101,8 +95,8 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 const AssetCard = React.memo(({ 
-  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto, onShowQr
-}: AssetCardProps) => {
+  asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto, onShowQr, onViewPhoto
+}: AssetCardProps & { onViewPhoto?: (url: string) => void }) => {
   return (
     <AssetListItem 
       asset={asset}
@@ -115,6 +109,7 @@ const AssetCard = React.memo(({
       onToggleSelect={onToggleSelect}
       hasLocalPhoto={hasLocalPhoto}
       onShowQr={onShowQr}
+      onViewPhoto={onViewPhoto}
     />
   );
 });
@@ -158,8 +153,6 @@ interface InventoryProps {
   onUpdateUnitConfig?: (unitId: string, lat: number, lng: number) => Promise<void>;
 }
 
-type InventoryListItem = Asset | { isHeader: boolean; title: string; id: string; _is_header: boolean };
-
 const Inventory: React.FC<InventoryProps> = ({ 
   assets, 
   allAssets, 
@@ -179,8 +172,6 @@ const Inventory: React.FC<InventoryProps> = ({
   onUpdateScannerMode, 
   autoConfirmOnScan, 
   scanFeedbackMode, 
-  onOpenConsultation, 
-  onOpenSignature,
   inventorySearchValue, 
   clearInventorySearchValue, 
   immersiveMode, 
@@ -194,13 +185,15 @@ const Inventory: React.FC<InventoryProps> = ({
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
+  const [activeTab, setActiveTab] = useState<'PENDING' | 'INVENTORIED'>('PENDING');
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [isPOPGuideOpen, setIsPOPGuideOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
 
   // Telemetria e Hardware
   const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
@@ -302,7 +295,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
   const [showNumericKeypad, setShowNumericKeypad] = useState(false);
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
@@ -312,15 +304,12 @@ const Inventory: React.FC<InventoryProps> = ({
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
-  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
-  const ocrInputRef = useRef<HTMLInputElement>(null);
-
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [showScrollTop, ] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // v24.50: Restauração de Scroll (UX de Campo)
@@ -535,7 +524,10 @@ const Inventory: React.FC<InventoryProps> = ({
       QT: 1,
       DESCRICAODOATIVO: '',
       SERIAL: '',
-      ENDERECO: selectedLocation || ""
+      ENDERECO: selectedLocation || "",
+      _isNew: true,
+      _is_synced: false,
+      _unitid: selectedUnit || ""
     });
     setIsManualEntryOpen(true);
   };
@@ -673,44 +665,6 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const handleSmartOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsOCRProcessing(true);
-    try {
-      const worker = await createWorker('por+eng');
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
-
-      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
-      
-      // Tentar encontrar padrão de plaqueta (6 dígitos)
-      const plaquetaMatch = cleanedText.match(/\b\d{6}\b/);
-      
-      if (plaquetaMatch) {
-        const foundTag = plaquetaMatch[0];
-        setDisplayValue(foundTag);
-        setCommittedSearch(foundTag);
-        setIsSearchVisible(true);
-        setShowNumericKeypad(false);
-      } else {
-        // Se não achar plaqueta, tenta qualquer código alfanumérico relevante
-        const genericMatch = cleanedText.match(/\b[A-Z0-9]{4,}\b/);
-        if (genericMatch) {
-          setDisplayValue(genericMatch[0]);
-          setCommittedSearch(genericMatch[0]);
-          setIsSearchVisible(true);
-        }
-      }
-    } catch (err) {
-      console.error('Erro no Smart OCR:', err);
-    } finally {
-      setIsOCRProcessing(false);
-      if (ocrInputRef.current) ocrInputRef.current.value = '';
-    }
-  };
-
   const handleReverseGeocoding = async () => {
     if (!navigator.geolocation) {
       alert('Geolocalização não suportada.');
@@ -743,10 +697,6 @@ const Inventory: React.FC<InventoryProps> = ({
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  };
-
-  const triggerSmartOCR = () => {
-    ocrInputRef.current?.click();
   };
 
   const handleForceLocation = async () => {
@@ -790,7 +740,7 @@ const Inventory: React.FC<InventoryProps> = ({
         
         if (isBaixado && !isConferido) continue;
 
-        if (activeFilter === 'checked') {
+        if (activeTab === 'INVENTORIED') {
           if (isConferido) result.push(a);
         } else {
           if (!isConferido) result.push(a);
@@ -798,7 +748,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
 
       return result.sort((a, b) => {
-        if (activeFilter === 'checked') {
+        if (activeTab === 'INVENTORIED') {
           const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
           const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
           if (dateA !== dateB) return dateB - dateA;
@@ -806,7 +756,7 @@ const Inventory: React.FC<InventoryProps> = ({
         
         const etqA = String(a.ETIQUETA || '').padStart(10, '0');
         const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-        return activeFilter === 'checked' 
+        return activeTab === 'INVENTORIED' 
           ? etqB.localeCompare(etqA, undefined, { numeric: true })
           : etqA.localeCompare(etqB, undefined, { numeric: true });
       });
@@ -824,7 +774,7 @@ const Inventory: React.FC<InventoryProps> = ({
     }
 
     return localMatches.sort((a, b) => {
-      if (activeFilter === 'checked') {
+      if (activeTab === 'INVENTORIED') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
         if (dateA !== dateB) return dateB - dateA;
@@ -832,11 +782,11 @@ const Inventory: React.FC<InventoryProps> = ({
 
       const etqA = String(a.ETIQUETA || '').padStart(10, '0');
       const etqB = String(b.ETIQUETA || '').padStart(10, '0');
-      return activeFilter === 'checked'
+      return activeTab === 'INVENTORIED'
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedUnit]);
+  }, [assets, allAssets, selectedLocation, committedSearch, activeTab, selectedUnit]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
@@ -860,93 +810,6 @@ const Inventory: React.FC<InventoryProps> = ({
     setDisplayValue('');
   };
 
-  const handleMakeDecision = useCallback(async (id: string, decision: 'YES' | 'NO') => {
-    if (decision === 'NO') return;
-
-    const asset = allAssets.find(a => String(a.id) === id);
-    if (!asset) return;
-    
-    const etq = normalizeKey(asset.ETIQUETA || "");
-    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
-    const currentCompKey = normalizeKey(selectedUnit || '');
-    
-    if (isBatch && etq && etq !== "ETIQUETAR") {
-      // Restrito à UNIDADE ATUAL e STATUS ATIVO
-      const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
-        const sUpper = String(a.STATUS || '').toUpperCase();
-        const isNotB = !sUpper.includes('BAIXA') && !a.DATABAIXA;
-        return sameEtq && sameComp && isNotB && !a._conferido;
-      });
-
-      if (related.length > 1) {
-        const ids = related.map(a => String(a.id));
-        await onBulkUpdateAssets(ids);
-        setDisplayValue('');
-        return;
-      }
-    }
-    
-    await onUpdateAsset({
-      ...asset,
-      _conferido: true,
-      _localMaster: selectedLocation || asset.ENDERECO
-    });
-    setDisplayValue('');
-  }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
-
-  const handleAssetClick = useCallback(async (asset: Asset) => {
-    setShowNumericKeypad(false);
-    const etq = normalizeKey(asset.ETIQUETA || "");
-    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
-    const currentCompKey = normalizeKey(selectedUnit || '');
-    const assetCompKey = normalizeKey(asset.UNIDADE_OPERACIONAL || asset._unitid || '');
-    
-    // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
-    if (asset._conferido) {
-      setDuplicateAsset(asset);
-      return;
-    }
-
-    // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
-    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      await onUpdateAsset({ 
-        ...asset, 
-        UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL || asset._unitid,
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.ENDERECO
-      });
-      return;
-    }
-
-    if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
-      const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.DATABAIXA;
-        return sameEtq && sameComp && isNotBaixado && !a._conferido;
-      });
-
-      if (related.length > 1) {
-        const ids = related.map(a => String(a.id));
-        await onBulkUpdateAssets(ids);
-        return;
-      }
-    }
-    onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
-
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) newSet.delete(id);
-      else newSet.add(id);
-      return newSet;
-    });
-  }, []);
 
   const handleBatchConfirm = async () => {
     if (selectedIds.size === 0) return;
@@ -965,29 +828,6 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsBatchMode(false);
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filteredAssets.length) {
-      setSelectedIds(new Set());
-    } else {
-      const allIds = filteredAssets.map(a => String(a.id));
-      setSelectedIds(new Set(allIds));
-    }
-  };
-
-  const handleCreateNew = () => {
-    setManualAsset({
-        ETIQUETA: committedSearch || "",
-        UNIDADE_OPERACIONAL: selectedUnit || "",
-        STATUS: "ATIVO",
-        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
-        AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
-        TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-        QT: 1,
-        DESCRICAODOATIVO: '',
-        SERIAL: ''
-    });
-    setIsManualEntryOpen(true);
-  };
 
   const handleVoiceTyping = (field: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1555,196 +1395,230 @@ const Inventory: React.FC<InventoryProps> = ({
         </div>
       ) : (
         <React.Fragment>
-          {/* Top App Bar - Minimalist Dashboard Style */}
-          <div className="bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
-            <div className="flex items-center space-x-4">
-              <button 
-                onClick={() => { setIsInventorying(false); setIsBatchMode(false); setSelectedIds(new Set()); setCommittedSearch(''); setIsSearchVisible(false); }}
-                className="p-2 -ml-2 text-[#1E293B] hover:bg-slate-50 rounded-full transition-colors active:scale-90"
-              >
-                <ArrowLeft size={24} />
-              </button>
-              <div>
-                <h1 className="text-lg font-bold text-[#1E293B] leading-tight tracking-tight">Inventário</h1>
-                <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-[0.15em]">Operação em Campo</p>
+          {/* GBR v2.6 "Clean Slate" Architecture */}
+          <div className="flex flex-col h-full bg-bg-main overflow-hidden">
+            
+            {/* 1. HeaderSection - Metadados técnicos */}
+            <div className="px-5 pt-10 pb-1 bg-white flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest leading-none mb-1">
+                  #{selectedUnit || '000000'}
+                </span>
+                <h2 className="text-sm font-black text-slate-900 uppercase tracking-tighter leading-none italic">
+                  {user?.tenantid || 'UNIDADE'}
+                </h2>
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <div className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 flex items-center space-x-1">
+                  <ShieldCheck size={8} className="text-emerald-500" />
+                  <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
+                </div>
+                <div className="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100">
+                  <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">v2.6</span>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              {/* Indicador de Estabilidade de Sensores (v2.6) - Migrado para v2.7 Soberania */}
-              <div className={`hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter border ${
-                navStatus === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :
-                navStatus === 'yellow' ? 'bg-amber-50 border-amber-200 text-amber-600' :
-                'bg-red-50 border-red-200 text-red-600'
-              }`}>
-                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                  navStatus === 'green' ? 'bg-emerald-500' :
-                  navStatus === 'yellow' ? 'bg-amber-500' :
-                  'bg-red-500'
-                }`} />
-                <span>{navStatus === 'green' ? 'CONCLUÍDO' : navStatus === 'yellow' ? 'PENDENTE' : 'CACHED'}</span>
-                {navStatus === 'green' ? (
-                  <ShieldCheck size={10} className="text-emerald-500" />
-                ) : navStatus === 'yellow' ? (
-                  <RefreshCw size={10} className="text-amber-500 animate-spin" />
-                ) : (
-                  <Database size={10} className="text-red-500" />
-                )}
+            {/* 2. ActionBar - Central de Comando Operacional */}
+            <div className="px-5 py-3 bg-white flex items-center justify-between relative z-[60]">
+              <button 
+                onClick={() => { 
+                  setIsInventorying(false); 
+                  setIsBatchMode(false); 
+                  setSelectedIds(new Set()); 
+                  setCommittedSearch(''); 
+                  setIsSearchVisible(false); 
+                  if (immersiveMode && document.fullscreenElement) onToggleFullscreen();
+                }}
+                className="flex items-center space-x-1 text-slate-400 active:text-slate-900 transition-colors"
+              >
+                <ArrowLeft size={16} strokeWidth={2.5} />
+                <span className="text-xs font-bold tracking-tight">Voltar</span>
+              </button>
+
+              <h1 className="text-base font-black text-slate-950 uppercase italic tracking-tighter absolute left-1/2 -translate-x-1/2">
+                Inventário
+              </h1>
+
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => setIsPOPGuideOpen(true)}
+                  className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-blue-500 transition-all border border-slate-100"
+                >
+                  <BookOpen size={18} />
+                </button>
+                <button 
+                  onClick={() => setIsSearchVisible(!isSearchVisible)}
+                  className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all border ${isSearchVisible ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-100'}`}
+                >
+                  <Search size={18} />
+                </button>
+                <button 
+                  onClick={handleScannerOpen}
+                  className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 text-slate-600 border border-slate-200"
+                >
+                  <Camera size={18} />
+                </button>
               </div>
-
-              {isBatchMode && (
-                <button 
-                  onClick={toggleSelectAll} 
-                  className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
-                >
-                  {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
-                </button>
-              )}
-
-              {activeFilter === 'checked' && (
-                <button 
-                  onClick={onOpenSignature}
-                  className="w-10 h-10 flex items-center justify-center text-accent bg-blue-50 rounded-xl transition-colors hover:bg-blue-100"
-                >
-                  <FileText size={20} />
-                </button>
-              )}
-
-              <button 
-                onClick={onOpenConsultation}
-                className="w-10 h-10 flex items-center justify-center text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
-              >
-                <Database size={20} />
-              </button>
-
-              <button 
-                onClick={() => setIsPOPGuideOpen(true)}
-                className="w-10 h-10 flex items-center justify-center text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
-                title="Guia POP"
-              >
-                <BookOpen size={20} />
-              </button>
-
-              <button 
-                onClick={handleScannerClose} 
-                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.MANUAL ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
-                title="Busca por Teclado"
-              >
-                <Keyboard size={20} />
-              </button>
-
-              <button 
-                onClick={() => setIsPOPGuideOpen(true)} 
-                className="w-10 h-10 flex items-center justify-center text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
-                title="Guia POP"
-              >
-                <BookOpen size={20} />
-              </button>
-
-              <button 
-                onClick={handleScannerOpen} 
-                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-50'}`}
-                title="Busca por Câmera"
-              >
-                <Camera size={20} />
-              </button>
             </div>
-          </div>
 
-          <div className="bg-white px-6 py-4 shadow-sm border-b border-slate-50">
-            <div className="space-y-4">
-              {/* Sensors Row - Elegant & Thin */}
-              <div className="flex items-center justify-between bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
-                <div className="flex items-center space-x-2 px-2 flex-1 min-w-0">
-                  <MapPin size={14} className="text-accent shrink-0" />
-                  <span className="text-[10px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
-                    {selectedLocation}
-                  </span>
-                </div>
-                
-                <div className="flex items-center space-x-3 pr-2">
-                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${torch === 'on' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-100/50 border border-slate-100 text-slate-400'}`}>
-                    <Flashlight size={12} className={torch === 'on' ? 'animate-pulse' : ''} />
-                    <span className="text-[9px] font-black tracking-widest">LUZ</span>
-                  </div>
-                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.temp > 42 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-blue-500/10 border border-blue-100 text-blue-600'}`}>
-                    <Activity size={12} className={deviceMetrics.temp > 42 ? 'animate-pulse' : ''} />
-                    <span className="text-[9px] font-black tracking-widest">{deviceMetrics.temp.toFixed(0)}°C</span>
-                  </div>
-                  <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.battery < 20 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-emerald-500/10 border border-emerald-100 text-emerald-600'}`}>
-                    <Zap size={12} className={deviceMetrics.battery < 20 ? 'animate-pulse' : ''} />
-                    <span className="text-[9px] font-black tracking-widest">{deviceMetrics.battery}%</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Segmented Control - Modern Pill Style */}
-              <div className="flex bg-slate-100/50 p-1 rounded-xl border border-slate-100">
-                <button 
-                  onClick={() => { setActiveFilter('pending'); setCommittedSearch(''); setDisplayValue(''); }} 
-                  className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${activeFilter === 'pending' ? 'bg-white text-accent shadow-sm' : 'text-[#64748B]'}`}
-                >
-                  Pendentes
-                </button>
-                <button 
-                  onClick={() => { setActiveFilter('checked'); setCommittedSearch(''); setDisplayValue(''); }} 
-                  className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${activeFilter === 'checked' ? 'bg-white text-accent shadow-sm' : 'text-[#64748B]'}`}
-                >
-                  Inventariado
-                </button>
-              </div>
-
-              {/* Search Bar - Minimalist & Functional */}
-              <div className="relative">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                  <Search size={16} className="text-[#94A3B8]" />
-                </div>
-                <input 
-                  ref={searchInputRef} 
-                  type="text" 
-                  readOnly
-                  inputMode="none"
-                  onFocus={() => setShowNumericKeypad(true)}
-                  value={displayValue} 
-                  className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-base font-bold rounded-2xl text-[#1E293B] outline-none focus:ring-2 focus:ring-accent/10 focus:border-accent transition-all cursor-pointer placeholder:text-[#94A3B8] placeholder:font-sans placeholder:text-xs placeholder:tracking-widest" 
-                  placeholder="DIGITE OU ESCANEIE ETIQUETA..." 
-                />
-                <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
-                  <button 
-                    onClick={triggerSmartOCR}
-                    className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all active:scale-90"
-                    title="Busca por Foto (OCR)"
+            {/* 3. ContextRibbon & SearchOverlay */}
+            <div className="relative h-11 bg-white border-b border-slate-50 px-5 overflow-hidden flex items-center">
+              <AnimatePresence mode="wait">
+                {!isSearchVisible ? (
+                  <motion.div 
+                    key="context"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center space-x-2 w-full no-scrollbar overflow-x-auto scroll-smooth"
                   >
-                    <Camera size={20} />
-                  </button>
-                  {displayValue && (
-                    <button 
-                      onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} 
-                      className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all"
-                    >
-                      <X size={20} />
-                    </button>
-                  )}
-                </div>
-                
-                <input 
-                  type="file" 
-                  ref={ocrInputRef} 
-                  className="hidden" 
-                  accept="image/*" 
-                  capture="environment"
-                  onChange={handleSmartOCR}
-                />
+                    <div className="shrink-0 px-3 py-1.5 rounded-full bg-slate-950 text-white flex items-center space-x-1.5 shadow-md">
+                      <MapPin size={10} className="text-blue-400" />
+                      <span className="text-[9px] font-black uppercase tracking-tighter truncate max-w-[120px]">
+                        {selectedLocation}
+                      </span>
+                    </div>
+                    <div className="shrink-0 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100 text-slate-400 flex items-center space-x-1.5">
+                      <Activity size={10} className="text-emerald-500 animate-pulse" />
+                      <span className="text-[9px] font-black uppercase tracking-tighter">
+                        {deviceMetrics.temp.toFixed(0)}°C | BOM
+                      </span>
+                    </div>
+                    {currentCampaignId && (
+                      <div className="shrink-0 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-600 flex items-center space-x-1.5">
+                        <Target size={10} className="text-blue-500" />
+                        <span className="text-[9px] font-black uppercase tracking-tighter">Campanha ATIVA</span>
+                      </div>
+                    )}
+                  </motion.div>
+                ) : (
+                  <motion.div 
+                    key="search"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="w-full flex items-center"
+                  >
+                    <div className="relative w-full">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500" />
+                      <input 
+                        ref={searchInputRef}
+                        type="text"
+                        value={displayValue}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setDisplayValue(val);
+                          setCommittedSearch(val);
+                        }}
+                        className="w-full bg-slate-50 border border-blue-100 pl-10 pr-10 py-1.5 rounded-full text-xs font-bold text-slate-900 outline-none focus:ring-2 ring-blue-500/20"
+                        placeholder="DIGITE PATRIMÔNIO OU DESCRIÇÃO..."
+                        autoFocus
+                      />
+                      {displayValue && (
+                        <button 
+                          onClick={() => setDisplayValue('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 4. Tab Selector - Fluxo de Inventário */}
+            <div className="bg-white px-5 py-2 flex items-center border-b border-slate-50">
+              <div className="flex-1 flex p-1 bg-slate-100 rounded-xl">
+                <button 
+                  onClick={() => { setActiveTab('PENDING'); setDisplayValue(''); setCommittedSearch(''); }}
+                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'PENDING' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                >
+                  Pendentes ({assets.filter(a => !a._conferido).length})
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('INVENTORIED'); setDisplayValue(''); setCommittedSearch(''); }}
+                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'INVENTORIED' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+                >
+                  Inventariados ({assets.filter(a => !!a._conferido).length})
+                </button>
               </div>
             </div>
-          </div>
 
-        <div 
-          className="flex-1 overflow-hidden bg-bg-main relative"
-            onPointerDown={() => {
-              if (showNumericKeypad) setShowNumericKeypad(false);
-            }}
-          >
+            <div 
+              className="flex-1 overflow-hidden bg-bg-main relative flex flex-col"
+              onPointerDown={() => {
+                if (showNumericKeypad) setShowNumericKeypad(false);
+              }}
+            >
+              <div className="flex-1 overflow-hidden relative">
+                {/* Virtualized List Container */}
+                <Virtuoso
+                ref={virtuosoRef}
+                style={{ height: '100%' }}
+                data={pagedItems}
+                rangeChanged={handleRangeChanged}
+                itemContent={(index, item) => {
+                  if ('isHeader' in item && item.isHeader) {
+                    return (
+                      <div className="px-6 py-2 bg-slate-50 border-y border-slate-100">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{item.title}</span>
+                      </div>
+                    );
+                  }
+                  
+                  const asset = item as Asset;
+                  return (
+                    <motion.div 
+                      key={asset.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="px-4 py-1"
+                    >
+                      <AssetCard 
+                        asset={asset}
+                        selectedLocation={selectedLocation}
+                        onSelect={onSelectAsset}
+                        onMakeDecision={handleDecisionInList}
+                        selectedUnit={selectedUnit}
+                        isBatchMode={isBatchMode}
+                        isSelected={selectedIds.has(String(asset.id))}
+                        onToggleSelect={toggleIdSelection}
+                        hasLocalPhoto={localPhotoIds.has(String(asset.id))}
+                        onShowQr={setQrModalAsset}
+                        onViewPhoto={(url) => setPhotoPreviewUrl(url)}
+                      />
+                    </motion.div>
+                  );
+                }}
+                components={{
+                  Footer: () => (
+                    <div className="p-8 pb-32 text-center space-y-4">
+                      <div className="flex flex-col items-center space-y-1">
+                        <Database size={24} className="text-slate-200" />
+                        <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Fim da Localidade</p>
+                      </div>
+                      
+                      {dbStatus && (
+                        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 max-w-xs mx-auto animate-fadeIn">
+                          <div className="flex items-center space-x-2 mb-2 justify-center">
+                            <div className={`w-1.5 h-1.5 rounded-full ${navStatus === 'green' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Soberania Nativa v2.6</span>
+                          </div>
+                          <p className="text-[7px] font-mono text-slate-400 break-all leading-relaxed bg-white p-2 rounded-lg border border-slate-100">
+                            DB_PATH: {dbStatus.path}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                }}
+              />
+            </div>
             {isSearchResultBatch && (
               <div className="px-4 pt-3">
                 <button 
@@ -1814,91 +1688,75 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             )}
 
-
             {showScrollTop && (
               <button 
                 onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
-                className="absolute bottom-6 right-6 w-12 h-12 bg-accent text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-[90] border-2 border-white/20"
+                className="absolute bottom-6 right-6 w-12 h-12 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-[90] border-2 border-white/20"
               >
-                <ChevronRight size={24} className="-rotate-90" />
+                <ArrowLeft size={24} className="rotate-90" />
               </button>
-            )}
-
-            {filteredAssets.length > 0 ? (
-              <Virtuoso
-                ref={virtuosoRef}
-                style={{ height: '100%' }}
-                data={filteredAssets}
-                increaseViewportBy={300}
-                rangeChanged={handleRangeChanged}
-                isScrolling={(scrolling) => {
-                  if (scrolling && showNumericKeypad) {
-                    setShowNumericKeypad(false);
-                  }
-                }}
-                atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
-                components={{
-                  Footer: () => <div className="h-28" />
-                }}
-                itemContent={(index, item: InventoryListItem) => (
-                  <div className="px-4 pt-1.5">
-                    {'isHeader' in item || '_is_header' in item ? (
-                      <div className="py-4 px-2 flex items-center space-x-3 sticky top-0 bg-white/80 backdrop-blur-md z-10">
-                        <div className="h-[1px] flex-1 bg-slate-100" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">{'title' in item ? item.title : ''}</span>
-                        <div className="h-[1px] flex-1 bg-slate-100" />
-                      </div>
-                    ) : (
-                      <AssetCard 
-                        asset={item as Asset} 
-                        selectedLocation={selectedLocation} 
-                        onSelect={() => handleAssetClick(item as Asset)} 
-                        onMakeDecision={handleMakeDecision} 
-                        selectedUnit={selectedUnit} 
-                        isBatchMode={isBatchMode} 
-                        isSelected={selectedIds.has(String((item as Asset).id))} 
-                        onToggleSelect={toggleSelect} 
-                        hasLocalPhoto={localPhotoIds.has(String((item as Asset).id))}
-                        onShowQr={(a) => setQrModalAsset(a)}
-                      />
-                    )}
-                  </div>
-                )}
-              />
-            ) : committedSearch ? (
-                <div className="py-20 flex flex-col items-center justify-center text-center animate-fadeIn px-10">
-                    <div className="w-24 h-24 bg-warning/5 border border-warning/20 rounded-full flex items-center justify-center text-warning mb-6 shadow-sm">
-                        <AlertTriangle size={40} />
-                    </div>
-                    <h3 className="text-xl font-bold text-ink uppercase tracking-tight">Nenhum Registro</h3>
-                    <p className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mt-3 leading-relaxed">Etiqueta &quot;{committedSearch}&quot; não localizada na base v24</p>
-                    
-                    <button onClick={handleCreateNew} className="mt-10 w-full py-5 bg-warning text-white rounded-2xl flex items-center justify-center space-x-3 shadow-lg active:scale-95 transition-all font-bold uppercase text-[10px] tracking-widest">
-                        <FilePlus2 size={18} />
-                        <span>Incluir Manual</span>
-                    </button>
-                </div>
-            ) : (
-                <div className="py-24 flex flex-col items-center justify-center opacity-30 text-center">
-                    <Search size={64} className="mb-6 text-ink-muted" />
-                    <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-ink-muted">Aguardando Auditoria</p>
-                </div>
             )}
           </div>
 
           {showNumericKeypad && (
             <div className="absolute inset-x-0 bottom-0 z-[100]">
               <NumericKeypad 
-                onInput={(val) => setDisplayValue(prev => prev + val)}
-                onDelete={() => setDisplayValue(prev => prev.slice(0, -1))}
+                onInput={(val) => {
+                  const newVal = displayValue + val;
+                  setDisplayValue(newVal);
+                  setCommittedSearch(newVal);
+                }}
+                onDelete={() => {
+                  const newVal = displayValue.slice(0, -1);
+                  setDisplayValue(newVal);
+                  setCommittedSearch(newVal);
+                }}
                 onClose={() => setShowNumericKeypad(false)}
               />
             </div>
           )}
-        </React.Fragment>
-      )}
+        </div>
+      </React.Fragment>
+    )}
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
+
+      {/* Native Evidence Preview Modal */}
+      <AnimatePresence>
+        {photoPreviewUrl && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[12000] bg-black flex flex-col pt-10"
+            onClick={() => setPhotoPreviewUrl(null)}
+          >
+            <div className="absolute top-4 right-4 z-10">
+              <button 
+                onClick={() => setPhotoPreviewUrl(null)}
+                className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="flex-1 w-full flex items-center justify-center p-4">
+              <motion.img 
+                initial={{ scale: 0.9 }}
+                animate={{ scale: 1 }}
+                src={photoPreviewUrl} 
+                alt="Native Evidence" 
+                className="max-h-full max-w-full object-contain shadow-2xl rounded-lg"
+              />
+            </div>
+            
+            <div className="p-8 text-center bg-gradient-to-t from-black to-transparent">
+              <p className="text-white text-xs font-black uppercase tracking-[0.2em] italic">Registro de Evidência Técnica</p>
+              <p className="text-white/50 text-[8px] font-bold uppercase tracking-widest mt-1">Soberania SQLite v2.6</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Scanner Full-Screen */}
       {isScannerOpen && searchMode !== 'SCANNER' && (
