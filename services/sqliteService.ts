@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS assets (
     ETIQUETA TEXT,
     REGISTRO TEXT,
     DESCRICAODOATIVO TEXT,
+    DESCRICAODOBEM TEXT,
+    STATUS TEXT,
     VLRAQUISIC REAL,
     DATAAQUISIC TEXT,
     CENTRODECUSTO TEXT,
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS assets (
     _lastUpdated TEXT,
     _dataLeitura TEXT,
     _auditor TEXT,
+    _history TEXT,
     _photoUrl TEXT,
     _lat REAL,
     _lng REAL,
@@ -73,10 +76,21 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT,
     email TEXT,
     profile TEXT,
+    role TEXT,
     is_certified INTEGER DEFAULT 0,
     _tenantid TEXT,
     _unitid TEXT,
     isAdmin INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS AUDIT_LOG (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT,
+    user_email TEXT,
+    action TEXT,
+    details TEXT,
+    _tenantid TEXT,
+    _unitid TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_tokens (
@@ -345,9 +359,9 @@ class SqliteService {
         
         if (table === 'assets') {
           const required = [
-            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'CONTACONTABIL', 'QT',
+            'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'STATUS', 'CENTRODECUSTO', 'CONTACONTABIL', 'QT',
             '_campaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
-            '_conferido', '_lastUpdated', '_is_synced', '_parent_id',
+            '_conferido', '_lastUpdated', '_is_synced', '_parent_id', '_history',
             '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
             '_is_unitized', '_is_divergent_baixa', '_isNew', 'DE_PARA', 
             'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
@@ -408,8 +422,22 @@ class SqliteService {
             await this.ensureRequiredColumns();
             this.storageSource = 'PHYSICAL'; // No nativo, o cache é físico
             this.isInitialized = true;
-            this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
-            console.log(`>>> [NativeBridge] Banco de Dados NATIVO carregado: ${this.nativePath}`);
+            
+            try {
+              const uriResult = await Filesystem.getUri({
+                path: this.storageKeys.nativeFileName,
+                directory: Directory.Data
+              });
+              this.nativePath = uriResult.uri;
+            } catch {
+              this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
+            }
+
+            console.log(`>>> [NativeBridge] Banco de Dados NATIVO carregado.`);
+            const user = JSON.parse(localStorage.getItem('app_current_user') || '{}');
+            if (user.isAdmin || user.role === 'ADMIN' || user.email === 'semorr@gmail.com') {
+              console.log(`[AdminPath] Path: ${this.nativePath}`);
+            }
             return true;
           }
         } catch (err) {
@@ -493,8 +521,22 @@ class SqliteService {
             data: base64Data,
             directory: Directory.Data
           });
-          this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
-          console.log(`>>> [NativeBridge] SINCRO NATIVA: Sucesso em ${this.nativePath}`);
+          
+          try {
+            const uriResult = await Filesystem.getUri({
+              path: this.storageKeys.nativeFileName,
+              directory: Directory.Data
+            });
+            this.nativePath = uriResult.uri;
+          } catch {
+            this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
+          }
+
+          console.log(`>>> [NativeBridge] SINCRO NATIVA: Sucesso.`);
+          const user = JSON.parse(localStorage.getItem('app_current_user') || '{}');
+          if (user.isAdmin || user.role === 'ADMIN' || user.email === 'semorr@gmail.com') {
+            console.log(`[AdminPath] Sync Target: ${this.nativePath}`);
+          }
           this.storageSource = 'PHYSICAL';
         } catch (err) {
           console.error(">>> [NativeBridge] FALHA na gravação nativa:", err);
@@ -560,6 +602,10 @@ class SqliteService {
     }
   }
 
+  async run(sql: string, params: (string | number | boolean | null)[] = []) {
+    return await this.execute(sql, params);
+  }
+
   // --- Ativos ---
   async getAssets(tenantId: string, unitId?: string | null): Promise<Asset[]> {
     let sql = "SELECT * FROM assets WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";
@@ -602,60 +648,54 @@ class SqliteService {
     await this.execute("UPDATE assets SET _is_deleted = 1 WHERE id = ?", [id]);
   }
 
-  // --- Campanhas ---
+  // --- Campanhas (Refactor v2.6.5) ---
   private normalizeCampaign(row: Record<string, string | number | boolean | null>): InventoryCampaign {
     if (!row) return row as unknown as InventoryCampaign;
     return {
       ...row,
-      // Normalização de Unidade
+      id: String(row.id),
       unit_id: (String(row.unit_id || row._unitid || '')).trim(),
       _unitid: (String(row.unit_id || row._unitid || '')).trim(),
-      // Normalização de Tenant
       tenant_id: (String(row.tenant_id || row._tenantid || '')).trim(),
       _tenantid: (String(row.tenant_id || row._tenantid || '')).trim(),
       tenantId: (String(row.tenant_id || row._tenantid || '')).trim(),
-      // Garantia de Status
       status: (row.status as string) || 'CREATED'
     } as unknown as InventoryCampaign;
   }
 
-  async getCampaigns(tenantId: string): Promise<InventoryCampaign[]> {
-    console.log(`>>> [Governance] SQL Query: SELECT * FROM campaigns WHERE tenant_id = '${tenantId}'`);
-    const rows = await this.query("SELECT * FROM campaigns WHERE tenant_id = ? OR _tenantid = ?", [tenantId, tenantId]);
-    const result = (rows || []).map(row => this.normalizeCampaign(row));
-    if (result.length > 0) {
-      console.table(result.map(c => ({ id: c.id, name: c.name, tenant: c.tenant_id, unit: c.unit_id })));
-    } else {
-      console.warn(`>>> [Governance] SQL Query retornou 0 resultados para o tenant '${tenantId}'`);
+  async getCampaigns(tenantId: string, unitId?: string | null): Promise<InventoryCampaign[]> {
+    console.log(`>>> [Governance] SQL Query Campaigns: Tenant=${tenantId}, Unit=${unitId || 'ALL'}`);
+    let sql = "SELECT * FROM campaigns WHERE (tenant_id = ? OR _tenantid = ?)";
+    const params: (string | number | boolean | null)[] = [tenantId, tenantId];
+    
+    if (unitId) {
+      sql += " AND (unit_id = ? OR _unitid = ?)";
+      params.push(unitId, unitId);
     }
-    return result;
+
+    const rows = await this.query(sql, params);
+    return (rows || []).map(row => this.normalizeCampaign(row));
   }
 
   async saveCampaign(campaign: InventoryCampaign): Promise<InventoryCampaign> {
     const payload = {
       id: campaign.id || `local_${Date.now()}`,
-      name: campaign.name || 'Sem Nome',
+      name: campaign.name || 'Nova Campanha',
       description: campaign.description || '',
       status: campaign.status || 'CREATED',
       start_date: campaign.start_date || new Date().toISOString(),
       end_date: campaign.end_date || null,
-      tenant_id: (campaign.tenant_id || campaign._tenantid || campaign.tenantId || 'CICOPAL').trim(),
+      tenant_id: (campaign.tenant_id || campaign._tenantid || 'CICOPAL').trim(),
       unit_id: (campaign.unit_id || campaign._unitid || '').trim()
     };
-    const cols = Object.keys(payload).join(', ');
-    const placeholders = Object.keys(payload).map(() => '?').join(', ');
-    const values = Object.values(payload).map(v => v === undefined ? null : v);
     
-    try {
-      await this.execute(`INSERT OR REPLACE INTO campaigns (${cols}) VALUES (${placeholders})`, values);
-      await this.saveDatabase();
-      const normalized = this.normalizeCampaign(payload);
-      console.log(`>>> [Governance] Campanha '${normalized.name}' persistida localmente. ID: ${normalized.id}`);
-      return normalized;
-    } catch (err) {
-      console.error(`>>> [Governance] ERRO CRÍTICO AO SALVAR CAMPANHA:`, err);
-      throw err;
-    }
+    const validKeys = Object.keys(payload);
+    const cols = validKeys.join(', ');
+    const placeholders = validKeys.map(() => '?').join(', ');
+    const values = validKeys.map(k => payload[k as keyof typeof payload]);
+    
+    await this.execute(`INSERT OR REPLACE INTO campaigns (${cols}) VALUES (${placeholders})`, values);
+    return this.normalizeCampaign(payload as unknown as Record<string, string | number | boolean | null>);
   }
 
   async deleteCampaignSql(id: string) {
@@ -664,9 +704,48 @@ class SqliteService {
     await this.saveDatabase();
   }
 
-  // --- Configurações ---
-  async getUnitConfigs(tenantId: string): Promise<Record<string, string | number | boolean | null>[]> {
-    return await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tenantId]);
+  // --- Configurações de Unidade (GPS) ---
+  private normalizeUnitConfig(row: Record<string, string | number | boolean | null>): UnitConfig {
+    return {
+      ...row,
+      unit_id: String(row.unit_id || row._unitid || ''),
+      _unitid: String(row.unit_id || row._unitid || ''),
+      tenant_id: String(row.tenant_id || row._tenantid || ''),
+      _tenantid: String(row.tenant_id || row._tenantid || ''),
+      lat: Number(row.lat) || 0,
+      lng: Number(row.lng) || 0,
+      radius_meters: Number(row.radius_meters) || 500,
+      is_active: Boolean(row.is_active)
+    } as unknown as UnitConfig;
+  }
+
+  async getUnitConfigs(tenantId: string): Promise<UnitConfig[]> {
+    const rows = await this.query("SELECT * FROM unit_configs WHERE (tenant_id = ? OR _tenantid = ?)", [tenantId, tenantId]);
+    return (rows || []).map(row => this.normalizeUnitConfig(row));
+  }
+
+  async saveUnitConfig(config: UnitConfig): Promise<void> {
+    const payload = {
+      id: config.id || `${config.tenant_id}_${config.unit_id}`,
+      unit_id: config.unit_id || config._unitid,
+      tenant_id: config.tenant_id || config._tenantid,
+      lat: config.lat,
+      lng: config.lng,
+      radius_meters: config.radius_meters || 500,
+      is_active: config.is_active ?? true,
+      updated_by: config.updated_by || 'system',
+      updated_at: new Date().toISOString(),
+      _tenantid: config.tenant_id || config._tenantid,
+      _unitid: config.unit_id || config._unitid
+    };
+
+    const keys = Object.keys(payload);
+    const cols = keys.join(', ');
+    const placeholders = keys.map(() => '?').join(', ');
+    const values = Object.values(payload);
+
+    await this.execute(`INSERT OR REPLACE INTO unit_configs (${cols}) VALUES (${placeholders})`, values);
+    console.log(`>>> [SQLite] Config de GPS para ${payload.unit_id} salva.`);
   }
 
   async getAssetCount(): Promise<number> {
@@ -726,12 +805,33 @@ class SqliteService {
     }
   }
 
-  async importDatabase(binary: Uint8Array) {
-    const SQL = await initSqlJs({ locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` });
-    this.db = new SQL.Database(binary);
-    this.isInitialized = true;
-    this.storageSource = 'CACHE';
-    await this.saveDatabase();
+  async logAuditEvent(entry: { user_email: string, action: string, details: string, _tenantid?: string, _unitid?: string }) {
+    const id = `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date().toISOString();
+    await this.execute(
+      "INSERT INTO AUDIT_LOG (id, timestamp, user_email, action, details, _tenantid, _unitid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, timestamp, entry.user_email, entry.action, entry.details, entry._tenantid || 'GLOBAL', entry._unitid || '']
+    );
+    console.log(`>>> [LocalAudit] Evento registrado: ${entry.action} para ${entry.user_email}`);
+  }
+
+  async localAuth(username: string, password_plain: string): Promise<User | null> {
+    // Em um sistema 100% offline, as credenciais residem no banco físico.
+    // Hash de senha deve ser implementado no futuro se necessário.
+    const rows = await this.query("SELECT * FROM users WHERE (username = ? OR email = ?) AND password = ?", [username, username, password_plain]);
+    if (rows && rows.length > 0) {
+      const u = rows[0];
+      return {
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        role: u.role || (u.isAdmin ? 'ADMIN' : 'USER'),
+        isAdmin: !!u.isAdmin,
+        _tenantid: u._tenantid,
+        _unitid: u._unitid
+      };
+    }
+    return null;
   }
 
   // --- File Link Methods ---
@@ -790,9 +890,12 @@ class SqliteService {
   async createPhysicalFile(handle?: FileSystemFileHandle) {
     if (Capacitor.isNativePlatform()) {
       console.log(">>> [NativeBridge] Criando base nativa automática no Android...");
-      await this.init(true); // Inicializa novo banco em memória
+      const success = await this.init(true); // Inicializa novo banco em memória
       await this.saveDatabase(); // Persiste no sistema de arquivos nativo
-      return true;
+      if (success) {
+        alert("Novo Banco de Dados Local criado automaticamente com sucesso!");
+      }
+      return success;
     }
 
     if (handle) {
@@ -840,6 +943,100 @@ class SqliteService {
     await this.saveUnitConfigSql(config);
   }
 
+  // Remove redundant campaign methods
+  async deleteCampaign(id: string): Promise<void> {
+    await this.run("DELETE FROM campaigns WHERE id = ?", [id]);
+    await this.saveDatabase();
+  }
+
+  async updateCampaignStatus(id: string, status: string, userEmail?: string): Promise<boolean> {
+    try {
+      await this.run("UPDATE campaigns SET status = ? WHERE id = ?", [status, id]);
+      if (userEmail) {
+        await this.logAuditEvent({
+          action: `UPDATE_CAMPAIGN_STATUS: ${status}`,
+          details: `Campanha ID: ${id}`,
+          user: userEmail
+        });
+      }
+      await this.saveDatabase();
+      return true;
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao atualizar status da campanha:", err);
+      return false;
+    }
+  }
+
+  async fetchCampaignStats(campaignId: string, tenantId: string) {
+    try {
+      const res = await this.query(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as inventoried,
+          SUM(CASE WHEN TAG_INVENTARIO = 'DIVERGÊNCIA' THEN 1 ELSE 0 END) as divergences
+        FROM assets 
+        WHERE _campaignId = ? AND (_tenantid = ? OR GRUPO_EMPRESARIAL = ?)
+      `, [campaignId, tenantId, tenantId]);
+
+      if (res.length > 0) {
+        return {
+          total: Number(res[0].total) || 0,
+          inventoried: Number(res[0].inventoried) || 0,
+          divergences: Number(res[0].divergences) || 0
+        };
+      }
+      return { total: 0, inventoried: 0, divergences: 0 };
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao buscar stats da campanha:", err);
+      return { total: 0, inventoried: 0, divergences: 0 };
+    }
+  }
+
+  async createCampaignSnapshot(campaignId: string, closedBy: string): Promise<boolean> {
+    try {
+      const assets = await this.query("SELECT * FROM assets WHERE _campaignId = ?", [campaignId]);
+      const assetsJson = JSON.stringify(assets);
+      const snapshotId = `snap_${campaignId}_${new Date().getTime()}`;
+      
+      const config = await this.getInventoryConfig();
+      const metadata = JSON.stringify(config || {});
+
+      await this.run(`
+        INSERT INTO campaign_snapshots (id, campaign_id, assets_data, metadata, closed_at, closed_by, _tenantid)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [
+        snapshotId, 
+        campaignId, 
+        assetsJson, 
+        metadata, 
+        new Date().toISOString(), 
+        closedBy,
+        config?._tenantid || 'CICOPAL'
+      ]);
+      await this.saveDatabase();
+      return true;
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao criar snapshot da campanha:", err);
+      return false;
+    }
+  }
+
+  async getCampaignSnapshot(campaignId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const res = await this.query("SELECT * FROM campaign_snapshots WHERE campaign_id = ? ORDER BY closed_at DESC LIMIT 1", [campaignId]);
+      if (res.length > 0) {
+        return {
+          ...res[0],
+          assets_data: JSON.parse(res[0].assets_data as string)
+        };
+      }
+      return null;
+    } catch (err) {
+      console.error(">>> [SQLite] Erro ao obter snapshot:", err);
+      return null;
+    }
+  }
+
   async mapLocalFolder() {
     if (Capacitor.isNativePlatform()) {
       // No Android/iOS, o mapeamento é automático para o diretório de dados seguro.
@@ -873,6 +1070,51 @@ class SqliteService {
     } catch (err) {
       console.error(">>> [Governance] Falha na re-sincronização:", err);
       return false;
+    }
+  }
+
+  /**
+   * Silent Migration: Garante colunas essenciais sem disparar alertas de integridade
+   */
+  async ensureRequiredColumns() {
+    if (!this.db) return;
+    const tables = ['assets', 'campaigns', 'unit_configs', 'users'];
+    
+    for (const table of tables) {
+      try {
+        const columns = await this.query(`PRAGMA table_info(${table})`);
+        const colNames = columns.map(c => String(c.name).toUpperCase());
+
+        if (table === 'assets') {
+          const required = [
+            { name: 'DESCRICAODOBEM', type: 'TEXT' },
+            { name: 'STATUS', type: 'TEXT' },
+            { name: '_conferido', type: 'INTEGER DEFAULT 0' },
+            { name: '_is_synced', type: 'INTEGER DEFAULT 0' },
+            { name: '_is_deleted', type: 'INTEGER DEFAULT 0' },
+            { name: '_lat', type: 'REAL' },
+            { name: '_lng', type: 'REAL' }
+          ];
+
+          for (const col of required) {
+            if (!colNames.includes(col.name.toUpperCase())) {
+              console.log(`>>> [SilentMigration] Adicionando coluna ${col.name} em ${table}...`);
+              await this.run(`ALTER TABLE ${table} ADD COLUMN ${col.name} ${col.type}`);
+            }
+          }
+        }
+
+        if (table === 'users') {
+          if (!colNames.includes('ROLE')) {
+            await this.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'USER'`);
+          }
+          if (!colNames.includes('ISADMIN')) {
+            await this.run(`ALTER TABLE users ADD COLUMN isAdmin INTEGER DEFAULT 0`);
+          }
+        }
+      } catch (err) {
+        console.warn(`>>> [SilentMigration] Falha ao verificar/alterar tabela ${table}:`, err);
+      }
     }
   }
 

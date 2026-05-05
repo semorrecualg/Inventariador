@@ -1,19 +1,18 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { motion, AnimatePresence } from 'motion/react';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
-import { generateUUID } from '../services/supabaseService';
+import { generateUUID } from '../services/utils';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { assetRepository } from '../services/assetRepository';
 import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 import { sqliteService, FileStatus } from '../services/sqliteService';
-
+import { getAllLocalPhotoIds } from '../services/photoService';
 import { reverseGeocode } from '../services/geocodingService';
 import { getCurrentLocation } from '../utils/gpsUtils';
 import { 
@@ -36,6 +35,7 @@ import {
   WifiOff,
   ArrowLeft,
   Target,
+  Box,
   AlertCircle,
   BookOpen,
   ShieldCheck
@@ -44,6 +44,7 @@ import POPGuide from './POPGuide';
 
 import { QRCodeSVG } from 'qrcode.react';
 
+const logger = console;
 
 interface AssetCardProps {
   asset: Asset;
@@ -85,14 +86,6 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
   );
 };
 
-const normalizeKeyFast = (s: string | null | undefined) => {
-  if (!s) return '';
-  return s.toString().toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9]/g, '')
-    .trim();
-};
 
 const AssetCard = React.memo(({ 
   asset, selectedLocation, onSelect, onMakeDecision, selectedUnit, isBatchMode, isSelected, onToggleSelect, hasLocalPhoto, onShowQr, onViewPhoto
@@ -115,8 +108,6 @@ const AssetCard = React.memo(({
 });
 
 AssetCard.displayName = 'AssetCard';
-
-import { getAllLocalPhotoIds } from '../services/photoService';
 
 interface InventoryProps {
   assets: Asset[];
@@ -146,11 +137,13 @@ interface InventoryProps {
   onToggleFullscreen: () => void;
   batterySaver: boolean;
   databaseMode: DatabaseMode;
-  onSyncFromCloud: () => Promise<void>;
   user: User | null;
   currentCampaignId?: string;
   unitConfig?: UnitConfig | null;
   onUpdateUnitConfig?: (unitId: string, lat: number, lng: number) => Promise<void>;
+  isOCRProcessing: boolean;
+  setIsOCRProcessing: (val: boolean) => void;
+  isLoading: boolean;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -181,7 +174,10 @@ const Inventory: React.FC<InventoryProps> = ({
   user,
   currentCampaignId,
   unitConfig,
-  onUpdateUnitConfig
+  onUpdateUnitConfig,
+  isOCRProcessing,
+  setIsOCRProcessing,
+  isLoading
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -194,6 +190,15 @@ const Inventory: React.FC<InventoryProps> = ({
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+
+  // v3.0: Reseta para 'PENDING' ao mudar de localidade para evitar tela vazia se o usuário estava em 'INVENTORIED' no local anterior
+  useEffect(() => {
+    if (selectedLocation) {
+      setActiveTab('PENDING');
+      setCommittedSearch('');
+      setDisplayValue('');
+    }
+  }, [selectedLocation]);
 
   // Telemetria e Hardware
   const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
@@ -307,24 +312,50 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
+  const handleDecisionInList = useCallback(async (assetId: string, decision: 'YES' | 'NO') => {
+    logger.log(`>>> [Soberania Nativa] Decisão Manual para ${assetId}: ${decision}`);
+    const asset = allAssets.find(a => String(a.id) === assetId);
+    if (!asset) return;
+
+    const updatedAsset: Asset = {
+      ...asset,
+      _conferido: true,
+      AUDITOR_STATUS_CONFERENCIA: 'SIM',
+      _dataLeitura: new Date().toISOString(),
+      _statusSincronizacao: 'PENDENTE',
+      _resultado_decisao: decision === 'YES' ? 'CONFORME' : 'DIVERGENTE'
+    };
+
+    try {
+      await onUpdateAsset(updatedAsset);
+      // Feedback tátil/sonoro pode ser adicionado aqui
+    } catch (error) {
+      logger.error('Erro ao salvar decisão:', error);
+    }
+  }, [allAssets, onUpdateAsset]);
+
+  const toggleIdSelection = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showScrollTop, ] = useState(false);
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // v24.50: Restauração de Scroll (UX de Campo)
+  // v24.50: Restauração de Scroll (UX de Campo) - Desativado para Plano B
   useEffect(() => {
     const savedIndex = sessionStorage.getItem(`gbr_scroll_index_${selectedUnit}_${selectedLocation || 'all'}`);
-    if (savedIndex && virtuosoRef.current) {
-      const index = parseInt(savedIndex, 10);
-      if (index > 0) {
-        console.log(`>>> [UX] Restaurando posição de scroll para o índice: ${index}`);
-        // Pequeno delay para garantir que a renderização do Virtuoso completou
-        const timer = setTimeout(() => {
-          virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
-        }, 300);
-        return () => clearTimeout(timer);
-      }
+    if (savedIndex) {
+      // No Direct Render, o scroll automático por index não é suportado nativamente por index sem itens de altura fixa
     }
   }, [selectedUnit, selectedLocation]);
 
@@ -352,12 +383,6 @@ const Inventory: React.FC<InventoryProps> = ({
 
     performSearch();
   }, [debouncedLocTerm, selectedUnit, allAssets.length]);
-
-  const handleRangeChanged = useCallback((range: { startIndex: number }) => {
-    if (range.startIndex > 0) {
-      sessionStorage.setItem(`gbr_scroll_index_${selectedUnit}_${selectedLocation || 'all'}`, range.startIndex.toString());
-    }
-  }, [selectedUnit, selectedLocation]);
 
   // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
   const allAssetsRef = useRef(allAssets);
@@ -406,6 +431,44 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsSearchVisible(true);
     setTimeout(() => searchInputRef.current?.focus(), 100);
   }, [onUpdateSearchMode]);
+
+  // Função para OCR na busca (Inovação v2.6)
+  const handleOCRSearch = async () => {
+    try {
+      setIsOCRProcessing(true);
+      const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+      const image = await Camera.getPhoto({
+        quality: 90,
+        allowEditing: false,
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera
+      });
+
+      if (image.webPath) {
+        const Tesseract = (await import('tesseract.js')).default;
+        const worker = await Tesseract.createWorker('por');
+        const { data: { text } } = await worker.recognize(image.webPath);
+        await worker.terminate();
+
+        // Regex para capturar padrões de etiquetas (ex: letras+números ou sequências numéricas longas)
+        const matches = text.match(/[A-Z0-9-]{4,20}/g) || [];
+        const uniqueMatches = [...new Set(matches.map(m => m.trim().toUpperCase()))];
+        
+        if (uniqueMatches.length > 0) {
+          // Pega o primeiro que parece uma etiqueta válida
+          const bestMatch = uniqueMatches[0];
+          setManualAsset(prev => prev ? ({ ...prev, ETIQUETA: bestMatch }) : prev);
+          logger.info(`Lido via OCR: ${bestMatch}`);
+        } else {
+          alert("Nenhuma etiqueta legível identificada. Tente aproximar a câmera.");
+        }
+      }
+    } catch (err) {
+      console.error("Erro no OCR da busca:", err);
+    } finally {
+      setIsOCRProcessing(false);
+    }
+  };
 
   const handleTorchToggle = useCallback(() => {
     setTorch(prev => prev === 'on' ? 'off' : 'on');
@@ -726,20 +789,17 @@ const Inventory: React.FC<InventoryProps> = ({
   // locationStats removido pois não é mais utilizado na UI de telemetria
 
   const filteredAssets = useMemo(() => {
-    if (!selectedLocation) return [];
-    const term = normalizeKeyFast(committedSearch);
+    const safeAssets = assets || [];
+    const term = committedSearch ? normalizeKey(committedSearch) : '';
 
     if (!term) {
       const result = [];
-      for (let i = 0; i < assets.length; i++) {
-        const a = assets[i];
+      for (let i = 0; i < safeAssets.length; i++) {
+        const a = safeAssets[i];
+        if (!a) continue;
         
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
         
-        if (isBaixado && !isConferido) continue;
-
         if (activeTab === 'INVENTORIED') {
           if (isConferido) result.push(a);
         } else {
@@ -763,17 +823,26 @@ const Inventory: React.FC<InventoryProps> = ({
     }
 
     const localMatches = [];
-    const targetAssets = allAssets && allAssets.length > 0 ? allAssets : assets;
+    const targetAssets = allAssets && allAssets.length > 0 ? allAssets : safeAssets;
     
     for (let i = 0; i < targetAssets.length; i++) {
         const a = targetAssets[i];
-        const etq = normalizeKeyFast(a.ETIQUETA || '');
-        if (etq === term || etq.includes(term)) {
+        const etq = normalizeKey(a.ETIQUETA || '');
+        const desc = normalizeKey(a.DESCRICAODOATIVO || a.DESCRICAODOBEM || a.DESCRICAO || '');
+        const serial = normalizeKey(a.SERIAL || '');
+
+        if (etq.includes(term) || desc.includes(term) || serial.includes(term)) {
             localMatches.push(a);
         }
     }
 
     return localMatches.sort((a, b) => {
+      // Prioridade máxima: match exato na etiqueta
+      const termEtq = normalizeKey(a.ETIQUETA || '');
+      const termEtqB = normalizeKey(b.ETIQUETA || '');
+      if (termEtq === term && termEtqB !== term) return -1;
+      if (termEtqB === term && termEtq !== term) return 1;
+
       if (activeTab === 'INVENTORIED') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
@@ -786,7 +855,7 @@ const Inventory: React.FC<InventoryProps> = ({
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeTab, selectedUnit]);
+  }, [assets, allAssets, committedSearch, activeTab]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
@@ -798,6 +867,11 @@ const Inventory: React.FC<InventoryProps> = ({
     
     return pendingInSearch.every(a => normalizeKey(a.ETIQUETA || "") === firstEtq);
   }, [committedSearch, filteredAssets, normalizeKey]);
+
+  // v3.0: PagedItems robusto com fallback para evitar ReferenceError
+  const pagedItems = useMemo(() => {
+    return filteredAssets || [];
+  }, [filteredAssets]);
 
   const handleConfirmSearchBatch = async () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
@@ -1318,6 +1392,11 @@ const Inventory: React.FC<InventoryProps> = ({
                     disabled={!unitConfig}
                     onClick={() => { 
                       setSelectedLocation(loc.displayName); 
+                      // v25.02: Limpeza de busca ao selecionar localidade para evitar lista vazia
+                      if (committedSearch) setCommittedSearch('');
+                      if (displayValue) setDisplayValue('');
+                      if (clearInventorySearchValue) clearInventorySearchValue();
+                      
                       setIsInventorying(true); 
                       if (immersiveMode && !document.fullscreenElement) {
                         onToggleFullscreen();
@@ -1533,16 +1612,28 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="bg-white px-5 py-2 flex items-center border-b border-slate-50">
               <div className="flex-1 flex p-1 bg-slate-100 rounded-xl">
                 <button 
-                  onClick={() => { setActiveTab('PENDING'); setDisplayValue(''); setCommittedSearch(''); }}
-                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'PENDING' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                  type="button"
+                  onClick={() => { 
+                    console.log(">>> [UI] Switching to PENDING");
+                    setActiveTab('PENDING'); 
+                    setDisplayValue(''); 
+                    setCommittedSearch(''); 
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'PENDING' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-black/5' : 'text-slate-400 opacity-60'}`}
                 >
-                  Pendentes ({assets.filter(a => !a._conferido).length})
+                  Pendentes ({assets.filter(a => !(!!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM')).length})
                 </button>
                 <button 
-                  onClick={() => { setActiveTab('INVENTORIED'); setDisplayValue(''); setCommittedSearch(''); }}
-                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'INVENTORIED' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+                  type="button"
+                  onClick={() => { 
+                    console.log(">>> [UI] Switching to INVENTORIED");
+                    setActiveTab('INVENTORIED'); 
+                    setDisplayValue(''); 
+                    setCommittedSearch(''); 
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'INVENTORIED' ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5' : 'text-slate-400 opacity-60'}`}
                 >
-                  Inventariados ({assets.filter(a => !!a._conferido).length})
+                  Inventariados ({assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length})
                 </button>
               </div>
             </div>
@@ -1553,72 +1644,96 @@ const Inventory: React.FC<InventoryProps> = ({
                 if (showNumericKeypad) setShowNumericKeypad(false);
               }}
             >
-              <div className="flex-1 overflow-hidden relative">
-                {/* Virtualized List Container */}
-                <Virtuoso
-                ref={virtuosoRef}
-                style={{ height: '100%' }}
-                data={pagedItems}
-                rangeChanged={handleRangeChanged}
-                itemContent={(index, item) => {
-                  if ('isHeader' in item && item.isHeader) {
-                    return (
-                      <div className="px-6 py-2 bg-slate-50 border-y border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{item.title}</span>
-                      </div>
-                    );
-                  }
-                  
-                  const asset = item as Asset;
-                  return (
-                    <motion.div 
-                      key={asset.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="px-4 py-1"
-                    >
-                      <AssetCard 
-                        asset={asset}
-                        selectedLocation={selectedLocation}
-                        onSelect={onSelectAsset}
-                        onMakeDecision={handleDecisionInList}
-                        selectedUnit={selectedUnit}
-                        isBatchMode={isBatchMode}
-                        isSelected={selectedIds.has(String(asset.id))}
-                        onToggleSelect={toggleIdSelection}
-                        hasLocalPhoto={localPhotoIds.has(String(asset.id))}
-                        onShowQr={setQrModalAsset}
-                        onViewPhoto={(url) => setPhotoPreviewUrl(url)}
-                      />
-                    </motion.div>
-                  );
-                }}
-                components={{
-                  Footer: () => (
-                    <div className="p-8 pb-32 text-center space-y-4">
-                      <div className="flex flex-col items-center space-y-1">
-                        <Database size={24} className="text-slate-200" />
-                        <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Fim da Localidade</p>
-                      </div>
-                      
-                      {dbStatus && (
-                        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 max-w-xs mx-auto animate-fadeIn">
-                          <div className="flex items-center space-x-2 mb-2 justify-center">
-                            <div className={`w-1.5 h-1.5 rounded-full ${navStatus === 'green' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Soberania Nativa v2.6</span>
-                          </div>
-                          <p className="text-[7px] font-mono text-slate-400 break-all leading-relaxed bg-white p-2 rounded-lg border border-slate-100">
-                            DB_PATH: {dbStatus.path}
-                          </p>
-                        </div>
-                      )}
+              <div className="flex-1 relative flex flex-col min-h-0">
+                {isLoading && (
+                  <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
+                    <Loader2 size={32} className="text-accent animate-spin mb-4" />
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] animate-pulse">
+                      Sincronizando Base Local...
+                    </p>
+                  </div>
+                )}
+
+                {pagedItems.length === 0 && !isLoading ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4 animate-fadeIn">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center">
+                      <Box size={24} className="text-slate-300" />
                     </div>
-                  )
-                }}
-              />
-            </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-loose">
+                        Nenhum Ativo em {activeTab === 'PENDING' ? 'Pendentes' : 'Inventariados'}<br/>
+                        <span className="text-[8px] opacity-60">
+                          {assets.length > 0 
+                            ? `Encontrados ${assets.length} ativos no total. Confira a aba ${activeTab === 'PENDING' ? 'Inventariados' : 'Pendentes'}.` 
+                            : 'Nenhum ativo encontrado para este endereço.'}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 relative overflow-hidden flex flex-col" style={{ minHeight: '500px' }}>
+                    {/* PLANO B: Renderização Direta para Bypass de Virtualização */}
+                    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 350px)', minHeight: '500px' }}>
+                      <div className="flex flex-col pb-20">
+                        {pagedItems.map((item, index) => {
+                          if ('isHeader' in item && item.isHeader) {
+                            return (
+                              <div key={`header-${index}`} className="px-6 py-2 bg-slate-50 border-y border-slate-100 sticky top-0 z-10">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{(item as { isHeader: boolean; title: string }).title}</span>
+                              </div>
+                            );
+                          }
+                          
+                          const asset = item as Asset;
+                          return (
+                            <motion.div 
+                              key={asset.id || `asset-${index}`}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.2, delay: Math.min(index * 0.01, 0.3) }}
+                              className="px-4 py-1"
+                            >
+                              <AssetCard 
+                                asset={asset}
+                                selectedLocation={selectedLocation}
+                                onSelect={onSelectAsset}
+                                onMakeDecision={handleDecisionInList}
+                                selectedUnit={selectedUnit}
+                                isBatchMode={isBatchMode}
+                                isSelected={selectedIds.has(String(asset.id))}
+                                onToggleSelect={toggleIdSelection}
+                                hasLocalPhoto={localPhotoIds.has(String(asset.id))}
+                                onShowQr={setQrModalAsset}
+                                onViewPhoto={(url) => setPhotoPreviewUrl(url)}
+                              />
+                            </motion.div>
+                          );
+                        })}
+
+                        {/* Footer Manual */}
+                        <div className="p-8 text-center space-y-4">
+                          <div className="flex flex-col items-center space-y-1">
+                            <Database size={24} className="text-slate-200" />
+                            <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Fim da Localidade</p>
+                          </div>
+                          
+                          {dbStatus && (
+                            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 max-w-xs mx-auto animate-fadeIn">
+                              <div className="flex items-center space-x-2 mb-2 justify-center">
+                                <div className={`w-1.5 h-1.5 rounded-full ${navStatus === 'green' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Soberania Nativa v2.6.4</span>
+                              </div>
+                              <p className="text-[7px] font-mono text-slate-400 break-all leading-relaxed bg-white p-2 rounded-lg border border-slate-100">
+                                DB_PATH: {dbStatus.path}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             {isSearchResultBatch && (
               <div className="px-4 pt-3">
                 <button 
@@ -1690,7 +1805,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
             {showScrollTop && (
               <button 
-                onClick={() => virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'smooth' })}
+                onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
                 className="absolute bottom-6 right-6 w-12 h-12 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-[90] border-2 border-white/20"
               >
                 <ArrowLeft size={24} className="rotate-90" />
@@ -2107,14 +2222,23 @@ const Inventory: React.FC<InventoryProps> = ({
                         type="text" 
                         value={manualAsset.ETIQUETA || ''} 
                         onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
-                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-black font-mono text-lg outline-none focus:border-accent"
+                        className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-24 text-ink font-black font-mono text-lg outline-none focus:border-accent"
                       />
-                      <button 
-                        onClick={() => handleVoiceTyping('ETIQUETA')}
-                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'ETIQUETA' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
-                      >
-                        <Mic size={18} />
-                      </button>
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                        <button 
+                          onClick={() => handleVoiceTyping('ETIQUETA')}
+                          className={`p-2 rounded-lg transition-all ${isListening === 'ETIQUETA' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                        >
+                          <Mic size={18} />
+                        </button>
+                        <button 
+                          onClick={handleOCRSearch}
+                          className="p-2 bg-accent text-white rounded-lg shadow-md active:scale-95 transition-all"
+                          title="Lê etiqueta via câmera (OCR)"
+                        >
+                          <Camera size={18} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div>

@@ -19,7 +19,8 @@ import {
   Download
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
+import { sqliteService } from '../services/sqliteService';
+import { generateUUID } from '../services/utils';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -108,7 +109,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       const finalUnit = newCampaignUnit.trim();
       console.log(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantId}, Unit: ${finalUnit || 'TODAS'}`);
       
-      const newCampaign: Partial<InventoryCampaign> = {
+      const newCampaign: InventoryCampaign = {
+        id: generateUUID(),
         name: newCampaignName.trim(),
         description: newCampaignDesc.trim(),
         status: CampaignStatus.CREATED,
@@ -120,7 +122,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         start_date: new Date().toISOString()
       };
 
-      const result = await createCampaign(newCampaign);
+      await sqliteService.saveCampaign(newCampaign);
+      // Simula o retorno de sucesso
+      const result = newCampaign;
       if (result) {
         // Atualização Otimista: garante que a UI reflita a criação ANTES do refresh terminar
         setLocalCampaigns(prev => [result, ...prev]);
@@ -150,16 +154,11 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     
     setIsSaving(true);
     try {
-      const success = await deleteCampaign(id);
-      if (success) {
-        setSuccessMessage('Campanha excluída');
+      await sqliteService.deleteCampaign(id);
+      setSuccessMessage('Campanha excluída');
         setTimeout(() => setSuccessMessage(null), 3000);
         setSelectedCampaign(null);
         if (onRefresh) await onRefresh();
-      } else {
-        setErrorMessage('Erro ao excluir campanha');
-        setTimeout(() => setErrorMessage(null), 3000);
-      }
     } catch (err) {
       console.error('Erro ao excluir:', err);
       setErrorMessage('Erro técnico ao excluir');
@@ -176,13 +175,13 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     try {
       // Regra: Se estiver fechando, cria o SNAPSHOT antes de mudar o status (Governança GBR)
       if (status === CampaignStatus.CLOSED) {
-        const snapSuccess = await createCampaignSnapshot(id, user?.email || 'admin');
+        const snapSuccess = await sqliteService.createCampaignSnapshot(id, user?.email || 'admin');
         if (!snapSuccess) {
           console.warn('>>> [Governance] Falha ao criar snapshot. Continuando encerramento mas sem histórico imutável.');
         }
       }
 
-      const success = await updateCampaignStatus(id, status, user?.email || 'admin');
+      const success = await sqliteService.updateCampaignStatus(id, status, user?.email || 'admin');
       if (success) {
         // REFRESH OBRIGATÓRIO: Buscamos a verdade do banco antes de qualquer mudança visual
         if (onRefresh) await onRefresh();
@@ -216,7 +215,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     if (tenantId) {
       setStatsLoading(true);
-      const campaignStats = await fetchCampaignStats(campaign.id, tenantId);
+      const campaignStats = await sqliteService.fetchCampaignStats(campaign.id, tenantId);
       setStats(campaignStats);
       setStatsLoading(false);
     }
@@ -378,7 +377,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                 {selectedCampaign.status === CampaignStatus.CLOSED && (
                   <button 
                     onClick={async () => {
-                        const snapshot = await getCampaignSnapshot(selectedCampaign.id);
+                        const snapshot = await sqliteService.getCampaignSnapshot(selectedCampaign.id);
                         if (snapshot && snapshot.assets_data) {
                             if (window.pushScreen) {
                                 window.pushScreen(AppScreen.ASSET_REPORT_PRINT, { 

@@ -58,12 +58,11 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
+import { Building2, ShieldCheck, FileText, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
-import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig } from './services/supabaseService';
-import { getPendingSyncItems, processSyncQueue } from './services/syncService';
+// Global logging helper
+const logAuditEvent = (entry: Parameters<typeof sqliteService.logAuditEvent>[0]) => sqliteService.logAuditEvent(entry);
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
@@ -189,10 +188,48 @@ const App: React.FC = () => {
       return parsed;
     } catch { return null; }
   });
+
+  // ESTADOS DE NAVEGAÇÃO E CORE (v2.6.5 - Anti ReferenceError)
+  const [history, setHistory] = useState<AppScreen[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const history = Array.isArray(parsed) && parsed.length > 0 ? parsed : [AppScreen.LOGIN];
+        return history.filter(s => s !== AppScreen.ONBOARDING);
+      }
+      return [AppScreen.LOGIN];
+    } catch { return [AppScreen.LOGIN]; }
+  });
+
+  const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_params');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  const screen = history[history.length - 1] || AppScreen.LOGIN;
+
+  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
+    return localStorage.getItem('app_selected_unit') || null;
+  });
+
+  const [currentCampaignId, setCurrentCampaignId] = useState<string | null>(() => {
+    return localStorage.getItem('app_current_campaign_id') || null;
+  });
+
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const databaseMode = DatabaseMode.INTERNAL;
+
   const userRef = useRef<User | null>(user);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
 
   const [hasAcceptedTerms] = useState<boolean>(() => {
     return localStorage.getItem('app_accepted_terms') === 'true';
@@ -205,12 +242,7 @@ const App: React.FC = () => {
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
-  const [unsyncedAssetsCount, setUnsyncedAssetsCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
-  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
-    const saved = localStorage.getItem('app_database_mode');
-    return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
-  });
 
   // Monitor de Soberania de Arquivos (Modo Físico)
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
@@ -294,7 +326,6 @@ const App: React.FC = () => {
     }
   };
 
-  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
   const [modalConfig, setModalConfig] = useState<ModalConfig>({
     isOpen: false,
     title: '',
@@ -314,51 +345,11 @@ const App: React.FC = () => {
     });
   };
 
-  // Monitor de Sincronização Offline
+  // Monitor de Sincronização Offline - Desativado em conformidade com Native Sovereignty
   useEffect(() => {
-    if (databaseMode === DatabaseMode.INTERNAL) {
-      setSyncQueueLength(0);
-      setPendingPhotosCount(0);
-      setIsSyncLocked(false);
-      return;
-    }
-
-    const checkSyncQueue = async () => {
-      try {
-        const { getSyncQueueLength, getUnsyncedAssetsCount } = await import('./services/syncService');
-        const len = await getSyncQueueLength();
-        setSyncQueueLength(len);
-
-        const unsyncedCount = await getUnsyncedAssetsCount();
-        setUnsyncedAssetsCount(unsyncedCount);
-
-        const totalPending = len + unsyncedCount;
-        if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
-          setIsSyncLocked(true);
-          setModalConfig({
-            isOpen: true,
-            title: 'Bloqueio de Segurança: Fila de Sincronização',
-            message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Sincronize antes de continuar.`,
-            type: 'error'
-          });
-        } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
-          setIsSyncLocked(false);
-        }
-      } catch (err) {
-        console.warn(">>> [Sync] Falha ao verificar fila:", err);
-      }
-    };
-
-    checkSyncQueue();
-    const interval = setInterval(checkSyncQueue, 15000); // Polling menos agressivo
-
-     const handleSynced = () => checkSyncQueue();
-     window.addEventListener('gbr_photo_synced', handleSynced);
-     return () => {
-       clearInterval(interval);
-       window.removeEventListener('gbr_photo_synced', handleSynced);
-     };
-  }, [isSyncLocked, databaseMode]);
+    setSyncQueueLength(0);
+    setIsSyncLocked(false);
+  }, [databaseMode]);
 
   // Rastreamento Autônomo v24.50
   useEffect(() => {
@@ -375,40 +366,9 @@ const App: React.FC = () => {
     return (saved as AppModule) || null;
   });
 
-  // Monitor de Segurança e Integridade (Blindagem Técnica)
+  // Monitor de Segurança
   useEffect(() => {
-    // Só monitora sessão do Supabase se estivermos em um modo que utilize a nuvem
-    if (supabase && databaseMode.startsWith('SUPABASE')) {
-      // Adicionado timeout de 5s para evitar travamento em redes instáveis
-      const sessionPromise = supabase.auth.getSession();
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 5000));
-
-      Promise.race([sessionPromise, timeoutPromise])
-        .then((result) => {
-          const { error } = result as { error: { message: string } | null; data: { session: unknown; user: unknown } };
-          if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
-            console.warn('[Supabase] Sessão inválida detectada. Limpando...');
-            localStorage.removeItem('app_current_user');
-            
-            const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
-            if (!hasReloaded) {
-              sessionStorage.setItem('app_session_error_reloaded', 'true');
-              supabase?.auth.signOut().finally(() => {
-                window.location.reload();
-              });
-            } else {
-              console.error('[Supabase] Loop detectado. Mantendo offline.');
-              setUser(null);
-              setTimeout(() => sessionStorage.removeItem('app_session_error_reloaded'), 5000);
-            }
-          } else {
-            sessionStorage.removeItem('app_session_error_reloaded');
-          }
-        })
-        .catch(err => {
-          console.warn('[Supabase] Falha ao verificar sessão (Timeout ou Rede):', err);
-        });
-    }
+    // Modo Soberano ativado
   }, [databaseMode]);
 
   useEffect(() => {
@@ -470,31 +430,9 @@ const App: React.FC = () => {
     return () => clearInterval(monitorId);
   }, []);
 
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  const [history, setHistory] = useState<AppScreen[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_screen_history');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const history = Array.isArray(parsed) && parsed.length > 0 ? parsed : [AppScreen.LOGIN];
-        // Sanitize: remove ONBOARDING from history as it's now an overlay
-        return history.filter(s => s !== AppScreen.ONBOARDING);
-      }
-      return [AppScreen.LOGIN];
-    } catch { return [AppScreen.LOGIN]; }
-  });
-
   useEffect(() => {
     localStorage.setItem('app_screen_history', JSON.stringify(history));
   }, [history]);
-
-  const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
-    try {
-      const saved = localStorage.getItem('app_screen_params');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
 
   useEffect(() => {
     if (screenParams) {
@@ -503,16 +441,6 @@ const App: React.FC = () => {
       localStorage.removeItem('app_screen_params');
     }
   }, [screenParams]);
-
-  const screen = history[history.length - 1] || AppScreen.LOGIN;
-
-  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
-    return localStorage.getItem('app_selected_unit') || null;
-  });
-
-  const [currentCampaignId, setCurrentCampaignId] = useState<string | null>(() => {
-    return localStorage.getItem('app_current_campaign_id') || null;
-  });
 
   useEffect(() => {
     if (selectedUnit) {
@@ -531,8 +459,6 @@ const App: React.FC = () => {
       localStorage.removeItem('app_current_campaign_id');
     }
   }, [currentCampaignId]);
-
-  const [isLoading, setIsLoading] = useState(false);
 
   const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
     assets: [], 
@@ -576,17 +502,19 @@ const App: React.FC = () => {
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
-  const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    document.body.dataset.isProcessing = String(isLoading || isSyncing || isOCRProcessing);
+  }, [isLoading, isSyncing, isOCRProcessing]);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('app_downloaded_units');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
+  const [isCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
@@ -737,15 +665,15 @@ const App: React.FC = () => {
         console.log(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
       }
 
-      // Configurações de GPS
-      const gpsData = await fetchUnitConfigs(tenantId);
+      // Configurações de GPS (Soberania SQL Local)
+      const gpsData = await sqliteService.getUnitConfigs(tenantId);
       setUnitConfigs(gpsData);
       setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-    // Campanhas (Soberania SQL Local / Supabase)
+    // Campanhas (Soberania SQL Local)
     // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
     const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
-    const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
+    const campaignData = await sqliteService.getCampaigns(tenantId, fetchUnitId);
     const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
     console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
     setLastQueryLog(resultMsg);
@@ -760,7 +688,7 @@ const App: React.FC = () => {
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
     if (user?.tenantid) {
-       fetchUnitConfigs(user.tenantid).then(configs => {
+       sqliteService.getUnitConfigs(user.tenantid).then(configs => {
          setUnitConfigs(configs);
          setInventory(prev => ({ ...prev, unitConfigs: configs }));
        }).catch(err => console.error(">>> [App] Erro ao carregar UnitConfigs:", err));
@@ -826,14 +754,14 @@ const App: React.FC = () => {
     console.log('>>> [App] Atualizando Âncora GPS para Unidade:', unitId);
     
     try {
-      await saveUnitConfig(configToSave);
+      await sqliteService.saveUnitConfig(configToSave);
       
       // PERSISTÊNCIA SOBERANA (v2.6)
       await sqliteService.saveConfig(`gps_ref_${unitId}_lat`, String(lat));
       await sqliteService.saveConfig(`gps_ref_${unitId}_lng`, String(lng));
       
       // Atualiza o estado local imediatamente para refletir a mudança
-      const updatedConfigs = await fetchUnitConfigs(user.tenantid);
+      const updatedConfigs = await sqliteService.getUnitConfigs(user.tenantid);
       setInventory(prev => ({
         ...prev,
         unitConfigs: updatedConfigs,
@@ -871,67 +799,6 @@ const App: React.FC = () => {
       indoorNavigation.stopTracking();
     };
   }, [selectedUnit]);
-
-  const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
-    if (!skipLoadingState && isSyncing) return;
-    if (databaseMode === DatabaseMode.INTERNAL) return;
-    
-    // GUARD: Check if online
-    if (!navigator.onLine) {
-      console.log('Push ignorado: Dispositivo offline.');
-      return;
-    }
-    
-    const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-    if (!hasSupabase) return;
-
-    const effectiveTenantId = user?.tenantid;
-
-    const dirtyIds = Array.from(dirtyAssetsRef.current);
-    if (dirtyIds.length === 0) return;
-
-    const dirtyAssets = dirtyIds.map(id => inventoryRef.current.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
-
-    if (dirtyAssets.length > 0) {
-      if (!skipLoadingState) setIsSyncing(true);
-      try {
-        // Sincroniza os ativos e recebe os IDs processados com sucesso (Push)
-        const syncedIds = await syncAssetsToCloud(dirtyAssets, effectiveTenantId);
-        
-        // Sincroniza a config também para garantir que o timestamp suba
-        const configToSync = { ...inventoryRef.current };
-        // @ts-expect-error - assets is removed for sync
-        delete configToSync.assets;
-        await syncConfigToCloud(configToSync as Omit<InventoryState, 'assets'>, effectiveTenantId);
-
-        // Remove apenas os que foram sincronizados com sucesso (Resiliência)
-        syncedIds.forEach(id => dirtyAssetsRef.current.delete(id));
-        
-        if (syncedIds.length === dirtyAssets.length) {
-          setLastSyncTime(new Date().toISOString());
-          setSyncError(null);
-        } else {
-          setSyncError(`Sincronização parcial: ${syncedIds.length}/${dirtyAssets.length} enviados.`);
-        }
-
-        // Log de Auditoria na Nuvem
-        if (databaseMode === DatabaseMode.SUPABASE) {
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'SYNC_PUSH',
-            details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
-            _tenantid: user?._tenantid || user?.tenantid
-          });
-        }
-      } catch (err) {
-        setSyncError('Erro ao enviar alterações locais');
-        console.error('Push error:', err);
-        throw err;
-      } finally {
-        if (!skipLoadingState) setIsSyncing(false);
-      }
-    }
-  }, [databaseMode, user?.tenantid, isSyncing]);
 
   const handleDownloadUnit = useCallback(async (unitName: string) => {
     if (isSyncing) return;
@@ -999,313 +866,17 @@ const App: React.FC = () => {
     });
   }, [isFieldMode]);
 
-  const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
-    if (isSyncing) return;
-    
-    const mode = explicitMode || databaseMode;
-    
-    // BLINDAGEM TOTAL: Se o modo for INTERNAL, não permite nenhuma chamada de rede
-    if (mode === DatabaseMode.INTERNAL) {
-      console.log('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
-      return;
-    }
+  // syncFromCloud removido para Soberania Técnica
 
-    // GUARD: Check if online
-    if (!navigator.onLine) {
-      console.log('Sincronização ignorada: Dispositivo offline.');
-      return;
-    }
-
-    // GUARD: Check if on login screen (unless explicitTenantId is provided)
-    if (screen === AppScreen.LOGIN && !explicitTenantId) {
-      console.log('Sincronização ignorada: Usuário na tela de login.');
-      return;
-    }
-
-    // GUARD: Check if user is logged in (unless explicitTenantId is provided, which happens during login/auth check)
-    if (!user && !explicitTenantId) {
-      console.log('Sincronização ignorada: Usuário não autenticado.');
-      return;
-    }
-    
-    const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-    const rawTenantId = explicitTenantId || user?._tenantid || user?.tenantid;
-    
-    // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
-    const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
-    
-    console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
-    
-    setIsSyncing(true);
-    setIsCloudUpdatePending(false); // Reset pending flag immediately
-    try {
-      // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
-      // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
-      // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
-      try {
-        await pushLocalChanges(true); 
-        await processSyncQueue();
-      } catch (pushErr) {
-        console.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
-      }
-      
-      const pendingItems = await getPendingSyncItems();
-      setPendingPhotosCount(pendingItems.length);
-
-      // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
-      // Passamos o tenantid e o unitid se fornecido
-      const cloudData = await fetchFullInventory(tenantid, explicitUnitId);
-      const syncTimestamp = new Date().toISOString();
-
-      console.log(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
-
-      if (cloudData) {
-        setInventory(prev => {
-          // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
-          const cloudCompanies = cloudData.config.companies || [];
-          const cloudAssets = cloudData.assets || [];
-          
-          // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais, 
-          // e não foi um erro de rede, pode ser um problema de tenantid.
-          // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
-          if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
-            console.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
-            return prev;
-          }
-
-          // MERGE: Preserva alterações locais que ainda não foram sincronizadas
-          const mergedAssets = [...cloudAssets];
-          const dirtyIds = Array.from(dirtyAssetsRef.current);
-          
-          if (dirtyIds.length > 0) {
-            console.log(`>>> [Sync] Mesclando ${dirtyIds.length} alterações locais pendentes no pull da nuvem.`);
-            dirtyIds.forEach(id => {
-              const localDirty = prev.assets.find(a => String(a.id) === id);
-              if (localDirty) {
-                const index = mergedAssets.findIndex(a => String(a.id) === id);
-                if (index !== -1) {
-                  const cloudAsset = mergedAssets[index];
-                  
-                  // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = cloudAsset._conferido && 
-                                   cloudAsset._auditor && 
-                                   cloudAsset._auditor !== (user?.email || 'unknown') &&
-                                   cloudAsset._dataLeitura !== localDirty._dataLeitura;
-
-                  if (isConflict) {
-                    console.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.ETIQUETA}.`);
-                    logAuditEvent({
-                      user_email: user?.email || 'system',
-                      action: 'SYNC_CONFLICT',
-                      record_id: String(id),
-                      table_name: 'assets',
-                      old_data: cloudAsset,
-                      new_data: localDirty,
-                      details: `Conflito de sincronização: Item conferido na nuvem por ${cloudAsset._auditor} em ${cloudAsset._dataLeitura}. Prevalecendo alteração local do auditor atual.`,
-                      _tenantid: user?._tenantid || user?.tenantid
-                    });
-                  }
-
-                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
-                } else {
-                  mergedAssets.push(localDirty);
-                }
-              }
-            });
-          }
-
-          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
-          const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
-
-          const newState: InventoryState = {
-            ...prev,
-            ...cloudData.config,
-            assets: mergedAssets.length > 0 ? mergedAssets : prev.assets,
-            companies: finalCompanies.length > 0 ? finalCompanies : prev.companies,
-            status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
-            lastUpdated: syncTimestamp
-          };
-          saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
-          
-          // Log de Auditoria na Nuvem
-          if (mode === DatabaseMode.SUPABASE) {
-            logAuditEvent({
-              user_email: user?.email || 'unknown',
-              action: 'SYNC_PULL',
-              details: `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`,
-              _tenantid: user?._tenantid || user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
-            });
-          }
-
-          return newState;
-        });
-        setLastSyncTime(syncTimestamp);
-        setSyncError(null);
-        if (cloudData.assets && cloudData.assets.length > 0) {
-          setRecoverySource('CLOUD');
-          setShowRecoveryToast(true);
-          setTimeout(() => setShowRecoveryToast(false), 5000);
-        }
-      } else {
-        // Mesmo se não houver dados, atualizamos o lastSyncTime para evitar loops de auto-sync
-        const syncTimestamp = new Date().toISOString();
-        setInventory(prev => ({ ...prev, lastUpdated: syncTimestamp }));
-        setLastSyncTime(syncTimestamp);
-        setSyncError(null);
-        if (!explicitTenantId) { // Só mostra modal se não for o sync automático do login
-          setModalConfig({
-            isOpen: true,
-            title: 'Sincronização Concluída',
-            message: 'A sincronização foi finalizada, mas nenhum dado foi encontrado na nuvem para este modo.',
-            type: 'info'
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao sincronizar da nuvem:', error);
-      setSyncError('Erro na conexão');
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [databaseMode, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
-
-  // Real-time Cloud Sync Listener
+  // Sincronismo em Tempo Real (Desativado)
   useEffect(() => {
-    // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
-    if (!user || databaseMode === DatabaseMode.INTERNAL) return;
+    return;
+  }, [databaseMode]);
 
-    // Update pending photos count
-    const updatePendingCount = async () => {
-      const items = await getPendingSyncItems();
-      setPendingPhotosCount(items.length);
-    };
-
-    updatePendingCount();
-
-    // Listen for sync events
-    const handlePhotoSynced = (e: Event) => {
-      const customEvent = e as CustomEvent<{ assetId: string; photoUrl: string }>;
-      const { assetId, photoUrl } = customEvent.detail;
-      // Update local state with the real cloud URL
-      setInventory(prev => {
-        const newState = {
-          ...prev,
-          assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
-        };
-        // Persist localmente para substituir o blob URL pela URL da nuvem no storage
-        saveInventory(newState).catch(err => console.error('[Sync] Erro ao persistir expurgo de foto:', err));
-        return newState;
-      });
-      updatePendingCount();
-    };
-
-    window.addEventListener('gbr_photo_synced', handlePhotoSynced);
-    
-    // Expose map opener for Dashboard
-    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => pushScreen(AppScreen.ASSET_MAP);
-
-    // Check periodically
-    const interval = setInterval(updatePendingCount, 10000);
-
-    const subscription = subscribeToInventoryChanges((newConfig) => {
-      if (newConfig && newConfig.lastUpdated) {
-        const cloudTime = new Date(newConfig.lastUpdated).getTime();
-        const localTime = inventory.lastUpdated ? new Date(inventory.lastUpdated).getTime() : 0;
-
-        // Se o tempo na nuvem for maior que o local, significa que houve uma carga externa (Admin)
-        if (cloudTime > localTime + 5000) { // Margem de 5s para evitar auto-sync do próprio update
-          setIsCloudUpdatePending(true);
-        }
-      }
-    });
-
-    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantid || '', (payload) => {
-      const { eventType, new: newAssetData, old: oldAssetData } = payload;
-      const newAsset = newAssetData as unknown as Asset;
-      const oldAsset = oldAssetData as unknown as Asset;
-      
-      setInventory(prev => {
-        let updatedAssets = [...prev.assets];
-        let hasChanges = false;
-        
-        if (eventType === 'INSERT') {
-          if (!updatedAssets.find(a => String(a.id) === String(newAsset.id))) {
-            updatedAssets.push(newAsset);
-            hasChanges = true;
-          }
-        } else if (eventType === 'UPDATE') {
-          const index = updatedAssets.findIndex(a => String(a.id) === String(newAsset.id));
-          if (index !== -1) {
-            // Só atualiza se não for um item que o usuário local acabou de mexer (dirty)
-            if (!dirtyAssetsRef.current.has(String(newAsset.id))) {
-              updatedAssets[index] = { ...updatedAssets[index], ...newAsset };
-              hasChanges = true;
-            }
-          } else {
-            // Se o item não existe localmente mas foi atualizado na nuvem, adicionamos
-            updatedAssets.push(newAsset);
-            hasChanges = true;
-          }
-        } else if (eventType === 'DELETE') {
-          const initialLength = updatedAssets.length;
-          updatedAssets = updatedAssets.filter(a => String(a.id) !== String(oldAsset.id));
-          if (updatedAssets.length !== initialLength) {
-            hasChanges = true;
-          }
-        }
-        
-        if (!hasChanges) return prev;
-
-        const newState = { ...prev, assets: updatedAssets };
-        saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado em tempo real:', e));
-        return newState;
-      });
-    });
-
-    return () => {
-      window.removeEventListener('gbr_photo_synced', handlePhotoSynced);
-      delete (window as unknown as { onOpenMap?: () => void }).onOpenMap;
-      clearInterval(interval);
-      if (subscription) subscription.unsubscribe();
-      if (assetSubscription) assetSubscription.unsubscribe();
-    };
-  }, [databaseMode, inventory.lastUpdated, user]);
-
-  // Efeito para forçar sincronização se houver atualização pendente
-  // Cloud Update Pending Handler
+  // Sincronismo Pendente (Desativado)
   useEffect(() => {
-    // Só processamos atualizações pendentes se o usuário estiver logado
-    if (!user || !isCloudUpdatePending || isSyncing || databaseMode === DatabaseMode.INTERNAL) return;
-
-    if (user?.isAdmin || user?.email === ADMIN_EMAIL) {
-      // Admins sincronizam automaticamente sem modal
-      syncFromCloud();
-    } else {
-      // Auditores recebem confirmação para não perder trabalho local
-      setModalConfig({
-        isOpen: true,
-        title: 'Atualização do Banco de Dados',
-        message: 'O Administrador realizou uma nova carga de dados. Para não perder seu trabalho, enviaremos suas alterações locais para a nuvem antes de baixar a nova base.',
-        type: 'confirm',
-        onConfirm: async () => {
-          try {
-            // 1. Envia o que tiver de local primeiro
-            await pushLocalChanges();
-            // 2. Baixa a nova base
-            await syncFromCloud();
-          } catch (e) {
-            console.error("Falha na sincronização segura:", e);
-            setModalConfig({
-              isOpen: true,
-              title: 'Erro na Sincronização',
-              message: 'Não foi possível garantir a segurança dos seus dados locais. Verifique sua conexão e tente novamente.',
-              type: 'error'
-            });
-          }
-        }
-      });
-    }
-  }, [isCloudUpdatePending, isSyncing, databaseMode, user, syncFromCloud, pushLocalChanges]);
+    return;
+  }, [user, isCloudUpdatePending, isSyncing, databaseMode]);
 
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
@@ -1355,29 +926,25 @@ const App: React.FC = () => {
     }
   });
 
-  // Apply theme class to body based on databaseMode, darkMode and environment
+  // Apply theme class to body
   useEffect(() => {
     const body = document.body;
-    body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark');
+    body.classList.remove('theme-internal', 'theme-dark');
     
     if (inventory.darkMode) {
       body.classList.add('theme-dark');
     } else {
-      if (databaseMode === DatabaseMode.SUPABASE) {
-        body.classList.add('theme-supabase');
-      } else {
-        body.classList.add('theme-internal');
-      }
+      body.classList.add('theme-internal');
     }
-  }, [databaseMode, inventory.darkMode]);
+  }, [inventory.darkMode]);
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
     const init = async () => {
-      // Solicita persistência durável para evitar perda de dados em limpeza de cache
+      // Solicita persistência durável
       await requestPersistentStorage();
       
-      console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
+      console.log(`App init - Soberania Nativa Ativada.`);
       
       // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
       try {
@@ -1426,22 +993,29 @@ const App: React.FC = () => {
               console.warn(">>> [Auditoria] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO.");
               setIntegrityFailed(true);
             } else if (count > 0) {
-              // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade se houver.
-              if (integrityFailed) {
-                 console.log(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
-                 setIntegrityFailed(false);
-              }
+              // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade.
+              console.log(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
+              setIntegrityFailed(false);
             }
 
-            // Validação de Schema Detalhada em caso de falha
+            // Validação de Schema Silenciosa (Soberania Nativa)
             if (count > 0) {
                const schema = await sqliteService.checkTableSchema('assets');
                if (schema && Array.isArray(schema)) {
-                  const required = ['ETIQUETA', 'DESCRICAODOBEM', 'STATUS'];
-                  const missing = required.filter(col => !schema.find((s) => s['name'] === col));
-                  if (missing.length > 0) {
-                    console.error(">>> [Auditoria] FALHA DE SCHEMA: Colunas ausentes no arquivo físico:", missing);
+                  // Colunas CRÍTICAS sem as quais o app não pode operar (Identidade)
+                  const critical = ['ETIQUETA']; 
+                  const missingCritical = critical.filter(col => !schema.find((s) => s['name'] === col));
+                  
+                  if (missingCritical.length > 0) {
+                    console.error(">>> [Auditoria] FALHA CRÍTICA DE SCHEMA: Colunas de identidade ausentes:", missingCritical);
                     setIntegrityFailed(true);
+                  } else {
+                    // Colunas que podem estar faltando mas o app consegue lidar (Logar apenas)
+                    const recommended = ['DESCRICAODOBEM', 'STATUS', 'CENTRODECUSTO', 'CONTACONTABIL'];
+                    const missingRecommended = recommended.filter(col => !schema.find((s) => s['name'] === col));
+                    if (missingRecommended.length > 0) {
+                      console.warn(">>> [Auditoria] Aviso de Schema: Colunas recomendadas ausentes (Silent Mode):", missingRecommended);
+                    }
                   }
                }
             }
@@ -1450,8 +1024,15 @@ const App: React.FC = () => {
           }
         }
 
+        // Se o banco físico foi validado, ignoramos a flag de falha de integridade do cache
         if (saved && (saved as InventoryState & { _integrity_failed?: boolean })._integrity_failed) {
-          setIntegrityFailed(true);
+          const isPhysicalValid = databaseMode === DatabaseMode.INTERNAL && sqliteService.getStorageSource() === 'PHYSICAL';
+          if (!isPhysicalValid) {
+            setIntegrityFailed(true);
+          } else {
+            console.log(">>> [Auditoria] Prevalecendo validade do Banco Físico sobre flag de integridade do cache.");
+            setIntegrityFailed(false);
+          }
         }
 
         // Recupera o status do SQLite para Soberania de Dados
@@ -1524,6 +1105,8 @@ const App: React.FC = () => {
           // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
           if (!recoverySource) setRecoverySource('CACHE');
           
+          // SUCESSO: O dado foi restaurado (seja do Cache ou SQLite). Silenciamos alertas de erro.
+          setIntegrityFailed(false);
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
         } else {
@@ -1570,6 +1153,7 @@ const App: React.FC = () => {
 
               setInventory(prev => ({ ...prev, ...parsed }));
               await saveInventory(parsed);
+              setIntegrityFailed(false);
               setShowRecoveryToast(true);
               setTimeout(() => setShowRecoveryToast(false), 5000);
             }
@@ -1578,70 +1162,15 @@ const App: React.FC = () => {
       } catch (e) { 
         console.error("Data load failed", e); 
       } finally {
-        console.log("App init - Finalizando carregamento de dados. isDataLoaded -> true");
+        console.log("App init - Finalizando carregamento de dados.");
         setIsDataLoaded(true);
         
-        // @ts-expect-error - appStarted is a custom property for the loader fallback
+        // @ts-expect-error - appStarted is a custom property
         window.appStarted = true;
-        // Remove o loader do index.html o mais rápido possível
         const loader = document.getElementById('app-loader');
         if (loader) {
           loader.classList.add('hidden');
           setTimeout(() => loader.remove(), 500);
-        }
-
-        // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background)
-        // Adicionado timeout e verificação rigorosa de modo para evitar travamento no splash screen
-        if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine) {
-          try {
-            // Promise.race para garantir que o fetch não trave o init por mais de 8s
-            const cloudData = await Promise.race([
-              fetchFullInventory(user?.tenantid),
-              new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
-            ]).catch(() => null);
-
-            if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
-              const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
-              const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
-              
-              const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
-              const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
-
-              // Se a base local estiver vazia e houver dados na nuvem, sincroniza AUTOMATICAMENTE
-              // Mas apenas se não tivermos acabado de limpar a base (para evitar loop de recuperação)
-              if (isLocalEmpty && cloudData.assets && cloudData.assets.length > 0 && !justCleared) {
-                console.log('Base local vazia detectada. Sincronizando automaticamente com a nuvem...');
-                const newState: InventoryState = {
-                  ...inventory,
-                  ...cloudData.config,
-                  assets: cloudData.assets,
-                  status: DatabaseStatus.LOADED,
-                  lastUpdated: new Date().toISOString()
-                };
-                setInventory(newState);
-                await saveInventory(newState);
-                setLastSyncTime(new Date().toISOString());
-                setRecoverySource('CLOUD');
-                setShowRecoveryToast(true);
-                setTimeout(() => setShowRecoveryToast(false), 5000);
-              } 
-              // Se a base local estiver vazia E a nuvem também estiver vazia para este tenant
-              else if (isLocalEmpty && (!cloudData.assets || cloudData.assets.length === 0)) {
-                console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
-                if (!user?.tenantid) {
-                  setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
-                } else {
-                  setSyncError(`Erro ao sincronizar dados da nuvem.`);
-                }
-              }
-              // Se não estiver vazia, mas a nuvem for mais nova, apenas avisa (comportamento atual)
-              else if (cloudTime > localTime + 5000) {
-                setIsCloudUpdatePending(true);
-              }
-            }
-          } catch (err) {
-            console.warn('Falha ao verificar atualizações na nuvem no início:', err);
-          }
         }
       }
     };
@@ -1669,17 +1198,10 @@ const App: React.FC = () => {
         console.error('Erro ao decodificar dados do QR Code:', e);
       }
     } else if (etqParam && !publicAsset) {
-      // 1. Tenta encontrar no inventário local primeiro (mais rápido)
+      // 1. Tenta encontrar no inventário local
       const foundLocal = inventory.assets.find(a => normalizeKey(a.ETIQUETA || "") === normalizeKey(etqParam));
       if (foundLocal) {
         setPublicAsset(foundLocal);
-      } else {
-        // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam, user?.tenantid).then(foundCloud => {
-          if (foundCloud) {
-            setPublicAsset(foundCloud);
-          }
-        });
       }
     }
 
@@ -1745,73 +1267,14 @@ const App: React.FC = () => {
     } catch { return []; }
   });
 
-  const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
-
-  // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(users));
-    
-    if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
-      const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-      if (isAdmin) {
-        syncUsersToCloud(users).catch(err => {
-          console.warn('[Supabase] Falha na sincronização silenciosa de usuários:', err);
-        });
-      }
-    }
-  }, [users, databaseMode, hasFetchedUsers]);
+  }, [users]);
 
-  // Busca usuários da nuvem ao carregar para admins
+  // Busca de usuários (Fisicamente Soberana)
   useEffect(() => {
-    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-    if (isAdmin && databaseMode === DatabaseMode.SUPABASE && user?.email) {
-      console.log("🔄 Buscando usuários da nuvem para sincronização...");
-      // Se for MASTER, busca apenas do seu tenant. Se for ADMIN global, busca todos.
-      const fetchTenantId = user.role === UserRole.MASTER ? user.tenantid : undefined;
-      fetchUsersFromCloud(fetchTenantId).then(cloudUsers => {
-        if (cloudUsers && cloudUsers.length > 0) {
-          console.log(`✅ ${cloudUsers.length} usuários encontrados na nuvem.`);
-          setUsers(prev => {
-            // Criamos um mapa dos usuários locais para preservar dados locais (como senhas e nomes recém editados)
-            const localMap = new Map(prev.map(u => [u.email.toLowerCase(), u]));
-            
-            // Mesclamos: prioridade para a nuvem em permissões, mas preservamos dados locais se existirem
-            const merged = cloudUsers.map(cloud => {
-              const local = localMap.get(cloud.email.toLowerCase());
-              if (local) {
-                return {
-                  ...cloud,
-                  // Se o nome local for diferente do da nuvem, pode ser uma edição recente
-                  // Mas a nuvem deve ser a verdade eventual. 
-                  // Para evitar o "revert" imediato, poderíamos preferir o local se for diferente.
-                  // No entanto, syncUsersToCloud já deve ter enviado o local para a nuvem.
-                  password: local.password, 
-                  mustChangePassword: local.mustChangePassword
-                };
-              }
-              return cloud;
-            });
-            
-            // Adicionamos usuários locais que ainda não estão na nuvem
-            const cloudEmails = new Set(cloudUsers.map(u => u.email.toLowerCase()));
-            prev.forEach(local => {
-              if (!cloudEmails.has(local.email.toLowerCase())) {
-                merged.push(local);
-              }
-            });
-            
-            return merged;
-          });
-        }
-        setHasFetchedUsers(true);
-      }).catch(err => {
-        console.error("❌ Erro ao buscar usuários da nuvem:", err);
-        setHasFetchedUsers(true); // Permite sync mesmo em erro para não travar
-      });
-    } else {
-      setHasFetchedUsers(true); // Se não for admin ou não estiver em modo supabase, permite sync
-    }
-  }, [user?.email, databaseMode]);
+    // Busca de usuários concluída
+  }, [user?.email]);
 
   const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
     return localStorage.getItem('app_inventory_location') || null;
@@ -2058,11 +1521,7 @@ const App: React.FC = () => {
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
           
-          const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-          
-          // Sincroniza se houver ativos sujos OU se a config mudou (lastUpdated mudou)
-          // APENAS se estiver em modo SUPABASE e houver conexão configurada
-          const shouldSyncCloud = hasSupabase && databaseMode === DatabaseMode.SUPABASE && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
+          const shouldSyncCloud = false;
           
           if (shouldSyncCloud) {
             setIsSyncing(true);
@@ -2144,203 +1603,11 @@ const App: React.FC = () => {
     };
   }, [pushScreen]);
 
-  // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
+  // Listener de Autenticação (Nativo)
   useEffect(() => {
-    if (!supabase || databaseMode === DatabaseMode.INTERNAL) return;
-
-    // Função para processar o login a partir de uma sessão
-    const processSession = async (session: Session) => {
-      if (!session?.user) return;
-      
-      const currentUser = userRef.current;
-      
-      // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido, não fazemos nada para evitar loop
-      if (currentUser && currentUser.email === session.user.email && currentUser.tenantid) return;
-
-      setIsLoading(true);
-      try {
-        // Garante que o usuário tenha um perfil na tabela user_permissions
-        // Passamos os metadados para garantir que o tenantId e role sejam preservados
-        // Unificamos user_metadata e app_metadata para garantir que o tenantid seja encontrado
-        const unifiedMetadata = { 
-          ...(session.user.user_metadata || {}), 
-          ...(session.user.app_metadata || {}) 
-        };
-        const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
-        console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
-          dbTenant: permissions.tenantid, 
-          metaTenant: unifiedMetadata.tenantid,
-          finalTenant: permissions.tenantid || unifiedMetadata.tenantid || ''
-        });
-        
-        const is_master = (session.user.email?.toLowerCase() === 'semorr@gmail.com' || session.user.email?.toLowerCase() === 'semorr@gmail.com.br');
-        const resolvedTenantId = permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || (is_master ? 'CICOPAL' : '');
-        const resolvedUnitId = permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || (is_master ? 'MATRIZ' : '');
-
-        const loggedUser: User = {
-          id: session.user.id,
-          email: session.user.email || '',
-          username: permissions.username || unifiedMetadata.username || session.user.email?.split('@')[0] || 'user',
-          name: permissions.name || unifiedMetadata.name || permissions.username || unifiedMetadata.username || session.user.email?.split('@')[0] || 'User',
-          role: (permissions.role as UserRole) || (session.user.app_metadata?.role as UserRole) || (session.user.user_metadata?.role as UserRole) || UserRole.AUDITOR,
-          is_admin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
-          isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
-          mustChangePassword: false,
-          _tenantid: resolvedTenantId,
-          _unitid: resolvedUnitId,
-          tenantid: resolvedTenantId,
-          unitid: resolvedUnitId,
-          units: permissions.units || unifiedMetadata.units || (resolvedUnitId ? [resolvedUnitId] : []),
-          tenants: permissions.tenants || unifiedMetadata.tenants || (resolvedTenantId ? [resolvedTenantId] : [])
-        };
-
-        // Só atualizamos se houver mudança real para evitar loops de renderização
-        const hasChanged = !currentUser || 
-                          currentUser.email !== loggedUser.email || 
-                          currentUser.tenantid !== loggedUser.tenantid || 
-                          currentUser.role !== loggedUser.role;
-
-        if (hasChanged) {
-          setUser(loggedUser);
-          localStorage.setItem('app_current_user', safeStringify(loggedUser));
-        }
-        
-        // Log de Auditoria na Nuvem
-        logAuditEvent({
-          user_email: loggedUser.email,
-          action: 'LOGIN',
-          details: `Usuário logado no sistema (${loggedUser.role})`,
-          _tenantid: loggedUser._tenantid || loggedUser.tenantid
-        });
-        
-        // Se logou via Supabase, garante que o modo está correto
-        if (databaseMode !== DatabaseMode.SUPABASE) {
-          setDatabaseMode(DatabaseMode.SUPABASE);
-          localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
-        }
-
-        // Navega para a seleção de módulos se estiver na tela de login
-        if (screen === AppScreen.LOGIN) {
-          pushScreen(AppScreen.MODULE_SELECTION);
-        }
-        
-        // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-        syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
-  } catch (err) {
-        console.error('Erro ao processar login automático:', err);
-        // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
-        const fallbackUser: User = {
-          username: session.user.email?.split('@')[0] || 'Usuário',
-          email: session.user.email!,
-          role: UserRole.AUDITOR,
-          isAdmin: false,
-          mustChangePassword: false,
-          _tenantid: '',
-          tenantid: '',
-          tenants: []
-        };
-        setUser(fallbackUser);
-        localStorage.setItem('app_current_user', safeStringify(fallbackUser));
-        setDatabaseMode(DatabaseMode.SUPABASE);
-        pushScreen(AppScreen.MODULE_SELECTION);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    // Verifica erros no hash ou query da URL (Magic Link expirado, etc)
-    const handleUrlErrors = () => {
-      const hash = window.location.hash;
-      const search = window.location.search;
-      
-      let errorCode: string | null = null;
-      let errorDescription: string | null = null;
-
-      if (hash && hash.includes('error=')) {
-        const params = new URLSearchParams(hash.substring(1));
-        errorCode = params.get('error_code');
-        errorDescription = params.get('error_description');
-      } else if (search && search.includes('error=')) {
-        const params = new URLSearchParams(search);
-        errorCode = params.get('error_code');
-        errorDescription = params.get('error_description');
-      }
-      
-      if (errorCode) {
-        // Se o usuário já estiver logado, ignoramos erros de OTP expirado (clique redundante)
-        if (userRef.current && (errorCode === 'otp_expired' || errorDescription?.includes('expired'))) {
-          window.history.replaceState(null, '', window.location.pathname);
-          return;
-        }
-
-        if (errorCode === 'otp_expired' || errorDescription?.includes('expired')) {
-          setModalConfig({
-            isOpen: true,
-            title: 'Link de Acesso Expirado',
-            message: 'Este link de acesso (Magic Link) já expirou ou foi utilizado. Por favor, retorne à tela de login e solicite um novo link. Lembre-se que o link é de uso único e expira em 5 minutos.',
-            type: 'error'
-          });
-        } else if (errorCode === 'access_denied') {
-          setModalConfig({
-            isOpen: true,
-            title: 'Acesso Negado',
-            message: 'O link de acesso é inválido ou foi recusado pelo servidor. Verifique se você está utilizando o link mais recente enviado para seu e-mail.',
-            type: 'error'
-          });
-        } else {
-          setModalConfig({
-            isOpen: true,
-            title: 'Erro de Autenticação',
-            message: `Ocorreu um erro ao processar seu login: ${errorDescription || errorCode}. Tente novamente ou entre em contato com o suporte.`,
-            type: 'error'
-          });
-        }
-        // Limpa a URL para não mostrar o erro novamente
-        window.history.replaceState(null, '', window.location.pathname);
-      }
-    };
-
-    handleUrlErrors();
-
-    // Verifica sessão atual ao montar
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) processSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
-      
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-        processSession(session);
-      } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED') {
-        // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
-        const currentUser = localStorage.getItem('app_current_user');
-        if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
-          console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
-          setModalConfig({
-            isOpen: true,
-            title: 'Sessão Expirada',
-            message: 'Sua sessão na nuvem expirou ou o token de acesso é inválido. Por favor, faça login novamente.',
-            type: 'error',
-            onConfirm: () => {
-              import('./services/supabaseService').then(m => m.signOut());
-              setUser(null);
-              localStorage.removeItem('app_current_user');
-              setHistory([AppScreen.LOGIN]);
-            }
-          });
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          localStorage.removeItem('app_current_user');
-          setHistory([AppScreen.LOGIN]);
-        }
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [supabase, databaseMode]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
+    // SOBERANIA: Não há escuta de eventos externos
+    return;
+  }, [databaseMode]);
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
@@ -2358,34 +1625,7 @@ const App: React.FC = () => {
       // 1. Limpa localmente todas as empresas selecionadas em uma única operação
       await clearMultipleInventories(companiesToClear, databaseMode);
 
-      // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
-      if (databaseMode === DatabaseMode.SUPABASE) {
-        const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
-        await clearCloudInventory(companiesToClear, effectiveTenantId);
-        
-        // Atualiza o timestamp na nuvem - envolvemos em try/catch para não falhar a limpeza se apenas o log falhar
-        try {
-          const configToSync = { ...inventory };
-          // @ts-expect-error - assets is removed for sync
-          delete configToSync.assets;
-          await syncConfigToCloud({ 
-            ...configToSync, 
-            lastUpdated: new Date().toISOString() 
-          } as Omit<InventoryState, 'assets'>, effectiveTenantId);
-        } catch (syncErr) {
-          console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
-        }
 
-        // Log de Auditoria na Nuvem
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'DELETE',
-          table_name: 'assets',
-          details: `Limpeza em massa de banco de dados (Unidades: ${companiesToClear.join(', ')})`,
-          _tenantid: user?._tenantid || user?.tenantid
-        });
-      }
 
       // 3. Atualiza o estado local
       sessionStorage.setItem('app_just_cleared_data', 'true');
@@ -2461,71 +1701,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
-    setIsSyncing(true);
-    try {
-      // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
-      console.log(`>>> [ModeSwitch] Salvando estado atual (${databaseMode}) antes da troca...`);
-      await saveInventory(inventory);
-
-      // 2. Troca o modo no localStorage e no estado de controle
-      setDatabaseMode(mode);
-      localStorage.setItem('app_database_mode', mode);
-
-      // Log de Auditoria
-      logAuditEvent({
-        user_email: user?.email || 'unknown',
-        action: 'UPDATE',
-        table_name: 'config',
-        details: `Alteração do modo de banco de dados para: ${mode}`,
-        _tenantid: user?._tenantid || user?.tenantid
-      });
-
-      // 3. Tenta carregar o estado do novo modo do IndexedDB
-      console.log(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
-      const loaded = await loadInventory(mode);
-      
-      if (loaded && loaded.assets && loaded.assets.length > 0) {
-        console.log(`>>> [ModeSwitch] Dados encontrados para ${mode}. Restaurando...`);
-        setInventory(loaded);
-      } else {
-        console.log(`>>> [ModeSwitch] Nenhum dado local para ${mode}. Iniciando base limpa.`);
-        const cleanState = getInitialInventoryState(mode);
-        setInventory(cleanState);
-        
-        // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
-        if (mode.startsWith('SUPABASE') && user) {
-          console.log(`>>> [ModeSwitch] Modo Nuvem detectado. Iniciando sincronização automática...`);
-          await syncFromCloud(undefined, mode);
-        }
-      }
-      
-      setModalConfig({
-        isOpen: true,
-        title: 'Modo Alterado',
-        message: mode === DatabaseMode.INTERNAL 
-          ? 'O sistema agora está operando em Modo INTERNO (Mobile Puro). Todas as conexões com a nuvem foram suspensas para garantir estabilidade máxima.' 
-          : 'O sistema agora está operando em Modo NUVEM (Supabase). A sincronização automática foi reativada.',
-        type: 'success',
-        onConfirm: () => {
-          // Recarrega a página para garantir que todos os serviços (Supabase, Sync, etc) 
-          // sejam reinicializados com as novas flags de blindagem técnica.
-          window.location.reload();
-        }
-      });
-    } catch (error) {
-      console.error('Erro ao trocar modo de banco de dados:', error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro na Troca de Modo',
-        message: 'Não foi possível alternar o modo de banco de dados com segurança. Tente novamente.',
-        type: 'error'
-      });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handleResetGPS = () => {
     localStorage.removeItem('gbr_gps_bypass');
     setModalConfig({
@@ -2567,6 +1742,42 @@ const App: React.FC = () => {
       return newHistory;
     });
   }, []);
+
+  // Controle de Back Button Físico (Android/Capacitor/Native v2.6)
+  useEffect(() => {
+    let backListener: { remove: () => void } | null = null;
+    
+    const setupBackListener = async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const listener = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+          // BLOQUEIO v2.6: Não permite sair se houver overlays persistentes ou telas de sistema
+          const hasModal = !!document.querySelector('.z-\\[12000\\]'); // Photo preview
+          
+          if (hasModal) {
+            console.log('[Native] Back Button: Fechando modal de evidência.');
+            return;
+          }
+
+          if (screen !== AppScreen.LOGIN && screen !== AppScreen.HOME) {
+            popScreen();
+          } else if (canGoBack) {
+            window.history.back();
+          } else {
+            CapacitorApp.exitApp();
+          }
+        });
+        backListener = listener;
+      } catch {
+        // Silencioso no Browser
+      }
+    };
+
+    setupBackListener();
+    return () => {
+      if (backListener) backListener.remove();
+    };
+  }, [screen, popScreen]);
 
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
@@ -2618,81 +1829,83 @@ const App: React.FC = () => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    // PESIMISMO SAUDÁVEL: Tentamos salvar no banco PRIMEIRO
     setIsProcessing(true);
     try {
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        console.log(`>>> [DBA] Persistindo no SQLite ANTES de atualizar a UI...`);
-        // No modo interno, salvamos o registro no SQLite físico via bulkInsert que já trata a transação
-        await sqliteService.bulkInsertAssets([updatedAsset]);
-      } else {
-        await syncAssetsToCloud([updatedAsset], user?.tenantid);
+      const timestamp = new Date().toISOString();
+      const updates = { ...updatedAsset } as Asset;
+      
+      const currentScreen = history[history.length - 1];
+      const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
+      const targetLoc = isReconciliationWorkflow
+          ? (updates.ENDERECO || "")
+          : (inventoryLocation 
+              ? inventoryLocation.toUpperCase().trim() 
+              : (updates.ENDERECO || "").toString().toUpperCase().trim());
+
+      const index = inventory.assets.findIndex(a => String(a.id) === String(updates.id));
+      const existingAsset = index !== -1 ? inventory.assets[index] : null;
+
+      // Metadados de Auditoria v2.6.5
+      updates._lastUpdated = timestamp;
+      if (updates._conferido) {
+        updates._dataLeitura = updates._dataLeitura || timestamp;
       }
+      updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+      updates._origemTransacao = origin;
+
+      // Log de Auditoria
+      const historyEntry: AuditLogEntry = {
+        timestamp,
+        user: updates._auditor,
+        action: index === -1 ? 'CREATE' : 'UPDATE',
+        details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
+        tenantid: user?.tenantid || '',
+        origin: origin
+      };
+      updates._history = [...(updates._history || []), historyEntry];
+
+      // Campos alterados e garantias de integridade
+      const alteredFields = new Set<string>(updates._camposAlterados || []);
+      const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
+
+      if (existingAsset) {
+        const wasLabelingCandidate = 
+          String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+          String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
+          existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+          existingAsset._plaquetado === true;
+
+        if (wasLabelingCandidate) {
+          updates._plaquetado = true;
+        }
+
+        Object.keys(updates).forEach(key => {
+          if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+          const k = key as keyof Asset;
+          if (String(updates[k]) !== String(existingAsset[k])) {
+            alteredFields.add(key);
+            if (originalValues[key] === undefined) {
+              originalValues[key] = existingAsset[k] as string | number | boolean | null;
+            }
+          }
+        });
+      }
+      
+      updates._camposAlterados = Array.from(alteredFields);
+      updates._valoresOriginais = originalValues;
+      if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+      if (!updates._unitid) updates._unitid = user?.unitid || '';
+
+      // PESIMISMO SAUDÁVEL: Persistência no SQLite Local (Soberania Nativa)
+      await sqliteService.bulkInsertAssets([updates]);
 
       // SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
       setInventory(prev => {
         const newAssets = [...prev.assets];
-        const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
+        const idx = newAssets.findIndex(a => String(a.id) === String(updates.id));
         
-        const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
-
-        const targetLoc = isReconciliationWorkflow
-          ? (updatedAsset.ENDERECO || "")
-          : (inventoryLocation 
-              ? inventoryLocation.toUpperCase().trim() 
-              : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
-        
-        const updates = { ...updatedAsset } as Asset;
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
-        updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-        updates._origemTransacao = origin; // Aplica o código fixo
-        
-        // Garantir que tenant e unit estão definidos
-        if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
-        if (!updates._unitid) updates._unitid = user?.unitid || '';
-        
-        // Log de Auditoria
-        const historyEntry: AuditLogEntry = {
-          timestamp: new Date().toISOString(),
-          user: user?.name || user?.username || user?.email || 'SISTEMA',
-          action: index === -1 ? 'CREATE' : 'UPDATE',
-          details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-          tenantid: user?.tenantid || '',
-          origin: origin // Aplica o código fixo no log
-        };
-        updates._history = [...(updates._history || []), historyEntry];
-        
-        const alteredFields = new Set<string>(updates._camposAlterados || []);
-        
-        const existingAsset = index !== -1 ? newAssets[index] : null;
-        const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
-
-        if (existingAsset) {
-          const wasLabelingCandidate = 
-            String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
-            String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
-            existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-            existingAsset._plaquetado === true;
-
-          Object.keys(updates).forEach(key => {
-            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-            const k = key as keyof Asset;
-            if (String(updates[k]) !== String(existingAsset[k])) {
-              alteredFields.add(key);
-              if (originalValues[key] === undefined) {
-                originalValues[key] = existingAsset[k] as string | number | boolean | null;
-              }
-            }
-          });
-
-          if (wasLabelingCandidate) {
-            updates._plaquetado = true;
-          }
-        }
-        
-        if (index !== -1) {
-          newAssets[index] = updates;
+        if (idx !== -1) {
+          newAssets[idx] = updates;
         } else {
           newAssets.push(updates);
         }
@@ -2708,11 +1921,10 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(">>> [DATABASE] Falha Crítica de Escrita:", err);
       alert("ERRO SQL: " + (err instanceof Error ? err.message : String(err)));
-      // Não removemos do dirtyAssetsRef pois queremos tentar sync posterior
     } finally {
       setIsProcessing(false);
     }
-  }, [history, inventoryLocation, databaseMode, user?.tenantid]);
+  }, [history, inventoryLocation, databaseMode, user, inventory.assets]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -2771,25 +1983,30 @@ const App: React.FC = () => {
         // Se falhar ou timeout, usa fallback da unidade
         const loc = await Promise.race([
           getCurrentLocation(),
-          new Promise<{lat: number, lng: number}>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+          new Promise<{lat: number, lng: number}>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 5000))
         ]).catch(e => {
-          console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+          console.warn('>>> [GPS] Falha na captura rápida (v2.6), verificando âncora de segurança:', e);
+          if (currentUnitConfig?.lat && currentUnitConfig?.lng && currentUnitConfig.lat !== 0) {
             return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
           }
-          return { lat: 0, lng: 0 };
-        });
+          // Se não houver âncora, retorna objeto vazio para sinalizar falta de GPS
+          return { lat: undefined, lng: undefined };
+        }) as { lat?: number; lng?: number };
 
-        console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}`);
-        
-        // Injeta GPS no objeto e no registro da auditoria
-        assetWithHistory._lat = loc.lat;
-        assetWithHistory._lng = loc.lng;
-        
-        // Atualiza a última entrada da trilha com a posição exata
-        const lastIndex = assetWithHistory._history.length - 1;
-        if (lastIndex >= 0) {
-          assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}]`;
+        if (loc.lat !== undefined && loc.lng !== undefined) {
+          console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}`);
+          
+          // Injeta GPS no objeto e no registro da auditoria
+          assetWithHistory._lat = loc.lat;
+          assetWithHistory._lng = loc.lng;
+          
+          // Atualiza a última entrada da trilha com a posição exata
+          const lastIndex = assetWithHistory._history.length - 1;
+          if (lastIndex >= 0) {
+            assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}]`;
+          }
+        } else {
+          console.warn('>>> [GPS] Nenhuma localização obtida (Hardware Timeout + Sem Âncora). Gravando sem coordenadas.');
         }
       } catch (e) {
         console.error(">>> [GPS] Erro fatal na lógica de captura:", e);
@@ -2915,15 +2132,10 @@ const App: React.FC = () => {
       newAssets.push(child);
     }
 
-    // 3. Atualizar estado APÓS confirmação (Pesimismo Saudável)
+    // 3. Atualizar estado (Pesimismo Saudável - SQLite Nativo)
     setIsProcessing(true);
     try {
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        // No modo interno salvamos os novos ativos 
-        await sqliteService.bulkInsertAssets([updatedParent, ...newAssets]);
-      } else {
-        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || '');
-      }
+      await sqliteService.bulkInsertAssets([updatedParent, ...newAssets]);
 
       setInventory(prev => ({
         ...prev,
@@ -2973,9 +2185,8 @@ const App: React.FC = () => {
       lastUpdated: new Date().toISOString()
     }));
 
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
-    }
+    // Modo Soberano: Apenas save local
+    await sqliteService.bulkInsertAssets([restoredAsset]);
   }, [inventory.assets, user, databaseMode]);
 
   const permanentDeleteAsset = useCallback(async (assetId: string) => {
@@ -2986,16 +2197,7 @@ const App: React.FC = () => {
       assets: prev.assets.filter(a => String(a.id) !== String(assetId)),
       lastUpdated: new Date().toISOString()
     }));
-
-    if (databaseMode === DatabaseMode.SUPABASE && supabase) {
-      const { error } = await supabase
-        .from('assets')
-        .delete()
-        .eq('id', assetId);
-      
-      if (error) console.error('Erro ao excluir permanentemente:', error);
-    }
-  }, [databaseMode]);
+  }, []);
 
   const addNewLocation = (newLocation: string) => {
     const upperCaseLocation = newLocation.toUpperCase().trim();
@@ -3040,25 +2242,8 @@ const App: React.FC = () => {
 
     setIsProcessing(true);
     try {
-      // 1. TENTA SALVAR NO BANCO PRIMEIRO
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        // No modo interno, salvamos o registro marcado como deletado no SQLite
-        await sqliteService.bulkInsertAssets([deletedAsset]);
-      } else {
-        // No modo Supabase, sincronizamos o flag _is_deleted
-        await syncAssetsToCloud([deletedAsset], user?.tenantid);
-        
-        // Log de Auditoria Global
-        await logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'DELETE',
-          table_name: 'assets',
-          record_id: assetId,
-          old_data: assetToDelete,
-          details: `Exclusão lógica do ativo: ${assetToDelete.ETIQUETA} - ${assetToDelete.DESCRICAODOATIVO}`,
-          _tenantid: user?.tenantid
-        });
-      }
+      // 1. TENTA SALVAR NO BANCO PRIMEIRO (MODO SOBERANO)
+      await sqliteService.bulkInsertAssets([deletedAsset]);
 
       // 2. SÓ ATUALIZA A UI APÓS CONFIRMAÇÃO DO BANCO
       setInventory(prev => ({
@@ -3198,22 +2383,9 @@ const App: React.FC = () => {
     // 2. PESIMISMO SAUDÁVEL: PERSISTÊNCIA ANTES DA UI
     setIsProcessing(true);
     try {
-      console.log(`>>> [DATABASE] Iniciando persistência em lote para ${updatedAssetsList.length} itens...`);
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        // SOBERANIA SQLITE: Transação atômica que NÃO sobrescreve dados antigos sem intenção (merge via spread)
-        await sqliteService.bulkInsertAssets(updatedAssetsList);
-      } else {
-        await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
-        
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'BULK_UPDATE',
-          table_name: 'assets',
-          details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          _tenantid: user?._tenantid || user?.tenantid,
-          origin: origin
-        });
-      }
+      console.log(`>>> [DATABASE] Iniciando persistência em lote para ${updatedAssetsList.length} itens (Modo Soberano)...`);
+      // SOBERANIA SQLITE: Transação atômica
+      await sqliteService.bulkInsertAssets(updatedAssetsList);
 
       // 3. SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
       setInventory(prev => ({
@@ -3318,16 +2490,14 @@ const App: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws, "INVENTARIO_AUDIT");
     XLSX.writeFile(wb, `INVENTARIO_AUDIT_${new Date().getTime()}.xlsx`);
 
-    // Log de Auditoria na Nuvem
-    if (databaseMode === DatabaseMode.SUPABASE) {
-      logAuditEvent({
-        user_email: user?.email || 'unknown',
-        action: 'EXPORT',
-        table_name: 'assets',
-        details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
-        _tenantid: user?._tenantid || user?.tenantid
-      });
-    }
+    // Log de Auditoria
+    logAuditEvent({
+      user_email: user?.email || 'unknown',
+      action: 'EXPORT',
+      table_name: 'assets',
+      details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
+      _tenantid: user?._tenantid || user?.tenantid
+    });
   };
 
   const handleBackup = async () => {
@@ -3368,93 +2538,18 @@ const App: React.FC = () => {
         type: 'info'
       });
 
-      // Log de Auditoria na Nuvem
-      if (databaseMode === DatabaseMode.SUPABASE) {
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'RESTORE',
-          details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
-          _tenantid: user?._tenantid || user?.tenantid
-        });
-      }
+      // Log de Auditoria
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'RESTORE',
+        details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
+        _tenantid: user?._tenantid || user?.tenantid
+      });
     } else {
       setModalConfig({
         isOpen: true,
         title: 'Erro na Restauração',
         message: 'Não foi possível restaurar o backup. Verifique se o arquivo é um JSON válido do sistema.',
-        type: 'error'
-      });
-    }
-  };
-
-  const handleDownloadCloudData = async () => {
-    if (databaseMode === DatabaseMode.INTERNAL) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Modo Interno',
-        message: 'Você está no modo de banco de dados interno. Mude para o modo Supabase para baixar dados da nuvem.',
-        type: 'info'
-      });
-      return;
-    }
-
-    setModalConfig({
-      isOpen: true,
-      title: 'Baixando Dados',
-      message: 'Aguarde enquanto buscamos os dados na nuvem...',
-      type: 'info'
-    });
-
-    try {
-      const cloudData = await fetchFullInventory();
-      if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
-        const backupData = {
-          assets: cloudData.assets,
-          config: cloudData.config,
-          timestamp: new Date().toISOString(),
-          source: 'Supabase Cloud Export'
-        };
-
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `backup_nuvem_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        setModalConfig({
-          isOpen: true,
-          title: 'Download Concluído',
-          message: `Foram baixados ${cloudData.assets.length} ativos da nuvem com sucesso.`,
-          type: 'success'
-        });
-
-        // Log de Auditoria na Nuvem
-        if (databaseMode === DatabaseMode.SUPABASE) {
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'DOWNLOAD',
-            details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
-            _tenantid: user?._tenantid || user?.tenantid
-          });
-        }
-      } else {
-        setModalConfig({
-          isOpen: true,
-          title: 'Nenhum Dado',
-          message: 'Não foram encontrados dados na nuvem para baixar.',
-          type: 'info'
-        });
-      }
-    } catch (error) {
-      console.error('Erro ao baixar dados da nuvem:', error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro no Download',
-        message: 'Ocorreu um erro ao tentar baixar os dados da nuvem. Verifique sua conexão.',
         type: 'error'
       });
     }
@@ -3537,7 +2632,7 @@ const App: React.FC = () => {
       const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
       const unitName = selectedUnit ? selectedUnit.toUpperCase().trim() : 'GERAL';
       
-      // Nome do arquivo conforme especificação: [INVENTARIO_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
+      // Nome do arquivo conforme especificação
       const backupFileName = `INVENTARIO_MOBILE+KBP+DADOS+${unitName}+${dateStr}+${timeStr}`;
       
       // 1. Realiza backup automático antes de limpar
@@ -3546,46 +2641,14 @@ const App: React.FC = () => {
       // 2. Limpa localmente (apenas a unidade selecionada se houver)
       await clearInventory(databaseMode, selectedUnit || undefined); 
       
-      // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
-      if (databaseMode === DatabaseMode.SUPABASE) {
-        try {
-          const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-          const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
-          await clearCloudInventory(selectedUnit || undefined, effectiveTenantId);
-          
-          // Log de Auditoria na Nuvem
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'DELETE',
-            table_name: 'assets',
-            details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
-            _tenantid: user?._tenantid || user?.tenantid
-          });
-
-          // Atualiza o timestamp na nuvem para notificar outros usuários
-          try {
-            const configToSync = { ...inventory };
-            // @ts-expect-error - assets is removed for sync
-            delete configToSync.assets;
-            await syncConfigToCloud({ 
-              ...configToSync, 
-              lastUpdated: new Date().toISOString() 
-            } as Omit<InventoryState, 'assets'>, effectiveTenantId);
-          } catch (syncErr) {
-            console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
-          }
-        } catch (error: unknown) {
-          console.error('Erro ao limpar nuvem:', error);
-          let errorMessage = 'Erro desconhecido';
-          if (error instanceof Error) {
-            errorMessage = error.message;
-          } else if (error && typeof error === 'object') {
-            const errObj = error as Record<string, unknown>;
-            errorMessage = String(errObj.message || errObj.details || errObj.hint || safeStringify(error));
-          }
-          throw new Error(`Erro na nuvem: ${errorMessage}`);
-        }
-      }
+      // 3. Log de Auditoria
+      logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'DELETE',
+        table_name: 'assets',
+        details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
+        _tenantid: user?._tenantid || user?.tenantid
+      });
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
       sessionStorage.setItem('app_just_cleared_data', 'true');
@@ -3620,7 +2683,7 @@ const App: React.FC = () => {
       setModalConfig({
         isOpen: true,
         title: 'Limpeza Concluída',
-        message: `A unidade operacional "${selectedUnit}" foi limpa com sucesso (Local${databaseMode === DatabaseMode.SUPABASE ? ' e Nuvem' : ''}). Um backup de segurança foi gerado: ${backupFileName}`,
+        message: `A unidade operacional "${selectedUnit}" foi limpa com sucesso. Um backup de segurança foi gerado: ${backupFileName}`,
         type: 'info'
       });
     } catch (error: unknown) {
@@ -3672,25 +2735,38 @@ const App: React.FC = () => {
   const filteredAssetsByLocation = useMemo(() => {
     if (!inventoryLocation) return [];
     
-    const virtualName = "PENDENTES DE ETIQUETAGEM / SEM ENDEREÇO";
-    const isOrphanVirtual = inventoryLocation.trim() === virtualName;
-    const exactLoc = inventoryLocation.trim();
-    const result = [];
+    const virtualName = "PENDENTES DE ETIQUETAGEM / SEM ENDERECO";
+    const targetKey = normalizeKey(inventoryLocation);
+    // v2.6.8: Normalização extrema para bater com o agrupamento
+    const isOrphanVirtual = inventoryLocation.trim().toUpperCase() === virtualName || targetKey === normalizeKey(virtualName);
     
-    console.log(`>>> [UX] Executando filtro por Localidade ${isOrphanVirtual ? 'ORFA' : 'EXATA'}: '${exactLoc}'`);
+    const result = [];
     
     for (let i = 0; i < filteredAssetsByUnit.length; i++) {
       const a = filteredAssetsByUnit[i];
-      // Comparação rigorosa mantendo espaços e caracteres, conforme solicitado
-      const assetLoc = (a.ENDERECO || "").toString().trim();
+      // USAR NORMALIZAÇÃO SOBERANA PARA BATER COM O AGRUPAMENTO
+      const effectiveLoc = a._localMaster || a.ENDERECO || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
+      const assetLocKey = normalizeKey(effectiveLoc);
       
       if (isOrphanVirtual) {
-        if (!assetLoc) {
+        // No modo órfão, consideramos itens sem endereço explícito ou que caíram no fallback default
+        const assetLocUpper = String(effectiveLoc).trim().toUpperCase();
+        if (!assetLocKey || assetLocUpper === 'SEM LOCAL' || assetLocUpper === '' || assetLocKey === normalizeKey(virtualName)) {
           result.push(a);
         }
-      } else if (assetLoc === exactLoc) {
+      } else if (assetLocKey === targetKey) {
         result.push(a);
       }
+    }
+
+    if (result.length === 0 && !isOrphanVirtual && filteredAssetsByUnit.length > 0) {
+       console.warn(`>>> [UX] ALERTA: Nenhum ativo encontrado para '${inventoryLocation}'.`);
+       console.log(`>>> [UX] Target Key: '${targetKey}'`);
+       const samples = filteredAssetsByUnit.slice(0, 5).map(a => {
+         const loc = a._localMaster || a.ENDERECO || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
+         return { original: loc, key: normalizeKey(loc) };
+       });
+       console.log(`>>> [UX] Amostras de chaves na unidade:`, samples);
     }
 
     // Se for virtual, ordena por Centro de Custo e injeta cabeçalhos para agrupamento visual
@@ -3720,14 +2796,7 @@ const App: React.FC = () => {
        return groupedResult;
     }
     
-    console.log(`>>> [UX] Filtro concluído. Encontrados: ${result.length} ativos para o endereço '${exactLoc}'`);
-    if (result.length === 0 && filteredAssetsByUnit.length > 0 && !isOrphanVirtual) {
-      console.warn(`>>> [UX] ALERTA: Nenhum ativo encontrado para '${exactLoc}'. Verifique se no banco a coluna ENDERECO contém exatamente este valor.`);
-      // Log extra para depuração profunda das strings se vier vazio
-      const sample = filteredAssetsByUnit.slice(0, 5).map(a => `'${(a.ENDERECO || "").toString()}'`);
-      console.log(`>>> [UX] Amostra de ENDERECOs na unidade atual:`, sample);
-    }
-    
+    console.log(`>>> [UX] Filtro concluído. Encontrados: ${result.length} ativos para o endereço '${inventoryLocation}'`);
     return result;
   }, [filteredAssetsByUnit, inventoryLocation]);
 
@@ -4031,38 +3100,12 @@ const App: React.FC = () => {
     });
   }, [inventory.assets, inventory.companies, users, fullCompaniesWithStatus]);
 
-  // Auto-sync on Company Selection if base is empty
+  // Auto-sync logic removed for Native Sovereignty
   useEffect(() => {
-    const rawTenants = user?.tenants || (user?.tenantid ? [user.tenantid] : []);
-    const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
     const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
     const isTrulyEmpty = isEmpty && sqliteStatus !== 'ACTIVE';
     
-    if (screen === AppScreen.UNIT_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
-      // Evita loops infinitos se o sync falhar ou retornar vazio
-      const lastSyncAttempt = sessionStorage.getItem('last_auto_sync_attempt');
-      const now = Date.now();
-      
-      // Se acabamos de carregar dados (onDataLoaded), não devemos sincronizar imediatamente
-      // pois os dados podem ainda estar sendo processados ou o tenantid pode não bater
-      const justLoaded = sessionStorage.getItem('app_just_loaded_data') === 'true';
-      if (justLoaded) {
-        console.log('Auto-sync ignorado: Dados acabaram de ser carregados localmente.');
-        sessionStorage.removeItem('app_just_loaded_data');
-        return;
-      }
-
-      if (lastSyncAttempt && now - parseInt(lastSyncAttempt) < 30000) {
-        console.log('Auto-sync ignorado: tentativa recente detectada.');
-        return;
-      }
-      sessionStorage.setItem('last_auto_sync_attempt', now.toString());
-
-      console.log(`>>> [AutoSync] Iniciando sincronização automática para tenants: ${JSON.stringify(tenants)}`);
-      syncFromCloud(tenants, databaseMode).then(() => {
-        console.log('>>> [AutoSync] Sincronização automática concluída.');
-      });
-    } else if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
+    if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
       // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
       // Evita loop: utiliza sessionStorage para persistir o bloqueio mesmo após refresh ou pop
       const hasJustFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
@@ -4077,7 +3120,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.LOAD_DATABASE);
       }
     }
-  }, [screen, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen, isDataLoaded, sqliteStatus]);
+  }, [screen, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isSyncing, user, isAdmin, pushScreen, isDataLoaded, sqliteStatus]);
 
   // Auto-select unit if only one is available for the auditor
   useEffect(() => {
@@ -4218,19 +3261,6 @@ const App: React.FC = () => {
                 setUser(u); 
                 localStorage.setItem('app_current_user', safeStringify(u));
                 
-                // Se logou via Supabase, garante que o modo está correto
-                if (databaseMode !== DatabaseMode.INTERNAL) {
-                  setDatabaseMode(DatabaseMode.SUPABASE);
-                  localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
-                }
-
-                // Sempre tenta sincronizar no login para garantir dados frescos e permissões atualizadas
-                // Isso evita conflitos com caches locais ou sessões anteriores incompletas
-                if (databaseMode !== DatabaseMode.INTERNAL) {
-                  console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem...');
-                  syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
-                }
-
                 if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
                 } else { 
@@ -4309,7 +3339,6 @@ const App: React.FC = () => {
               }} 
               onExport={handleExport} 
               onBackup={handleBackup}
-              onDownloadCloudData={handleDownloadCloudData}
               onRestore={handleRestore}
               onClearDatabase={handleClearDatabase} 
               onClearMultipleUnits={handleClearMultipleCompanies}
@@ -4317,7 +3346,6 @@ const App: React.FC = () => {
               user={user} 
               units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
               databaseMode={databaseMode}
-              onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
                 count: filteredAssetsByUnit.length, 
                 totalDatabase: selectedUnit ? filteredAssetsByUnit.length : inventory.assets.length, 
@@ -4335,18 +3363,6 @@ const App: React.FC = () => {
               onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
               batterySaver={inventory.batterySaver || false}
               onUpdateBatterySaver={(val) => updateConfig({ batterySaver: val })}
-              mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence || false}
-              onUpdateMandatoryPhotoOnDivergence={(val) => updateConfig({ mandatoryPhotoOnDivergence: val })}
-              mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
-              onUpdateMandatoryPhotoOnNewItem={(val) => updateConfig({ mandatoryPhotoOnNewItem: val })}
-              onSyncCloud={syncFromCloud}
-              isSyncing={isSyncing}
-              lastSyncTime={lastSyncTime}
-              syncError={syncError}
-              hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
-              pendingPhotosCount={pendingPhotosCount}
-              syncQueueLength={syncQueueLength}
-              unsyncedAssetsCount={unsyncedAssetsCount}
               deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
               impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
               excludedAccounts={inventory.excludedAccounts}
@@ -4431,6 +3447,9 @@ const App: React.FC = () => {
                 </div>
               ) : (
                 <Inventory 
+                  isLoading={isLoading}
+                  isOCRProcessing={isOCRProcessing}
+                  setIsOCRProcessing={setIsOCRProcessing}
                   assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit} 
                   allAssets={inventory.assets} 
                   onBack={popScreen} 
@@ -4458,7 +3477,6 @@ const App: React.FC = () => {
                   onToggleFullscreen={toggleFullscreen}
                   batterySaver={inventory.batterySaver || false}
                   databaseMode={inventory.databaseMode}
-                  onSyncFromCloud={syncFromCloud}
                   user={user}
                   currentCampaignId={currentCampaignId || undefined}
                   unitConfig={currentUnitConfig}
@@ -4494,6 +3512,8 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && (
             <AssetDetail 
+              isOCRProcessing={isOCRProcessing}
+              setIsOCRProcessing={setIsOCRProcessing}
               assets={selectedAssets} 
               onBack={popScreen} 
               onUpdate={updateAsset} 
@@ -4650,9 +3670,7 @@ const App: React.FC = () => {
                 setInventoryLocation(null); 
                 sessionStorage.removeItem('app_just_finished_load');
                 
-                if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
-                  syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
-                }
+                /* syncFromCloud removed */
                 
                 pushScreen(AppScreen.MAIN_MENU); 
               }} 
@@ -4664,22 +3682,13 @@ const App: React.FC = () => {
                   localStorage.removeItem('app_current_module');
                   pushScreen(AppScreen.MODULE_SELECTION);
                 } else {
-                  if (supabase) {
-                    await logAuditEvent({
-                      user_email: user?.email || 'unknown',
-                      action: 'LOGOUT',
-                      details: 'Usuário saiu do sistema.',
-                      _tenantid: user?._tenantid || user?.tenantid
-                    });
-                    await supabase.auth.signOut();
-                  }
                   setUser(null); 
                   setSelectedUnit(null); 
                   pushScreen(AppScreen.LOGIN); 
                 }
               }} 
-              onSync={syncFromCloud}
-              isSyncing={isSyncing}
+              onSync={() => {}}
+              isSyncing={false}
               lastSyncTime={lastSyncTime}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
@@ -4736,15 +3745,6 @@ const App: React.FC = () => {
               userRole={user?.role}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
-                if (supabase) {
-                  await logAuditEvent({
-                    user_email: user?.email || 'unknown',
-                    action: 'LOGOUT',
-                    details: 'Usuário saiu do sistema.',
-                    _tenantid: user?._tenantid || user?.tenantid
-                  });
-                  await supabase.auth.signOut();
-                }
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
@@ -4814,7 +3814,6 @@ const App: React.FC = () => {
               onBack={popScreen} 
               onSyncSuccess={async () => {
                 const items = await getPendingSyncItems();
-                setPendingPhotosCount(items.length);
                 setSyncQueueLength(items.length);
               }}
               isFieldMode={isFieldMode}
@@ -4898,9 +3897,12 @@ const App: React.FC = () => {
                   )}
                 </div>
                 {sqliteService.getNativePath() && (
-                  <span className="text-[7px] font-mono text-emerald-400 truncate max-w-[140px] mt-1 opacity-80">
-                    {sqliteService.getNativePath()}
-                  </span>
+                  <div className="flex items-center gap-1 overflow-hidden mt-0.5 border-t border-white/5 pt-1">
+                    <Database size={6} className="text-emerald-400/60" />
+                    <span className="text-[6px] font-mono text-emerald-400 truncate max-w-[150px] opacity-80">
+                      {sqliteService.getNativePath()}
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -5010,10 +4012,10 @@ const App: React.FC = () => {
             </div>
           </div>
           <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">
-            {databaseMode === DatabaseMode.INTERNAL ? 'Processando Local' : 'Sincronizando Base'}
+            Processando Local
           </h3>
           <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">
-            {databaseMode === DatabaseMode.INTERNAL ? 'Aguarde, alternando modo de dados...' : 'Aguarde, baixando dados da nuvem...'}
+            Aguarde, atualizando base local...
           </p>
         </div>
       )}

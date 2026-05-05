@@ -107,7 +107,7 @@ const AssetListItemComponent: React.FC<AssetListItemProps> = ({
             </div>
 
             <h3 className="text-sm font-black text-slate-900 leading-tight line-clamp-1 truncate uppercase">
-              {asset.DESCRICAODOATIVO || 'DESCRIÇÃO NÃO CADASTRADA'}
+              {asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM || asset.DESCRICAO || 'DESCRIÇÃO NÃO CADASTRADA'}
             </h3>
             
             <p className="text-lg font-black text-slate-700 font-mono tracking-tighter mb-2">

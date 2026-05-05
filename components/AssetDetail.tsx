@@ -76,6 +76,8 @@ interface AssetDetailProps {
   mandatoryPhotoOnDivergence?: boolean;
   mandatoryPhotoOnNewItem?: boolean;
   databaseMode: DatabaseMode;
+  isOCRProcessing: boolean;
+  setIsOCRProcessing: (val: boolean) => void;
 }
 
 const AssetDetail: React.FC<AssetDetailProps> = ({ 
@@ -95,7 +97,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   tenantid = '',
   mandatoryPhotoOnDivergence = false,
   mandatoryPhotoOnNewItem = false,
-  databaseMode
+  databaseMode,
+  isOCRProcessing,
+  setIsOCRProcessing
 }) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
@@ -105,7 +109,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [ocrResults, setOcrResults] = useState<string[]>([]);
   const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
@@ -941,14 +944,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           )}
 
-          <input 
-            type="file" 
-            accept="image/*" 
-            capture="environment" 
-            className="hidden" 
-            ref={ocrInputRef} 
-            onChange={handleOCR} 
-          />
           
           {isOCRProcessing && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">

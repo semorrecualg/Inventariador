@@ -72,3 +72,13 @@ export const generateChecksum = async (data: unknown): Promise<string> => {
     return 'checksum_error';
   }
 };
+
+/**
+ * Função para gerar UUID v4 simples para uso local/offline
+ */
+export const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};

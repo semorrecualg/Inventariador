@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UnitConfig, User, AppScreen } from '../types';
-import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
+import { sqliteService } from '../services/sqliteService';
 import { getCurrentLocation } from '../utils/gpsUtils';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -99,7 +99,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
   const loadConfigs = async () => {
     setLoading(true);
-    const data = await fetchUnitConfigs(user.tenantid);
+    const data = await sqliteService.getUnitConfigs(user.tenantid);
     setConfigs(data);
     setLoading(false);
   };
@@ -228,27 +228,28 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     };
 
     try {
-      const result = await saveUnitConfig(configToSave);
-      if (result === true) {
+      const success = await sqliteService.saveUnitConfig(configToSave);
+      if (success) {
+        // PERSISTÊNCIA SOBERANA v2.6 (Escrita Imediata SQLite)
+        try {
+          await sqliteService.saveConfig(`gps_ref_${selectedUnit}_lat`, String(lat));
+          await sqliteService.saveConfig(`gps_ref_${selectedUnit}_lng`, String(lng));
+          await sqliteService.saveConfig(`gps_ref_${selectedUnit}_radius`, String(currentConfig.radius_meters));
+          await sqliteService.persist(); // COMMIT IMEDIATO
+          console.log('[NativeConfig] GPS Anchor persistido fisicamente no SQLite');
+        } catch (sqliteErr) {
+          console.warn('[NativeConfig] Falha no espelhamento SQLite:', sqliteErr);
+        }
+
         setMessage({ text: 'CONFIGURAÇÃO GRAVADA COM SUCESSO!', type: 'success' });
-        setConfigs(prev => {
-          const newConfigs = [...prev];
-          const idx = newConfigs.findIndex(c => 
-            c.unit_id?.trim().toUpperCase() === selectedUnit.trim().toUpperCase()
-          );
-          if (idx >= 0) {
-            newConfigs[idx] = { ...newConfigs[idx], ...configToSave };
-          } else {
-            newConfigs.push(configToSave);
-          }
-          return newConfigs;
-        });
+        const updatedConfigs = await sqliteService.getUnitConfigs(user.tenantid);
+        setConfigs(updatedConfigs);
+        
         setCurrentConfig(prev => ({ ...prev, ...configToSave }));
-        if (onUpdateConfigs) onUpdateConfigs([...configs]);
+        if (onUpdateConfigs) onUpdateConfigs(updatedConfigs);
         setTimeout(() => setIsSheetExpanded(false), 2000);
       } else {
-        const errorMsg = typeof result === 'string' ? result : 'Falha na comunicação com o banco';
-        setMessage({ text: `ERRO AO GRAVAR: ${errorMsg}`, type: 'error' });
+        setMessage({ text: `ERRO AO GRAVAR NO SQLITE`, type: 'error' });
       }
     } catch (err: unknown) {
       const error = err as Error;
@@ -263,9 +264,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   );
 
   return (
-    <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
-      {/* Background Map */}
-      <div className="absolute inset-0 z-0">
+    <div className="flex flex-col w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
+      {/* Background Map - Agora flex-grow para ocupar o espaço disponível */}
+      <div className="relative flex-grow z-0 min-h-[40dvh]">
         <MapContainer 
           center={mapCenter} 
           zoom={15} 
@@ -372,21 +373,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         </button>
       </div>
 
-      {/* Bottom Sheet Panel */}
+      {/* Bottom Sheet Panel - Refatorado para Mobile Ready */}
       <motion.div 
         initial={false}
-        animate={{ height: isSheetExpanded ? 'auto' : '100px' }}
-        className="absolute bottom-0 left-0 right-0 z-50 bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 flex flex-col overflow-hidden"
+        animate={{ height: isSheetExpanded ? '85dvh' : '120px' }}
+        className="shrink-0 bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 flex flex-col overflow-hidden z-[100] transition-all"
       >
         {/* Handle Bar */}
         <div 
-          className="w-full py-3 flex justify-center cursor-pointer active:bg-slate-50 transition-colors"
+          className="w-full py-4 flex justify-center cursor-pointer active:bg-slate-50 transition-colors shrink-0"
           onClick={() => setIsSheetExpanded(!isSheetExpanded)}
         >
           <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
         </div>
 
-        <div className="px-6 pb-8">
+        <div className="px-6 flex flex-col overflow-y-auto no-scrollbar scroll-smooth pb-[env(safe-area-inset-bottom,40px)]">
           {/* Collapsed View Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex-1">
@@ -514,7 +515,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex flex-col space-y-3">
+                    <div className="flex flex-col space-y-3 pb-[env(safe-area-inset-bottom,24px)]">
                       <button 
                         onClick={handleSave}
                         disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}

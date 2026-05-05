@@ -5,12 +5,12 @@
  */
 
 export const DB_ASSET_COLUMNS = [
-  'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'VLRAQUISIC', 'DATAAQUISIC',
+  'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'STATUS', 'VLRAQUISIC', 'DATAAQUISIC',
   'CENTRODECUSTO', 'CONTACONTABIL', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
   'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
   'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'SUBREG', 'DATABAIXA',
   'PRIMARYKEY', '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
-  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
+  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_history', '_lat', '_lng',
   '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
   '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',

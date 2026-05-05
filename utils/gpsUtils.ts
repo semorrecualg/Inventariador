@@ -88,6 +88,13 @@ export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> =
     };
 
     const success = (position: GeolocationPosition) => {
+      // REGRA DE SEGURANÇA v2.6: Ignora coordenadas (0,0) ou nulas que indicam falha de hardware
+      if (position.coords.latitude === 0 && position.coords.longitude === 0) {
+        console.warn('>>> [GPS] Coordenada (0,0) detectada e ignorada. Tentando nova leitura...');
+        error({ code: 2, message: 'Invalid 0,0 location', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError);
+        return;
+      }
+
       const newLoc = {
         lat: position.coords.latitude,
         lng: position.coords.longitude,

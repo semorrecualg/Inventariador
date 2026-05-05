@@ -577,8 +577,9 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
     // SISTEMA DE RETRY EXPONENCIAL (Resiliência Sênior)
     let retryCount = 0;
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 5;
     let success = false;
+    let lastError: unknown = null;
 
     while (retryCount <= MAX_RETRIES && !success) {
       try {
@@ -593,20 +594,37 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         success = true;
         successfullySyncedIds.push(...chunk.map(a => String(a.id)));
       } catch (err: unknown) {
-        const error = err as { message?: string, code?: string };
-        const isNetworkError = error.message?.includes('Failed to fetch') || error.message?.includes('network') || error.code === 'ERR_NAME_NOT_RESOLVED';
+        lastError = err;
+        const error = err as { message?: string, code?: string, details?: string };
+        const isNetworkError = error.message?.includes('Failed to fetch') || 
+                               error.message?.includes('network') || 
+                               error.code === 'ERR_NAME_NOT_RESOLVED' ||
+                               error.message === 'TypeError: Failed to fetch';
         
         if (isNetworkError) {
           retryCount++;
           if (retryCount <= MAX_RETRIES) {
             const delay = Math.pow(2, retryCount) * 1000;
-            console.warn(`>>> [Supabase] Erro de rede no lote ${Math.floor(i / CHUNK_SIZE) + 1}. Tentativa ${retryCount}/${MAX_RETRIES} em ${delay}ms...`);
+            console.warn(`>>> [Supabase] Erro de rede no lote ${Math.floor(i / CHUNK_SIZE) + 1}. Tentativa ${retryCount}/${MAX_RETRIES} em ${delay}ms...`, error.message);
             await new Promise(resolve => setTimeout(resolve, delay));
           } else {
-            console.error(`>>> [Supabase] Falha definitiva por conectividade no lote ${Math.floor(i / CHUNK_SIZE) + 1}. O dado permanece salvo LOCALMENTE.`);
+            console.error(`>>> [Supabase] Falha definitiva por conectividade no lote ${Math.floor(i / CHUNK_SIZE) + 1}. O dado permanece salvo LOCALMENTE.`, lastError);
+            // Salva log de erro para diagnóstico administrativo
+            await logAuditEvent({
+              user_email: 'Sincronizador',
+              action: 'SYNC_ERROR_DEFINITIVE',
+              details: `Falha definitiva no lote ${Math.floor(i / CHUNK_SIZE) + 1}. Erro: ${error.message || 'Erro de conexão'}`,
+              _tenantid: forcedTenantId || 'Global'
+            });
           }
         } else {
-          console.error(`>>> [Supabase] Erro de integridade no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, err);
+          console.error(`>>> [Supabase] Erro de integridade/schema no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, err);
+          await logAuditEvent({
+            user_email: 'Sincronizador',
+            action: 'SYNC_INTEGRITY_ERROR',
+            details: `Erro de integridade/schema no lote ${Math.floor(i / CHUNK_SIZE) + 1}: ${err instanceof Error ? err.message : String(err)}`,
+            _tenantid: forcedTenantId || 'Global'
+          });
           break; // Erros de lógica ou schema não devem ter retry
         }
       }
@@ -2142,19 +2160,23 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   localConfigs[unitKey] = payload;
   localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
 
-  // Mirroring in Dexie/SQLite for durability
-  try {
-    const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
-    await localDb.unitConfigs.put({
-      ...payload,
-      id: unitKey, // Garantir ID para o Primary Key do SQLite
-      unit_id: unitId,
-      tenant_id: tenantId
-    } as UnitConfig);
-    console.log('>>> [Persistence] GPS espelhado no banco local (SQLite/Dexie).');
-  } catch (dexieErr) {
-    console.warn('>>> [Persistence] Falha ao espelhar GPS no banco local:', dexieErr);
-  }
+    // Mirroring in Dexie/SQLite for durability
+    try {
+      const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
+      await localDb.unitConfigs.put({
+        ...payload,
+        id: unitKey, // Garantir ID para o Primary Key do SQLite
+        unit_id: unitId,
+        tenant_id: tenantId
+      } as UnitConfig);
+      
+      // PERSISTÊNCIA SOBERANA: Força o flush para o sistema de arquivos virtual/nativo
+      await sqliteService.persist();
+      
+      console.log('>>> [Persistence] GPS espelhado e PERSISTIDO no banco local (SQLite/Dexie).');
+    } catch (dexieErr) {
+      console.warn('>>> [Persistence] Falha ao espelhar GPS no banco local:', dexieErr);
+    }
 
   // Se for modo INTERNO, encerramos aqui (Isolamento Total)
   if (isInternal) {

@@ -1,6 +1,5 @@
 import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
-import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb } from './localDbService';
 import { sqliteService } from './sqliteService';
@@ -155,7 +154,7 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   }
 };
 
-export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false): Promise<void> => {
+export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[]): Promise<void> => {
   try {
     const mode = data.databaseMode || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
@@ -217,20 +216,8 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
 
     console.log('>>> [Persistence] Gravado com sucesso no IndexedDB.');
 
-    // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se estiver em modo SUPABASE
-    if (mode.startsWith('SUPABASE')) {
-      const assetsToSync = dirtyAssets || [];
-      
-      if (assetsToSync.length > 0) {
-        console.log(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
-        syncAssetsToCloud(assetsToSync).catch(err => console.warn('Cloud sync failed (offline?):', err));
-        // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
-      } else if (forceCloudSync) {
-        console.log('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
-      }
-    }
+    // 2. Sincronização com a nuvem (Supabase) removida em conformidade com Native Sovereignty
+    // O sistema agora opera exclusivamente offline.
 
   } catch (error) {
     console.error('>>> [Persistence] Erro ao salvar inventário no IndexedDB:', error);

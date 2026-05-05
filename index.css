@@ -48,6 +48,8 @@
 
 
 :root {
+  --ion-safe-area-top: env(safe-area-inset-top);
+  --ion-safe-area-bottom: env(safe-area-inset-bottom);
   --accent: #2563EB;
   --accent-soft: #F1F5F9;
   --bg-main: #F8FAFC;
@@ -94,20 +96,29 @@
 @layer base {
   body {
     @apply bg-bg-main text-ink font-sans overflow-x-hidden m-0 p-0;
+    width: 100%;
     min-height: 100vh;
     min-height: -webkit-fill-available;
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: text;
     user-select: text;
     transition: background-color 0.3s ease, color 0.3s ease;
+    /* Evita que o teclado "esmague" o layout */
+    display: flex;
+    flex-direction: column;
   }
 
   html {
     height: -webkit-fill-available;
+    overflow: hidden;
   }
 
   #root {
-    @apply h-full w-full flex flex-col;
+    @apply w-full flex flex-col flex-1;
+    height: 100%;
+    overflow: hidden;
+    padding-top: var(--ion-safe-area-top);
+    padding-bottom: var(--ion-safe-area-bottom);
   }
 
   input, textarea { 
