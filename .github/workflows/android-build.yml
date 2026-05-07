@@ -36,8 +36,8 @@ jobs:
           java-version: '21'
           
       - name: Build APK (Debug)
+        working-directory: android
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleDebug
           
