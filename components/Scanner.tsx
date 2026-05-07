@@ -323,7 +323,12 @@ const Scanner: React.FC<ScannerProps> = ({
       isStartingRef.current = false;
       if (isMounted.current) {
         console.error("Scanner start error", err);
-        setError(err instanceof Error ? err.message : "Erro ao acessar câmera. Verifique as permissões.");
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Permission dismissed") || msg.includes("NotAllowedError") || msg.includes("Permission denied")) {
+          setError("Permissão de câmera negada ou cancelada. Por favor, clique no cadeado na barra de endereços do seu navegador e ative a Câmera.");
+        } else {
+          setError(msg);
+        }
         setIsLoading(false);
       }
     }

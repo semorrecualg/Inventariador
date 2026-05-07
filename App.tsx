@@ -1813,7 +1813,27 @@ const App: React.FC = () => {
     }
   }, [history, user, ADMIN_EMAIL]);
 
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Monitoramento de Hardware: Bateria (Soberania de Operação v2.6.6)
+    const nav = navigator as unknown as { getBattery: () => Promise<{ level: number, addEventListener: (type: string, listener: () => void) => void }> };
+    if ('getBattery' in navigator) {
+      nav.getBattery().then((battery) => {
+        const updateBattery = () => setBatteryLevel(battery.level * 100);
+        updateBattery();
+        battery.addEventListener('levelchange', updateBattery);
+      });
+    }
+  }, []);
+
   const commitAssetUpdate = useCallback(async (updatedAsset: Asset) => {
+    // Check-point de Integridade v2.6.6: Bloqueio em caso de energia insuficiente
+    if (batteryLevel !== null && batteryLevel < 5) {
+      alert("🛑 BATERIA CRÍTICA (< 5%): Gravações no SQLite bloqueadas para evitar corrupção do banco. Conecte ao carregador.");
+      return;
+    }
+
     dirtyAssetsRef.current.add(String(updatedAsset.id));
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
@@ -1898,6 +1918,15 @@ const App: React.FC = () => {
 
       // PESIMISMO SAUDÁVEL: Persistência no SQLite Local (Soberania Nativa)
       await sqliteService.bulkInsertAssets([updates]);
+      
+      // 3. Log de Auditoria Interno (Check-point de Integridade v2.6.6)
+      await sqliteService.logAuditEvent({
+        user_email: user?.email || 'SOBERANO_USER',
+        action: updates._isNew ? 'INSERT_SOBRA' : 'UPDATE_CONFERIDO',
+        details: `Ativo ${updates.ETIQUETA} persistido no path: ${sqliteService.getNativePath() || 'INTERNAL.db'}`,
+        _tenantid: updates._tenantid,
+        _unitid: updates._unitid
+      });
 
       // SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
       setInventory(prev => {
@@ -3141,7 +3170,14 @@ const App: React.FC = () => {
     }
   }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, history, pushScreen]);
 
-  const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
+  const showCompanyHeader = !!selectedUnit && 
+    screen !== AppScreen.LOGIN && 
+    screen !== AppScreen.REGISTER && 
+    screen !== AppScreen.UNIT_SELECTION && 
+    screen !== AppScreen.MAIN_MENU &&
+    screen !== AppScreen.INVENTORY &&
+    screen !== AppScreen.ASSET_DETAIL &&
+    screen !== AppScreen.LABELING;
   
   console.log("App render - screen:", screen, "selectedUnit:", selectedUnit, "hasCompletedOnboarding:", inventory.hasCompletedOnboarding, "hasAcceptedTerms:", hasAcceptedTerms);
 
@@ -3876,26 +3912,20 @@ const App: React.FC = () => {
                 )}
               </div>
               
-              <div className="flex flex-col min-w-[80px]">
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA NATIVA' : 
+              <div className="flex flex-col min-w-[120px]">
+                <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5 line-clamp-1">
+                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'MOBILE SOBERANO (v2.6)' : 
                    sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
                   {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}
                 </span>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter truncate max-w-[120px]">
-                    {sqliteService.getStorageSource() === 'PHYSICAL' 
-                      ? 'Disco Android (Nativo)' 
-                      : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
+                  <span className="text-[7px] font-bold text-white/50 uppercase tracking-tighter truncate max-w-[120px]">
+                    {sqliteService.getLastDiscWrite() ? `Última escrita: ${sqliteService.getLastDiscWrite()}` : 'Pronto para Auditoria'}
                   </span>
-                  {lastQueryLog && (
-                    <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest border-l border-white/10 pl-2">
-                       {lastQueryLog}
-                    </span>
-                  )}
                 </div>
+              </div>
                 {sqliteService.getNativePath() && (
                   <div className="flex items-center gap-1 overflow-hidden mt-0.5 border-t border-white/5 pt-1">
                     <Database size={6} className="text-emerald-400/60" />

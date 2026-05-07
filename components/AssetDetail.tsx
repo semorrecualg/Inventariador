@@ -3,10 +3,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario, TransactionOrigin, AuditLogEntry, DatabaseMode } from '../types';
 import { TYPE_LABELS } from '../utils/schema';
 import { sqliteService } from '../services/sqliteService';
-import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
-import { updateAssetInProtheus } from '../services/protheusService';
 
 import { 
   Edit2, 
@@ -29,21 +27,91 @@ import {
   Camera as CameraIcon,
   X,
   ChevronRight,
-  ArrowDown,
   Image as ImageIcon,
   Trash2,
-  History
+  CheckCircle2,
+  History,
+  Activity,
+  Layers,
+  Database
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { motion, AnimatePresence } from 'motion/react';
 import { deleteAssetPhoto } from '../services/supabaseService';
 import { addToSyncQueue } from '../services/syncService';
-import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
-import { createWorker } from 'tesseract.js';
+import { saveLocalPhoto, getLocalPhoto } from '../services/photoService';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { indoorNavigation } from '../services/indoorNavigationService';
+import { DB_ASSET_COLUMNS } from '../constants/schema';
 
-import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata } from '../services/tagService';
+
+const ALL_ICON_MAP: Record<string, React.ElementType> = {
+  ETIQUETA: FileText,
+  DESCRICAODOATIVO: Info,
+  DESCRICAODOBEM: Info,
+  MARCA: Briefcase,
+  MODELO: Briefcase,
+  QT: Hash,
+  SERIAL: Hash,
+  REGISTRO: Hash,
+  SUBREG: Hash,
+  PRIMARYKEY: Lock,
+  GRUPO_EMPRESARIAL: Building2,
+  UNIDADE_OPERACIONAL: Building2,
+  ENDERECO: MapPin,
+  CENTRODECUSTO: Briefcase,
+  VLRAQUISIC: Wallet,
+  DATAAQUISIC: Calendar,
+  NOTAFISCAL: FileText,
+  NOMEFORNECEDOR: User,
+  CNPJ: Building2,
+  STATUS: ShieldCheck,
+  CONTACONTABIL: Briefcase,
+  ESTADO_CONSERVACAO: FileText,
+  DATABAIXA: Calendar,
+  Sn1_recno: Hash,
+  Sn3_recno: Hash,
+  _dataLeitura: Calendar,
+  _auditor: User,
+  _localMaster: MapPin,
+  _lat: MapPin,
+  _lng: MapPin,
+  _history: History,
+  _camposAlterados: Activity,
+  _valoresOriginais: Layers,
+  _campaignId: Briefcase,
+  _version: Database,
+  _is_synced: Layers,
+  _is_deleted: Trash2,
+  _plaquetado: CheckCircle2,
+  _aprovado: ShieldCheck
+};
+
+const EXTRA_LABELS: Record<string, string> = {
+  MARCA: 'Marca',
+  MODELO: 'Modelo',
+  QT: 'Quantidade',
+  REGISTRO: 'Registro Mestre',
+  SUBREG: 'Sub-Registro',
+  PRIMARYKEY: 'Chave Primária (PK)',
+  STATUS: 'Status Operacional',
+  ESTADO_CONSERVACAO: 'Estado de Conservação',
+  DATABAIXA: 'Data de Baixa',
+  Sn1_recno: 'ID Protheus (SN1)',
+  Sn3_recno: 'ID Protheus (SN3)',
+  _dataLeitura: 'Data/Hora Inventário',
+  _auditor: 'Auditor Responsável',
+  _localMaster: 'Local Originário',
+  _lat: 'Latitude',
+  _lng: 'Longitude',
+  _history: 'Histórico de Auditoria',
+  _camposAlterados: 'Campos Alterados',
+  _valoresOriginais: 'Valores Originais',
+  _version: 'Versão do Registro',
+  _is_synced: 'Sincronizado',
+  _plaquetado: 'Plaquetado'
+};
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -88,30 +156,19 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   onUnitize,
   onBulkUpdate, 
   editableFields, 
-  uniqueEnderecos, 
-  uniqueCentrosDeCusto, 
   qrCodeFields, 
   readOnly = false,
-  protheusIntegrationEnabled = false,
-  protheusApiUrl = '',
   tenantid = '',
   mandatoryPhotoOnDivergence = false,
   mandatoryPhotoOnNewItem = false,
-  databaseMode,
-  isOCRProcessing,
-  setIsOCRProcessing
+  databaseMode
 }) => {
   const isBatch = assets.length > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>({ ...assets[0] });
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
-  const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isGeocoding, setIsGeocoding] = useState(false);
-  const [ocrResults, setOcrResults] = useState<string[]>([]);
-  const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
   const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
   const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
   const [unitizeCount, setUnitizeCount] = useState(2);
@@ -139,238 +196,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     }
   }, [unitizeCount, unitizeMethod, unitizePercentages.length]);
 
-  const handleOCR = async (field: string) => {
-    if (!field) return;
-
-    try {
-      // 1. Prova de Vida: Captura de Foto Apenas via Câmera (Sem Galeria)
-      const image = await Camera.getPhoto({
-        quality: 60, // Otimização WhatsApp
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Camera, // Obrigatório: Apenas Câmera
-        width: 1600, // Padrão WhatsApp
-        promptLabelHeader: 'PROVA DE VIDA DO ATIVO',
-        promptLabelPhoto: 'Capturar Etiqueta Patrimonial',
-        promptLabelPicture: 'Foque na etiqueta patrimonial já colada no bem. A posição geográfica será registrada para fins de auditoria.'
-      });
-
-      if (!image.base64String) return;
-
-      setIsOCRProcessing(true);
-      setOcrResults([]);
-
-      // Converter base64 para Blob para o Tesseract
-      const byteCharacters = atob(image.base64String);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'image/jpeg' });
-
-      // 2. Processamento OCR (Modo 100% Offline v2.6)
-      const worker = await createWorker('por+eng', 1, {
-        workerPath: '/assets/tesseract/worker.min.js',
-        langPath: '/assets/tesseract/lang-data',
-        corePath: '/assets/tesseract/tesseract-core.wasm.js',
-        logger: m => console.log(`>>> [OCR] ${m.status}: ${Math.round(m.progress * 100)}%`)
-      });
-      const { data: { text } } = await worker.recognize(blob);
-      await worker.terminate();
-
-      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
-      
-      const patterns = {
-        plaqueta: /\b\d{6}\b/g, 
-        serial: /\b[A-Z0-9-]{6,20}\b/g,
-        geral: /\b[A-Z0-9]{4,}\b/g
-      };
-
-      const foundMatches: string[] = [];
-      if (field === 'ETIQUETA') {
-        const plaquetaMatches = cleanedText.match(patterns.plaqueta);
-        if (plaquetaMatches) foundMatches.push(...plaquetaMatches);
-      } else if (field === 'SERIAL') {
-        const serialMatches = cleanedText.match(patterns.serial);
-        if (serialMatches) foundMatches.push(...serialMatches);
-      }
-
-      const genericMatches = cleanedText.match(patterns.geral);
-      if (genericMatches) {
-        genericMatches.forEach(m => {
-          if (!foundMatches.includes(m) && m.length < 25) {
-            foundMatches.push(m);
-          }
-        });
-      }
-
-      const uniqueMatches = Array.from(new Set(foundMatches));
-
-      // 3. Validação Anti-Fraude e Coordenadas (Odometria Indoor)
-      const validateAndFinalize = async (recognizedVal: string) => {
-        try {
-          setIsGeocoding(true);
-          
-          // REQUISITO v25.02: Coordenadas calculadas via sensores (Indoor Navigation)
-          const indoorPos = indoorNavigation.getCurrentPosition();
-          const { lat, lng, accuracy, altitude } = indoorPos;
-
-          // Se for ETIQUETA, obriga o cruzamento OCR x Registro
-          if (field === 'ETIQUETA' || field === 'SERIAL') {
-            const currentVal = (workingAsset[field] || editValue || "").toString().trim();
-            if (currentVal && recognizedVal !== currentVal) {
-               alert(`BLOQUEIO DE SEGURANÇA: Divergência detectada!\n\nOCR: ${recognizedVal}\nDigitado: ${currentVal}\n\nA etiqueta deve ser fotografada in loco e corresponder exatamente ao registro.`);
-               setIsGeocoding(false);
-               setIsOCRProcessing(false);
-               return;
-            }
-          }
-
-          const updates = { 
-            ...workingAsset,
-            [field]: recognizedVal,
-            _lat: lat,
-            _lng: lng,
-            _altitude_level: altitude || 0,
-            _pos_timestamp: new Date().toISOString(),
-            _gps_accuracy: accuracy,
-            _ocr_verified: true,
-            _dataLeitura: new Date().toISOString(),
-            _conferido: true
-          };
-
-          // Tenta Geocoding reverso silencioso
-          try {
-            const geoResult = await reverseGeocode(lat, lng);
-            updates._localMaster = geoResult.address;
-            if (field === 'ENDERECO') updates.ENDERECO = geoResult.address;
-          } catch {
-            console.warn('Geocoding falhou, continuando apenas com coordenadas');
-          }
-
-          setWorkingAsset(updates);
-          if (editingField === field) setEditValue(recognizedVal);
-          onUpdate(updates);
-          alert('Presença física autenticada via OCR e Sensores.');
-
-        } catch (err) {
-          console.error('Erro na navegação indoor:', err);
-          alert("Erro ao calcular posição indoor. Verifique se a unidade está validada.");
-        } finally {
-          setIsGeocoding(false);
-          setIsOCRProcessing(false);
-        }
-      };
-
-      if (uniqueMatches.length === 1) {
-        await validateAndFinalize(uniqueMatches[0]);
-      } else if (uniqueMatches.length > 1) {
-        setOcrTargetField(field);
-        setOcrResults(uniqueMatches);
-      } else {
-        // Se não achou nada via OCR, solicita nova foto ou avisa que falhou
-        alert('Não foi possível identificar a etiqueta ou serial na foto. Certifique-se de que a foto está nítida e que a etiqueta está centralizada.');
-        setIsOCRProcessing(false);
-      }
-
-    } catch (err) {
-      console.error('Erro na captura/OCR:', err);
-      setIsOCRProcessing(false);
-    }
-  };
-
-  const selectOCRResult = (val: string) => {
-    if (!ocrTargetField) return;
-    // Dispara a validação para o resultado selecionado
-    // Como a foto já foi tirada e o OCR processado, poderíamos simplificar, 
-    // mas a regra pede GPS no momento do OCR OK.
-    
-    // Por simplicidade, vamos apenas chamar a função de finalização que já definimos se pudermos
-    // Ou replicar a lógica aqui
-    setOcrResults([]);
-    // Chamar um helper que faz o GPS
-    finalizeOCRSelectionWithGPS(ocrTargetField, val);
-  };
-
-  const finalizeOCRSelectionWithGPS = async (field: string, val: string) => {
-    try {
-      setIsOCRProcessing(true);
-      setIsGeocoding(true);
-      
-      const indoorPos = indoorNavigation.getCurrentPosition();
-      const { lat, lng, accuracy, altitude } = indoorPos;
-
-      const updates = { 
-        ...workingAsset,
-        [field]: val,
-        _lat: lat,
-        _lng: lng,
-        _altitude_level: altitude || 0,
-        _pos_timestamp: new Date().toISOString(),
-        _gps_accuracy: accuracy,
-        _ocr_verified: true,
-        _dataLeitura: new Date().toISOString()
-      };
-
-      setWorkingAsset(updates);
-      if (editingField === field) setEditValue(val);
-      onUpdate(updates);
-      setOcrTargetField(null);
-      alert('Presença física validada via sensores indoor.');
-    } catch {
-      alert("Falha ao calcular posição indoor para validação.");
-    } finally {
-      setIsGeocoding(false);
-      setIsOCRProcessing(false);
-    }
-  };
-
-  const triggerOCR = (field: string) => {
-    handleOCR(field); // Agora chama direto a nova função que usa Capacitor
-  };
-
-  const handleReverseGeocoding = async (field: string) => {
-    if (!navigator.geolocation) {
-      alert('Geolocalização não suportada pelo seu navegador.');
-      return;
-    }
-
-    setIsGeocoding(true);
-    
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const result = await reverseGeocode(latitude, longitude);
-          
-          const updates = { ...workingAsset };
-          updates[field] = result.address;
-          setWorkingAsset(updates);
-          
-          if (editingField === field) {
-            setEditValue(result.address);
-          }
-          
-          // Feedback visual de sucesso (opcional, mas bom para UX)
-          console.log('Endereço capturado:', result.address);
-        } catch {
-          console.error('Erro ao obter endereço');
-          alert('Não foi possível obter o endereço automaticamente. Verifique sua conexão.');
-        } finally {
-          setIsGeocoding(false);
-        }
-      },
-      (err) => {
-        console.error('Erro de GPS:', err);
-        setIsGeocoding(false);
-        alert('Erro ao acessar GPS: ' + err.message);
-      },
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
-    );
-  };
-
-
   useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
 
   useEffect(() => {
@@ -383,6 +208,15 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       }, 100);
     }
   }, [editingField]);
+
+  // Hook simplificado para buscar o usuário logado e verificar admin
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    const saved = localStorage.getItem('app_current_user');
+    if (saved) {
+      try { setUser(JSON.parse(saved)); } catch { console.error('Erro ao carregar usuário para auditoria'); }
+    }
+  }, []);
 
   const qrCodeData = useMemo(() => {
     // Criar uma string de texto apenas com os valores dos campos selecionados seguindo a ordem oficial
@@ -422,74 +256,92 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     fetchMappings();
   }, []);
 
-  const fieldGroups = useMemo(() => [
-    {
-      title: 'IDENTIFICAÇÃO TÉCNICA',
-      fields: [
-        { key: 'ETIQUETA', label: TYPE_LABELS.TAG, icon: FileText },
-        { key: 'DESCRICAODOATIVO', label: TYPE_LABELS.DESCRIPTION, icon: Info },
-        { key: 'QT', label: 'QUANTIDADE', icon: Hash },
-        { key: 'SERIAL', label: TYPE_LABELS.SERIAL, icon: Hash },
-        { key: 'REGISTRO', label: 'REGISTRO MESTRE', icon: Hash },
-        { key: 'SUBREG', label: 'SUB-REGISTRO', icon: Hash },
-        { key: 'PRIMARYKEY', label: 'CHAVE PRIMÁRIA (PK)', icon: Lock }
-      ]
-    },
-    {
-      title: 'LOCALIZAÇÃO E CUSTO',
-      fields: [
-        { key: 'GRUPO_EMPRESARIAL', label: TYPE_LABELS.GROUP, icon: Building2 },
-        { key: unitMapping || 'UNIDADE_OPERACIONAL', label: TYPE_LABELS.UNIT, icon: Building2 },
-        { key: 'ENDERECO', label: TYPE_LABELS.ADDRESS, icon: MapPin },
-        { key: ccMapping || 'CENTRODECUSTO', label: TYPE_LABELS.COST_CENTER, icon: Briefcase }
-      ]
-    },
-    {
-      title: 'DADOS DE AQUISIÇÃO',
-      fields: [
-        { key: 'VLRAQUISIC', label: TYPE_LABELS.VALUE, icon: Wallet },
-        { key: 'DATAAQUISIC', label: TYPE_LABELS.DATE, icon: Calendar },
-        { key: 'NOTAFISCAL', label: TYPE_LABELS.INVOICE, icon: FileText },
-        { key: 'NOMEFORNECEDOR', label: TYPE_LABELS.VENDOR, icon: User },
-        { key: 'CNPJ', label: 'CNPJ FORNECEDOR', icon: Building2 }
-      ]
-    },
-    {
-      title: 'CONTROLE CONTÁBIL',
-      fields: [
-        { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
-        { key: 'CONTACONTABIL', label: TYPE_LABELS.ACCOUNT, icon: Briefcase },
-        { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
-        { key: 'Sn1_recno', label: 'ID PROTHEUS (SN1)', icon: Hash },
-        { key: 'Sn3_recno', label: 'ID PROTHEUS (SN3)', icon: Hash }
-      ]
-    },
-    {
-      title: 'DADOS DO INVENTÁRIO',
-      fields: [
-        { key: '_dataLeitura', label: 'DATA/HORA DO INVENTÁRIO', icon: Calendar },
-        { key: '_auditor', label: 'AUDITOR RESPONSÁVEL', icon: User },
-        { key: '_localMaster', label: 'LOCAL ONDE FOI ENCONTRADO', icon: MapPin }
-      ]
-    },
-    {
-      title: 'GEOLOCALIZAÇÃO',
-      fields: [
-        { key: '_lat', label: 'LATITUDE', icon: MapPin },
-        { key: '_lng', label: 'LONGITUDE', icon: MapPin }
-      ]
-    }
-  ], [unitMapping, ccMapping]);
+  const fieldGroups = useMemo(() => {
+    const groups = [
+      {
+        title: 'IDENTIFICAÇÃO TÉCNICA',
+        fields: [
+          { key: 'ETIQUETA', label: TYPE_LABELS.TAG, icon: FileText },
+          { key: 'DESCRICAODOATIVO', label: TYPE_LABELS.DESCRIPTION, icon: Info },
+          { key: 'MARCA', label: 'MARCA', icon: Briefcase },
+          { key: 'MODELO', label: 'MODELO', icon: Briefcase },
+          { key: 'QT', label: 'QUANTIDADE', icon: Hash },
+          { key: 'SERIAL', label: TYPE_LABELS.SERIAL, icon: Hash },
+          { key: 'REGISTRO', label: 'REGISTRO MESTRE', icon: Hash },
+          { key: 'SUBREG', label: 'SUB-REGISTRO', icon: Hash },
+          { key: 'PRIMARYKEY', label: 'CHAVE PRIMÁRIA (PK)', icon: Lock }
+        ]
+      },
+      {
+        title: 'LOCALIZAÇÃO E CUSTO',
+        fields: [
+          { key: 'GRUPO_EMPRESARIAL', label: TYPE_LABELS.GROUP, icon: Building2 },
+          { key: 'UNIDADE_OPERACIONAL', label: TYPE_LABELS.UNIT, icon: Building2 },
+          { key: 'ENDERECO', label: TYPE_LABELS.ADDRESS, icon: MapPin },
+          { key: 'CENTRODECUSTO', label: TYPE_LABELS.COST_CENTER, icon: Briefcase }
+        ]
+      },
+      {
+        title: 'DADOS DE AQUISIÇÃO',
+        fields: [
+          { key: 'VLRAQUISIC', label: TYPE_LABELS.VALUE, icon: Wallet },
+          { key: 'DATAAQUISIC', label: TYPE_LABELS.DATE, icon: Calendar },
+          { key: 'NOTAFISCAL', label: TYPE_LABELS.INVOICE, icon: FileText },
+          { key: 'NOMEFORNECEDOR', label: TYPE_LABELS.VENDOR, icon: User },
+          { key: 'CNPJ', label: 'CNPJ FORNECEDOR', icon: Building2 }
+        ]
+      },
+      {
+        title: 'CONTROLE CONTÁBIL',
+        fields: [
+          { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
+          { key: 'CONTACONTABIL', label: TYPE_LABELS.ACCOUNT, icon: Briefcase },
+          { key: 'ESTADO_CONSERVACAO', label: 'ESTADO DE CONSERVAÇÃO', icon: FileText },
+          { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
+          { key: 'Sn1_recno', label: 'ID PROTHEUS (SN1)', icon: Hash },
+          { key: 'Sn3_recno', label: 'ID PROTHEUS (SN3)', icon: Hash }
+        ]
+      }
+    ];
 
-  const suggestions = useMemo(() => {
-    if (editingField === 'ENDERECO') {
-      return uniqueEnderecos.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
+    // Mapeia campos extras que não estão nos grupos fixos mas podem estar no DB_ASSET_COLUMNS
+    const processedKeys = new Set(groups.flatMap(g => g.fields.map(f => f.key)));
+    const additionalFields: { key: string; label: string; icon: React.ElementType }[] = [];
+    const internalFields: { key: string; label: string; icon: React.ElementType }[] = [];
+
+    DB_ASSET_COLUMNS.forEach(key => {
+      if (processedKeys.has(key)) return;
+      if (key === 'id' || key === 'FOTO_PATH') return;
+
+      const fieldDef = {
+        key,
+        label: EXTRA_LABELS[key] || TYPE_LABELS[key] || key,
+        icon: ALL_ICON_MAP[key] || Database
+      };
+
+      if (key.startsWith('_')) {
+        internalFields.push(fieldDef);
+      } else {
+        additionalFields.push(fieldDef);
+      }
+    });
+
+    if (additionalFields.length > 0) {
+      groups.push({
+        title: 'DADOS ADICIONAIS',
+        fields: additionalFields
+      });
     }
-    if (editingField === 'CENTRODECUSTO' || editingField === ccMapping) {
-      return uniqueCentrosDeCusto.filter(e => e.includes(editValue.toUpperCase())).slice(0, 15);
+
+    if (internalFields.length > 0) {
+      groups.push({
+        title: 'METADADOS E SISTEMA',
+        fields: internalFields
+      });
     }
-    return [];
-  }, [editingField, editValue, uniqueEnderecos, uniqueCentrosDeCusto, ccMapping]);
+
+    return groups;
+  }, [unitMapping, ccMapping]);
 
   const applyFieldEdit = (val?: string) => {
     if (editingField) {
@@ -501,7 +353,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     }
   };
 
-  const handleFinalize = () => {
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    if (type === 'success' && navigator.vibrate) navigator.vibrate(50);
+  };
+
+  const handleFinalize = async () => {
     const finalAsset = { ...workingAsset };
     
     // Se o usuário está editando um campo e clicou direto em SALVAR, aplicamos o valor atual
@@ -531,23 +397,70 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       return;
     }
 
-    if (isBatch) {
-      // Para lote, se houve alteração em algum campo no finalAsset, aplicamos a todos os itens do lote.
-      const manualUpdates: Partial<Asset> = {};
-      const original = assets[0];
+    // 1. EXTRAÇÃO DE ALTERAÇÕES PARA AUDITORIA SOBERANA
+    const originalAsset = assets.find(a => a.id === finalAsset.id) || assets[0];
+    const changedFields: string[] = [];
+    const auditDetails: string[] = [];
+
+    // Compara chaves do schema técnico
+    Object.keys(originalAsset).forEach(key => {
+      if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'FOTO_PATH') return;
       
-      Object.keys(finalAsset).forEach(key => {
-        if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-        if (String(finalAsset[key]) !== String(original[key])) {
-          (manualUpdates as Record<string, unknown>)[key] = finalAsset[key];
+      const oldVal = String(originalAsset[key] || '').trim();
+      const newVal = String(finalAsset[key] || '').trim();
+      
+      if (oldVal !== newVal) {
+        changedFields.push(key);
+        auditDetails.push(`${key}: "${oldVal}" -> "${newVal}"`);
+      }
+    });
+
+    if (changedFields.length > 0) {
+      const timestamp = new Date().toISOString();
+      const auditEntry: AuditLogEntry = {
+        action: 'UPDATE_ASSET_FIELDS',
+        details: `Alteração de campos: ${auditDetails.join(' | ')}`,
+        timestamp,
+        user: finalAsset._auditor || user?.name || 'AUDITOR',
+        user_email: user?.email,
+        origin: TransactionOrigin.INVENTORY,
+        record_id: String(finalAsset.id),
+        old_data: originalAsset,
+        new_data: finalAsset
+      };
+
+      // Persiste no histórico do ativo para rastreabilidade offline
+      finalAsset._history = [...(finalAsset._history || []), auditEntry];
+      finalAsset._camposAlterados = [...new Set([...(finalAsset._camposAlterados || []), ...changedFields])];
+      
+      // Armazena valores originais se for a primeira vez que altera
+      if (!finalAsset._valoresOriginais) finalAsset._valoresOriginais = {};
+      changedFields.forEach(f => {
+        if (finalAsset._valoresOriginais && finalAsset._valoresOriginais[f] === undefined) {
+          finalAsset._valoresOriginais[f] = originalAsset[f];
         }
       });
 
-      onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
-    } else {
-      onUpdate({ ...finalAsset, _conferido: true });
+      // Log no SQLite Global
+      await sqliteService.logAuditEvent(auditEntry);
     }
-    onBack();
+
+    if (isBatch) {
+      // Para lote, se houve alteração em algum campo no finalAsset, aplicamos a todos os itens do lote.
+      const manualUpdates: Partial<Asset> = {};
+      
+      changedFields.forEach(key => {
+        (manualUpdates as Record<string, unknown>)[key] = finalAsset[key];
+      });
+
+      onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
+      showToast("LOTE GRAVADO NO DISCO NATIVO");
+    } else {
+      // v2.6: Garante que o status 'CONFERIDO' seja setado se houver alteração ou ação positiva
+      onUpdate({ ...finalAsset, _conferido: true, _dataLeitura: new Date().toISOString() });
+      showToast("DADOS GRAVADOS NO DISCO NATIVO");
+    }
+    setTimeout(onBack, 1000); // Dá tempo de ver o toast
   };
 
   const handleDelete = () => {
@@ -569,34 +482,20 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     loadLocalPhotoIfNeeded();
   }, [workingAsset.id]);
 
-  const handleProtheusSync = async () => {
-    if (!protheusApiUrl || isBatch) return;
-    
-    setIsSyncingProtheus(true);
-    setProtheusSyncResult(null);
-    
-    try {
-      const result = await updateAssetInProtheus(workingAsset, protheusApiUrl);
-      setProtheusSyncResult(result);
-      
-      if (result.success) {
-        // Opcional: Atualizar o status local se necessário
-        // onUpdate({ ...workingAsset, _protheusSynced: true });
-      }
-    } catch {
-      setProtheusSyncResult({
-        success: false,
-        message: 'Erro inesperado na comunicação com Protheus.'
-      });
-    } finally {
-      setIsSyncingProtheus(false);
-    }
-  };
+  useEffect(() => { setWorkingAsset({ ...assets[0] }); }, [assets]);
 
   const handlePhotoUpload = async () => {
     if (isBatch) return;
 
     try {
+      const checkPerms = await Camera.checkPermissions();
+      if (checkPerms.camera !== 'granted') {
+        const reqPerms = await Camera.requestPermissions();
+        if (reqPerms.camera !== 'granted') {
+          throw new Error('PERMISSÃO NEGADA: A câmera é obrigatória para Prova de Vida e registro de evidências. Clique no cadeado na barra de endereços do navegador e mude de "Bloquear" para "Permitir".');
+        }
+      }
+
       // 1. Prova de Vida: Captura de Foto Apenas via Câmera (Sem Galeria)
       const image = await Camera.getPhoto({
         quality: 60, // Otimização WhatsApp
@@ -677,31 +576,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     }
   };
 
-  const removePhoto = async () => {
-    if (workingAsset._photoUrl) {
-      await deleteAssetPhoto(workingAsset._photoUrl);
-      await deleteLocalPhoto(String(workingAsset.id));
-    }
-    const updated = { ...workingAsset, _photoUrl: undefined };
-    setWorkingAsset(updated);
-    onUpdate(updated);
-  };
-
   const visualStatus = useMemo(() => {
     return determineAssetTag(workingAsset, workingAsset._localMaster || workingAsset.ENDERECO || "", tenantid);
   }, [workingAsset, tenantid]);
 
-  const isBaixado = useMemo(() => {
-    const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
-    return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
-  }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
-
-  const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-  const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
-
   const meta = getTagMetadata(visualStatus);
   const StatusIcon = meta.icon;
-  const headerBg = meta.color.bg.replace('/30', '');
 
   const calculateImpairment = () => {
     // Fidedignidade: Garantir que o valor contábil seja calculado corretamente (CPC 27 / CPC 01)
@@ -740,399 +620,191 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
-      {/* KARDEX HEADER */}
-      <div className={`px-5 pt-8 pb-6 ${headerBg} text-white relative shadow-md z-20`}>
-        <div className="flex items-center justify-between mb-6">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Detalhes do Ativo" />
-          <div className="flex items-center space-x-3">
-            <button onClick={() => setIsQrModalOpen(true)} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
-              <QrCode size={22} />
-            </button>
-            <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md flex items-center space-x-2">
-              {readOnly && <Lock size={14} className="text-white/70" />}
-              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">
-                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'NATIVE v2.6')}
-              </span>
-            </div>
+    <div className="flex flex-col h-full bg-[#F8FAFC] animate-fadeIn overflow-hidden font-sans">
+      {/* NATIVE HEADER v2.7 - Minimalist & Compact */}
+      <div className="shrink-0 bg-white border-b border-slate-100 px-6 pt-10 pb-4 z-40">
+        <div className="flex items-center justify-between mb-4">
+          <button 
+            onClick={onBack}
+            className="w-10 h-10 bg-slate-50 text-slate-600 rounded-full flex items-center justify-center active:scale-90 transition-all border border-slate-100"
+          >
+            <ChevronRight className="rotate-180" size={20} strokeWidth={2.5} />
+          </button>
+          <div className="flex items-center space-x-2">
+             <button onClick={() => setIsQrModalOpen(true)} className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-blue-600 transition-all">
+               <QrCode size={18} />
+             </button>
+             <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em]">NATIVE v2.7</span>
+             </div>
           </div>
         </div>
-        
-        <div className="flex flex-col">
-          <div className="flex items-center space-x-2 mb-3">
-            <div className="bg-white/20 px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm flex items-center space-x-2">
-              <StatusIcon size={12} className="text-white" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-white">{visualStatus}</span>
+
+        <div className="flex items-center space-x-4 px-1">
+          <div className="relative shrink-0">
+            <div className="w-16 h-16 bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden flex items-center justify-center shadow-sm relative">
+              {workingAsset._photoUrl ? (
+                <img 
+                  src={workingAsset._photoUrl} 
+                  className="w-full h-full object-cover" 
+                  referrerPolicy="no-referrer"
+                  alt="Avatar"
+                />
+              ) : (
+                <ImageIcon size={24} className="text-slate-200" />
+              )}
+              {isUploadingPhoto && (
+                <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
+                  <Loader2 size={16} className="text-blue-600 animate-spin" />
+                </div>
+              )}
             </div>
-            {isBaixado && (
-              <div className="bg-red-500 px-3 py-1 rounded-full border border-red-400 flex items-center space-x-2 shadow-lg">
-                <AlertTriangle size={12} className="text-white" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-white">BAIXADO</span>
-              </div>
+            {!readOnly && (
+              <button 
+                onClick={handlePhotoUpload} 
+                className="absolute -bottom-1 -right-1 w-7 h-7 bg-[#1E40AF] text-white rounded-lg flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-white"
+              >
+                <CameraIcon size={12} strokeWidth={3} />
+              </button>
             )}
           </div>
-
-          <h2 className="text-xl font-bold uppercase tracking-tight leading-tight mb-6 text-white line-clamp-2">
-            {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
-          </h2>
-
-          {!isBatch && (
-            <div className="flex items-center space-x-4 mb-4">
-              <div className="relative group">
-                <div className="w-24 h-24 bg-white/20 rounded-2xl border border-white/30 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg">
-                  {workingAsset._photoUrl ? (
-                    <img 
-                      src={workingAsset._photoUrl} 
-                      alt="Ativo" 
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <ImageIcon size={32} className="text-white/40" />
-                  )}
-                  {isUploadingPhoto && (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <Loader2 size={24} className="text-white animate-spin" />
-                    </div>
-                  )}
-                </div>
-                {!readOnly && (
-                  <div className="absolute -bottom-2 -right-2 flex space-x-1">
-                    <button onClick={handlePhotoUpload} className="w-8 h-8 bg-white text-slate-900 rounded-lg flex items-center justify-center shadow-lg cursor-pointer active:scale-90 transition-all">
-                      <CameraIcon size={16} />
-                    </button>
-                    {workingAsset._photoUrl && (
-                      <button onClick={removePhoto} className="w-8 h-8 bg-red-500 text-white rounded-lg flex items-center justify-center shadow-lg active:scale-90 transition-all">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="flex-1">
-                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mb-1">Evidência Fotográfica</p>
-                <p className="text-[11px] text-white/90 leading-tight">
-                  {workingAsset._photoUrl 
-                    ? 'Foto registrada com sucesso. Clique para ampliar ou alterar.' 
-                    : 'Nenhuma foto registrada para este ativo. Capture uma agora para auditoria.'}
-                </p>
-              </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center space-x-2 mb-0.5">
+              <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${meta.color.bg} ${meta.color.text} border ${meta.color.border.replace('border-', 'border-opacity-30 border-')}`}>
+                {visualStatus}
+              </span>
+              <span className="text-[10px] font-mono font-bold text-slate-400">#{workingAsset.REGISTRO || '---'}</span>
             </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner">
-              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">PLAQUETA</p>
-              <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
-            </div>
-            <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
-              <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">SITUAÇÃO / TAG</p>
-              <div className="flex items-center space-x-2">
-                <StatusIcon size={14} className="text-white" />
-                <span className="text-[10px] font-black uppercase text-white tracking-widest">
-                  {meta.label}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.ENDERECO) && (
-            <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
-              <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-                <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>
-                <MapPin size={14} className="text-white/60" />
-              </div>
-              <div className="space-y-3">
-                <div className="flex flex-col">
-                  <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest">Local de Origem (Base)</span>
-                  <span className="text-xs font-bold text-white uppercase mt-0.5">{workingAsset.ENDERECO || 'NÃO INFORMADO'}</span>
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center space-x-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-[8px] font-bold text-blue-300 uppercase tracking-widest">Novo Local (Inventariado)</span>
-                  </div>
-                  <span className="text-xs font-black text-white uppercase mt-1 bg-white/10 px-2 py-1.5 rounded-lg border border-white/10">{workingAsset._localMaster}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* REGRA DE OURO: ALERTA DE DIVERGÊNCIA CRÍTICA */}
-      {workingAsset._is_divergent_baixa && (
-        <div className="bg-red-600 p-4 flex items-center space-x-4 animate-pulse shadow-lg z-10">
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-white shrink-0">
-            <AlertTriangle size={24} strokeWidth={2.5} />
-          </div>
-          <div className="flex-1">
-            <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Divergência Crítica (Regra de Ouro)</h4>
-            <p className="text-[9px] font-bold text-white/80 uppercase tracking-tight leading-tight mt-0.5">
-              Este item está marcado como <strong className="text-white underline">ATIVO</strong> na base, porém possui <strong className="text-white underline">DATA DE BAIXA</strong> preenchida ({workingAsset.DATABAIXA}).
+            <h2 className="text-lg font-bold text-[#0F172A] mb-0.5 truncate uppercase tracking-tight">
+              {isBatch ? `LOTE: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
+            </h2>
+            <p className="text-[14px] font-black font-mono text-blue-600 tracking-tighter">
+              {workingAsset.ETIQUETA || '000000'}
             </p>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* KARDEX BODY */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
-          {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
-          {(isAdopted || workingAsset._is_divergent_baixa || isConferido) && (
-            <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
-              <div className="flex items-center justify-between mb-1">
-                <h4 className="text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] flex items-center">
-                  <ShieldCheck size={14} className="mr-2 text-accent" /> Situação da Auditoria
-                </h4>
-                <div className={`px-3 py-1 rounded-lg border ${meta.color.bg} ${meta.color.border}`}>
-                  <span className={`text-[10px] font-black uppercase tracking-tight ${meta.color.text}`}>{visualStatus}</span>
-                </div>
+      {/* SOVEREIGN SCROLL VIEW - High Performance */}
+      <div className="flex-1 overflow-y-auto pb-44 no-scrollbar bg-[#F8FAFC]">
+        <div className="p-4 space-y-6">
+          {/* Alertas Críticos */}
+          {workingAsset._is_divergent_baixa && (
+            <div className="bg-red-500 p-4 rounded-2xl flex items-center space-x-4 shadow-[0_8px_20px_rgba(239,68,68,0.2)] border border-red-400">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-white shrink-0">
+                <AlertTriangle size={20} strokeWidth={2.5} />
               </div>
-
-              <div className="grid grid-cols-1 gap-3">
-                {/* LOCAL DE ORIGEM VS NOVO LOCAL */}
-                <div className={`p-4 rounded-2xl border ${isAdopted ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex flex-col space-y-3">
-                    <div className="flex items-start">
-                      <div className="w-8 h-8 rounded-xl bg-slate-200 flex items-center justify-center mr-3 shrink-0">
-                        <MapPin size={14} className="text-slate-500" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Local de Origem (Base)</p>
-                        <p className="text-xs font-black text-slate-700 uppercase leading-snug break-words">
-                          {workingAsset.ENDERECO || 'LOCAL NÃO INFORMADO NA BASE'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {isAdopted && (
-                      <div className="flex items-center justify-center h-4 relative">
-                        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-blue-300" />
-                        <div className="bg-blue-50 px-2 relative z-10">
-                          <ArrowDown size={12} className="text-blue-500 animate-bounce" />
-                        </div>
-                      </div>
-                    )}
-
-                    {(isAdopted || isConferido) && (
-                      <div className="flex items-start">
-                        <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center mr-3 shrink-0 shadow-lg shadow-blue-500/20">
-                          <MapPin size={14} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[8px] font-bold text-blue-500 uppercase tracking-widest mb-0.5">Novo Local (Inventariado)</p>
-                          <p className="text-xs font-black text-blue-900 uppercase leading-snug break-words">
-                            {workingAsset._localMaster || workingAsset.ENDERECO}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* DIVERGÊNCIA DE BAIXA */}
-                {workingAsset._is_divergent_baixa && !isAdopted && (
-                  <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center space-x-3">
-                    <AlertTriangle className="text-red-500 shrink-0" size={20} />
-                    <div>
-                      <p className="text-[9px] font-black text-red-600 uppercase tracking-widest">Divergência Crítica</p>
-                      <p className="text-[11px] font-bold text-red-900 leading-tight">ATIVO com DATA DE BAIXA ({workingAsset.DATABAIXA})</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          
-          {isOCRProcessing && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
-                <Loader2 size={40} className="text-accent animate-spin" />
-              </div>
-              <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Processando OCR</h3>
-              <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
-                Aguarde enquanto nossa IA extrai o texto da imagem...
-              </p>
-            </div>
-          )}
-
-          {ocrResults.length > 0 && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-slideUp">
-                <div className="bg-bg-main p-4 border-b border-border flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">Resultados Detectados</h3>
-                  <button onClick={() => setOcrResults([])} className="p-1 text-ink-muted"><X size={18} /></button>
-                </div>
-                <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto no-scrollbar">
-                  <p className="text-[10px] text-ink-muted uppercase font-bold mb-3 tracking-tight">Toque no valor correto para o campo {ocrTargetField === 'ETIQUETA' ? 'PLAQUETA' : 'SERIAL'}:</p>
-                  {ocrResults.map((res, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => selectOCRResult(res)}
-                      className="w-full p-4 bg-bg-main border border-border rounded-xl text-left flex items-center justify-between active:scale-95 transition-all hover:border-accent group"
-                    >
-                      <span className="text-sm font-bold font-mono text-ink group-hover:text-accent">{res}</span>
-                      <ChevronRight size={16} className="text-ink-muted group-hover:text-accent" />
-                    </button>
-                  ))}
-                </div>
-                <div className="p-4 bg-bg-main border-t border-border">
-                  <button onClick={() => setOcrResults([])} className="w-full py-3 text-[10px] font-bold text-ink-muted uppercase tracking-widest">Cancelar</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {isBatch && (
-            <div className="bg-white border border-border rounded-xl p-4 shadow-sm modern-card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.1em] flex items-center">
-                  <AlertCircle size={12} className="mr-1.5 text-warning" /> REGISTROS NO LOTE
+              <div className="flex-1">
+                <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Divergência Crítica</h4>
+                <p className="text-[9px] font-bold text-white/90 uppercase tracking-tight leading-tight mt-0.5">
+                  Ativo possui Baixa ({workingAsset.DATABAIXA}) mas está em auditoria.
                 </p>
-                <span className="text-[9px] font-bold text-warning bg-warning/10 border border-warning/20 px-2 py-0.5 rounded-full">{assets.length} ITENS</span>
-              </div>
-              <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar pr-1">
-                {assets.map((a, idx) => (
-                  <div key={a.id} className="bg-bg-main border border-border p-3 rounded-lg flex items-center justify-between shadow-sm">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-ink truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
-                      <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.1em] mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
-                    </div>
-                    <span className="text-[9px] font-bold text-ink-muted/30 font-mono ml-2">#{String(idx + 1).padStart(2, '0')}</span>
-                  </div>
-                ))}
               </div>
             </div>
           )}
 
-          {fieldGroups.map((group) => (
-            <div key={group.title} className="bg-white border border-border rounded-xl overflow-hidden shadow-sm modern-card">
-              <div className="bg-bg-main px-4 py-2 border-b border-border">
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em]">{group.title}</span>
+          <div className="grid grid-cols-2 gap-3">
+             <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Plaqueta</p>
+                <p className="text-lg font-black text-slate-900 font-mono tracking-tight">{workingAsset.ETIQUETA || '---'}</p>
+             </div>
+             <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                <div className="flex items-center space-x-1.5">
+                   <StatusIcon size={12} className={meta.color.text} />
+                   <span className={`text-[10px] font-black uppercase ${meta.color.text} truncate`}>{meta.label}</span>
+                </div>
+             </div>
+          </div>
+
+          {/* Seções de Campos Agrupados */}
+          {fieldGroups.map((group, gIdx) => (
+            <div key={gIdx} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 bg-slate-50/50 border-b border-slate-100/50 flex items-center justify-between">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{group.title}</h3>
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />
               </div>
-              
-              <div className="divide-y divide-border">
-                {group.fields.map(({ key, label, icon: Icon }) => {
+              <div className="divide-y divide-slate-50">
+                {group.fields.map((field) => {
+                  const key = field.key;
+                  const label = field.label;
+                  const Icon = field.icon;
+                  const rawVal = workingAsset[key as keyof Asset];
                   const isDateField = key === 'DATAAQUISIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
                   const isCurrency = key === 'VLRAQUISIC' || key.startsWith('_valor') || key.includes('perda');
-                  const rawVal = workingAsset[key];
+                  
                   let displayVal = String(rawVal || '---');
                   if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
                   if (isDateTime) displayVal = formatReadingTime(rawVal as string);
                   if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
                   const canEdit = !readOnly && editableFields.includes(key);
-                  const isEmptyAddress = key === 'ENDERECO' && (!rawVal || String(rawVal).trim() === '');
-                  if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor')) return null;
+                  const isEditing = editingField === key;
+
+                  if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor' || key.startsWith('_'))) return null;
+                  
+                  // Se o campo for um objeto ou array (como _history, _camposAlterados), vamos pular por enquanto na listagem simples
+                  if (rawVal && (typeof rawVal === 'object')) return null;
 
                   return (
                     <div 
-                      key={key} 
-                      onClick={(e) => { e.stopPropagation(); if (canEdit) { setEditingField(key); setEditValue(String(rawVal || '')); } }} 
-                      className={`px-4 py-3 flex flex-col transition-all active:bg-bg-main relative ${
-                        editingField === key ? 'bg-accent-soft ring-1 ring-inset ring-accent' : 
-                        isEmptyAddress ? 'bg-amber-50 border-x-4 border-amber-400' : ''
-                      }`}
+                      key={key}
+                      onClick={() => canEdit && !isEditing && (setEditingField(key), setEditValue(String(rawVal || '')))}
+                      className={`px-5 py-4 flex flex-col transition-all active:bg-slate-50/50 relative group ${canEdit ? 'cursor-pointer' : 'opacity-80'}`}
                     >
-                      {isEmptyAddress && (
-                        <div className="absolute top-1 right-2 flex items-center space-x-1">
-                          <span className="text-[7px] font-black text-amber-600 uppercase tracking-tighter">Definir Endereço</span>
-                          <AlertTriangle size={10} className="text-amber-500" />
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center space-x-2">
+                          <Icon size={12} className={canEdit ? 'text-blue-500' : 'text-slate-300'} strokeWidth={2.5} />
+                          <label className={`text-[9px] font-bold uppercase tracking-widest ${canEdit ? 'text-slate-400' : 'text-slate-300'}`}>
+                            {label}
+                          </label>
                         </div>
-                      )}
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center space-x-1.5">
-                          {Icon && <Icon size={10} className="text-ink-muted/30" />}
-                          <label className="text-[7px] font-bold uppercase tracking-[0.1em] text-ink-muted">{label}</label>
-                        </div>
-                        {canEdit && <Edit2 size={10} className="text-accent" />}
+                        {canEdit && !isEditing && (
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Edit2 size={10} className="text-blue-400" strokeWidth={3} />
+                          </div>
+                        )}
+                        {!canEdit && <Lock size={10} className="text-slate-200" />}
                       </div>
-                      
-                      {editingField === key ? (
-                        <div className="mt-2 flex flex-col space-y-2">
-                          {workingAsset._valoresOriginais?.[key] !== undefined && (
-                            <p className="text-[8px] text-danger font-bold uppercase tracking-wider px-1">
-                              ORIGINAL (DE): {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
-                            </p>
-                          )}
+
+                      {isEditing ? (
+                        <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
                           <div className="flex items-center space-x-2">
                             <input 
-                              autoFocus 
-                              value={editValue} 
-                              onChange={(e) => setEditValue(e.target.value)} 
-                              onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()} 
-                              className="flex-1 bg-white px-3 py-2 border border-accent/30 rounded-lg text-xs font-bold uppercase text-ink outline-none shadow-sm focus:ring-2 focus:ring-accent/20" 
-                              placeholder={`NOVO VALOR (PARA) ${label}`}
+                              autoFocus
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
+                              className="flex-1 bg-blue-50/50 px-3 py-2 rounded-xl text-xs font-bold text-slate-900 border border-blue-200 outline-none focus:ring-2 focus:ring-blue-100 transition-all uppercase"
                             />
-                            {(key === 'SERIAL' || key === 'ETIQUETA') && (
+                            <div className="flex space-x-1">
                               <button 
-                                onClick={(e) => { e.stopPropagation(); triggerOCR(key); }}
-                                className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30"
-                                title="Ler texto da câmera (OCR)"
+                                onClick={(e) => { e.stopPropagation(); applyFieldEdit(); }}
+                                className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-90"
                               >
-                                <CameraIcon size={18} />
+                                <Check size={14} strokeWidth={3} />
                               </button>
-                            )}
-                            {(key === 'ENDERECO' || key === '_localMaster') && (
                               <button 
-                                onClick={(e) => { e.stopPropagation(); handleReverseGeocoding(key); }}
-                                disabled={isGeocoding}
-                                className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30 disabled:opacity-50"
-                                title="Capturar endereço via GPS"
+                                onClick={(e) => { e.stopPropagation(); setEditingField(null); }}
+                                className="w-8 h-8 bg-slate-100 text-slate-400 rounded-lg flex items-center justify-center active:scale-90"
                               >
-                                {isGeocoding ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />}
+                                <X size={14} strokeWidth={2.5} />
                               </button>
-                            )}
-                            <button onClick={() => applyFieldEdit()} className="w-10 h-10 bg-accent text-white rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-all">
-                              <Check size={20}/>
-                            </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="flex flex-col">
-                          {key === 'ENDERECO' && workingAsset.DE_PARA === 'COM ALTERAÇÃO' ? (
-                            <>
-                              <p className="text-xs font-bold uppercase leading-tight font-mono tracking-tight text-accent">
-                                PARA: {workingAsset._localMaster || '---'}
-                              </p>
-                              <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
-                                DE: {workingAsset.ENDERECO || '---'}
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-ink' : 'text-ink-muted/30'}`}>
-                                {workingAsset._valoresOriginais?.[key] !== undefined ? `PARA: ${displayVal}` : displayVal}
-                              </p>
-                              {workingAsset._valoresOriginais?.[key] !== undefined && (
-                               <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
-                                  DE: {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
-                                </p>
-                              )}
-                            </>
+                        <div className="flex items-center justify-between">
+                          <p className={`text-[13px] font-bold font-mono tracking-tight ${rawVal ? 'text-slate-700' : 'text-slate-300 italic font-sans'}`}>
+                            {displayVal}
+                          </p>
+                          {workingAsset._valoresOriginais?.[key] !== undefined && (
+                            <div className="flex items-center space-x-1 text-[7px] text-amber-600 font-black bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                              <AlertCircle size={8} />
+                              <span>ALTERADO</span>
+                            </div>
                           )}
-                        </div>
-                      )}
-                      
-                      {editingField === key && suggestions.length > 0 && (
-                        <div className="mt-3 p-3 bg-bg-main border border-border rounded-2xl shadow-inner">
-                          <div className="flex items-center justify-between mb-2 px-1">
-                            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.2em]">Sugestões Disponíveis</p>
-                            <span className="text-[7px] font-bold text-accent uppercase">{suggestions.length} encontrados</span>
-                          </div>
-                          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar py-1">
-                            {suggestions.map(s => (
-                              <button 
-                                key={s} 
-                                onClick={(e) => { e.stopPropagation(); applyFieldEdit(s); }} 
-                                className="px-3 py-1.5 rounded-xl bg-white border border-border text-[10px] font-bold text-ink uppercase active:bg-accent active:text-white active:border-accent transition-all shadow-sm hover:border-accent"
-                              >
-                                {s}
-                              </button>
-                            ))}
-                          </div>
                         </div>
                       )}
                     </div>
@@ -1141,132 +813,67 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               </div>
             </div>
           ))}
-
-          {/* TESTE DE IMPAIRMENT (CPC 01) */}
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm modern-card">
-            <div className="bg-bg-main px-4 py-2 border-b border-border flex items-center justify-between">
-              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em]">TESTE DE IMPAIRMENT (CPC 01)</span>
-              <button 
-                onClick={() => setIsImpairmentModalOpen(true)}
-                className="text-[8px] font-bold text-accent uppercase tracking-widest bg-accent-soft px-2 py-1 rounded-md border border-accent/10"
-              >
-                Executar Teste
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
-                  <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1">Valor Recuperável</p>
-                  <p className="text-xs font-bold text-slate-900">{formatCurrency(workingAsset._valor_recuperavel || 0)}</p>
-                </div>
-                <div className={`p-2 rounded-lg border ${Number(workingAsset._perda_impairment || 0) > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
-                  <p className="text-[7px] font-bold uppercase tracking-widest mb-1 opacity-70">Perda Estimada</p>
-                  <p className="text-xs font-bold">{formatCurrency(workingAsset._perda_impairment || 0)}</p>
-                </div>
-              </div>
-              {workingAsset._data_impairment && (
-                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest text-right italic">
-                  Último teste: {new Date(workingAsset._data_impairment).toLocaleDateString('pt-BR')}
-                </p>
-              )}
-            </div>
-          </div>
+        </div>
       </div>
       
-      {/* AUDIT HISTORY SECTION */}
-      {workingAsset._history && workingAsset._history.length > 0 && (
-        <div className="mt-6 mb-32 px-4">
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">
-              <History size={16} className="text-accent" />
-            </div>
-            <h3 className="text-[11px] font-black text-ink uppercase tracking-[0.2em]">Histórico de Auditoria</h3>
-          </div>
-          
-          <div className="space-y-3">
-            {workingAsset._history.slice().reverse().map((entry, index) => (
-              <div key={index} className="relative pl-6 border-l-2 border-border pb-4 last:pb-0">
-                <div className="absolute left-[-9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-accent flex items-center justify-center">
-                   <div className="w-1.5 h-1.5 rounded-full bg-accent" />
-                </div>
-                <div className="bg-white border border-border rounded-xl p-3 shadow-sm">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[8px] font-bold text-accent uppercase tracking-wider">{entry.action}</span>
-                    <span className="text-[7px] font-medium text-ink-muted">{new Date(entry.timestamp).toLocaleString('pt-BR')}</span>
-                  </div>
-                  <p className="text-[10px] font-bold text-ink mb-1">{entry.details}</p>
-                  <div className="flex items-center space-x-1">
-                    <User size={8} className="text-ink-muted" />
-                    <span className="text-[7px] font-bold text-ink-muted uppercase tracking-tighter">AUDITOR: {entry.user}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* KARDEX FOOTER */}
+      {/* NATIVE SOVEREIGN FOOTER v2.7 - Floating Glassmorphism */}
       {!readOnly && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-border flex flex-col space-y-3 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-          {protheusIntegrationEnabled && !isBatch && (
-            <div className="flex flex-col space-y-2">
-              {protheusSyncResult && (
-                <div className={`p-3 rounded-xl text-[10px] font-bold uppercase tracking-tight flex items-center space-x-2 animate-fadeIn ${protheusSyncResult.success ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}>
-                  {protheusSyncResult.success ? <Check size={14} /> : <AlertCircle size={14} />}
-                  <span>{protheusSyncResult.message}</span>
-                </div>
-              )}
-              <button 
-                onClick={handleProtheusSync}
-                disabled={isSyncingProtheus}
-                className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase flex items-center justify-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-indigo-700/20 bg-indigo-600 text-white shadow-lg active:scale-95 disabled:opacity-50 disabled:active:scale-100`}
-              >
-                {isSyncingProtheus ? (
-                  <Loader2 size={20} className="animate-spin" />
-                ) : (
-                  <ShieldCheck size={20} strokeWidth={3} />
-                )}
-                <span>{isSyncingProtheus ? 'INTEGRANDO...' : 'INTEGRAR COM ERP'}</span>
-              </button>
+        <div className="fixed bottom-0 left-0 right-0 p-6 z-50 pointer-events-none">
+          <div className="bg-white/80 backdrop-blur-xl border border-white/50 p-4 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] flex items-center justify-between max-w-lg mx-auto pointer-events-auto">
+            <div className="flex flex-col px-2">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.4em]">SOBERANIA NATIVA</span>
+              <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight mt-0.5 italic">VERSÃO 2.7.1</span>
             </div>
-          )}
-
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col">
-              <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">NATIVE v2.6</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              {!isBatch && onUnitize && (
-                <button 
-                  onClick={() => setIsUnitizeModalOpen(true)}
-                  className="p-4 bg-amber-50 text-amber-600 border border-amber-100 rounded-2xl active:scale-95 transition-all"
-                  title="Unitarizar Ativo (Desmembrar)"
-                >
-                  <Briefcase size={20} />
-                </button>
-              )}
+            
+            <div className="flex items-center space-x-3">
               {!isBatch && onDelete && (
                 <button 
                   onClick={handleDelete}
-                  className="p-4 bg-rose-50 text-rose-600 border border-rose-100 rounded-2xl active:scale-95 transition-all"
-                  title="Excluir Ativo"
+                  className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl active:scale-90 transition-all flex items-center justify-center border border-red-100"
                 >
-                  <Trash2 size={20} />
+                  <Trash2 size={20} strokeWidth={2.5} />
                 </button>
               )}
+
               <button 
                 onClick={handleFinalize} 
-                className={`text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-2xl active:scale-95 flex items-center space-x-3 transition-all tracking-[0.2em] border-b-4 border-black/20 ${meta.color.bg.replace('/30', '')}`}
+                className="h-14 px-8 bg-[#1E40AF] text-white rounded-2xl text-[13px] font-black uppercase shadow-xl shadow-blue-900/20 active:scale-95 flex items-center justify-center space-x-3 transition-all tracking-widest border-b-4 border-blue-950"
               >
-                 <Check size={20} strokeWidth={3} />
-                 <span>{isBatch ? 'EFETIVAR LOTE' : 'SALVAR E CONFERIR'}</span>
+                 <ShieldCheck size={20} strokeWidth={3} />
+                 <span>{isBatch ? 'CONCLUIR' : 'GRAVAR'}</span>
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* MODAIS E TOASTS */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-32 left-4 right-4 z-[12000] pointer-events-none"
+          >
+            <div className={`mx-auto max-w-xs px-6 py-4 rounded-3xl shadow-2xl border-2 flex items-center space-x-4 backdrop-blur-xl ${
+              toast.type === 'success' 
+                ? 'bg-emerald-500/95 border-emerald-400 text-white' 
+                : 'bg-red-500/95 border-red-400 text-white'
+            }`}>
+              <div className="flex-shrink-0 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                {toast.type === 'success' ? <CheckCircle2 size={24} strokeWidth={3} /> : <AlertCircle size={24} strokeWidth={3} />}
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] font-black uppercase tracking-widest leading-none mb-1 opacity-70">Sistema Soberano</p>
+                <p className="text-xs font-black uppercase tracking-tight leading-tight">
+                  {toast.message}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {isQrModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>

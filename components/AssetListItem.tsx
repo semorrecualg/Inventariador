@@ -6,8 +6,7 @@ import { formatEtiqueta } from '../utils/formatUtils';
 import { 
   Camera, 
   Check, 
-  MapPin,
-  Eye
+  MapPin
 } from 'lucide-react';
 
 interface AssetListItemProps {
@@ -34,8 +33,7 @@ const AssetListItemComponent: React.FC<AssetListItemProps> = ({
   onSelect, 
   onToggleSelect, 
   onMakeDecision,
-  hasLocalPhoto,
-  onViewPhoto
+  hasLocalPhoto
 }) => {
   const statusUpper = String(asset.STATUS || '').toUpperCase();
   
@@ -57,20 +55,19 @@ const AssetListItemComponent: React.FC<AssetListItemProps> = ({
 
   const handleConfirm = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (onMakeDecision) {
-      if (navigator.vibrate) navigator.vibrate(10);
+    if (onMakeDecision && !isConferido) {
+      if (navigator.vibrate) navigator.vibrate(20);
       onMakeDecision(String(asset.id), 'YES');
     }
   };
 
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
-  
-  // Real evidence: use local path if available
   const photoUrl = asset._photoUrl || asset.FOTO_PATH;
 
   return (
     <div 
-      className={`mb-2 bg-white rounded-xl border border-slate-100 relative transition-all active:scale-[0.98] shadow-sm overflow-hidden flex ${isSelected ? 'ring-2 ring-blue-500' : ''}`} 
+      className={`mb-3 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card shadow-sm bg-white border border-slate-100 ${isSelected ? 'ring-2 ring-blue-500' : ''} ${isConferido ? 'bg-slate-50' : 'active:scale-[0.99] cursor-pointer'}`} 
+      style={{ borderLeftColor: meta.color.hex || '#e2e8f0' }}
       onClick={() => {
         if (isBatchMode && onToggleSelect) {
           if (!isConferido) onToggleSelect(String(asset.id));
@@ -79,103 +76,83 @@ const AssetListItemComponent: React.FC<AssetListItemProps> = ({
         }
       }}
     >
-      {/* Indicador Lateral Técnico (4px) */}
-      <div 
-        className={`w-1 shrink-0 h-full absolute left-0 top-0 bottom-0 ${
-          visualStatus === TagInventario.PENDENTE ? 'bg-slate-400' : 
-          visualStatus === TagInventario.CONFERIDO ? 'bg-emerald-500' : 
-          visualStatus === TagInventario.ADOTADO ? 'bg-blue-500' : 
-          visualStatus === TagInventario.RE_ADOTADO ? 'bg-fuchsia-500' : 
-          visualStatus === TagInventario.NOVO_ITEM ? 'bg-violet-500' : 
-          'bg-orange-500'
-        }`}
-      />
-
-      <div className="flex-1 p-4 pl-5">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0 pr-2">
-            <div className="flex items-center space-x-1.5 mb-1">
-              <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">
-                #{asset.REGISTRO || String(asset.id).slice(-6).toUpperCase()}
-              </span>
-              {(photoUrl || hasLocalPhoto) && (
-                <Camera size={10} className="text-blue-500" />
-              )}
-              {isBaixado && (
-                <span className="px-1.5 py-0.5 bg-red-50 text-red-500 text-[7px] font-black rounded uppercase tracking-tighter">BAIXA</span>
-              )}
-            </div>
-
-            <h3 className="text-sm font-black text-slate-900 leading-tight line-clamp-1 truncate uppercase">
-              {asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM || asset.DESCRICAO || 'DESCRIÇÃO NÃO CADASTRADA'}
-            </h3>
-            
-            <p className="text-lg font-black text-slate-700 font-mono tracking-tighter mb-2">
+      {/* Small Status Badge Top Left */}
+      <div className={`absolute top-0 left-0 px-2 py-0.5 rounded-br-lg text-[7px] font-black uppercase flex items-center space-x-1 shadow-sm z-10 ${meta.color.badge || 'bg-slate-200 text-slate-600'}`}>
+        <StatusIcon size={9} strokeWidth={3} />
+        <span className="tracking-widest">
+          {asset.REGISTRO || '---'} | {visualStatus}
+        </span>
+      </div>
+      
+      <div className="pt-4 pr-10 flex flex-col space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
+            <span className={`text-lg font-black font-mono tracking-tighter ${isConferido ? 'text-emerald-600' : 'text-slate-900'}`}>
               {formatEtiqueta(asset.ETIQUETA)}
-            </p>
-
-            <div className="flex items-center space-x-2">
-              <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded ${meta.color.bg} border ${meta.color.border}`}>
-                <StatusIcon size={8} className={meta.color.text} />
-                <span className={`text-[8px] font-black uppercase tracking-tight ${meta.color.text}`}>
-                  {visualStatus}
-                </span>
-              </div>
-              {asset.SERIAL && (
-                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">S/N: {asset.SERIAL}</span>
-              )}
-            </div>
+            </span>
           </div>
-
-          <div className="shrink-0 flex flex-col items-end space-y-2">
-            <div className="flex items-center space-x-2">
-              {isBatchMode ? (
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white'}`}>
-                  {isSelected && <Check size={18} strokeWidth={4} />}
-                </div>
-              ) : (
-                <button 
-                  onClick={!isConferido ? handleConfirm : undefined}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isConferido ? 'bg-emerald-500 shadow-lg shadow-emerald-500/20' : 'border border-slate-200 bg-white active:scale-90 shadow-sm'} ${isConferido ? 'text-white' : 'text-slate-200'}`}
-                >
-                  <Check size={20} strokeWidth={4} />
-                </button>
-              )}
-            </div>
-            
-            {/* Native Evidence Thumbnail */}
-            {photoUrl && isConferido && (
-              <div 
-                className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden relative group cursor-pointer active:scale-95 transition-transform"
-                onClick={(e) => { e.stopPropagation(); onViewPhoto?.(photoUrl); }}
-              >
-                <img 
-                  src={photoUrl} 
-                  alt="Evidência" 
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/40x40/f1f5f9/64748b?text=?'; }}
-                />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                  <Eye size={12} className="text-white" />
-                </div>
-              </div>
-            )}
-          </div>
+          {(photoUrl || hasLocalPhoto) && !isConferido && (
+            <Camera size={12} className="text-blue-500" />
+          )}
         </div>
 
+        {/* Full description - No truncation */}
+        <p className="text-[11px] font-bold text-slate-600 uppercase leading-snug tracking-tight whitespace-normal break-words">
+          {[
+            asset.DESCRICAODOATIVO || asset.DESCRICAODOBEM || 'DESCRIÇÃO NÃO CADASTRADA',
+            asset.SERIAL ? `SN: ${asset.SERIAL}` : null
+          ].filter(Boolean).join(' | ')}
+        </p>
+
+        <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 mt-1">
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">C. Custo:</span>
+          <span className="text-[10px] font-black text-slate-700 uppercase tracking-tight truncate">
+            {asset.CENTRODECUSTO || '---'}
+          </span>
+        </div>
+
+        {isBaixado && (
+          <div className="flex items-center space-x-1 mt-1">
+             <span className="px-1.5 py-0.5 bg-red-50 text-red-600 text-[8px] font-black rounded uppercase tracking-widest border border-red-100">
+               BAIXADO
+             </span>
+          </div>
+        )}
+
         {isAdopted && (
-          <div className="mt-3 p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center space-x-3">
+          <div className="mt-2 p-2 bg-blue-50/50 rounded-lg border border-blue-100 flex items-center space-x-3">
              <div className="flex flex-col items-center">
-                <MapPin size={10} className="text-slate-400" />
+                <MapPin size={8} className="text-slate-400" />
                 <div className="h-2 w-[1px] bg-slate-300 my-0.5" />
-                <MapPin size={10} className="text-blue-500" />
+                <MapPin size={8} className="text-blue-500" />
              </div>
              <div className="flex-1 min-w-0">
-                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tight truncate">De: {asset.ENDERECO || 'BASE'}</p>
-                <p className="text-[9px] font-black text-slate-700 uppercase tracking-tight truncate">Para: {asset._localMaster || selectedLocation}</p>
+                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-tight truncate">De: {asset.ENDERECO || 'BASE'}</p>
+                <p className="text-[8px] font-black text-slate-700 uppercase tracking-tight truncate">Para: {asset._localMaster || selectedLocation}</p>
              </div>
           </div>
+        )}
+      </div>
+
+      {/* Confirmation Button Bottom Right */}
+      <div className="absolute bottom-3 right-3">
+        {isBatchMode ? (
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md ${isSelected ? 'bg-blue-600 text-white' : 'border-2 border-slate-200 bg-white'}`}>
+            {isSelected && <Check size={20} strokeWidth={4} />}
+          </div>
+        ) : (
+          <button 
+            onClick={handleConfirm}
+            disabled={isConferido}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg ${isConferido ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-slate-200 text-slate-400 active:scale-95 active:bg-slate-50'}`}
+          >
+            {isConferido ? (
+              <Check size={20} strokeWidth={4} />
+            ) : (
+              <div className="w-5 h-5 rounded-full border-2 border-slate-200" />
+            )}
+          </button>
         )}
       </div>
     </div>

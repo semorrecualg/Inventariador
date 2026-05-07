@@ -37,8 +37,7 @@ import {
   Target,
   Box,
   AlertCircle,
-  BookOpen,
-  ShieldCheck
+  BookOpen
 } from 'lucide-react';
 import POPGuide from './POPGuide';
 
@@ -190,6 +189,14 @@ const Inventory: React.FC<InventoryProps> = ({
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // v3.0: Reseta para 'PENDING' ao mudar de localidade para evitar tela vazia se o usuário estava em 'INVENTORIED' no local anterior
   useEffect(() => {
@@ -323,12 +330,18 @@ const Inventory: React.FC<InventoryProps> = ({
       AUDITOR_STATUS_CONFERENCIA: 'SIM',
       _dataLeitura: new Date().toISOString(),
       _statusSincronizacao: 'PENDENTE',
-      _resultado_decisao: decision === 'YES' ? 'CONFORME' : 'DIVERGENTE'
+      _resultado_decisao: decision === 'YES' ? 'CONFORME' : 'DIVERGENTE',
+      _localMaster: selectedLocationRef.current || asset.ENDERECO || asset.LOCALIZACAO || ""
     };
 
     try {
       await onUpdateAsset(updatedAsset);
-      // Feedback tátil/sonoro pode ser adicionado aqui
+      setToast({ 
+        message: `ITEM ${asset.ETIQUETA || asset.REGISTRO} INVENTARIADO COM SUCESSO`, 
+        type: 'success' 
+      });
+      // Feedback tátil v2.6.6
+      if (navigator.vibrate) navigator.vibrate([30, 20, 30]);
     } catch (error) {
       logger.error('Erro ao salvar decisão:', error);
     }
@@ -382,7 +395,7 @@ const Inventory: React.FC<InventoryProps> = ({
     };
 
     performSearch();
-  }, [debouncedLocTerm, selectedUnit, allAssets.length]);
+  }, [debouncedLocTerm, selectedUnit, allAssets]);
 
   // Refs para manter callbacks estáveis e evitar reinício do scanner a cada atualização de estado
   const allAssetsRef = useRef(allAssets);
@@ -794,6 +807,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     if (!term) {
       const result = [];
+
       for (let i = 0; i < safeAssets.length; i++) {
         const a = safeAssets[i];
         if (!a) continue;
@@ -902,6 +916,8 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsBatchMode(false);
   };
 
+  // v2.6.9: SubReg helper removed per user request
+
 
   const handleVoiceTyping = (field: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -952,9 +968,22 @@ const Inventory: React.FC<InventoryProps> = ({
         _isNew: true,
         _campaignId: currentCampaignId,
         _localMaster: selectedLocation || "",
-        _tenantid: user?.tenantid || '',
-        _unitid: selectedUnit || user?.unitid || ''
+        _tenantid: user?._tenantid || user?.tenantid || '',
+        _unitid: selectedUnit || user?._unitid || user?.unitid || '',
+        _origemTransacao: TransactionOrigin.INVENTORY, // Fixo 1000
+        _dataLeitura: new Date().toISOString(),
+        _auditor: user?.name || user?.username || 'SISTEMA'
     } as Asset;
+    
+    // Captura de GPS se disponível
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        newAsset._lat = pos.coords.latitude;
+        newAsset._lng = pos.coords.longitude;
+        newAsset._gps_accuracy = pos.coords.accuracy;
+        newAsset._pos_timestamp = new Date().toISOString();
+      }, (err) => console.warn('GPS Error (Sobra Física):', err));
+    }
     
     onUpdateAsset(newAsset);
     setIsManualEntryOpen(false);
@@ -976,7 +1005,11 @@ const Inventory: React.FC<InventoryProps> = ({
           setIsScannerOpen(true);
         } catch (err) {
           console.error('Erro ao acessar a câmera:', err);
-          // Opcional: Mostrar um alerta amigável se a permissão for negada
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("Permission denied") || msg.includes("NotAllowedError") || msg.includes("Permission dismissed")) {
+             alert("PERMISSÃO DE CÂMERA NEGADA: O scanner não pode iniciar. Por favor, clique no ícone de cadeado na barra de endereços (ao lado da URL) e ative a Câmera para este site.");
+             setSearchMode(InventorySearchMode.NUMERIC); // Fallback para teclado numérico
+          }
         }
       }
     };
@@ -1480,21 +1513,12 @@ const Inventory: React.FC<InventoryProps> = ({
             {/* 1. HeaderSection - Metadados técnicos */}
             <div className="px-5 pt-10 pb-1 bg-white flex items-center justify-between">
               <div className="flex flex-col">
-                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest leading-none mb-1">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">
                   #{selectedUnit || '000000'}
                 </span>
-                <h2 className="text-sm font-black text-slate-900 uppercase tracking-tighter leading-none italic">
+                <h2 className="text-base font-black text-slate-900 uppercase tracking-tighter leading-none italic">
                   {user?.tenantid || 'UNIDADE'}
                 </h2>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <div className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 flex items-center space-x-1">
-                  <ShieldCheck size={8} className="text-emerald-500" />
-                  <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tighter">SAFE</span>
-                </div>
-                <div className="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100">
-                  <span className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">v2.6</span>
-                </div>
               </div>
             </div>
 
@@ -1515,11 +1539,13 @@ const Inventory: React.FC<InventoryProps> = ({
                 <span className="text-xs font-bold tracking-tight">Voltar</span>
               </button>
 
-              <h1 className="text-base font-black text-slate-950 uppercase italic tracking-tighter absolute left-1/2 -translate-x-1/2">
-                Inventário
-              </h1>
-
               <div className="flex items-center space-x-2">
+                <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-400 flex items-center space-x-1.5">
+                  <Activity size={12} className="text-emerald-500 animate-pulse" />
+                  <span className="text-[10px] font-black uppercase tracking-tighter">
+                    {deviceMetrics.temp.toFixed(0)}°C
+                  </span>
+                </div>
                 <button 
                   onClick={() => setIsPOPGuideOpen(true)}
                   className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-blue-500 transition-all border border-slate-100"
@@ -1542,35 +1568,32 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
 
             {/* 3. ContextRibbon & SearchOverlay */}
-            <div className="relative h-11 bg-white border-b border-slate-50 px-5 overflow-hidden flex items-center">
+            <div className="relative bg-white border-b border-slate-50 px-5 flex flex-col py-1.5 min-h-[44px]">
               <AnimatePresence mode="wait">
                 {!isSearchVisible ? (
-                  <motion.div 
-                    key="context"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="flex items-center space-x-2 w-full no-scrollbar overflow-x-auto scroll-smooth"
-                  >
-                    <div className="shrink-0 px-3 py-1.5 rounded-full bg-slate-950 text-white flex items-center space-x-1.5 shadow-md">
-                      <MapPin size={10} className="text-blue-400" />
-                      <span className="text-[9px] font-black uppercase tracking-tighter truncate max-w-[120px]">
-                        {selectedLocation}
-                      </span>
-                    </div>
-                    <div className="shrink-0 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100 text-slate-400 flex items-center space-x-1.5">
-                      <Activity size={10} className="text-emerald-500 animate-pulse" />
-                      <span className="text-[9px] font-black uppercase tracking-tighter">
-                        {deviceMetrics.temp.toFixed(0)}°C | BOM
-                      </span>
-                    </div>
-                    {currentCampaignId && (
-                      <div className="shrink-0 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-600 flex items-center space-x-1.5">
-                        <Target size={10} className="text-blue-500" />
-                        <span className="text-[9px] font-black uppercase tracking-tighter">Campanha ATIVA</span>
+                  <div className="flex flex-col space-y-2 w-full">
+                    <motion.div 
+                      key="context"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="flex items-center space-x-2 w-full"
+                    >
+                      <div className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-slate-950 text-white flex items-center space-x-2 shadow-lg shadow-slate-950/20">
+                        <MapPin size={12} className="text-blue-500 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-tight truncate">
+                          {selectedLocation}
+                        </span>
                       </div>
-                    )}
-                  </motion.div>
+                      
+                      {currentCampaignId && (
+                        <div className="shrink-0 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center space-x-1.5">
+                          <Target size={12} className="text-blue-500" />
+                          <span className="text-[10px] font-black uppercase tracking-tighter shadow-sm">ATIVO</span>
+                        </div>
+                      )}
+                    </motion.div>
+                  </div>
                 ) : (
                   <motion.div 
                     key="search"
@@ -1608,38 +1631,41 @@ const Inventory: React.FC<InventoryProps> = ({
               </AnimatePresence>
             </div>
 
-            {/* 4. Tab Selector - Fluxo de Inventário */}
-            <div className="bg-white px-5 py-2 flex items-center border-b border-slate-50">
-              <div className="flex-1 flex p-1 bg-slate-100 rounded-xl">
-                <button 
-                  type="button"
-                  onClick={() => { 
-                    console.log(">>> [UI] Switching to PENDING");
-                    setActiveTab('PENDING'); 
-                    setDisplayValue(''); 
-                    setCommittedSearch(''); 
-                  }}
-                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'PENDING' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-black/5' : 'text-slate-400 opacity-60'}`}
-                >
-                  Pendentes ({assets.filter(a => !(!!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM')).length})
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => { 
-                    console.log(">>> [UI] Switching to INVENTORIED");
-                    setActiveTab('INVENTORIED'); 
-                    setDisplayValue(''); 
-                    setCommittedSearch(''); 
-                  }}
-                  className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'INVENTORIED' ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5' : 'text-slate-400 opacity-60'}`}
-                >
-                  Inventariados ({assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length})
-                </button>
-              </div>
+            <div className="bg-white px-5 border-b border-slate-100 flex items-center">
+              <button 
+                type="button"
+                onClick={() => { 
+                  console.log(">>> [UI] Switching to PENDING");
+                  setActiveTab('PENDING'); 
+                  setDisplayValue(''); 
+                  setCommittedSearch(''); 
+                }}
+                className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeTab === 'PENDING' ? 'text-slate-950' : 'text-slate-400'}`}
+              >
+                Pendentes <span className="font-bold">({assets.filter(a => !(!!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM')).length})</span>
+                {activeTab === 'PENDING' && (
+                  <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#1E40AF]" />
+                )}
+              </button>
+              <button 
+                type="button"
+                onClick={() => { 
+                  console.log(">>> [UI] Switching to INVENTORIED");
+                  setActiveTab('INVENTORIED'); 
+                  setDisplayValue(''); 
+                  setCommittedSearch(''); 
+                }}
+                className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeTab === 'INVENTORIED' ? 'text-slate-950' : 'text-slate-400'}`}
+              >
+                Inventariados <span className="font-bold">({assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length})</span>
+                {activeTab === 'INVENTORIED' && (
+                  <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#1E40AF]" />
+                )}
+              </button>
             </div>
 
             <div 
-              className="flex-1 overflow-hidden bg-bg-main relative flex flex-col"
+              className="flex-1 overflow-hidden bg-[#F1F5F9] relative flex flex-col"
               onPointerDown={() => {
                 if (showNumericKeypad) setShowNumericKeypad(false);
               }}
@@ -1869,6 +1895,14 @@ const Inventory: React.FC<InventoryProps> = ({
               <p className="text-white text-xs font-black uppercase tracking-[0.2em] italic">Registro de Evidência Técnica</p>
               <p className="text-white/50 text-[8px] font-bold uppercase tracking-widest mt-1">Soberania SQLite v2.6</p>
             </div>
+
+            {/* FAB - NOVO ITEM (Sobra Física Soberana v2.6.9) */}
+            <button 
+              onClick={handleCreateNewAsset}
+              className="absolute bottom-8 right-6 w-14 h-14 bg-[#1E40AF] text-white rounded-full shadow-2xl shadow-blue-900/40 flex items-center justify-center active:scale-90 transition-all border-b-4 border-blue-900 z-50 animate-in fade-in zoom-in duration-300"
+            >
+              <Plus size={28} strokeWidth={3} />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1967,6 +2001,30 @@ const Inventory: React.FC<InventoryProps> = ({
       )}
 
       {/* Outros Modais do Sistema */}
+      {/* Toast Notification - Sovereign Feedback */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-24 left-4 right-4 z-[12000] pointer-events-none"
+          >
+            <div className={`mx-auto max-w-xs px-4 py-3 rounded-2xl shadow-2xl border flex items-center space-x-3 backdrop-blur-xl ${
+              toast.type === 'success' 
+                ? 'bg-emerald-500/90 border-emerald-400 text-white' 
+                : 'bg-red-500/90 border-red-400 text-white'
+            }`}>
+              <div className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                {toast.type === 'success' ? <Check size={18} strokeWidth={4} /> : <AlertCircle size={18} strokeWidth={4} />}
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest leading-tight">
+                {toast.message}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {isNewLocationModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
