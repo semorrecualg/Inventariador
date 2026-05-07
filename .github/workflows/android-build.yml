@@ -24,9 +24,9 @@ jobs:
       - name: Build Web Project
         run: npm run build
         
-      - name: Initialize Capacitor Android
+      - name: Sync Capacitor Android
         run: |
-          npx cap add android
+          npx cap copy android
           npx cap sync android
           
       - name: Setup Java
