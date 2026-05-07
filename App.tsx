@@ -58,6 +58,7 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
+import { DEFAULT_EDITABLE_FIELDS } from './constants/schema';
 import { Building2, ShieldCheck, FileText, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2, Cloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
@@ -465,7 +466,7 @@ const App: React.FC = () => {
     companies: [], 
     lastUpdated: null, 
     status: DatabaseStatus.EMPTY,
-    editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
+    editableFields: DEFAULT_EDITABLE_FIELDS,
     qrCodeFields: ['ETIQUETA'],
     scannerMode: ScannerMode.BARCODE,
     autoConfirmOnScan: false,
@@ -512,6 +513,7 @@ const App: React.FC = () => {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+  const [searchQuery, setSearchQuery] = useState("");
   const [isCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -650,32 +652,20 @@ const App: React.FC = () => {
     }
 
     console.log(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
-    console.log(`>>> [Governance] Contexto: Tenant=${tenantId}, Unidade=${unitId || 'TODAS'}, Modo=${databaseMode}`);
     
-    if (!tenantId) {
-      console.warn(">>> [Governance] refreshCampaigns ABORTADO: Sem TenantID!");
-      return;
-    }
+    if (!tenantId) return;
 
     try {
-      // v25.60: Garantia de Soberania - Se banco local, força re-leitura do binário para evitar limbo de cache desincronizado
       if (databaseMode === DatabaseMode.INTERNAL) {
         await sqliteService.forceSync();
-        console.log(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
       }
 
-      // Configurações de GPS (Soberania SQL Local)
       const gpsData = await sqliteService.getUnitConfigs(tenantId);
       setUnitConfigs(gpsData);
       setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-    // Campanhas (Soberania SQL Local)
-    // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
-    const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
-    const campaignData = await sqliteService.getCampaigns(tenantId, fetchUnitId);
-    const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
-    console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
-    setLastQueryLog(resultMsg);
+      const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
+      const campaignData = await sqliteService.getCampaigns(tenantId, fetchUnitId);
       
       setCampaigns([...(campaignData || [])]);
       setRefreshVersion(prev => prev + 1);
@@ -683,6 +673,52 @@ const App: React.FC = () => {
       console.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
     }
   }, [currentTenantId, currentUnitId, databaseMode, user, screen]);
+
+  // --- CAMPAIGN MANAGEMENT SOBERANA (v2.6) ---
+  const handleActivateCampaign = useCallback(async (campaignId: string) => {
+    try {
+      setIsSyncing(true);
+      console.log(`>>> [Soberania] Ativando campanha: ${campaignId}`);
+
+      // 1. Persistência no SQLite Soberano
+      await sqliteService.executeRaw(`UPDATE campaigns SET status = 'ACTIVE' WHERE id = '${campaignId}'`);
+      await sqliteService.executeRaw(`UPDATE campaigns SET status = 'FINISHED' WHERE id != '${campaignId}' AND status = 'ACTIVE'`);
+      
+      // 2. Atualização de Estado Local
+      setCurrentCampaignId(campaignId);
+      
+      // 3. Auditoria Física
+      await sqliteService.logAuditEvent({
+        user_email: user?.email || 'SOBERANO_USER',
+        action: 'CAMPAIGN_ACTIVATE',
+        details: `Campanha ativada no SQLite: ${campaignId}`,
+        _tenantid: currentTenantId,
+        _unitid: selectedUnit || campaignId
+      });
+
+      // 4. Sincronização de Visão
+      await refreshCampaigns();
+      
+      setInventory(prev => ({ 
+        ...prev, 
+        status: DatabaseStatus.LOADED 
+      }));
+
+      // 5. Navegação
+      pushScreen(AppScreen.INVENTORY);
+      
+      showModal('Sucesso', 'Campanha ativada com sucesso no Banco Soberano.', 'success');
+    } catch (err) {
+      console.error(">>> [Soberania] Erro ao ativar campanha:", err);
+      showModal('Erro', 'Não foi possível ativar a campanha no SQLite.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user, currentTenantId, selectedUnit, refreshCampaigns, pushScreen, showModal]);
+
+  const onSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+  }, []);
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
@@ -3831,16 +3867,7 @@ const App: React.FC = () => {
             <CampaignManager 
               user={user} 
               onBack={popScreen} 
-              onActivate={async (id) => {
-                setCurrentCampaignId(id);
-                setInventory(prev => ({ 
-                  ...prev, 
-                  status: DatabaseStatus.LOADED 
-                }));
-                // Força atualização das estatísticas e estado reactivo antes de navegar
-                await refreshCampaigns();
-                pushScreen(AppScreen.INVENTORY);
-              }}
+              onActivate={handleActivateCampaign}
               currentCampaignId={currentCampaignId || undefined}
               availableUnits={fullCompaniesWithStatus.map(c => c.name)}
               campaigns={campaigns}

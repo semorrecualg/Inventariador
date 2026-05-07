@@ -121,3 +121,64 @@ export const TYPE_LABELS: Record<string, string> = {
   ADDRESS: 'Endereço / Localização',
   GROUP: 'Grupo Empresarial'
 };
+
+export type FieldInputType = 'text' | 'date' | 'number' | 'currency' | 'camera' | 'select' | 'boolean';
+
+export interface FieldMetadata {
+  label: string;
+  type: FieldInputType;
+  icon?: string; // lucide-react icon name as string
+  isSystem?: boolean;
+}
+
+export const FIELD_METADATA: Record<string, FieldMetadata> = {
+  ETIQUETA: { label: 'Plaqueta Patrimonial', type: 'camera', icon: 'FileText' },
+  REGISTRO: { label: 'Registro Mestre', type: 'text', icon: 'Hash' },
+  DESCRICAODOATIVO: { label: 'Descrição do Ativo', type: 'text', icon: 'Info' },
+  DESCRICAODOBEM: { label: 'Descrição do Bem', type: 'text', icon: 'Info' },
+  MARCA: { label: 'Marca', type: 'text', icon: 'Briefcase' },
+  MODELO: { label: 'Modelo', type: 'text', icon: 'Briefcase' },
+  QT: { label: 'Quantidade', type: 'number', icon: 'Hash' },
+  SERIAL: { label: 'Número de Série', type: 'camera', icon: 'Hash' },
+  VLRAQUISIC: { label: 'Valor de Aquisição', type: 'currency', icon: 'Wallet' },
+  DATAAQUISIC: { label: 'Data de Aquisição', type: 'date', icon: 'Calendar' },
+  DATABAIXA: { label: 'Data de Baixa', type: 'date', icon: 'Calendar' },
+  STATUS: { label: 'Status Operacional', type: 'text', icon: 'ShieldCheck' },
+  ESTADO_CONSERVACAO: { label: 'Estado de Conservação', type: 'text', icon: 'FileText' },
+  CENTRODECUSTO: { label: 'Centro de Custo', type: 'text', icon: 'Briefcase' },
+  CONTACONTABIL: { label: 'Conta Contábil', type: 'text', icon: 'Briefcase' },
+  ENDERECO: { label: 'Endereço / Localização', type: 'text', icon: 'MapPin' },
+  _conferido: { label: 'Conferido', type: 'boolean', isSystem: true, icon: 'CheckCircle2' },
+  _dataLeitura: { label: 'Data da Leitura', type: 'date', isSystem: true, icon: 'Calendar' },
+  _photoUrl: { label: 'Evidência Fotográfica', type: 'camera', isSystem: true, icon: 'Camera' }
+};
+
+export const EXTRA_LABELS: Record<string, string> = {
+  MARCA: 'Marca',
+  MODELO: 'Modelo',
+  QT: 'Quantidade',
+  REGISTRO: 'Registro Mestre',
+  SUBREG: 'Sub-Registro',
+  PRIMARYKEY: 'Chave Primária (PK)',
+  STATUS: 'Status Operacional',
+  ESTADO_CONSERVACAO: 'Estado de Conservação',
+  DATABAIXA: 'Data de Baixa',
+  Sn1_recno: 'ID Protheus (SN1)',
+  Sn3_recno: 'ID Protheus (SN3)',
+  _dataLeitura: 'Data/Hora Inventário',
+  _auditor: 'Auditor Responsible',
+  _localMaster: 'Local Originário',
+  _lat: 'Latitude',
+  _lng: 'Longitude',
+  _history: 'Histórico de Auditoria',
+  _camposAlterados: 'Campos Alterados',
+  _valoresOriginais: 'Valores Originais',
+  _version: 'Versão do Registro',
+  _is_synced: 'Sincronizado',
+  _plaquetado: 'Plaquetado'
+};
+
+export const DEFAULT_EDITABLE_FIELDS = [
+  'ETIQUETA', 'SERIAL', 'DESCRICAODOATIVO', 'DESCRICAODOBEM', 'MARCA', 'MODELO', 'STATUS', 'ESTADO_CONSERVACAO',
+  'CENTRODECUSTO', 'ENDERECO', 'NOTAFISCAL', 'DATAAQUISIC', 'VLRAQUISIC'
+];

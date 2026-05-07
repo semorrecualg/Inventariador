@@ -42,7 +42,7 @@ import { addToSyncQueue } from '../services/syncService';
 import { saveLocalPhoto, getLocalPhoto } from '../services/photoService';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { indoorNavigation } from '../services/indoorNavigationService';
-import { DB_ASSET_COLUMNS } from '../constants/schema';
+import { DB_ASSET_COLUMNS, FIELD_METADATA, EXTRA_LABELS } from '../constants/schema';
 
 import { determineAssetTag, getTagMetadata } from '../services/tagService';
 
@@ -86,31 +86,6 @@ const ALL_ICON_MAP: Record<string, React.ElementType> = {
   _is_deleted: Trash2,
   _plaquetado: CheckCircle2,
   _aprovado: ShieldCheck
-};
-
-const EXTRA_LABELS: Record<string, string> = {
-  MARCA: 'Marca',
-  MODELO: 'Modelo',
-  QT: 'Quantidade',
-  REGISTRO: 'Registro Mestre',
-  SUBREG: 'Sub-Registro',
-  PRIMARYKEY: 'Chave Primária (PK)',
-  STATUS: 'Status Operacional',
-  ESTADO_CONSERVACAO: 'Estado de Conservação',
-  DATABAIXA: 'Data de Baixa',
-  Sn1_recno: 'ID Protheus (SN1)',
-  Sn3_recno: 'ID Protheus (SN3)',
-  _dataLeitura: 'Data/Hora Inventário',
-  _auditor: 'Auditor Responsável',
-  _localMaster: 'Local Originário',
-  _lat: 'Latitude',
-  _lng: 'Longitude',
-  _history: 'Histórico de Auditoria',
-  _camposAlterados: 'Campos Alterados',
-  _valoresOriginais: 'Valores Originais',
-  _version: 'Versão do Registro',
-  _is_synced: 'Sincronizado',
-  _plaquetado: 'Plaquetado'
 };
 
 const formatReadingTime = (isoStr?: string) => {
@@ -174,6 +149,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [unitizeCount, setUnitizeCount] = useState(2);
   const [unitizeMethod, setUnitizeMethod] = useState<'EQUAL' | 'PERCENT'>('EQUAL');
   const [unitizePercentages, setUnitizePercentages] = useState<number[]>([50, 50]);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingField && inputRef.current) {
+      inputRef.current.focus();
+      // Mover cursor para o final
+      const val = inputRef.current.value;
+      inputRef.current.value = '';
+      inputRef.current.value = val;
+    }
+  }, [editingField]);
   const [impairmentData, setImpairmentData] = useState({
     valorJusto: workingAsset._valor_justo || 0,
     valorEmUso: workingAsset._valor_em_uso || 0
@@ -771,40 +757,83 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       {isEditing ? (
                         <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
                           <div className="flex items-center space-x-2">
-                            <input 
-                              autoFocus
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
-                              className="flex-1 bg-blue-50/50 px-3 py-2 rounded-xl text-xs font-bold text-slate-900 border border-blue-200 outline-none focus:ring-2 focus:ring-blue-100 transition-all uppercase"
-                            />
+                            {FIELD_METADATA[key]?.type === 'date' ? (
+                              <input 
+                                ref={inputRef}
+                                type="date"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
+                                className="flex-1 bg-white px-3 py-2.5 rounded-xl text-xs font-bold text-slate-900 border-2 border-blue-200 outline-none focus:border-blue-500 transition-all shadow-sm"
+                              />
+                            ) : FIELD_METADATA[key]?.type === 'number' || FIELD_METADATA[key]?.type === 'currency' ? (
+                              <input 
+                                ref={inputRef}
+                                type="number"
+                                step="any"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
+                                className="flex-1 bg-white px-3 py-2.5 rounded-xl text-xs font-bold text-slate-900 border-2 border-blue-200 outline-none focus:border-blue-500 transition-all shadow-sm"
+                              />
+                            ) : FIELD_METADATA[key]?.type === 'camera' ? (
+                              <div className="flex-1 flex items-center gap-2">
+                                <input 
+                                  ref={inputRef}
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
+                                  className="flex-1 bg-white px-3 py-2.5 rounded-xl text-xs font-bold text-slate-900 border-2 border-blue-200 outline-none focus:border-blue-500 transition-all shadow-sm uppercase"
+                                />
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handlePhotoUpload(); }}
+                                  className="p-2.5 bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+                                  title="Capturar Foto/OCR"
+                                >
+                                  <CameraIcon size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <input 
+                                ref={inputRef}
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && applyFieldEdit()}
+                                className="flex-1 bg-white px-3 py-2.5 rounded-xl text-xs font-bold text-slate-900 border-2 border-blue-200 outline-none focus:border-blue-500 transition-all shadow-sm uppercase"
+                              />
+                            )}
                             <div className="flex space-x-1">
                               <button 
                                 onClick={(e) => { e.stopPropagation(); applyFieldEdit(); }}
-                                className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md active:scale-90"
+                                className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20 active:scale-90 transition-all"
                               >
-                                <Check size={14} strokeWidth={3} />
+                                <Check size={18} strokeWidth={3} />
                               </button>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setEditingField(null); }}
-                                className="w-8 h-8 bg-slate-100 text-slate-400 rounded-lg flex items-center justify-center active:scale-90"
+                                className="w-10 h-10 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center active:scale-90 transition-all"
                               >
-                                <X size={14} strokeWidth={2.5} />
+                                <X size={18} strokeWidth={2.5} />
                               </button>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between">
-                          <p className={`text-[13px] font-bold font-mono tracking-tight ${rawVal ? 'text-slate-700' : 'text-slate-300 italic font-sans'}`}>
+                        <div className="flex items-center justify-between group">
+                          <p className={`text-[14px] font-bold font-mono tracking-tight ${rawVal ? 'text-slate-800' : 'text-slate-300 italic font-sans'}`}>
                             {displayVal}
                           </p>
-                          {workingAsset._valoresOriginais?.[key] !== undefined && (
-                            <div className="flex items-center space-x-1 text-[7px] text-amber-600 font-black bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
-                              <AlertCircle size={8} />
-                              <span>ALTERADO</span>
-                            </div>
-                          )}
+                          <div className="flex items-center space-x-2">
+                            {workingAsset._valoresOriginais?.[key] !== undefined && (
+                              <div className="flex items-center space-x-1 text-[7px] text-amber-600 font-black bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                                <AlertCircle size={8} />
+                                <span>ALTERADO</span>
+                              </div>
+                            )}
+                            {isInventorying && canEdit && (
+                               <Edit2 size={10} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

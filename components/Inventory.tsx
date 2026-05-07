@@ -1603,7 +1603,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     className="w-full flex items-center"
                   >
                     <div className="relative w-full">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500" />
+                      <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600" />
                       <input 
                         ref={searchInputRef}
                         type="text"
@@ -1613,16 +1613,19 @@ const Inventory: React.FC<InventoryProps> = ({
                           setDisplayValue(val);
                           setCommittedSearch(val);
                         }}
-                        className="w-full bg-slate-50 border border-blue-100 pl-10 pr-10 py-1.5 rounded-full text-xs font-bold text-slate-900 outline-none focus:ring-2 ring-blue-500/20"
-                        placeholder="DIGITE PATRIMÔNIO OU DESCRIÇÃO..."
+                        className="w-full bg-white border-2 border-blue-100 pl-11 pr-11 py-3 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:border-blue-500 focus:ring-4 ring-blue-500/10 transition-all shadow-sm"
+                        placeholder="PESQUISAR PATRIMÔNIO OU DESCRIÇÃO..."
                         autoFocus
                       />
                       {displayValue && (
                         <button 
-                          onClick={() => setDisplayValue('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                          onClick={() => {
+                            setDisplayValue('');
+                            setCommittedSearch('');
+                          }}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                         >
-                          <X size={14} />
+                          <X size={16} />
                         </button>
                       )}
                     </div>
