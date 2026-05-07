@@ -515,7 +515,6 @@ const App: React.FC = () => {
   const [isCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
-  const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
@@ -2416,6 +2415,15 @@ const App: React.FC = () => {
       // SOBERANIA SQLITE: Transação atômica
       await sqliteService.bulkInsertAssets(updatedAssetsList);
 
+      // Audit Log em LOTE
+      await sqliteService.logAuditEvent({
+        user_email: user?.email || 'SOBERANO_USER',
+        action: 'BULK_UPDATE',
+        details: `Atualização em lote de ${updatedAssetsList.length} itens. IDs: ${ids.slice(0, 5).join(', ')}${ids.length > 5 ? '...' : ''}`,
+        _tenantid: user?.tenantid,
+        _unitid: user?.unitid
+      });
+
       // 3. SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
       setInventory(prev => ({
         ...prev,
@@ -3913,7 +3921,7 @@ const App: React.FC = () => {
               </div>
               
               <div className="flex flex-col min-w-[120px]">
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5 line-clamp-1">
+                <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-3 line-clamp-1">
                   {sqliteService.getStorageSource() === 'PHYSICAL' ? 'MOBILE SOBERANO (v2.6)' : 
                    sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
                   {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
@@ -3925,7 +3933,7 @@ const App: React.FC = () => {
                     {sqliteService.getLastDiscWrite() ? `Última escrita: ${sqliteService.getLastDiscWrite()}` : 'Pronto para Auditoria'}
                   </span>
                 </div>
-              </div>
+
                 {sqliteService.getNativePath() && (
                   <div className="flex items-center gap-1 overflow-hidden mt-0.5 border-t border-white/5 pt-1">
                     <Database size={6} className="text-emerald-400/60" />
@@ -3935,16 +3943,16 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
-
-              {lastLocalSave && (
-                <div className="ml-2 pl-3 border-l border-white/10 flex flex-col">
-                   <span className="text-[7px] font-black text-white/40 uppercase tracking-widest leading-none">Gravado</span>
-                   <span className="text-[8px] font-bold text-green-400 uppercase tracking-tighter mt-0.5">
-                     {new Date(lastLocalSave).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                   </span>
-                </div>
-              )}
             </div>
+
+            {lastLocalSave && (
+              <div className="ml-2 pl-3 border-l border-white/10 flex flex-col">
+                 <span className="text-[7px] font-black text-white/40 uppercase tracking-widest leading-none">Gravado</span>
+                 <span className="text-[8px] font-bold text-green-400 uppercase tracking-tighter mt-0.5">
+                   {new Date(lastLocalSave).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                 </span>
+              </div>
+            )}
           </motion.div>
         )}
 

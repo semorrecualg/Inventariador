@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sqliteService } from '../services/sqliteService';
 import { assetRepository } from '../services/assetRepository';
-import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, FolderOpen, ChevronLeft } from 'lucide-react';
+import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, FolderOpen, ChevronLeft, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
 import { formatErrorMessage } from '../utils/errorUtils';
 
 import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode } from '../types';
@@ -415,6 +416,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     onDataLoaded([], []);
   };
 
+  const handleBackup = async () => {
+    addLog("Iniciando cópia física de segurança...");
+    await sqliteService.exportPhysicalBackup();
+  };
+
   return (
     <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[300px] safe-area-p">
       <AnimatePresence mode="wait">
@@ -481,6 +487,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 </div>
                 <span>Vincular Arquivo .DB Existente</span>
               </button>
+
+              {Capacitor.isNativePlatform() && sqliteService.getStorageSource() === 'PHYSICAL' && (
+                <button
+                  onClick={handleBackup}
+                  className="flex items-center justify-center gap-4 bg-emerald-50 border-2 border-emerald-200 text-emerald-700 p-4 rounded-3xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 active:scale-95 transition-all group"
+                >
+                  <ShieldCheck size={16} />
+                  <span>Gerar Backup de Segurança (Exportar DB)</span>
+                </button>
+              )}
 
               <button
                 onClick={handleCreateEmpty}

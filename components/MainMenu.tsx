@@ -1040,8 +1040,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
 
               <button 
-                onClick={() => { 
-                  sqliteService.downloadDatabase();
+                onClick={async () => { 
+                  if (Capacitor.isNativePlatform() && sqliteService.getStorageSource() === 'PHYSICAL') {
+                    await sqliteService.exportPhysicalBackup();
+                  } else {
+                    sqliteService.downloadDatabase();
+                  }
                 }} 
                 className="w-full flex items-center p-5 bg-indigo-600 text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-indigo-500/20 border-2 border-white/20"
               >
