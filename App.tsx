@@ -55,6 +55,9 @@ import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
+import { Camera } from '@capacitor/camera';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'framer-motion';
 import { APP_LOGO } from './constants';
@@ -513,7 +516,6 @@ const App: React.FC = () => {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [searchQuery, setSearchQuery] = useState("");
   const [isCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -545,6 +547,21 @@ const App: React.FC = () => {
     
     let cleanup: (() => void) | undefined;
     setupKeyboardListeners().then(cb => { cleanup = cb; });
+
+    // --- HANDSHAKE DE PERMISSÕES SOBERANAS (v2.6) ---
+    const requestSystemPermissions = async () => {
+      if (Capacitor.isNativePlatform()) {
+        console.log(">>> [Capacitor] Solicitando permissões de sistema...");
+        try {
+          await Camera.requestPermissions();
+          await Geolocation.requestPermissions();
+          console.log(">>> [Capacitor] Handshake de permissões concluído.");
+        } catch (err) {
+          console.warn(">>> [Capacitor] Falha no handshake de permissões:", err);
+        }
+      }
+    };
+    requestSystemPermissions();
     
     return () => {
       if (cleanup) cleanup();
@@ -715,10 +732,6 @@ const App: React.FC = () => {
       setIsSyncing(false);
     }
   }, [user, currentTenantId, selectedUnit, refreshCampaigns, pushScreen, showModal]);
-
-  const onSearch = useCallback((query: string) => {
-    setSearchQuery(query);
-  }, []);
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
