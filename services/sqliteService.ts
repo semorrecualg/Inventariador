@@ -189,6 +189,7 @@ class SqliteService {
   private activeFileHandle: FileSystemFileHandle | null = null;
   private permissionGrantedSession = false;
   private activeSchemaMappings: Record<string, string> = {};
+  private lastError: string | null = null;
   
   public onStatusChange: ((status: FileStatus) => void) | null = null;
   
@@ -214,7 +215,12 @@ class SqliteService {
 
   async reset() {
     if (this.db) {
-      try { this.db.close(); } catch (e) { console.warn(e); }
+      try { 
+        this.db.close(); 
+        console.log(">>> [SafeRecovery] Conexão ativa encerrada com sucesso.");
+      } catch (e) { 
+        console.warn(">>> [SafeRecovery] Falha ao encerrar conexão órfã:", e); 
+      }
       this.db = null;
     }
     this.isInitialized = false;
@@ -241,6 +247,7 @@ class SqliteService {
   getIsInitialized() { return this.isInitialized; }
   getStorageSource() { return this.storageSource; }
   getDbStatus() { return this.currentDbStatus; }
+  getLastError() { return this.lastError; }
 
   async setSystemStatus(status: DatabaseStatus) {
     this.currentDbStatus = status;
@@ -505,16 +512,22 @@ class SqliteService {
 
   async init(force = false) {
     if (this.isInitialized && this.db && !force) return true;
+    
+    this.lastError = null;
     if (force) await this.reset();
     
     try {
-      const SQL = await initSqlJs({ locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` });
+      console.log(">>> [Init] Iniciando motor SQL.js...");
+      const SQL = await initSqlJs({ 
+        locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
+      });
       
       let bytes: Uint8Array | null = null;
 
       // PRIORIDADE 0: PERSISTÊNCIA NATIVA (CAPACITOR / ANDROID)
       if (Capacitor.isNativePlatform()) {
         try {
+          console.log(`>>> [NativeBridge] Verificando existência de ${this.storageKeys.nativeFileName} em Directory.Data...`);
           const result = await Filesystem.readFile({
             path: this.storageKeys.nativeFileName,
             directory: Directory.Data
@@ -528,8 +541,12 @@ class SqliteService {
             }
             console.log(`>>> [NativeBridge] Banco NATIVO lido com sucesso (${bytes.length} bytes).`);
           }
-        } catch {
-          console.warn(">>> [NativeBridge] Arquivo nativo ausente. Tentando Cache.");
+        } catch (err: any) {
+          const errorMsg = err?.message || String(err);
+          console.warn(`>>> [NativeBridge] Arquivo nativo ausente ou ilegível: ${errorMsg}`);
+          if (errorMsg.includes("corrupt") || errorMsg.includes("Sqlite")) {
+             this.lastError = `SQLite Error: ${errorMsg}`;
+          }
         }
       }
 
@@ -561,13 +578,23 @@ class SqliteService {
       }
 
       // Inicialização do Banco
-      if (bytes && bytes.length > 0) {
-        this.db = new SQL.Database(bytes);
-        this.storageSource = 'PHYSICAL'; // No nativo e handle, consideramos físico
-      } else {
-        console.log(">>> [Persistence] Nenhuma base existente encontrada. Iniciando MEMORY MODE.");
+      try {
+        if (bytes && bytes.length > 0) {
+          this.db = new SQL.Database(bytes);
+          this.storageSource = 'PHYSICAL'; // No nativo e handle, consideramos físico
+          console.log(`>>> [Persistence] Banco montado via ${this.storageSource}.`);
+        } else {
+          console.log(">>> [Persistence] Nenhuma base existente encontrada. Iniciando MEMORY MODE.");
+          this.db = new SQL.Database();
+          this.storageSource = 'MEMORY';
+        }
+      } catch (dbErr) {
+        console.error(">>> [Persistence] Erro ao instanciar banco (possível corrupção):", dbErr);
+        this.lastError = `Corrupção detectada: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`;
+        // Fallback para memória se o arquivo estiver corrompido
         this.db = new SQL.Database();
         this.storageSource = 'MEMORY';
+        console.warn(">>> [Persistence] Retornando para MEMORY MODE devido a erro no carregamento.");
       }
 
       // Aplicação de Schema e Migrações APÓS carga de dados
@@ -588,7 +615,9 @@ class SqliteService {
       }
 
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      this.lastError = msg;
       console.error(">>> [FATAL] Init SQLite failed:", err);
       return false;
     }

@@ -93,6 +93,7 @@ interface MainMenuProps {
   setIsAIAssistantOpen: (val: boolean) => void;
   onOpenHelp?: () => void;
   campaignsCount?: number;
+  sqliteStatus?: string;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -134,7 +135,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isAIAssistantOpen,
   setIsAIAssistantOpen,
   onOpenHelp,
-  campaignsCount
+  campaignsCount,
+  sqliteStatus
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -274,9 +276,35 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border bg-emerald-50 border-emerald-100 text-emerald-500">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span className="text-[9px] font-bold uppercase tracking-tight">Soberania Ativa</span>
+          <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border ${
+            sqliteStatus === 'ACTIVE' && sqliteService.getStorageSource() === 'PHYSICAL'
+              ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+              : sqliteService.getStorageSource() === 'PHYSICAL'
+                ? 'bg-blue-50 border-blue-100 text-blue-500'
+                : sqliteService.getStorageSource() === 'CACHE'
+                  ? 'bg-amber-50 border-amber-100 text-amber-500'
+                  : 'bg-red-50 border-red-100 text-red-500'
+          }`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              sqliteStatus === 'ACTIVE' && sqliteService.getStorageSource() === 'PHYSICAL' 
+                ? 'bg-emerald-500' 
+                : sqliteService.getStorageSource() === 'PHYSICAL'
+                  ? 'bg-blue-500 animate-pulse'
+                  : sqliteService.getStorageSource() === 'CACHE'
+                    ? 'bg-amber-500 animate-pulse'
+                    : 'bg-red-500'
+            }`} />
+            <span className="text-[9px] font-bold uppercase tracking-tight">
+              {sqliteStatus === 'ACTIVE' && sqliteService.getStorageSource() === 'PHYSICAL' 
+                ? 'ARMAZENAMENTO FÍSICO ATIVO' 
+                : sqliteStatus === 'LOADED' && sqliteService.getStorageSource() === 'PHYSICAL'
+                  ? 'SOBERANIA ATIVA (AGUARDANDO)'
+                  : sqliteService.getStorageSource() === 'PHYSICAL'
+                    ? 'FÍSICO CONECTADO'
+                    : sqliteService.getStorageSource() === 'CACHE'
+                      ? 'BANCO PERSISTENTE'
+                      : 'MEMÓRIA VOLÁTIL'}
+            </span>
           </div>
           <button 
             onClick={() => onOpenHelp?.()}

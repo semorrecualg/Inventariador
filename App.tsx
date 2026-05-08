@@ -215,6 +215,40 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
+  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
+    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Recurso Indisponível',
+        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
+        type: 'info'
+      });
+      return;
+    }
+
+    setScreenParams(params || null);
+
+    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
+      console.log(`>>> [Navigation] Resetting history to: ${s}`);
+      setHistory([s]);
+    } else {
+      console.log(`>>> [Navigation] Pushing screen: ${s}`);
+      setHistory(prev => [...prev, s]);
+    }
+  }, [databaseMode]);
+
+  const popScreen = useCallback(() => {
+    setHistory(prev => {
+      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
+      const newScreen = newHistory[newHistory.length - 1];
+      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
+      if (newScreen !== AppScreen.ASSET_DETAIL) {
+        setSelectedAssets([]);
+      }
+      return newHistory;
+    });
+  }, []);
+
   const [modalConfig, setModalConfig] = useState<ModalConfig>({
     isOpen: false,
     title: '',
@@ -278,40 +312,6 @@ const App: React.FC = () => {
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
   const databaseMode = DatabaseMode.INTERNAL;
-
-  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
-    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Recurso Indisponível',
-        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
-        type: 'info'
-      });
-      return;
-    }
-
-    setScreenParams(params || null);
-
-    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
-      console.log(`>>> [Navigation] Resetting history to: ${s}`);
-      setHistory([s]);
-    } else {
-      console.log(`>>> [Navigation] Pushing screen: ${s}`);
-      setHistory(prev => [...prev, s]);
-    }
-  }, [databaseMode]);
-
-  const popScreen = useCallback(() => {
-    setHistory(prev => {
-      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
-      const newScreen = newHistory[newHistory.length - 1];
-      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
-      if (newScreen !== AppScreen.ASSET_DETAIL) {
-        setSelectedAssets([]);
-      }
-      return newHistory;
-    });
-  }, []);
 
   // Expose pushScreen to window for components that need it
   useEffect(() => {
@@ -1159,14 +1159,16 @@ const App: React.FC = () => {
           }
         }
 
-        // Recupera o status do SQLite para Soberania de Dados
-        if (databaseMode === DatabaseMode.INTERNAL) {
-          const status = sqliteService.getDbStatus();
-          const source = sqliteService.getStorageSource();
-          setSqliteStatus(status);
-          setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
-          console.log(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
-        }
+      // Recupera o status do SQLite para Soberania de Dados
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        const status = sqliteService.getDbStatus();
+        const source = sqliteService.getStorageSource();
+        // SOBERANIA: No boot, mesmo que o banco tenha dados, mantemos como LOADED. 
+        // O estado ACTIVE (Soberania Plena) só é declarado após a validação de carga ou interação.
+        setSqliteStatus(status === DatabaseStatus.ACTIVE ? DatabaseStatus.LOADED : status);
+        setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
+        console.log(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
+      }
 
         if (saved && saved.assets && saved.assets.length > 0) {
           // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
@@ -3170,13 +3172,15 @@ const App: React.FC = () => {
     });
   }, [inventory.assets, inventory.companies, users, fullCompaniesWithStatus]);
 
-  // Auto-sync logic removed for Native Sovereignty
+  // Monitoramento de Estado Inicial e Redirecionamento de Segurança (v2.6.2)
   useEffect(() => {
+    // SOBERANIA: Precisamos garantir que o Admin passe pela tela de carga se o banco SQL não estiver ACTIVE,
+    // mesmo que existam dados no cache (isEmpty pode ser falso mas o banco físico pode estar vazio ou offline).
+    const isPhysicalEmpty = sqliteStatus !== 'ACTIVE';
     const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
-    const isTrulyEmpty = isEmpty && sqliteStatus !== 'ACTIVE';
+    const isTrulyEmpty = (isEmpty || (databaseMode === DatabaseMode.INTERNAL && isPhysicalEmpty)) && isAdmin;
     
-    if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
-      // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
+    if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && !isSyncing && isDataLoaded) {
       // Evita loop: utiliza sessionStorage para persistir o bloqueio mesmo após refresh ou pop
       const hasJustFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
       if (hasJustFinishedLoad) {
@@ -3184,13 +3188,10 @@ const App: React.FC = () => {
         return;
       }
 
-      const isSystemAdmin = checkIsAdmin(user);
-      if (isSystemAdmin) {
-        console.log('>>> [Redirect] Base vazia detectada após carregamento. Redirecionando para Carga Expert.');
-        pushScreen(AppScreen.LOAD_DATABASE);
-      }
+      console.warn(">>> [Governance] SOBERANIA: Banco SQL não ativado ou Vazio. Redirecionando para Carga de Dados.");
+      pushScreen(AppScreen.LOAD_DATABASE);
     }
-  }, [screen, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isSyncing, user, isAdmin, pushScreen, isDataLoaded, sqliteStatus]);
+  }, [screen, selectedUnit, sqliteStatus, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isAdmin, isSyncing, isDataLoaded, pushScreen]);
 
   // Auto-select unit if only one is available for the auditor
   useEffect(() => {
@@ -3464,6 +3465,7 @@ const App: React.FC = () => {
               isAIAssistantOpen={isAIAssistantOpen}
               setIsAIAssistantOpen={setIsAIAssistantOpen}
               campaignsCount={campaigns.length}
+              sqliteStatus={sqliteStatus}
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
@@ -3946,8 +3948,10 @@ const App: React.FC = () => {
               
               <div className="flex flex-col min-w-[120px]">
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-3 line-clamp-1">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'MOBILE SOBERANO (v2.6)' : 
-                   sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
+                  {sqliteStatus === 'ACTIVE' && sqliteService.getStorageSource() === 'PHYSICAL' ? 'ARMAZENAMENTO FÍSICO ATIVO' : 
+                   sqliteStatus === 'LOADED' && sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA ATIVA (AGUARDANDO)' :
+                   sqliteService.getStorageSource() === 'PHYSICAL' ? 'FÍSICO CONECTADO' :
+                   sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'MEMÓRIA VOLÁTIL'}
                   {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}

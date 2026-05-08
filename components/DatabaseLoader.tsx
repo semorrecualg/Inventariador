@@ -465,7 +465,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <div className="p-2 bg-white/20 rounded-xl group-hover:rotate-12 transition-transform">
                   <FileSpreadsheet size={18} />
                 </div>
-                <span>Carga Expert (Excel)</span>
+                <span>Carregar Dados (Excel/CSV)</span>
               </button>
 
               <button
@@ -475,7 +475,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <div className="p-2 bg-emerald-50 rounded-xl group-hover:rotate-12 transition-transform">
                   <Database size={18} className="text-emerald-600" />
                 </div>
-                <span>Criar Novo Arquivo SQL</span>
+                <span>Criar Novo Banco de Dados</span>
               </button>
 
               <button
@@ -485,7 +485,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <div className="p-2 bg-slate-100 rounded-xl group-hover:scale-110 transition-transform">
                   <FolderOpen size={18} />
                 </div>
-                <span>Vincular Arquivo .DB Existente</span>
+                <span>Sincronizar SQL (Vincular .DB)</span>
               </button>
 
               {Capacitor.isNativePlatform() && sqliteService.getStorageSource() === 'PHYSICAL' && (
@@ -660,11 +660,22 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             className="flex flex-col items-center gap-4 text-center"
           >
             <AlertCircle className="w-12 h-12 text-red-500" />
-            <h3 className="text-sm font-black text-red-800 uppercase tracking-widest">Falha na Sincronização</h3>
+            <div className="space-y-1">
+              <h3 className="text-sm font-black text-red-800 uppercase tracking-widest">Falha na Sincronização</h3>
+              {sqliteService.getLastError() && (
+                <p className="text-[10px] text-red-600 font-mono bg-red-50 p-2 rounded-lg break-all max-w-[250px]">
+                  {sqliteService.getLastError()}
+                </p>
+              )}
+            </div>
             <button
-              onClick={() => loadDataFlow()}
-              className="text-[10px] font-black text-blue-600 uppercase hover:underline"
+              onClick={() => {
+                addLog("Tentando recuperação forçada...");
+                loadDataFlow(false);
+              }}
+              className="text-[10px] font-black text-blue-600 uppercase hover:underline flex items-center gap-2"
             >
+              <RefreshCw size={12} />
               Tentar Novamente
             </button>
           </motion.div>
