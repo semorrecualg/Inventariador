@@ -25,7 +25,7 @@ import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { getCurrentLocation } from './utils/gpsUtils';
 import { indoorNavigation } from './services/indoorNavigationService';
 import UnitSelector from './components/UnitSelector';
 import Dashboard from './components/Dashboard';
@@ -215,28 +215,44 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
-  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
-    return localStorage.getItem('app_selected_unit') || null;
+  const [modalConfig, setModalConfig] = useState<ModalConfig>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
   });
 
-  const [currentCampaignId, setCurrentCampaignId] = useState<string | null>(() => {
-    return localStorage.getItem('app_current_campaign_id') || null;
-  });
+  const showModal = useCallback((title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+    });
+  }, []);
 
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const databaseMode = DatabaseMode.INTERNAL;
 
-  const userRef = useRef<User | null>(user);
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
+  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_selected_unit');
+      return saved || null;
+    } catch { return null; }
+  });
 
+  const [currentCampaignId, setCurrentCampaignId] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_current_campaign_id');
+      return saved || null;
+    } catch { return null; }
+  });
+
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const [hasAcceptedTerms] = useState<boolean>(() => {
-    return localStorage.getItem('app_accepted_terms') === 'true';
+    return localStorage.getItem('app_terms_accepted') === 'true';
   });
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
@@ -246,12 +262,103 @@ const App: React.FC = () => {
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
-  const [isSyncLocked, setIsSyncLocked] = useState(false);
-
-  // Monitor de Soberania de Arquivos (Modo Físico)
+  const [isSyncLocked] = useState(false);
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string, linkType?: string} | null>(null);
+
+  const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
+    return localStorage.getItem('app_field_mode') === 'true';
+  });
+
+  const [, setCurrentModule] = useState<AppModule | null>(() => {
+    const saved = localStorage.getItem('app_current_module');
+    return (saved as AppModule) || null;
+  });
+
+  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+  const databaseMode = DatabaseMode.INTERNAL;
+
+  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
+    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Recurso Indisponível',
+        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
+        type: 'info'
+      });
+      return;
+    }
+
+    setScreenParams(params || null);
+
+    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
+      console.log(`>>> [Navigation] Resetting history to: ${s}`);
+      setHistory([s]);
+    } else {
+      console.log(`>>> [Navigation] Pushing screen: ${s}`);
+      setHistory(prev => [...prev, s]);
+    }
+  }, [databaseMode]);
+
+  const popScreen = useCallback(() => {
+    setHistory(prev => {
+      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
+      const newScreen = newHistory[newHistory.length - 1];
+      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
+      if (newScreen !== AppScreen.ASSET_DETAIL) {
+        setSelectedAssets([]);
+      }
+      return newHistory;
+    });
+  }, []);
+
+  // Expose pushScreen to window for components that need it
+  useEffect(() => {
+    window.pushScreen = pushScreen;
+    return () => {
+      delete window.pushScreen;
+    };
+  }, [pushScreen]);
+
+  // Controle de Back Button Físico (Android/Capacitor/Native v2.6)
+  useEffect(() => {
+    let backListener: { remove: () => void } | null = null;
+    
+    const setupBackListener = async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const listener = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+          // BLOQUEIO v2.6: Não permite sair se houver overlays persistentes ou telas de sistema
+          const hasModal = !!document.querySelector('.z-\\[12000\\]'); // Photo preview
+          
+          if (hasModal) {
+            console.log('[Native] Back Button: Fechando modal de evidência.');
+            return;
+          }
+
+          if (screen !== AppScreen.LOGIN && screen !== AppScreen.HOME) {
+            popScreen();
+          } else if (canGoBack) {
+            window.history.back();
+          } else {
+            CapacitorApp.exitApp();
+          }
+        });
+        backListener = listener;
+      } catch {
+        // Silencioso no Browser
+      }
+    };
+
+    setupBackListener();
+    return () => {
+      if (backListener) backListener.remove();
+    };
+  }, [screen, popScreen]);
+
+
+  // Handlers
 
   const handleReconnectFile = async () => {
     if (isReconnecting) return;
@@ -330,47 +437,16 @@ const App: React.FC = () => {
     }
   };
 
-  const [modalConfig, setModalConfig] = useState<ModalConfig>({
-    isOpen: false,
-    title: '',
-    message: '',
-    type: 'info'
-  });
-  const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
-    return localStorage.getItem('app_field_mode') === 'true';
-  });
+  // Config
+  const updateConfig = useCallback((updates: Partial<InventoryState>) => {
+    setInventory(prev => ({
+      ...prev,
+      ...updates,
+      lastUpdated: new Date().toISOString()
+    }));
+  }, []);
 
-  const showModal = (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => {
-    setModalConfig({
-      isOpen: true,
-      title,
-      message,
-      type,
-    });
-  };
-
-  // Monitor de Sincronização Offline - Desativado em conformidade com Native Sovereignty
-  useEffect(() => {
-    setSyncQueueLength(0);
-    setIsSyncLocked(false);
-  }, [databaseMode]);
-
-  // Rastreamento Autônomo v24.50
-  useEffect(() => {
-    if (!isFieldMode) {
-      startAutonomousTracking();
-    } else {
-      stopAutonomousTracking();
-    }
-    return () => stopAutonomousTracking();
-  }, [isFieldMode]);
-
-  const [, setCurrentModule] = useState<AppModule | null>(() => {
-    const saved = localStorage.getItem('app_current_module');
-    return (saved as AppModule) || null;
-  });
-
-  // Monitor de Segurança
+  // Monitor de Sincronização
   useEffect(() => {
     // Modo Soberano ativado
   }, [databaseMode]);
@@ -1225,7 +1301,6 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
 
   // Safety check to prevent getting stuck on screens with missing state
   useEffect(() => {
@@ -1613,49 +1688,6 @@ const App: React.FC = () => {
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
 
-  const updateConfig = useCallback((updates: Partial<InventoryState>) => {
-    setInventory(prev => ({
-      ...prev,
-      ...updates,
-      lastUpdated: new Date().toISOString()
-    }));
-  }, []);
-
-  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
-    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Recurso Indisponível',
-        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
-        type: 'info'
-      });
-      return;
-    }
-
-    setScreenParams(params || null);
-
-    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
-      console.log(`>>> [Navigation] Resetting history to: ${s}`);
-      setHistory([s]);
-    } else {
-      console.log(`>>> [Navigation] Pushing screen: ${s}`);
-      setHistory(prev => [...prev, s]);
-    }
-  }, [databaseMode]);
-
-  // Expose pushScreen to window for components that need it
-  useEffect(() => {
-    window.pushScreen = pushScreen;
-    return () => {
-      delete window.pushScreen;
-    };
-  }, [pushScreen]);
-
-  // Listener de Autenticação (Nativo)
-  useEffect(() => {
-    // SOBERANIA: Não há escuta de eventos externos
-    return;
-  }, [databaseMode]);
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
@@ -1778,54 +1810,6 @@ const App: React.FC = () => {
       });
     }
   };
-
-  const popScreen = useCallback(() => {
-    setHistory(prev => {
-      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
-      const newScreen = newHistory[newHistory.length - 1];
-      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
-      if (newScreen !== AppScreen.ASSET_DETAIL) {
-        setSelectedAssets([]);
-      }
-      return newHistory;
-    });
-  }, []);
-
-  // Controle de Back Button Físico (Android/Capacitor/Native v2.6)
-  useEffect(() => {
-    let backListener: { remove: () => void } | null = null;
-    
-    const setupBackListener = async () => {
-      try {
-        const { App: CapacitorApp } = await import('@capacitor/app');
-        const listener = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-          // BLOQUEIO v2.6: Não permite sair se houver overlays persistentes ou telas de sistema
-          const hasModal = !!document.querySelector('.z-\\[12000\\]'); // Photo preview
-          
-          if (hasModal) {
-            console.log('[Native] Back Button: Fechando modal de evidência.');
-            return;
-          }
-
-          if (screen !== AppScreen.LOGIN && screen !== AppScreen.HOME) {
-            popScreen();
-          } else if (canGoBack) {
-            window.history.back();
-          } else {
-            CapacitorApp.exitApp();
-          }
-        });
-        backListener = listener;
-      } catch {
-        // Silencioso no Browser
-      }
-    };
-
-    setupBackListener();
-    return () => {
-      if (backListener) backListener.remove();
-    };
-  }, [screen, popScreen]);
 
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
