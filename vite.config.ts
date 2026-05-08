@@ -3,12 +3,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import legacy from '@vitejs/plugin-legacy';
 
 export default defineConfig({
   base: './',
   plugins: [
     react(),
     tailwindcss(),
+    legacy({
+      targets: ['defaults', 'not IE 11', 'Android >= 7'],
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png'],
@@ -81,7 +85,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'esbuild',
+    minify: 'terser',
+    target: 'es2017',
     chunkSizeWarningLimit: 1600,
   }
 });
