@@ -43,10 +43,9 @@ jobs:
           cache-disabled: true
 
       - name: Build APK (Debug)
-        working-directory: android
         id: build_apk
         run: |
-          gradle assembleDebug
+          gradle assembleDebug -p android
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
