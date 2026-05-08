@@ -40,10 +40,6 @@ jobs:
         with:
           validate-wrappers: false
 
-      - name: Force Wrapper Repair
-        working-directory: android
-        run: gradle wrapper
-
       - name: Build APK (Debug)
         working-directory: android
         continue-on-error: true
