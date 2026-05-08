@@ -55,6 +55,7 @@ import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
+import { Filesystem } from '@capacitor/filesystem';
 import { Camera } from '@capacitor/camera';
 import { Geolocation } from '@capacitor/geolocation';
 import { Capacitor } from '@capacitor/core';
@@ -1064,7 +1065,31 @@ const App: React.FC = () => {
 
   // Load inventory from IndexedDB on mount
   useEffect(() => {
+    const safetyTimeout = setTimeout(() => {
+      const currentLoader = document.getElementById('app-loader');
+      if (currentLoader && !currentLoader.classList.contains('hidden')) {
+        console.warn(">>> [Safety] Splash Screen timeout atingido (5s). Forçando liberação...");
+        currentLoader.classList.add('hidden');
+        if (currentLoader.parentNode) {
+          setTimeout(() => currentLoader.remove(), 500);
+        }
+        setIsDataLoaded(true);
+      }
+    }, 5000);
+
     const init = async () => {
+      console.log(">>> [Initialize] Iniciando ciclo de vida do app...");
+      
+      // TRIGGER DE PERMISSÕES NATIVO (Solicitado p/ Android v24.50)
+      if (Capacitor.isNativePlatform()) {
+        try {
+          console.log(">>> [Native] Solicitando permissões de Filesystem...");
+          await Filesystem.requestPermissions();
+        } catch (permErr) {
+          console.warn(">>> [Native] Falha na solicitação de permissões:", permErr);
+        }
+      }
+
       // Solicita persistência durável
       await requestPersistentStorage();
       
@@ -1288,15 +1313,17 @@ const App: React.FC = () => {
       } catch (e) { 
         console.error("Data load failed", e); 
       } finally {
-        console.log("App init - Finalizando carregamento de dados.");
+        console.log(">>> [Initialize] Concluído. Liberando UI.");
+        clearTimeout(safetyTimeout);
         setIsDataLoaded(true);
-        
         // @ts-expect-error - appStarted is a custom property
         window.appStarted = true;
-        const loader = document.getElementById('app-loader');
-        if (loader) {
-          loader.classList.add('hidden');
-          setTimeout(() => loader.remove(), 500);
+        const currentLoader = document.getElementById('app-loader');
+        if (currentLoader) {
+          currentLoader.classList.add('hidden');
+          if (currentLoader.parentNode) {
+            setTimeout(() => currentLoader.remove(), 500);
+          }
         }
       }
     };
@@ -3180,7 +3207,10 @@ const App: React.FC = () => {
     const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
     const isTrulyEmpty = (isEmpty || (databaseMode === DatabaseMode.INTERNAL && isPhysicalEmpty)) && isAdmin;
     
-    if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && !isSyncing && isDataLoaded) {
+    // Agora monitoramos tanto UNIT_SELECTION quanto MODULE_SELECTION para o Admin
+    const isMainLanding = screen === AppScreen.UNIT_SELECTION || screen === AppScreen.MODULE_SELECTION;
+    
+    if (isMainLanding && isTrulyEmpty && !isSyncing && isDataLoaded) {
       // Evita loop: utiliza sessionStorage para persistir o bloqueio mesmo após refresh ou pop
       const hasJustFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
       if (hasJustFinishedLoad) {
