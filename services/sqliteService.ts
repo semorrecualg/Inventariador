@@ -541,8 +541,8 @@ class SqliteService {
             }
             console.log(`>>> [NativeBridge] Banco NATIVO lido com sucesso (${bytes.length} bytes).`);
           }
-        } catch (err: any) {
-          const errorMsg = err?.message || String(err);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
           console.warn(`>>> [NativeBridge] Arquivo nativo ausente ou ilegível: ${errorMsg}`);
           if (errorMsg.includes("corrupt") || errorMsg.includes("Sqlite")) {
              this.lastError = `SQLite Error: ${errorMsg}`;
@@ -615,8 +615,8 @@ class SqliteService {
       }
 
       return true;
-    } catch (err: any) {
-      const msg = err?.message || String(err);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       this.lastError = msg;
       console.error(">>> [FATAL] Init SQLite failed:", err);
       return false;

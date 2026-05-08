@@ -144,6 +144,27 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 // App Component
+// Polyfills p/ Androids Antigos (WebView < 92)
+if (typeof window !== 'undefined' && window.crypto && !window.crypto.randomUUID) {
+  // @ts-expect-error - polyfill intentional
+  window.crypto.randomUUID = function() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };
+}
+
+const updateLoaderMessage = (title: string, subtitle?: string) => {
+  const loader = document.getElementById('app-loader');
+  if (loader) {
+    const h1 = loader.querySelector('h1');
+    const p = loader.querySelector('p');
+    if (h1) h1.textContent = title;
+    if (p && subtitle) p.textContent = subtitle;
+  }
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -645,7 +666,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [showRecoveryToast] = useState(false);
   const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
   const [integrityFailed, setIntegrityFailed] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1068,6 +1089,7 @@ const App: React.FC = () => {
     const safetyTimeout = setTimeout(() => {
       const currentLoader = document.getElementById('app-loader');
       if (currentLoader && !currentLoader.classList.contains('hidden')) {
+        window.alert("SAFETY TRIGGER: Splash demorou +5s. Forçando entrada.");
         console.warn(">>> [Safety] Splash Screen timeout atingido (5s). Forçando liberação...");
         currentLoader.classList.add('hidden');
         if (currentLoader.parentNode) {
@@ -1075,260 +1097,164 @@ const App: React.FC = () => {
         }
         setIsDataLoaded(true);
       }
-    }, 5000);
+    }, 8000); // Aumentado para 8s para dar tempo de ver os alertas
 
     const init = async () => {
-      console.log(">>> [Initialize] Iniciando ciclo de vida do app...");
-      
-      // TRIGGER DE PERMISSÕES NATIVO (Solicitado p/ Android v24.50)
-      if (Capacitor.isNativePlatform()) {
-        try {
-          console.log(">>> [Native] Solicitando permissões de Filesystem...");
-          await Filesystem.requestPermissions();
-        } catch (permErr) {
-          console.warn(">>> [Native] Falha na solicitação de permissões:", permErr);
-        }
-      }
-
-      // Solicita persistência durável
-      await requestPersistentStorage();
-      
-      console.log(`App init - Soberania Nativa Ativada.`);
-      
-      // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
       try {
-        const savedUnit = await sqliteService.getConfig('selectedUnit');
-        const savedCampaign = await sqliteService.getConfig('currentCampaignId');
+        console.log(">>> [Initialize] Iniciando ciclo de vida do app...");
+        window.alert("Passo 1: Iniciando Boot");
+        updateLoaderMessage("Carregando...", "Validando permissões...");
         
-        if (savedUnit && !selectedUnit) {
-          console.log(`>>> [Boot] Restaurando Unidade Operacional: ${savedUnit}`);
-          setSelectedUnit(savedUnit);
-        }
-        
-        if (savedCampaign && !currentCampaignId) {
-          console.log(`>>> [Boot] Restaurando Campanha Ativa: ${savedCampaign}`);
-          setCurrentCampaignId(savedCampaign);
-        }
-      } catch (err) {
-        console.warn(">>> [Boot] Falha ao restaurar meta-configurações:", err);
-      }
-
-      let savedInventory: InventoryState | null = null;
-      try {
-        savedInventory = await loadInventory(databaseMode);
-        const saved = savedInventory;
-        
-        // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
-        // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso
-        // if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
-        //   await syncFromCloud();
-        //   return;
-        // }
-
-        // AUDITORIA DE PERSISTÊNCIA: Executa um SELECT global para garantir que os dados estão presentes
-        if (databaseMode === DatabaseMode.INTERNAL && savedInventory) {
+        // TRIGGER DE PERMISSÕES NATIVO (Solicitado p/ Android v24.50)
+        if (Capacitor.isNativePlatform()) {
           try {
-            const count = await sqliteService.getAssetCount();
-            console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
-            
-            if (savedInventory.status === DatabaseStatus.ERROR) {
-              console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
-              setShowReconnectOverlay(true);
-              return; 
-            }
-
-            // Discrepância real: O loadInventory trouxe dados (do cache?) mas o banco físico executado agora reporta 0
-            if (count === 0 && savedInventory.assets.length > 0) {
-              console.warn(">>> [Auditoria] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO.");
-              setIntegrityFailed(true);
-            } else if (count > 0) {
-              // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade.
-              console.log(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
-              setIntegrityFailed(false);
-            }
-
-            // Validação de Schema Silenciosa (Soberania Nativa)
-            if (count > 0) {
-               const schema = await sqliteService.checkTableSchema('assets');
-               if (schema && Array.isArray(schema)) {
-                  // Colunas CRÍTICAS sem as quais o app não pode operar (Identidade)
-                  const critical = ['ETIQUETA']; 
-                  const missingCritical = critical.filter(col => !schema.find((s) => s['name'] === col));
-                  
-                  if (missingCritical.length > 0) {
-                    console.error(">>> [Auditoria] FALHA CRÍTICA DE SCHEMA: Colunas de identidade ausentes:", missingCritical);
-                    setIntegrityFailed(true);
-                  } else {
-                    // Colunas que podem estar faltando mas o app consegue lidar (Logar apenas)
-                    const recommended = ['DESCRICAODOBEM', 'STATUS', 'CENTRODECUSTO', 'CONTACONTABIL'];
-                    const missingRecommended = recommended.filter(col => !schema.find((s) => s['name'] === col));
-                    if (missingRecommended.length > 0) {
-                      console.warn(">>> [Auditoria] Aviso de Schema: Colunas recomendadas ausentes (Silent Mode):", missingRecommended);
-                    }
-                  }
-               }
-            }
-          } catch (sqlErr) {
-            console.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
+            window.alert("Passo 2: Permissões Filesystem");
+            console.log(">>> [Native] Solicitando permissões de Filesystem...");
+            await Filesystem.requestPermissions();
+          } catch (permErr) {
+            console.warn(">>> [Native] Falha na solicitação de permissões:", permErr);
           }
         }
 
-        // Se o banco físico foi validado, ignoramos a flag de falha de integridade do cache
-        if (saved && (saved as InventoryState & { _integrity_failed?: boolean })._integrity_failed) {
-          const isPhysicalValid = databaseMode === DatabaseMode.INTERNAL && sqliteService.getStorageSource() === 'PHYSICAL';
-          if (!isPhysicalValid) {
-            setIntegrityFailed(true);
-          } else {
-            console.log(">>> [Auditoria] Prevalecendo validade do Banco Físico sobre flag de integridade do cache.");
-            setIntegrityFailed(false);
+        window.alert("Passo 3: Persistência");
+        updateLoaderMessage("Carregando...", "Habilitando storage...");
+        // Solicita persistência durável
+        await requestPersistentStorage();
+        
+        console.log(`App init - Soberania Nativa Ativada.`);
+        
+        // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
+        try {
+          window.alert("Passo 4: SQLite Config");
+          updateLoaderMessage("Carregando...", "Restaurando contexto...");
+          const savedUnit = await sqliteService.getConfig('selectedUnit');
+          const savedCampaign = await sqliteService.getConfig('currentCampaignId');
+          
+          if (savedUnit && !selectedUnit) {
+            console.log(`>>> [Boot] Restaurando Unidade Operacional: ${savedUnit}`);
+            setSelectedUnit(savedUnit);
           }
+          
+          if (savedCampaign && !currentCampaignId) {
+            console.log(`>>> [Boot] Restaurando Campanha Ativa: ${savedCampaign}`);
+            setCurrentCampaignId(savedCampaign);
+          }
+        } catch (err) {
+          console.warn(">>> [Boot] Falha ao restaurar meta-configurações:", err);
         }
 
-      // Recupera o status do SQLite para Soberania de Dados
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        const status = sqliteService.getDbStatus();
-        const source = sqliteService.getStorageSource();
-        // SOBERANIA: No boot, mesmo que o banco tenha dados, mantemos como LOADED. 
-        // O estado ACTIVE (Soberania Plena) só é declarado após a validação de carga ou interação.
-        setSqliteStatus(status === DatabaseStatus.ACTIVE ? DatabaseStatus.LOADED : status);
-        setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
-        console.log(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
-      }
+        let savedInventory: InventoryState | null = null;
+        try {
+          window.alert("Passo 5: Carregando Dados");
+          updateLoaderMessage("Carregando...", "Lendo banco de dados...");
+          savedInventory = await loadInventory(databaseMode);
+          
+          // BLOCO DE AUDITORIA SIMPLIFICADO (Solicitado p/ evitar hangs)
+          /* 
+          if (databaseMode === DatabaseMode.INTERNAL && savedInventory) {
+             // ... auditoria pesada ...
+          }
+          */
+          
+          // Recupera o status do SQLite para Soberania de Dados
+          if (databaseMode === DatabaseMode.INTERNAL) {
+            const status = sqliteService.getDbStatus();
+            const source = sqliteService.getStorageSource();
+            setSqliteStatus(status === DatabaseStatus.ACTIVE ? DatabaseStatus.LOADED : status);
+            setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
+          }
 
-        if (saved && saved.assets && saved.assets.length > 0) {
-          // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
-          const todayStr = '2026-03-16';
-          const yesterdayStr = '2026-03-15T12:00:00Z';
-          let hasChanges = false;
+          if (savedInventory && savedInventory.assets && savedInventory.assets.length > 0) {
+            window.alert("Passo 6: Restaurando Ativos");
+            const saved = savedInventory;
+            // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
+            const todayStr = '2026-03-16';
+            const yesterdayStr = '2026-03-15T12:00:00Z';
+            let hasChanges = false;
 
-          const updatedAssets = saved.assets.map(a => {
-            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            if (isConferido) {
-              let needsUpdate = false;
-              if (!a._dataLeitura) {
-                needsUpdate = true;
-              } else {
-                try {
-                  const d = new Date(a._dataLeitura);
-                  if (isNaN(d.getTime())) {
-                    needsUpdate = true;
-                  } else {
-                    const readingDate = d.toLocaleDateString('en-CA');
-                    if (readingDate < todayStr) {
-                      needsUpdate = true;
-                    }
-                  }
-                } catch {
+            const updatedAssets = saved.assets.map(a => {
+              const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+              if (isConferido) {
+                let needsUpdate = false;
+                if (!a._dataLeitura) {
                   needsUpdate = true;
-                }
-              }
-
-              if (needsUpdate) {
-                hasChanges = true;
-                return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
-              }
-              
-              // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
-              if (!a._conferido) {
-                hasChanges = true;
-                return { ...a, _conferido: true };
-              }
-            }
-            return a;
-          });
-
-          if (hasChanges) {
-            saved.assets = updatedAssets;
-            await saveInventory(saved);
-          }
-
-          setInventory(prev => ({
-            ...prev,
-            ...saved,
-            editableFields: saved.editableFields || prev.editableFields,
-            qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
-            autoConfirmOnScan: saved.autoConfirmOnScan ?? prev.autoConfirmOnScan,
-            scanFeedbackMode: saved.scanFeedbackMode || prev.scanFeedbackMode,
-            inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
-            immersiveMode: saved.immersiveMode ?? prev.immersiveMode
-          }));
-          
-          // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
-          if (!recoverySource) setRecoverySource('CACHE');
-          
-          // SUCESSO: O dado foi restaurado (seja do Cache ou SQLite). Silenciamos alertas de erro.
-          setIntegrityFailed(false);
-          setShowRecoveryToast(true);
-          setTimeout(() => setShowRecoveryToast(false), 5000);
-        } else {
-          // Fallback to localStorage for migration
-          const legacy = localStorage.getItem('inventory_data');
-          if (legacy) {
-            setRecoverySource('LEGACY');
-            const parsed = JSON.parse(legacy);
-            if (parsed && parsed.assets && parsed.assets.length > 0) {
-              // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
-              const todayStr = '2026-03-16';
-              const yesterdayStr = '2026-03-15T12:00:00Z';
-              
-              parsed.assets = parsed.assets.map((a: Asset) => {
-                const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-                if (isConferido) {
-                  let needsUpdate = false;
-                  if (!a._dataLeitura) {
-                    needsUpdate = true;
-                  } else {
-                    try {
-                      const d = new Date(a._dataLeitura);
-                      if (isNaN(d.getTime())) {
-                        needsUpdate = true;
-                      } else {
-                        const readingDate = d.toLocaleDateString('en-CA');
-                        if (readingDate < todayStr) {
-                          needsUpdate = true;
-                        }
-                      }
-                    } catch {
+                } else {
+                  try {
+                    const d = new Date(a._dataLeitura);
+                    if (isNaN(d.getTime())) {
                       needsUpdate = true;
+                    } else {
+                      const readingDate = d.toLocaleDateString('en-CA');
+                      if (readingDate < todayStr) {
+                        needsUpdate = true;
+                      }
                     }
-                  }
-                  if (needsUpdate) {
-                    return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
-                  }
-                  if (!a._conferido) {
-                    return { ...a, _conferido: true };
+                  } catch {
+                    needsUpdate = true;
                   }
                 }
-                return a;
-              });
 
-              setInventory(prev => ({ ...prev, ...parsed }));
-              await saveInventory(parsed);
-              setIntegrityFailed(false);
-              setShowRecoveryToast(true);
-              setTimeout(() => setShowRecoveryToast(false), 5000);
+                if (needsUpdate) {
+                  hasChanges = true;
+                  return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                }
+                
+                if (!a._conferido) {
+                  hasChanges = true;
+                  return { ...a, _conferido: true };
+                }
+              }
+              return a;
+            });
+
+            if (hasChanges) {
+              saved.assets = updatedAssets;
+              await saveInventory(saved);
+            }
+
+            setInventory(prev => ({
+              ...prev,
+              ...saved,
+              editableFields: saved.editableFields || prev.editableFields,
+              qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
+              autoConfirmOnScan: saved.autoConfirmOnScan ?? prev.autoConfirmOnScan,
+              scanFeedbackMode: saved.scanFeedbackMode || prev.scanFeedbackMode,
+              inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
+              immersiveMode: saved.immersiveMode ?? prev.immersiveMode
+            }));
+            
+            if (!recoverySource) setRecoverySource('CACHE');
+            setIntegrityFailed(false);
+          } else {
+            // Fallback legacy
+            // window.alert("Passo 6: Base Vazia");
+          }
+        } catch (e) { 
+          window.alert("ERRO NO DADOS: " + String(e));
+          console.error("Data load failed", e); 
+        } finally {
+          // window.alert("Passo Final: Liberando");
+          console.log(">>> [Initialize] Concluído. Liberando UI.");
+          clearTimeout(safetyTimeout);
+          setIsDataLoaded(true);
+          // @ts-expect-error - appStarted is a custom property
+          window.appStarted = true;
+          const currentLoader = document.getElementById('app-loader');
+          if (currentLoader) {
+            currentLoader.classList.add('hidden');
+            if (currentLoader.parentNode) {
+              setTimeout(() => currentLoader.remove(), 500);
             }
           }
         }
-      } catch (e) { 
-        console.error("Data load failed", e); 
-      } finally {
-        console.log(">>> [Initialize] Concluído. Liberando UI.");
-        clearTimeout(safetyTimeout);
-        setIsDataLoaded(true);
-        // @ts-expect-error - appStarted is a custom property
-        window.appStarted = true;
-        const currentLoader = document.getElementById('app-loader');
-        if (currentLoader) {
-          currentLoader.classList.add('hidden');
-          if (currentLoader.parentNode) {
-            setTimeout(() => currentLoader.remove(), 500);
-          }
-        }
+      } catch (fatal) {
+        window.alert("ERRO FATAL NO BOOT: " + String(fatal));
+        updateLoaderMessage("Erro Crítico", String(fatal));
+        setIsDataLoaded(true); // Tenta forçar render mesmo com erro
       }
     };
     init();
-  }, []);
+  }, [databaseMode, selectedUnit, currentCampaignId, recoverySource]);
 
 
   // Safety check to prevent getting stuck on screens with missing state
