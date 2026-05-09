@@ -519,7 +519,7 @@ class SqliteService {
     try {
       console.log(">>> [Init] Iniciando motor SQL.js...");
       const SQL = await initSqlJs({ 
-        locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
+        locateFile: (file: string) => `./${file}` 
       });
       
       let bytes: Uint8Array | null = null;
