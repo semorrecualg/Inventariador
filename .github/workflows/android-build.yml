@@ -19,7 +19,8 @@ jobs:
           cache: 'npm'
           
       - name: Install Dependencies
-        run: npm install
+        # CORREÇÃO CRÍTICA: --legacy-peer-deps para evitar o erro ERESOLVE
+        run: npm install --legacy-peer-deps
         
       - name: Build Web Project
         run: npm run build
@@ -40,15 +41,13 @@ jobs:
         with:
           gradle-version: 8.11.1
           validate-wrappers: false
-          cache-disabled: true
 
       - name: Build APK (Debug)
-        id: build_apk
-        run: |
-          gradle assembleDebug -p android
+        # Usamos o binário global do gradle para evitar o wrapper corrompido
+        run: gradle assembleDebug -p android
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: Auditoria_Versao_2.6_Legacy
           path: android/app/build/outputs/apk/debug/app-debug.apk
