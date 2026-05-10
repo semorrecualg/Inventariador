@@ -1,5 +1,8 @@
 {
-  "name": "Audit Auditoria Patrimonial",
-  "description": "Sistema Profissional de Inventário de Ativo Imobilizado v24.50.",
-  "requestFramePermissions": ["camera", "fullscreen", "geolocation"]
+  "name": "Inventário de Ativo Imobilizado",
+  "description": "Sistema de gestão e inventário para ativos imobilizados com suporte a Capacitor.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
 }

@@ -1,9 +1,8 @@
-
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ESNext",
     "useDefineForClassFields": true,
-    "lib": ["DOM", "DOM.Iterable", "ES2017"],
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": false,
@@ -15,9 +14,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react",
-    "types": ["vite/client", "node"]
+    "jsx": "react-hot-loader",
+    "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src", "index.tsx", "App.tsx", "types.ts", "services", "components", "vite-env.d.ts"],
+  "include": ["./**/*.ts", "./**/*.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
