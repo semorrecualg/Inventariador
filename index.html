@@ -39,16 +39,28 @@
     <script src="capacitor.js"></script>
     <script type="module" src="./index.tsx"></script>
     <script>
-        // Fallback para remover o loader caso o React demore ou falhe silenciosamente
+        // Função para remover o loader
+        function hideAppLoader() {
+            const loader = document.getElementById('app-loader');
+            if (loader) {
+                loader.classList.add('hidden');
+                console.log(">>> [Loader] Splash screen removida.");
+            }
+        }
+
+        // Fallback para remover o loader caso o React demore
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const loader = document.getElementById('app-loader');
-                if (loader && !window.appStarted) {
-                    console.warn("App taking too long to start, forcing loader removal...");
-                    loader.classList.add('hidden');
+                if (loader && !loader.classList.contains('hidden')) {
+                    console.warn(">>> [Loader] Timeout atingido, forçando remoção...");
+                    hideAppLoader();
                 }
-            }, 5000);
+            }, 8000); // 8 segundos de tolerância máxima
         });
+
+        // Escuta o sinal do index.tsx
+        window.addEventListener('app_ready', hideAppLoader);
     </script>
 </body>
 </html>
