@@ -12,8 +12,6 @@ export default defineConfig({
     tailwindcss(),
     legacy({
       targets: ['defaults', 'not IE 11', 'Android >= 7'],
-      renderLegacyChunks: true,
-      polyfills: true
     }),
     VitePWA({
       registerType: 'autoUpdate',
@@ -88,15 +86,7 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'terser',
-    rollupOptions: {
-      output: {
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
-        },
-      },
-    },
-    chunkSizeWarningLimit: 2000,
+    target: 'es2017',
+    chunkSizeWarningLimit: 1600,
   }
 });

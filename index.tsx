@@ -8,10 +8,11 @@ if (typeof document !== 'undefined' && document.body) {
   statusDiv.style.left = '0';
   statusDiv.style.width = '10px';
   statusDiv.style.height = '10px';
-  statusDiv.style.background = 'orange'; // Iniciando carregamento de módulos
+  statusDiv.style.background = 'red';
   statusDiv.style.zIndex = '10000';
   document.body.appendChild(statusDiv);
-  console.log(">>> [BOOT] Ponto de diagnóstico injetado (Laranja).");
+  console.log(">>> [BOOT] Teste de vida injetado.");
+  // window.alert("JS EXECUTANDO: Index.tsx carregado!");
 }
 
 import React from 'react';
@@ -20,12 +21,6 @@ import './index.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { registerSW } from 'virtual:pwa-register';
-
-// Sinal de sucesso no carregamento de imports
-if (typeof document !== 'undefined') {
-  const pixel = document.getElementById('boot-status-pixel');
-  if (pixel) pixel.style.background = 'blue'; // Módulos carregados
-}
 
 // Register PWA Service Worker
 const updateSW = registerSW({
@@ -50,10 +45,6 @@ const root = createRoot(rootElement);
 // Sinaliza que o app iniciou para remover o loader do index.html
 if (typeof window !== 'undefined') {
   (window as Window & { appStarted?: boolean }).appStarted = true;
-  window.dispatchEvent(new CustomEvent('app_ready'));
-  
-  const pixel = document.getElementById('boot-status-pixel');
-  if (pixel) pixel.style.background = 'green'; // Render Iniciado
 }
 
 root.render(

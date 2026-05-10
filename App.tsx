@@ -237,6 +237,8 @@ const App: React.FC = () => {
 
   const screen = history[history.length - 1] || AppScreen.LOGIN;
 
+  const databaseMode = DatabaseMode.INTERNAL;
+
   const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
     if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
       setModalConfig({
@@ -306,6 +308,7 @@ const App: React.FC = () => {
   });
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   const [hasAcceptedTerms] = useState<boolean>(() => {
     return localStorage.getItem('app_terms_accepted') === 'true';
@@ -333,7 +336,6 @@ const App: React.FC = () => {
   });
 
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
-  const databaseMode = DatabaseMode.INTERNAL;
 
   // Expose pushScreen to window for components that need it
   useEffect(() => {
@@ -471,35 +473,6 @@ const App: React.FC = () => {
   // Monitor de Sincronização
   useEffect(() => {
     // Modo Soberano ativado
-  }, [databaseMode]);
-
-  useEffect(() => {
-    // Inicializa SQLite Nativo (Simulado via WASM para Web)
-    sqliteService.init().catch(err => {
-      console.error("[DBA] Erro ao inicializar SQLite:", err);
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        setModalConfig({
-          isOpen: true,
-          title: 'Erro de Banco de Dados',
-          message: 'Não foi possível carregar o motor de banco de dados SQL. Se estiver offline, tente conectar-se uma vez para baixar o motor.',
-          type: 'error'
-        });
-      }
-    });
-
-    const handleInitFailed = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      console.error(">>> [DBA] Falha de inicialização capturada:", detail?.error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Motor de Dados Offline',
-        message: 'O motor SQL.js não pôde ser carregado. Verifique sua conexão ou tente recarregar o app.',
-        type: 'warning'
-      });
-    };
-
-    window.addEventListener('gbr_db_init_failed', handleInitFailed);
-    return () => window.removeEventListener('gbr_db_init_failed', handleInitFailed);
   }, [databaseMode]);
 
   useEffect(() => {
@@ -1123,25 +1096,35 @@ const App: React.FC = () => {
         
         console.log(`App init - Soberania Nativa Ativada.`);
         
-        // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
-        try {
-          window.alert("Passo 4: SQLite Config");
-          updateLoaderMessage("Carregando...", "Restaurando contexto...");
-          const savedUnit = await sqliteService.getConfig('selectedUnit');
-          const savedCampaign = await sqliteService.getConfig('currentCampaignId');
-          
-          if (savedUnit && !selectedUnit) {
-            console.log(`>>> [Boot] Restaurando Unidade Operacional: ${savedUnit}`);
-            setSelectedUnit(savedUnit);
-          }
-          
-          if (savedCampaign && !currentCampaignId) {
-            console.log(`>>> [Boot] Restaurando Campanha Ativa: ${savedCampaign}`);
-            setCurrentCampaignId(savedCampaign);
-          }
-        } catch (err) {
-          console.warn(">>> [Boot] Falha ao restaurar meta-configurações:", err);
-        }
+    // RESTORE OPERATIONAL CONTEXT FROM SQLITE SOBERANIA (v2.6)
+    try {
+      window.alert("Passo 4: SQLite Config");
+      updateLoaderMessage("Carregando...", "Restaurando contexto...");
+      
+      // Force init sqlite explicitly here with extra safety
+      try {
+        console.log(">>> [Boot] Chamada segura SQLite init...");
+        await sqliteService.init(true);
+      } catch (sqErr) {
+        console.error(">>> [Boot] Falha ao acordar SQLite:", sqErr);
+        // Não trava aqui, deixa o fluxo fatal capturar se for realmente impeditivo
+      }
+
+      const savedUnit = await sqliteService.getConfig('selectedUnit');
+      const savedCampaign = await sqliteService.getConfig('currentCampaignId');
+      
+      if (savedUnit && !selectedUnit) {
+        console.log(`>>> [Boot] Restaurando Unidade Operacional: ${savedUnit}`);
+        setSelectedUnit(savedUnit);
+      }
+      
+      if (savedCampaign && !currentCampaignId) {
+        console.log(`>>> [Boot] Restaurando Campanha Ativa: ${savedCampaign}`);
+        setCurrentCampaignId(savedCampaign);
+      }
+    } catch (err) {
+      console.warn(">>> [Boot] Falha ao restaurar meta-configurações:", err);
+    }
 
         let savedInventory: InventoryState | null = null;
         try {
@@ -1248,9 +1231,27 @@ const App: React.FC = () => {
           }
         }
       } catch (fatal) {
+        console.error(">>> [FATAL] Boot failure:", fatal);
+        setBootError(String(fatal));
         window.alert("ERRO FATAL NO BOOT: " + String(fatal));
         updateLoaderMessage("Erro Crítico", String(fatal));
         setIsDataLoaded(true); // Tenta forçar render mesmo com erro
+        
+        // Garantir que o loader seja removido
+        const currentLoader = document.getElementById('app-loader');
+        if (currentLoader) {
+          currentLoader.classList.add('hidden');
+          if (currentLoader.parentNode) {
+            setTimeout(() => currentLoader.remove(), 500);
+          }
+        }
+
+        // Se for erro de banco, força a tela de Loader como solicitado pelo usuário
+        const errorStr = String(fatal).toUpperCase();
+        if (errorStr.includes('SQLITE') || errorStr.includes('DATABASE') || errorStr.includes('DIRECTORY') || errorStr.includes('FILESYSTEM')) {
+           console.warn(">>> [Soberania] Forçando tela de DatabaseLoader devido a erro de motor.");
+           setHistory([AppScreen.LOAD_DATABASE]);
+        }
       }
     };
     init();
@@ -3425,7 +3426,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.LOAD_DATABASE && (
-            isAdmin ? (
+            (isAdmin || bootError) ? (
               <DatabaseLoader 
                 onOpenHelp={() => setIsHelpMenuOpen(true)}
                 onBack={popScreen} 

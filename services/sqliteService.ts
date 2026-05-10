@@ -519,7 +519,7 @@ class SqliteService {
     try {
       console.log(">>> [Init] Iniciando motor SQL.js...");
       const SQL = await initSqlJs({ 
-        locateFile: (file: string) => `./${file}` 
+        locateFile: (file: string) => `https://unpkg.com/sql.js@1.14.1/dist/${file}` 
       });
       
       let bytes: Uint8Array | null = null;
@@ -527,10 +527,15 @@ class SqliteService {
       // PRIORIDADE 0: PERSISTÊNCIA NATIVA (CAPACITOR / ANDROID)
       if (Capacitor.isNativePlatform()) {
         try {
+          const dataDir = (Directory && 'Data' in Directory) ? Directory.Data : null;
+          if (!dataDir) {
+            console.warn(">>> [NativeBridge] Diretório Data não disponível no enum Directory.");
+          }
+
           console.log(`>>> [NativeBridge] Verificando existência de ${this.storageKeys.nativeFileName} em Directory.Data...`);
           const result = await Filesystem.readFile({
             path: this.storageKeys.nativeFileName,
-            directory: Directory.Data
+            directory: dataDir as Directory | undefined
           });
           
           if (result.data) {
@@ -607,10 +612,14 @@ class SqliteService {
       // Atualiza Path Nativo para Admin
       if (Capacitor.isNativePlatform()) {
         try {
-          const uriResult = await Filesystem.getUri({ path: this.storageKeys.nativeFileName, directory: Directory.Data });
+          const dataDir = (Directory && 'Data' in Directory) ? Directory.Data : null;
+          const uriResult = await Filesystem.getUri({ 
+            path: this.storageKeys.nativeFileName, 
+            directory: dataDir as Directory | undefined 
+          });
           this.nativePath = uriResult.uri;
         } catch {
-          this.nativePath = `Directory.Data/${this.storageKeys.nativeFileName}`;
+          this.nativePath = `Data/${this.storageKeys.nativeFileName}`;
         }
       }
 
@@ -1330,11 +1339,14 @@ class SqliteService {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupName = `inventario_seguranca_${timestamp}.db`;
       
+      const dataDir = (Directory && 'Data' in Directory) ? Directory.Data : null;
+      const docsDir = (Directory && 'Documents' in Directory) ? Directory.Documents : null;
+
       await Filesystem.copy({
         from: this.storageKeys.nativeFileName,
         to: backupName,
-        directory: Directory.Data,
-        toDirectory: Directory.Documents
+        directory: dataDir as Directory | undefined,
+        toDirectory: docsDir as Directory | undefined
       });
 
       alert(`BACKUP REALIZADO: Cópia física exportada para Documentos.\nArquivo: ${backupName}`);
