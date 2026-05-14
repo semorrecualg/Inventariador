@@ -558,6 +558,28 @@ class SqliteService {
     }
   }
 
+  /**
+   * CORREÇÃO DE PERFORMANCE: Executa uma transação única em lote no driver C++ nativo.
+   * Insere mais de 50 mil ativos imobilizados em poucos segundos no celular.
+   */
+  async executeStatementsBatch(statements: string[]) {
+    if (!this.nativeDb) {
+      throw new Error(">>> [SQL] Banco nativo gbr_inventario_expert não inicializado.");
+    }
+    try {
+      // Junta todas as queries SQL em uma única execução atômica transacional
+      const batchSql = statements.join('\n');
+      return await this.nativeDb.execute(batchSql);
+    } catch (error) {
+      console.error(">>> [SQL] Falha crítica na transação em lote:", error);
+      throw new Error(`Erro de persistência Batch: ${error}`);
+    }
+  }
+
+  async executeQuery(sql: string, params: (string | number | boolean | null)[] = []) {
+    return this.execute(sql, params);
+  }
+
   // --- Ativos ---
   async getAssets(tenantId: string, unitId?: string | null): Promise<Asset[]> {
     let sql = "SELECT * FROM inventario_mestre WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";

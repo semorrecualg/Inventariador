@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { read, utils } from 'xlsx';
 import { sqliteService } from '../services/sqliteService';
 import { assetRepository } from '../services/assetRepository';
 import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, FolderOpen, ChevronLeft } from 'lucide-react';
@@ -32,12 +33,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (msg: string) => {
     console.log(`[DatabaseLoader] ${msg}`);
-    setErrorLog(prev => [...prev.slice(-20), msg]);
+    setLoadingMessage(msg);
+    setErrorLog(prev => [...prev.slice(-10), msg]);
   };
 
   const loadDataFlow = async (forceCache = false) => {
@@ -147,19 +151,42 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
   };
 
-  const handleMapFolder = async () => {
-    addLog("Mapeando diretório de trabalho exclusivo...");
-    const handle = await sqliteService.hardLinkPick(); 
-    if (handle) {
-      loadDataFlow();
-    }
-  };
+  const processRowsToDatabaseBatch = async (rows: any[]) => {
+    const CONTA_BAIXA = "131105001";
+    const sqlStatements: string[] = [];
 
-  const handleCreateNewPhysical = async () => {
-    addLog("Criando novo arquivo de banco físico...");
-    const handle = await sqliteService.createPhysicalFile();
-    if (handle) {
-      loadDataFlow();
+    addLog(`Mapeando ${rows.length} ativos. Preparando lote nativo...`);
+
+    for (const row of rows) {
+      if (String(row.conta_contabil || row.CONTA) === CONTA_BAIXA) continue;
+
+      const id = row.id || row.ID || row.PRIMARYKEY || crypto.randomUUID();
+      const codigoAtivo = String(row.codigo_ativo || row.CODIGO || row.ETIQUETA || row.REGISTRO || '').replace(/'/g, "''");
+      const contaContabil = String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '').replace(/'/g, "''");
+      const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
+      const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
+
+      sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
+      
+      const registro = String(row.REGISTRO || row.RECORD || codigoAtivo || '').replace(/'/g, "''");
+      const descricao = String(row.DESCRICAO || row.DESCRICAODOATIVO || 'Importado via Expert').replace(/'/g, "''");
+      
+      sqlStatements.push(`INSERT OR REPLACE INTO inventario_mestre (id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, CONTACONTABIL, _origemTransacao) VALUES ('${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 'EXPERT_LOAD');`);
+    }
+
+    try {
+      addLog(`Injetando dados no SQLite Nativo...`);
+      await sqliteService.executeStatementsBatch(sqlStatements);
+      addLog("Carga concluída com sucesso!");
+      
+      if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (sqlError: any) {
+      alert(`Falha ao salvar no banco local: ${sqlError.message}`);
+      setStatus('ERROR');
     }
   };
 
@@ -167,201 +194,81 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.toLowerCase().match(/\.(xlsx|xls|csv)$/)) {
-      addLog(`Erro: O arquivo "${file.name}" não é uma planilha válida.`);
-      alert("Por favor, selecione um arquivo Excel (.xlsx, .xls) ou CSV.");
-      return;
-    }
-
     setStatus('IMPORTING');
-    addLog(`Lendo planilha: ${file.name}`);
+    addLog(`Lendo planilha (Soberania Nativa): ${file.name}`);
 
     try {
-      // 0. Espaço em Disco
-      if (navigator.storage && navigator.storage.estimate) {
-        const { quota, usage } = await navigator.storage.estimate();
-        const available = (quota || 0) - (usage || 0);
-        if (available < file.size * 5) {
-          const proceed = window.confirm(`Espaço em disco baixo (~${Math.round(available/1024/1024)}MB). Continuar?`);
-          if (!proceed) { setStatus('IDLE'); return; }
-        }
-      }
-
-      // 1. Verificação de Permissão
-      const hasPermission = await sqliteService.verifyPermission();
-      if (!hasPermission) {
-        addLog("Erro: Permissão negada.");
-        setStatus('IDLE');
-        return;
-      }
-
-      await sqliteService.init(); 
-
       const reader = new FileReader();
+      
       reader.onload = async (evt) => {
-        const dataBuffer = evt.target?.result as ArrayBuffer;
-        
-        addLog("Iniciando Worker de Processamento...");
-        
         try {
-          // Utiliza o Worker estático no-bundle para evitar erros de minificação
-          // Cache bust com timestamp para garantir que pegamos a versão corrigida
-          const worker = new Worker(`/workers/assetProcessor.js?v=${Date.now()}`);
-          
-          // BroadcastChannel para comunicação de dados pesados
-          const channel = new BroadcastChannel('asset_worker_channel');
-          
-          worker.addEventListener('message', async (e) => {
-            const data = e.data;
-            const type = data.type;
-            const current = data.current;
-            const total = data.total;
-            const msg = data.msg;
-            const stack = data.stack;
-            const raw = data.raw;
-            const dbBuffer = data.dbBuffer;
-            
-            if (type === 'STATUS') {
-              addLog(msg);
-            } else if (type === 'LOG_REJECTION') {
-              const cols = data.columns || [];
-              if (cols.length > 0) {
-                const logMsg = `MAPEAMENTO: ${cols.length} colunas ignoradas (ex: ${cols.slice(0, 3).join(', ')}...)`;
-                addLog(logMsg);
-                console.warn("[Loader Audit] Colunas Ignoradas:", cols);
-              }
-            } else if (type === 'PROGRESS') {
-              setImportProgress({ current, total });
-              addLog(`Gravando no SQLite Local: ${current} / ${total}`);
-              
-              // @ts-expect-error performance.memory is experimental
-              const memory = window.performance.memory;
-              if (memory) {
-                const used = Math.round(memory.usedJSHeapSize / 1024 / 1024);
-                addLog(`Heap: ${used}MB`);
-              }
-            } else if (type === 'COMPLETE') {
-              addLog("Exportando banco atualizado e forçando persistência física...");
-              if (dbBuffer) {
-                const u8Data = new Uint8Array(dbBuffer);
-                await sqliteService.importDatabase(u8Data);
-                // Garantia Extra: Força o sync físico com commit imediato no disco
-                await sqliteService.persist(true);
-                addLog("Persistência física confirmada.");
+          const data = evt.target?.result;
+          if (!data) throw new Error("Falha ao ler bytes do arquivo.");
 
-                // POPULAÇÃO DO REPOSITÓRIO DE ALTA PERFORMANCE (DEXIE)
-                addLog("Otimizando busca instantânea (Indexação)...");
-                const assetsToSync = await sqliteService.getAllAssets();
-                if (assetsToSync && assetsToSync.length > 0) {
-                  await assetRepository.bulkInsert(assetsToSync);
-                  addLog(`${assetsToSync.length} ativos indexados no cache rápido.`);
-                }
-              }
-              addLog("Carga concluída com sucesso!");
-              
-              // Pequena pausa para garantir que o OS liberou o arquivo
-              await new Promise(r => setTimeout(r, 1000));
-              
-              setStatus('IDLE');
-              channel.close();
-              worker.terminate();
-              if (showModal) showModal('Sucesso', 'Carga finalizada com sucesso e sincronizada no arquivo .db.', 'success');
-              await loadDataFlow();
-            } else if (type === 'ERROR') {
-              console.error("Worker Critical Failure:", { msg, stack, raw });
-              const { message, raw: formattedRaw } = formatErrorMessage({ message: msg, stack, raw });
-              addLog(`ERRO CRÍTICO: ${message}`);
-              
-              // Log stack and raw separately for deep debug
-              console.log("Full Stack:", stack);
-              console.log("Full Raw Error:", raw);
+          addLog("Parsing binário via XLSX...");
+          const workbook = read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const rows: any[] = utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-              alert(`DEBUG CRÍTICO (Worker):\n\nMensagem: ${message}\n\nRaw Data (primeiros 200 chars): ${String(formattedRaw).substring(0, 200)}...`);
-              setStatus('ERROR');
-              channel.close();
-              worker.terminate();
-            }
-          });
+          if (rows.length === 0) throw new Error("Planilha vazia.");
 
-          worker.addEventListener('error', (err) => {
-            console.error("Worker Global Error:", err);
-            addLog(`Worker Error: ${err.message}`);
-            setStatus('ERROR');
-            worker.terminate();
-          });
+          await processRowsToDatabaseBatch(rows);
 
-          const db = await sqliteService.getDb();
-          const dbData = db ? db.export() : null;
-
-          if (dbData) {
-            // Enviamos apenas buffers puros para evitar problemas de serialização de objetos complexos
-            const dataBuf = dataBuffer;
-            const dbBuf = dbData.buffer;
-            
-            const payload = { 
-              dataBuffer: dataBuf, 
-              dbBuffer: dbBuf 
-            };
-            
-            // Tenta postMessage (Transferable)
-            worker.postMessage(payload, [dataBuf, dbBuf]);
-            
-            // E também via Channel (não suporta Transferable da mesma forma em todos os browsers, mas serve como fallback)
-            // Nota: Se o postMessage falhar por conflito de constante, o channel pode salvar.
-            try {
-               channel.postMessage(payload);
-            } catch (chanErr) {
-               console.warn("BroadcastChannel postMessage failed:", chanErr);
-            }
-          } else {
-            const payload = { 
-              dataBuffer, 
-              dbBuffer: null 
-            };
-            worker.postMessage(payload, [dataBuffer]);
-            try {
-               channel.postMessage(payload);
-            } catch (chanErr) {
-               console.warn("BroadcastChannel postMessage failed:", chanErr);
-            }
-          }
-
-        } catch (err) {
-          const { message, stack, raw } = formatErrorMessage(err);
-          console.error("Falha na Carga:", { message, stack, raw });
-          addLog(`ERRO: ${message}`);
-          alert(`Falha na importação: ${message}\n\nDebug: ${raw?.substring(0, 500)}`);
+        } catch (innerError: any) {
+          addLog(`Erro interno: ${innerError.message}`);
+          alert(`Erro no processamento: ${innerError.message}`);
           setStatus('ERROR');
         }
       };
-      
-      reader.onerror = (err) => {
-        addLog(`Erro na leitura: ${err}`);
-        setStatus('ERROR');
-      };
 
       reader.readAsArrayBuffer(file);
-    } catch (err) {
-       const { message } = formatErrorMessage(err);
-       addLog(`Erro ao iniciar: ${message}`);
-       setStatus('ERROR');
+
+    } catch (error: any) {
+      console.error("Erro fatal ao carregar planilha:", error);
+      addLog(`Falha na carga: ${error.message}`);
+      setStatus('ERROR');
     }
   };
 
 
   const handleExpertLoadClick = async () => {
-    // Se temos um arquivo físico vinculado mas está sem permissão, pedimos primeiro
     const fStatus = await sqliteService.getFileStatus();
     if (fStatus.handle && fStatus.status !== 'granted') {
-      addLog("Solicitando permissão para gravar no arquivo vinculado...");
+      addLog("Solicitando permissão...");
       const success = await sqliteService.requestFilePermission();
-      if (!success) {
-        alert("Atenção: Para carregar dados no arquivo físico você precisa conceder permissão de escrita.");
-        return;
-      }
+      if (!success) return;
     }
-    
     fileInputRef.current?.click();
+  };
+
+  const handleHardResetLocal = async () => {
+    const confirmar = window.confirm(
+      "ATENÇÃO: Deseja realmente limpar todas as tabelas locais e reiniciar o banco em branco? Esta ação não afetará o arquivo físico nativo."
+    );
+    if (!confirmar) return;
+
+    setStatus('LOADING');
+    addLog('Executando limpeza de governança...');
+
+    try {
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS ativos_imobilizados;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS inventario_mestre;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS unit_configs;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS AUDIT_LOG;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS localidades;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS campaigns;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS inventory_config;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS campaign_snapshots;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS users;");
+      
+      await sqliteService.initializeDatabase(true);
+      
+      alert("Banco de dados resetado com sucesso!");
+      window.location.reload();
+    } catch (err: any) {
+      alert(`Falha ao executar Hard Reset: ${err.message}`);
+      setStatus('ERROR');
+    }
   };
 
   const handleCreateEmpty = async () => {
@@ -384,8 +291,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
               <Database className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 text-blue-600" />
             </div>
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Acessando Camada de Dados</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase">Verificando integridade física...</p>
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Processando</h3>
+            <p className="text-[10px] text-blue-600 font-bold uppercase animate-pulse">{loadingMessage}</p>
           </motion.div>
         )}
 
@@ -417,30 +324,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </button>
 
               <button
-                onClick={handleCreateNewPhysical}
-                className="flex items-center justify-center gap-4 bg-white border-2 border-slate-200 text-slate-600 p-5 rounded-3xl font-black text-xs uppercase tracking-widest hover:border-emerald-200 hover:text-emerald-600 active:scale-95 transition-all group"
+                onClick={handleHardResetLocal}
+                className="flex items-center justify-center gap-4 bg-white border-2 border-red-100 text-red-600 p-4 rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-red-50 active:scale-95 transition-all group"
               >
-                <div className="p-2 bg-emerald-50 rounded-xl group-hover:rotate-12 transition-transform">
-                  <Database size={18} className="text-emerald-600" />
+                <div className="p-2 bg-red-50 rounded-xl">
+                  <RefreshCw size={16} />
                 </div>
-                <span>Criar Novo Arquivo SQL</span>
-              </button>
-
-              <button
-                onClick={handleMapFolder}
-                className="flex items-center justify-center gap-4 bg-white border-2 border-slate-200 text-slate-600 p-5 rounded-3xl font-black text-xs uppercase tracking-widest hover:border-blue-200 hover:text-blue-600 active:scale-95 transition-all group"
-              >
-                <div className="p-2 bg-slate-100 rounded-xl group-hover:scale-110 transition-transform">
-                  <FolderOpen size={18} />
-                </div>
-                <span>Vincular Arquivo .DB Existente</span>
+                <span>Limpar e Iniciar em Branco</span>
               </button>
 
               <button
                 onClick={handleCreateEmpty}
                 className="text-[10px] font-black text-slate-400 uppercase tracking-widest py-2 hover:text-accent transition-colors"
               >
-                Iniciar com Base em Branco
+                Pular Carga (Modo Demo)
               </button>
             </div>
 
@@ -473,9 +370,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           >
             <div className="w-16 h-16 bg-blue-50 border-4 border-blue-500 border-t-transparent rounded-full animate-spin flex items-center justify-center" />
             <div className="space-y-1">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Processando Ativos</h3>
-              <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest">
-                {importProgress.current} / {importProgress.total} Registros
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Injetando Soberania</h3>
+              <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest animate-pulse">
+                {loadingMessage}
               </p>
             </div>
           </motion.div>
@@ -505,13 +402,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               >
                 <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
                 Re-vincular Arquivo
-              </button>
-
-              <button
-                onClick={() => loadDataFlow(true)}
-                className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-all py-2"
-              >
-                Tentar carregar via Cache local
               </button>
             </div>
           </motion.div>
@@ -544,32 +434,17 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </div>
             </div>
 
-            {summary.units === 0 && (
-              <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-left">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
-                  <p className="text-[10px] text-amber-800 font-bold leading-tight uppercase">
-                    Aviso: Nenhuma unidade organizacional encontrada. O sistema usará uma unidade padrão. Verifique o mapeamento das colunas.
-                  </p>
-                </div>
-              </div>
-            )}
-
             <button
               onClick={async () => {
                 if (summary) {
                   try {
                     setStatus('LOADING');
-                    addLog("Preparando camada de memória para ativação...");
-                    // Pequena pausa para garantir que o loader apareça
-                    await new Promise(r => setTimeout(r, 100));
-                    
+                    addLog("Ativando sistema...");
                     const assets = await sqliteService.getAllAssets();
                     sessionStorage.setItem('app_just_finished_load', 'true');
                     onDataLoaded(assets, summary.companies);
                     setStatus('IDLE');
                   } catch {
-                    addLog("Erro na ativação final.");
                     setStatus('SUMMARY');
                   }
                 }
@@ -578,6 +453,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             >
               <RefreshCw size={18} />
               Ativar Sistema
+            </button>
+            
+            <button
+                onClick={handleHardResetLocal}
+                className="text-[9px] font-black text-red-400 uppercase tracking-widest hover:text-red-600 py-2"
+              >
+                Limpar dados e carregar novo arquivo
             </button>
           </motion.div>
         )}
@@ -591,9 +473,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           >
             <AlertCircle className="w-12 h-12 text-red-500" />
             <h3 className="text-sm font-black text-red-800 uppercase tracking-widest">Falha na Sincronização</h3>
+            <p className="text-[10px] text-slate-500 max-w-xs">{loadingMessage}</p>
             <button
               onClick={() => loadDataFlow()}
-              className="text-[10px] font-black text-blue-600 uppercase hover:underline"
+              className="text-[10px] font-black text-blue-600 uppercase hover:underline p-4"
             >
               Tentar Novamente
             </button>
@@ -603,7 +486,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
       <div className="mt-8 border-t border-slate-200 pt-4 w-full">
         <div className="flex flex-col gap-1">
-          {errorLog.map((log, i) => (
+          {errorLog.slice(-5).map((log, i) => (
             <p key={i} className="text-[8px] font-mono text-slate-400 truncate text-center">
               {log}
             </p>
