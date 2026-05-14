@@ -6,7 +6,8 @@ import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, Fold
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatErrorMessage } from '../utils/errorUtils';
 
-import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode } from '../types';
+import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
+import { saveInventory } from '../services/persistenceService';
 
 interface DatabaseLoaderProps {
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
@@ -158,20 +159,49 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     addLog(`Mapeando ${rows.length} ativos. Preparando lote nativo...`);
 
     for (const row of rows) {
-      if (String(row.conta_contabil || row.CONTA) === CONTA_BAIXA) continue;
+      if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
 
       const id = row.id || row.ID || row.PRIMARYKEY || crypto.randomUUID();
-      const codigoAtivo = String(row.codigo_ativo || row.CODIGO || row.ETIQUETA || row.REGISTRO || '').replace(/'/g, "''");
-      const contaContabil = String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '').replace(/'/g, "''");
+      
+      // Robust column finding
+      const rowKeys = Object.keys(row);
+      const findVal = (priorities: string[]) => {
+        const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_')));
+        return key ? row[key] : null;
+      };
+
+      const codigoAtivo = String(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA']) || '').replace(/'/g, "''").trim();
+      const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL']) || '').replace(/'/g, "''").trim();
       const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
       const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
+      
+      const registro = String(findVal(['REGISTRO', 'RECORD']) || codigoAtivo || '').replace(/'/g, "''").trim();
+      const descricao = String(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''").trim();
+      
+      let unidadeOp = String(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').replace(/'/g, "''").trim().toUpperCase();
+      if (!unidadeOp || unidadeOp === 'NULL') unidadeOp = 'MATRIZ';
 
+      const centroCusto = String(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO']) || '').replace(/'/g, "''").trim();
+      const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
+      const dataAquisic = String(findVal(['DATAAQUISIC', 'DATA']) || '').replace(/'/g, "''").trim();
+      const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
+      const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
+      const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
+      const subreg = String(findVal(['SUBREG', 'SALA', 'DEP']) || '').replace(/'/g, "''").trim();
+
+      // Inserção na tabela de ativos (espelhamento contábil)
       sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
       
-      const registro = String(row.REGISTRO || row.RECORD || codigoAtivo || '').replace(/'/g, "''");
-      const descricao = String(row.DESCRICAO || row.DESCRICAODOATIVO || 'Importado via Expert').replace(/'/g, "''");
-      
-      sqlStatements.push(`INSERT OR REPLACE INTO inventario_mestre (id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, CONTACONTABIL, _origemTransacao) VALUES ('${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 'EXPERT_LOAD');`);
+      // Inserção na tabela mestre (inventário)
+      sqlStatements.push(`INSERT OR REPLACE INTO inventario_mestre (
+        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, CONTACONTABIL, 
+        UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
+        QT, GRUPO_EMPRESARIAL, ENDERECO, SUBREG, _origemTransacao
+      ) VALUES (
+        '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
+        '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
+        '${qt}', '${grupoEmp}', '${endereco}', '${subreg}', 'EXPERT_LOAD'
+      );`);
     }
 
     try {
@@ -181,6 +211,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       
       if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
       
+      // Forçamos a limpeza do cache de unidades para garantir que o resumo atualize
       setTimeout(() => {
         window.location.reload();
       }, 1500);
@@ -435,16 +466,30 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             </div>
 
             <button
-              onClick={async () => {
+               onClick={async () => {
                 if (summary) {
                   try {
                     setStatus('LOADING');
                     addLog("Ativando sistema...");
                     const assets = await sqliteService.getAllAssets();
+                    
+                    // Sincroniza o cache do IndexedDB com o novo banco SQL carregado
+                    const newState: InventoryState = {
+                      assets,
+                      companies: summary.companies,
+                      databaseMode: DatabaseMode.INTERNAL,
+                      status: DatabaseStatus.LOADED,
+                      lastUpdated: new Date().toISOString()
+                    };
+                    
+                    addLog("Sincronizando cache de segurança...");
+                    await saveInventory(newState, assets);
+
                     sessionStorage.setItem('app_just_finished_load', 'true');
                     onDataLoaded(assets, summary.companies);
                     setStatus('IDLE');
-                  } catch {
+                  } catch (err: any) {
+                    addLog(`Erro na ativação: ${err.message}`);
                     setStatus('SUMMARY');
                   }
                 }

@@ -3449,9 +3449,13 @@ const App: React.FC = () => {
           finalCompanies = sqlUnits;
         } else {
           // Fallback total se a query falhar: Extração direta dos objetos
-          finalCompanies = [...new Set(assets.map(a => 
-            (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase()
-          ))].filter(Boolean);
+          const unitSet = new Set<string>();
+          assets.forEach(a => {
+            const unit = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
+            if (unit && unit !== 'NULL') unitSet.add(unit);
+          });
+          finalCompanies = Array.from(unitSet);
+          if (finalCompanies.length === 0) finalCompanies = ['MATRIZ'];
         }
       } catch (err) {
         console.error('>>> [App] Erro na extração de emergência de unidades:', err);
