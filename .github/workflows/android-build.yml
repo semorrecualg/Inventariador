@@ -34,8 +34,9 @@ jobs:
 
       - name: Sync Capacitor Android
         run: |
-          npm install @capacitor/cli@6.2.1 --no-save --legacy-peer-deps --force
-          npx cap sync android || (npx cap add android && npx cap sync android)
+          npm install @capacitor/cli@6.2.1 @capacitor/android@6.2.1 --no-save --legacy-peer-deps --force
+          npx cap add android || true
+          npx cap sync android
 
       - name: Build Debug APK with Gradle
         run: |
