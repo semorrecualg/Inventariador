@@ -1,0 +1,53 @@
+import * as XLSX from 'xlsx';
+import { Asset } from '../types';
+
+export class ReportService {
+  /**
+   * Gera relatório de auditoria industrial completo
+   */
+  async generateAuditReport(assets: Asset[]) {
+    try {
+      console.log(`[GBR-Report] Gerando relatório para ${assets.length} ativos...`);
+      
+      const worksheet = XLSX.utils.json_to_sheet(assets.map(a => ({
+        'ESTADO': a.C_STATUS_AUDIT === 'pending' ? 'PENDENTE' : 'CONFERIDO',
+        'PATRIMONIO': a.ETIQUETA || a.REGISTRO,
+        'DESCRICAO': a.DESCRICAODOATIVO,
+        'CENTRO_CUSTO': a.CENTRODECUSTO,
+        'CONTA': a.CONTACONTABIL,
+        'UNIDADE': a.UNIDADE_OPERACIONAL,
+        'ENDERECO': a.ENDERECO,
+        'DATA_AUDITORIA': new Date().toLocaleDateString('pt-BR')
+      })));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Auditoria_Kardek");
+      
+      XLSX.writeFile(workbook, `GBR_AUDITORIA_MASTER_${new Date().getTime()}.xlsx`);
+      return true;
+    } catch (err) {
+      console.error("[GBR-Report] Erro ao gerar Excel:", err);
+      return false;
+    }
+  }
+
+  /**
+   * Exportação CSV Simples para sistemas legados
+   */
+  exportToCSV(assets: Asset[]) {
+    const headers = ["ETIQUETA", "DESCRICAO", "STATUS"];
+    const rows = assets.map(a => `${a.ETIQUETA},"${a.DESCRICAODOATIVO}",${a.C_STATUS_AUDIT}`);
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `gbr_legacy_export_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+}
+
+export const reportService = new ReportService();

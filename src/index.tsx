@@ -1,26 +1,39 @@
-import './index.css';
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import './index.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { registerSW } from 'virtual:pwa-register';
 
-console.log('[GBR-Index] Ponto de entrada carregado - v24.50.2');
+// Register PWA Service Worker
+const updateSW = registerSW({
+  onNeedRefresh() {
+    if (confirm('Nova versão disponível. Atualizar agora?')) {
+      updateSW(true);
+    }
+  },
+  onOfflineReady() {
+    console.log('App pronto para uso offline.');
+  },
+});
 
-const container = document.getElementById('root');
-if (container) {
-  try {
-    const root = createRoot(container);
-    root.render(
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    );
-    console.log('[GBR-Index] React Render disparado');
-  } catch (err) {
-    console.error('[GBR-Index] Erro crítico no render:', err);
-    container.innerHTML = `<div style="padding: 20px; background: #0f172a; color: #10b981; font-family: sans-serif;">
-      <h1 style="color: #ef4444">FALHA DE KERNEL</h1>
-      <p>Erro ao montar interface: ${err}</p>
-    </div>`;
-  }
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
 }
+
+console.log("App mounting...");
+const root = createRoot(rootElement);
+
+// Sinaliza que o app iniciou para remover o loader do index.html
+if (typeof window !== 'undefined') {
+  (window as Window & { appStarted?: boolean }).appStarted = true;
+}
+
+root.render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+console.log("App render triggered.");
