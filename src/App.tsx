@@ -4043,15 +4043,15 @@ const App: React.FC = () => {
 
   if (initError) {
     return (
-      <div className="w-full h-screen bg-red-950 flex flex-col items-center justify-center p-10 text-white font-sans">
-        <AlertTriangle size={48} className="text-red-500 mb-6" />
-        <p className="text-xs font-black uppercase tracking-[0.3em] mb-4">Erro de Inicialização</p>
-        <div className="bg-red-900/30 border border-red-500/30 p-4 rounded-2xl max-w-sm w-full mb-6">
-          <p className="text-[10px] text-red-200 font-mono break-all">{initError}</p>
+      <div className="w-full h-screen bg-[#1a0000] flex flex-col items-center justify-center p-10 text-white font-sans">
+        <AlertTriangle size={48} className="text-red-600 mb-8" />
+        <h2 className="text-sm font-black uppercase tracking-[0.4em] mb-10 text-center">Erro de Inicialização</h2>
+        <div className="bg-red-900/10 border border-red-500/20 p-6 rounded-3xl max-w-sm w-full mb-10 text-center shadow-2xl">
+          <p className="text-[10px] text-red-200/70 font-medium leading-relaxed font-mono break-all">{initError}</p>
         </div>
         <button 
           onClick={() => window.location.reload()}
-          className="bg-white text-red-950 px-6 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-100 transition-all"
+          className="bg-slate-950 border border-white/5 text-white w-full max-w-[240px] py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-slate-900"
         >
           Recarregar Aplicativo
         </button>

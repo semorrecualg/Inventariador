@@ -11,8 +11,11 @@ export default defineConfig({
       name: 'wasm-mime-type',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url?.endsWith('.wasm')) {
+          const url = req.url?.split('?')[0];
+          if (url?.endsWith('.wasm')) {
+            console.log(`[WASM Middleware] Serving ${url} with application/wasm`);
             res.setHeader('Content-Type', 'application/wasm');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
           }
           next();
         });
@@ -22,7 +25,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png', 'sql-wasm.wasm'],
       manifest: {
         name: 'GBR Auditoria Patrimonial',
         short_name: 'GBR Auditor',
@@ -92,12 +95,12 @@ export default defineConfig({
       allow: ['..']
     },
     headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
-      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
     }
   },
   optimizeDeps: {
-    // sql.js needs to be optimized to provide a default export correctly in Vite
+    exclude: ['sql.js']
   },
   assetsInclude: ['**/*.wasm'],
   build: {

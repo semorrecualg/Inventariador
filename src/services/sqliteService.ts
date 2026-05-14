@@ -1,4 +1,3 @@
-import * as initSqlJs from 'sql.js';
 import type { Database } from 'sql.js';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -121,6 +120,17 @@ CREATE TABLE IF NOT EXISTS users (
     _unitid TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
+CREATE TABLE IF NOT EXISTS AUDIT_LOG (
+    id TEXT PRIMARY KEY,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    acao TEXT NOT NULL,
+    tabela TEXT,
+    registro_id TEXT,
+    _status_sinc INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
 `;
 
 const ADMIN_PAYLOAD = {
@@ -168,8 +178,8 @@ class SqliteService {
   };
 
   private nativePath: string | null = null;
-
-
+  private webDatabase: any = null;
+  
   constructor() {
     localforage.config({
       name: 'AuditoriaInteligente',
@@ -368,9 +378,12 @@ class SqliteService {
   private isInitializingDb = false;
 
   async init(force = false) {
+    return await this.initializeDatabase(force);
+  }
+
+  async initializeDatabase(force = false) {
     if (this.isInitialized && (this.db || this.nativeDb) && !force) return true;
     if (this.isInitializingDb) {
-      // Aguarda até que a inicialização em curso termine
       return new Promise((resolve) => {
         const check = setInterval(() => {
           if (!this.isInitializingDb) {
@@ -383,29 +396,45 @@ class SqliteService {
 
     if (force) await this.reset();
     this.isInitializingDb = true;
-    
+
     try {
       if (Capacitor.isNativePlatform()) {
         if (!this.sqliteConnection) {
           this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
         }
         
+        await this.sqliteConnection.checkConnectionsConsistency();
+        
         const dbName = this.storageKeys.nativeFileName;
         try {
-          // Verifica se o banco já está aberto
           const isConn = await this.sqliteConnection.isConnection(dbName, false);
+          
           if (isConn.result) {
              this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
           } else {
              this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
           }
           
-          await this.nativeDb.open();
+          const isDbOpen = await this.nativeDb.isDBOpen();
+          if (!isDbOpen.result) {
+            await this.nativeDb.open();
+          }
           
-          // Executa o schema
           await this.nativeDb.execute(FULL_SCHEMA);
           
-          // Captura o path real
+          await this.nativeDb.execute(`
+            CREATE TABLE IF NOT EXISTS AUDIT_LOG (
+              id TEXT PRIMARY KEY,
+              timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+              usuario TEXT NOT NULL,
+              acao TEXT NOT NULL,
+              tabela TEXT,
+              registro_id TEXT,
+              _status_sinc INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
+          `);
+          
           const pathRes = await CapacitorSQLite.getDatabaseDefaultDirectory();
           this.nativePath = `${pathRes.path}/${dbName}.db`;
           
@@ -414,69 +443,115 @@ class SqliteService {
           await this.ensureRequiredColumns();
           console.log(`>>> [NativeBridge] Capacitor SQLite inicializado: ${this.nativePath}`);
           return true;
-        } catch (err) {
+        } catch (err: unknown) {
           console.error(">>> [NativeBridge] Erro ao inicializar SQLite Nativo:", err);
-          throw err;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          throw new Error(`Falha no SQLite Nativo durante o Bootstrap: ${errMsg}`);
         }
       }
 
-      const initSqlJsFn = (initSqlJs as unknown as { default?: InitSqlJs }).default || (initSqlJs as unknown as InitSqlJs);
-      const SQL = await initSqlJsFn({ 
-        locateFile: () => '/sql-wasm.wasm' 
-      });
+      // FLUXO BROWSER/DEV: Correção da importação dinâmica para evitar "is not a function"
+      try {
+        console.log(">>> Inicializando motor de desenvolvimento (WebAssembly)...");
+        
+        const initSqlJs = await this.resolveSqlJs();
+        
+        const SQL = await initSqlJs({
+          locateFile: (file: string) => `/${file}`
+        });
+        
+        this.webDatabase = SQL; 
 
-      const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
-      this.currentDbStatus = await this.getSystemStatus();
+        console.log("🟢 Banco de dados de desenvolvimento iniciado com sucesso!");
 
-      if (handle) {
-        try {
-          // @ts-expect-error queryPermission is experimental
-          const permission = await handle.queryPermission({ mode: 'readwrite' });
-          if (permission === 'granted') {
-            this.permissionGrantedSession = true;
-            const file = await handle.getFile();
-            const buffer = await file.arrayBuffer();
-            this.db = new SQL.Database(new Uint8Array(buffer));
-            this.db.run(FULL_SCHEMA);
-            await this.seedAdminUser();
-            await this.ensureRequiredColumns();
-            await this.detectAndPersistSchema();
-            this.storageSource = 'PHYSICAL';
-            this.isInitialized = true;
-            this.activeFileHandle = handle;
-            window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-            return true;
-          }
-        } catch (err) { console.error(err); }
-      }
+        const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
+        this.currentDbStatus = await this.getSystemStatus();
 
-      const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
-      if (binary && binary.length > 4096) {
-        this.db = new SQL.Database(binary);
+        if (handle) {
+          try {
+            const permission = await handle.queryPermission({ mode: 'readwrite' });
+            if (permission === 'granted') {
+              this.permissionGrantedSession = true;
+              const file = await handle.getFile();
+              const buffer = await file.arrayBuffer();
+              this.db = new SQL.Database(new Uint8Array(buffer));
+              this.db.run(FULL_SCHEMA);
+              await this.seedAdminUser();
+              await this.ensureRequiredColumns();
+              await this.detectAndPersistSchema();
+              this.storageSource = 'PHYSICAL';
+              this.isInitialized = true;
+              this.activeFileHandle = handle;
+              window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
+              return true;
+            }
+          } catch (err) { console.error(err); }
+        }
+
+        const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
+        if (binary && binary.length > 4096) {
+          this.db = new SQL.Database(binary);
+          this.db.run(FULL_SCHEMA);
+          await this.seedAdminUser();
+          await this.ensureRequiredColumns();
+          await this.detectAndPersistSchema();
+          this.storageSource = 'CACHE';
+          this.isInitialized = true;
+          window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
+          return true;
+        }
+
+        this.db = new SQL.Database();
         this.db.run(FULL_SCHEMA);
         await this.seedAdminUser();
-        await this.ensureRequiredColumns();
-        await this.detectAndPersistSchema();
-        this.storageSource = 'CACHE';
+        this.storageSource = 'MEMORY';
         this.isInitialized = true;
         window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
         return true;
-      }
 
-      this.db = new SQL.Database();
-      this.db.run(FULL_SCHEMA);
-      await this.seedAdminUser();
-      this.storageSource = 'MEMORY';
-      this.isInitialized = true;
-      window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-      return true;
-    } catch (err) {
-      console.error("Init SQLite failed:", err);
+      } catch (err: any) {
+        console.error("Erro fatal ao carregar o motor Web:", err);
+        throw new Error(`Falha ao inicializar o motor SQL: ${err.message}`);
+      }
+    } catch (err: any) {
+      console.error(">>> [App] Erro capturado:", err);
       window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: String(err) } }));
       return false;
     } finally {
       this.isInitializingDb = false;
     }
+  }
+
+  /**
+   * Resolve a função de inicialização do sql.js lidando com diferentes padrões de exportação
+   */
+  private async resolveSqlJs(): Promise<any> {
+    // @ts-ignore
+    const sqlModule = await import('sql.js');
+    console.log(">>> [Governance] sql.js module loaded:", sqlModule);
+
+    let initFn = sqlModule.default || (sqlModule as any);
+
+    if (initFn && initFn.default) initFn = initFn.default;
+
+    if (typeof initFn !== 'function' && sqlModule.initSqlJs) {
+        initFn = sqlModule.initSqlJs;
+    }
+
+    if (typeof initFn !== 'function') {
+        const found = Object.values(sqlModule).find(v => typeof v === 'function');
+        if (found) initFn = found;
+    }
+
+    if (typeof initFn !== 'function' && typeof (window as any).initSqlJs === 'function') {
+        return (window as any).initSqlJs;
+    }
+
+    if (typeof initFn !== 'function') {
+        throw new Error("O módulo carregado não exportou initSqlJs como função padrão ou nomeada.");
+    }
+
+    return initFn;
   }
 
   async saveDatabase() {
@@ -780,9 +855,15 @@ class SqliteService {
   }
 
   async importDatabase(binary: Uint8Array) {
-    const initSqlJsFn = (initSqlJs as unknown as { default?: InitSqlJs }).default || (initSqlJs as unknown as InitSqlJs);
+    if (Capacitor.isNativePlatform()) {
+      console.warn(">>> [Governance] importDatabase (WASM) ignorado em plataforma nativa.");
+      return;
+    }
+    
+    const initSqlJsFn = await this.resolveSqlJs();
+
     const SQL = await initSqlJsFn({ 
-      locateFile: () => '/sql-wasm.wasm' 
+      locateFile: (file: string) => `/${file}` 
     });
     this.db = new SQL.Database(binary);
     this.isInitialized = true;
