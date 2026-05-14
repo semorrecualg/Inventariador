@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 export default defineConfig({
   base: '/',
@@ -23,6 +24,26 @@ export default defineConfig({
     },
     react(),
     tailwindcss(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'node_modules/sql.js/dist/sql-wasm.wasm',
+          dest: '.'
+        },
+        {
+          src: 'node_modules/sql.js/dist/sql-wasm.js',
+          dest: '.'
+        },
+        {
+          src: 'node_modules/sql.js/dist/sql-wasm.wasm',
+          dest: 'assets'
+        },
+        {
+          src: 'node_modules/sql.js/dist/sql-wasm.js',
+          dest: 'assets'
+        }
+      ]
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png', 'sql-wasm.wasm'],
@@ -48,7 +69,7 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,wasm}'],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10MB to accommodate sql-wasm
         runtimeCaching: [
           {
@@ -100,7 +121,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    exclude: ['sql.js']
+    exclude: ['sql.js', 'jeep-sqlite', '@capacitor-community/sqlite']
   },
   assetsInclude: ['**/*.wasm'],
   build: {

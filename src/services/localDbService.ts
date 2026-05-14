@@ -1,8 +1,9 @@
 
 import { sqliteService } from './sqliteService';
 import { Asset, UnitConfig, AuditLogEntry } from '../types';
-import { SqlValue } from 'sql.js';
 import { DB_ASSET_COLUMNS } from '../constants/schema';
+
+type SqlValue = string | number | boolean | null;
 
 // Colunas válidas para a tabela assets (conforme definido em sqliteService.ts)
 const ASSET_COLUMNS = DB_ASSET_COLUMNS;

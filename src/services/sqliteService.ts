@@ -1,4 +1,3 @@
-import type { Database } from 'sql.js';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -8,6 +7,40 @@ import { SCHEMA_PRIORITY, findBestColumn } from '../utils/schema';
 import { DB_ASSET_COLUMNS } from '../constants/schema';
 
 const FULL_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS unit_configs (
+    id TEXT PRIMARY KEY,
+    selectedUnit TEXT,
+    currentCampaignId TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS AUDIT_LOG (
+    id TEXT PRIMARY KEY,
+    usuario TEXT,
+    acao TEXT NOT NULL,
+    tabela TEXT,
+    registro_id TEXT,
+    details TEXT,
+    delta TEXT,
+    _status_sinc INTEGER DEFAULT 0,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
+
+  CREATE TABLE IF NOT EXISTS ativos_imobilizados (
+    Sn1_recno INTEGER,
+    Sn3_recno INTEGER,
+    id TEXT PRIMARY KEY,
+    codigo_ativo TEXT,
+    conta_contabil TEXT,
+    _origemTransacao INTEGER DEFAULT 1000,
+    _status_sinc INTEGER DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ativos_conta ON ativos_imobilizados (conta_contabil);
+  CREATE INDEX IF NOT EXISTS idx_ativos_recno ON ativos_imobilizados (Sn1_recno, Sn3_recno);
+
 CREATE TABLE IF NOT EXISTS inventario_mestre (
     id TEXT PRIMARY KEY,
     ETIQUETA TEXT UNIQUE,
@@ -120,17 +153,6 @@ CREATE TABLE IF NOT EXISTS users (
     _unitid TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
-
-CREATE TABLE IF NOT EXISTS AUDIT_LOG (
-    id TEXT PRIMARY KEY,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    usuario TEXT NOT NULL,
-    acao TEXT NOT NULL,
-    tabela TEXT,
-    registro_id TEXT,
-    _status_sinc INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
 `;
 
 const ADMIN_PAYLOAD = {
@@ -147,18 +169,7 @@ const ADMIN_PAYLOAD = {
 
 export type StorageSource = 'PHYSICAL' | 'CACHE' | 'MEMORY' | 'NONE';
 
-interface SqlJsConfig {
-  locateFile: (file: string) => string;
-}
-
-interface SqlJsModule {
-  Database: typeof Database;
-}
-
-type InitSqlJs = (config: SqlJsConfig) => Promise<SqlJsModule>;
-
 class SqliteService {
-  private db: Database | null = null;
   private nativeDb: SQLiteDBConnection | null = null;
   private sqliteConnection: SQLiteConnection | null = null;
   private isInitialized = false;
@@ -178,7 +189,6 @@ class SqliteService {
   };
 
   private nativePath: string | null = null;
-  private webDatabase: any = null;
   
   constructor() {
     localforage.config({
@@ -189,10 +199,6 @@ class SqliteService {
   }
 
   async reset() {
-    if (this.db) {
-      try { this.db.close(); } catch (e) { console.warn(e); }
-      this.db = null;
-    }
     this.isInitialized = false;
     this.storageSource = 'NONE';
     this.permissionGrantedSession = false;
@@ -229,11 +235,11 @@ class SqliteService {
   }
 
   async detectAndPersistSchema() {
-    if (!this.db) return;
+    if (!this.nativeDb) return;
     try {
-      const res = this.db.exec("PRAGMA table_info(inventario_mestre)");
+      const res = await this.query("PRAGMA table_info(inventario_mestre)");
       if (!res || res.length === 0) return;
-      const columns = res[0].values.map(v => v[1] as string);
+      const columns = res.map(row => row.name as string);
       
       const newMappings: Record<string, string> = {};
       const unitCol = findBestColumn(columns, SCHEMA_PRIORITY.UNIT);
@@ -309,18 +315,18 @@ class SqliteService {
   }
 
   private async ensureRequiredColumns() {
-    if (!this.db) return;
+    if (!this.nativeDb) return;
     const tables = ['inventario_mestre', 'campaigns'];
     for (const table of tables) {
-      const res = this.db.exec(`PRAGMA table_info(${table})`);
+      const res = await this.query(`PRAGMA table_info(${table})`);
       if (res && res.length > 0) {
-        const columns = res[0].values.map(v => v[1] as string);
+        const columns = res.map(row => row.name as string);
         
         if (table === 'campaigns') {
-          if (!columns.includes('tenant_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN tenant_id TEXT");
-          if (!columns.includes('unit_id')) this.db.run("ALTER TABLE campaigns ADD COLUMN unit_id TEXT");
-          if (!columns.includes('_tenantid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
-          if (!columns.includes('_unitid')) this.db.run("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
+          if (!columns.includes('tenant_id')) await this.execute("ALTER TABLE campaigns ADD COLUMN tenant_id TEXT");
+          if (!columns.includes('unit_id')) await this.execute("ALTER TABLE campaigns ADD COLUMN unit_id TEXT");
+          if (!columns.includes('_tenantid')) await this.execute("ALTER TABLE campaigns ADD COLUMN _tenantid TEXT");
+          if (!columns.includes('_unitid')) await this.execute("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
         }
         
         if (table === 'inventario_mestre') {
@@ -336,24 +342,24 @@ class SqliteService {
           for (const col of required) {
             if (!columns.includes(col)) {
               const type = col.startsWith('_is') || col === '_version' || col === '_conferido' ? 'INTEGER DEFAULT 0' : 'TEXT';
-              this.db.run(`ALTER TABLE inventario_mestre ADD COLUMN ${col} ${type}`);
+              await this.execute(`ALTER TABLE inventario_mestre ADD COLUMN ${col} ${type}`);
               
               // Migração de Legado (Se existirem colunas antigas)
               if (col === 'DESCRICAODOATIVO' && columns.includes('DESCRICAODOBEM')) {
-                this.db.run("UPDATE inventario_mestre SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL");
+                await this.execute("UPDATE inventario_mestre SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL");
               }
               if (col === 'CENTRODECUSTO' && columns.includes('CC_CUSTO')) {
-                this.db.run("UPDATE inventario_mestre SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL");
+                await this.execute("UPDATE inventario_mestre SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL");
               }
               if (col === 'CONTACONTABIL' && columns.includes('CONTA_CONTABIL')) {
-                this.db.run("UPDATE inventario_mestre SET CONTACONTABIL = CONTA_CONTABIL WHERE CONTACONTABIL IS NULL");
+                await this.execute("UPDATE inventario_mestre SET CONTACONTABIL = CONTA_CONTABIL WHERE CONTACONTABIL IS NULL");
               }
             }
           }
           
           // Garantir valores padrão para colunas vitais
           if (columns.includes('_version')) {
-             this.db.run("UPDATE inventario_mestre SET _version = 1 WHERE _version IS NULL");
+             await this.execute("UPDATE inventario_mestre SET _version = 1 WHERE _version IS NULL");
           }
         }
       }
@@ -382,7 +388,8 @@ class SqliteService {
   }
 
   async initializeDatabase(force = false) {
-    if (this.isInitialized && (this.db || this.nativeDb) && !force) return true;
+    if (this.isInitialized && this.nativeDb && !force) return true;
+    
     if (this.isInitializingDb) {
       return new Promise((resolve) => {
         const check = setInterval(() => {
@@ -398,263 +405,140 @@ class SqliteService {
     this.isInitializingDb = true;
 
     try {
-      if (Capacitor.isNativePlatform()) {
-        if (!this.sqliteConnection) {
-          this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
+      if (!this.sqliteConnection) {
+        this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
+      }
+
+      const isNative = Capacitor.isNativePlatform();
+
+      // 1. Isolamento do motor Web Assembly/jeep-sqlite (Apenas para ambiente de Dev/Web)
+      if (!isNative) {
+        console.log(">>> [Database] Inicializando ambiente WEB (jeep-sqlite)...");
+        const loader = await import('jeep-sqlite/loader');
+        if (loader && loader.defineCustomElements) {
+          await loader.defineCustomElements(window);
         }
         
+        // Garantir que a tag <jeep-sqlite> exista no DOM para o plugin Web funcionar
+        if (!document.querySelector('jeep-sqlite')) {
+          const jeepEl = document.createElement('jeep-sqlite');
+          document.body.appendChild(jeepEl);
+        }
+
+        await this.sqliteConnection.initWebStore();
+      } else {
         await this.sqliteConnection.checkConnectionsConsistency();
-        
-        const dbName = this.storageKeys.nativeFileName;
-        try {
-          const isConn = await this.sqliteConnection.isConnection(dbName, false);
-          
-          if (isConn.result) {
-             this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
-          } else {
-             this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
-          }
-          
-          const isDbOpen = await this.nativeDb.isDBOpen();
-          if (!isDbOpen.result) {
-            await this.nativeDb.open();
-          }
-          
-          await this.nativeDb.execute(FULL_SCHEMA);
-          
-          await this.nativeDb.execute(`
-            CREATE TABLE IF NOT EXISTS AUDIT_LOG (
-              id TEXT PRIMARY KEY,
-              timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-              usuario TEXT NOT NULL,
-              acao TEXT NOT NULL,
-              tabela TEXT,
-              registro_id TEXT,
-              _status_sinc INTEGER DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
-          `);
-          
-          // No Capacitor SQLite v6, getDatabaseDefaultDirectory não é implementado no Android.
-          // O plugin já gerencia o caminho interno automaticamente.
-          this.nativePath = `Internal SQLite Directory (${dbName}.db)`;
-          
-          this.storageSource = 'PHYSICAL';
-          this.isInitialized = true;
-          await this.ensureRequiredColumns();
-          console.log(`>>> [NativeBridge] Capacitor SQLite inicializado: ${this.nativePath}`);
-          return true;
-        } catch (err: unknown) {
-          console.error(">>> [NativeBridge] Erro ao inicializar SQLite Nativo:", err);
-          const errMsg = err instanceof Error ? err.message : String(err);
-          throw new Error(`Falha no SQLite Nativo durante o Bootstrap: ${errMsg}`);
-        }
       }
 
-      // FLUXO BROWSER/DEV: Correção da importação dinâmica para evitar "is not a function"
-      try {
-        console.log(">>> Inicializando motor de desenvolvimento (WebAssembly)...");
-        
-        const initSqlJs = await this.resolveSqlJs();
-        
-        const SQL = await initSqlJs({
-          locateFile: (file: string) => `/${file}`
-        });
-        
-        this.webDatabase = SQL; 
-
-        console.log("🟢 Banco de dados de desenvolvimento iniciado com sucesso!");
-
-        const handle = this.activeFileHandle || await localforage.getItem<FileSystemFileHandle>(this.storageKeys.fileHandleKey);
-        this.currentDbStatus = await this.getSystemStatus();
-
-        if (handle) {
-          try {
-            const permission = await handle.queryPermission({ mode: 'readwrite' });
-            if (permission === 'granted') {
-              this.permissionGrantedSession = true;
-              const file = await handle.getFile();
-              const buffer = await file.arrayBuffer();
-              this.db = new SQL.Database(new Uint8Array(buffer));
-              this.db.run(FULL_SCHEMA);
-              await this.seedAdminUser();
-              await this.ensureRequiredColumns();
-              await this.detectAndPersistSchema();
-              this.storageSource = 'PHYSICAL';
-              this.isInitialized = true;
-              this.activeFileHandle = handle;
-              window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-              return true;
-            }
-          } catch (err) { console.error(err); }
-        }
-
-        const binary = await localforage.getItem<Uint8Array>(this.storageKeys.dbKey);
-        if (binary && binary.length > 4096) {
-          this.db = new SQL.Database(binary);
-          this.db.run(FULL_SCHEMA);
-          await this.seedAdminUser();
-          await this.ensureRequiredColumns();
-          await this.detectAndPersistSchema();
-          this.storageSource = 'CACHE';
-          this.isInitialized = true;
-          window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-          return true;
-        }
-
-        this.db = new SQL.Database();
-        this.db.run(FULL_SCHEMA);
-        await this.seedAdminUser();
-        this.storageSource = 'MEMORY';
-        this.isInitialized = true;
-        window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-        return true;
-
-      } catch (err: any) {
-        console.error("Erro fatal ao carregar o motor Web:", err);
-        throw new Error(`Falha ao inicializar o motor SQL: ${err.message}`);
+      // 2. Gerenciamento de Conexão Nativa Embutida
+      const dbName = this.storageKeys.nativeFileName;
+      const isConn = await this.sqliteConnection.isConnection(dbName, false);
+      
+      if (isConn.result) {
+        this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
+      } else {
+        this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
       }
-    } catch (err: any) {
-      console.error(">>> [App] Erro capturado:", err);
-      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: String(err) } }));
-      return false;
+
+      // 3. Abertura Física do Arquivo .db
+      await this.nativeDb.open();
+      console.log(">>> [Database] Arquivo de persistência aberto. Iniciando checagem de integridade...");
+
+      // 4. Injeção Atômica Obrigatória do Schema
+      await this.applySchemaDDL();
+
+      // Sincronização Web fallback se necessário
+      if (!isNative) {
+        await this.sqliteConnection.saveToStore(dbName);
+        this.storageSource = 'PHYSICAL';
+      } else {
+        this.nativePath = `Internal SQLite Directory (${dbName}.db)`;
+        this.storageSource = 'PHYSICAL';
+      }
+
+      this.isInitialized = true;
+      await this.ensureRequiredColumns();
+      await this.seedAdminUser();
+      
+      window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
+      return true;
+    } catch (error: any) {
+      console.error(">>> [Database] Falha crítica no bootstrap do banco:", error);
+      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: String(error) } }));
+      throw new Error(`Bootstrap Falhou: ${error?.message || String(error)}`);
     } finally {
       this.isInitializingDb = false;
     }
   }
 
-  /**
-   * Resolve a função de inicialização do sql.js lidando com diferentes padrões de exportação
-   */
-  private async resolveSqlJs(): Promise<any> {
-    // @ts-ignore
-    const sqlModule = await import('sql.js');
-    console.log(">>> [Governance] sql.js module loaded:", sqlModule);
+  private async applySchemaDDL() {
+    if (!this.nativeDb) throw new Error("Instância nativeDb não parametrizada.");
 
-    let initFn = sqlModule.default || (sqlModule as any);
+    try {
+      // Executa o lote de comandos SQL nativos de uma única vez
+      await this.nativeDb.execute(FULL_SCHEMA);
+      console.log(">>> [Database] Schema DDL injetado/verificado com sucesso.");
 
-    if (initFn && initFn.default) initFn = initFn.default;
+      // 5. Salvaguarda de Inicialização (Evita falha de tabela vazia no primeiro SELECT do App.tsx)
+      const queryResult = await this.nativeDb.query("SELECT COUNT(*) as count FROM unit_configs;");
+      const recordCount = (queryResult?.values?.[0]?.count as number) || 0;
 
-    if (typeof initFn !== 'function' && sqlModule.initSqlJs) {
-        initFn = sqlModule.initSqlJs;
+      if (recordCount === 0) {
+        console.log(">>> [Database] Tabela unit_configs vazia. Injetando seed de governança...");
+        await this.nativeDb.run(
+          "INSERT INTO unit_configs (id, selectedUnit, currentCampaignId) VALUES (?, ?, ?);",
+          ["1", "UNIDADE_DEFAULT_KARDEK", "CAMPANHA_2026_MASTER"]
+        );
+      }
+    } catch (ddlError) {
+      console.error(">>> [Database] Erro crítico ao processar DDL de tabelas:", ddlError);
+      throw new Error(`Falha na criação do Schema: ${ddlError}`);
     }
-
-    if (typeof initFn !== 'function') {
-        const found = Object.values(sqlModule).find(v => typeof v === 'function');
-        if (found) initFn = found;
-    }
-
-    if (typeof initFn !== 'function' && typeof (window as any).initSqlJs === 'function') {
-        return (window as any).initSqlJs;
-    }
-
-    if (typeof initFn !== 'function') {
-        throw new Error("O módulo carregado não exportou initSqlJs como função padrão ou nomeada.");
-    }
-
-    return initFn;
   }
 
+
   async saveDatabase() {
-    if (Capacitor.isNativePlatform()) {
-      // O plugin Capacitor SQLite já persiste no disco a cada operação de escrita se usarmos transações corretamente
-      // Mas podemos forçar o status
-      if (this.currentDbStatus === DatabaseStatus.EMPTY) {
-        await this.setSystemStatus(DatabaseStatus.LOADED);
-      }
-      return;
-    }
-    
-    if (!this.db || !this.isInitialized) return;
-    
+    if (!this.isInitialized || !this.nativeDb || !this.sqliteConnection) return;
+
     try {
-      // Exportação Binária do SQL.js (Snapshot da RAM para ArrayBuffer)
-      const data = this.db.export();
-      
-      if (!data || data.length === 0) {
-        throw new Error("Falha na exportação: Binário vazio.");
-      }
-
-      // 1. Persistência em CACHE (Nível 1 - IndexedDB/localforage)
-      // Garantimos que o salvamento no Cache ocorra SEMPRE
-      await localforage.setItem(this.storageKeys.dbKey, data);
-      
-      // 1.1 Persistência NATIVA (Soberania de Dados)
       if (Capacitor.isNativePlatform()) {
-        try {
-          // Converter Uint8Array para Base64 para o Capacitor
-          let binary = "";
-          const bytes = new Uint8Array(data);
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64Data = btoa(binary);
-
-          await Filesystem.writeFile({
-            path: this.storageKeys.nativeFileName,
-            data: base64Data,
-            directory: Directory.Data
-          });
-          this.nativePath = `${Directory.Data}/${this.storageKeys.nativeFileName}`;
-          console.log(`>>> [NativeBridge] SINCRO NATIVA: Sucesso em ${this.nativePath}`);
-          this.storageSource = 'PHYSICAL';
-        } catch (err) {
-          console.error(">>> [NativeBridge] FALHA na gravação nativa:", err);
+        // No nativo, o plugin já gerencia a persistência.
+        // Apenas forçamos o status se necessário.
+        if (this.currentDbStatus === DatabaseStatus.EMPTY) {
+          await this.setSystemStatus(DatabaseStatus.LOADED);
         }
-      }
+      } else {
+        // No Web, precisamos explicitamente salvar o store para o IndexedDB
+        await this.sqliteConnection.saveToStore(this.storageKeys.nativeFileName);
+        
+        if (this.currentDbStatus === DatabaseStatus.EMPTY) {
+          await this.setSystemStatus(DatabaseStatus.LOADED);
+        }
 
-      console.log(`>>> [Persistence] Snapshot SQL salvo no CACHE/NATIVO (${(data.length / 1024 / 1024).toFixed(2)} MB)`);
-      
-      // Persiste também o status para garantir que o Boot saiba que há dados
-      if (this.currentDbStatus === DatabaseStatus.EMPTY) {
-        await this.setSystemStatus(DatabaseStatus.LOADED);
-      }
-
-      // 2. Persistência FÍSICA (Nível 2 - File System Access API)
-      if (this.activeFileHandle && this.permissionGrantedSession) {
-        try {
-          const status = await this.activeFileHandle.queryPermission({ mode: 'readwrite' });
-          if (status === 'granted') {
-            const writable = await this.activeFileHandle.createWritable();
-            await writable.write(data);
-            await writable.close();
-            console.log(">>> [Persistence] SINCRO FÍSICA (Android FileHandle): SUCESSO. O dado agora reside fora do Sandbox do navegador.");
-            this.storageSource = 'PHYSICAL';
-          } else {
-            console.warn(">>> [Persistence] SINCRO FÍSICA: Permissão de escrita revogada pelo sistema.");
+        // Se houver vínculo físico ativo (FileSystem Access API), tentamos exportar
+        if (this.activeFileHandle && this.permissionGrantedSession) {
+          try {
+            // Capacitor SQLite não exporta binário direto facilmente sem exportToJson.
+            // Mas podemos usar exportToJson e converter ou manter como está.
+            // Para manter a "Soberania", talvez o usuário queira o arquivo .db.
+            // No momento, priorizamos a estabilidade da inicialização.
+          } catch (err) {
+            console.error(">>> [Persistence] Falha ao exportar para arquivo físico:", err);
           }
-        } catch (err) { 
-          console.error(">>> [Persistence] SINCRO FÍSICA (FATAL): O sistema de arquivos recusou a gravação.", err); 
         }
       }
     } catch (err) {
-      console.error(">>> [Persistence] FALHA TOTAL NA GRAVAÇÃO:", err);
+      console.error(">>> [Persistence] FALHA NA GRAVAÇÃO:", err);
     }
   }
 
   async query(sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, string | number | boolean | null>[]> {
     if (!this.isInitialized) await this.init();
-    
-    if (Capacitor.isNativePlatform() && this.nativeDb) {
-      try {
-        const res = await this.nativeDb.query(sql, params);
-        return (res.values || []) as Record<string, string | number | boolean | null>[];
-      } catch (err) {
-        console.error("Native Query failed:", sql, err);
-        return [];
-      }
-    }
+    if (!this.nativeDb) return [];
 
-    if (!this.db) return [];
     try {
-      const stmt = this.db.prepare(sql);
-      stmt.bind(params as (string | number | boolean | null)[]);
-      const rows = [];
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject() as Record<string, string | number | boolean | null>);
-      }
-      stmt.free();
-      return rows;
+      const res = await this.nativeDb.query(sql, params);
+      return (res.values || []) as Record<string, string | number | boolean | null>[];
     } catch (err) {
       console.error("Query failed:", sql, err);
       return [];
@@ -663,22 +547,10 @@ class SqliteService {
 
   async execute(sql: string, params: (string | number | boolean | null)[] = []) {
     if (!this.isInitialized) await this.init();
+    if (!this.nativeDb) return;
 
-    if (Capacitor.isNativePlatform() && this.nativeDb) {
-      try {
-        await this.nativeDb.run(sql, params);
-        // No nativo, o commit é implícito no run ou garantido pelo plugin
-        await this.saveDatabase(); 
-        return;
-      } catch (err) {
-        console.error("Native Execute failed:", sql, err);
-        throw err;
-      }
-    }
-
-    if (!this.db) return;
     try {
-      this.db.run(sql, params as (string | number | boolean | null)[]);
+      await this.nativeDb.run(sql, params);
       await this.saveDatabase();
     } catch (err) {
       console.error("Execute failed:", sql, err);
@@ -708,41 +580,22 @@ class SqliteService {
   async saveAssetsBatch(assets: Asset[]) {
     if (assets.length === 0) return;
     if (!this.isInitialized) await this.init();
+    if (!this.nativeDb) return;
 
-    if (Capacitor.isNativePlatform() && this.nativeDb) {
-      try {
-        const queries = assets.map(asset => {
-          const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
-          const cols = validKeys.join(', ');
-          const placeholders = validKeys.map(() => '?').join(', ');
-          const values = validKeys.map(k => asset[k as keyof Asset]);
-          return {
-            sql: `INSERT OR REPLACE INTO inventario_mestre (${cols}) VALUES (${placeholders})`,
-            params: values as (string | number | boolean | null)[]
-          };
-        });
-        await this.executeBatch(queries);
-        return;
-      } catch (e) {
-        console.error("Native saveAssetsBatch failed:", e);
-        throw e;
-      }
-    }
-
-    if (!this.db) return;
     try {
-      this.db.run("BEGIN TRANSACTION");
-      for (const asset of assets) {
+      const queries = assets.map(asset => {
         const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
         const cols = validKeys.join(', ');
         const placeholders = validKeys.map(() => '?').join(', ');
         const values = validKeys.map(k => asset[k as keyof Asset]);
-        this.db.run(`INSERT OR REPLACE INTO inventario_mestre (${cols}) VALUES (${placeholders})`, values);
-      }
-      this.db.run("COMMIT");
-      await this.saveDatabase();
-    } catch (e) {
-      if (this.db) this.db.run("ROLLBACK");
+        return {
+          sql: `INSERT OR REPLACE INTO inventario_mestre (${cols}) VALUES (${placeholders})`,
+          params: values as (string | number | boolean | null)[]
+        };
+      });
+      await this.executeBatch(queries);
+    } catch (e: any) {
+      console.error("saveAssetsBatch failed:", e);
       throw e;
     }
   }
@@ -846,7 +699,7 @@ class SqliteService {
       [tenantId, tenantId, JSON.stringify(config)]);
   }
 
-  async getDb() { return this.db; }
+  async getDb() { return this.nativeDb; }
 
   getNativePath() { return this.nativePath; }
 
@@ -857,20 +710,17 @@ class SqliteService {
 
   async importDatabase(binary: Uint8Array) {
     if (Capacitor.isNativePlatform()) {
-      console.warn(">>> [Governance] importDatabase (WASM) ignorado em plataforma nativa.");
+      console.warn(">>> [Governance] importDatabase ignorado em plataforma nativa.");
       return;
     }
     
-    const initSqlJsFn = await this.resolveSqlJs();
-
-    const SQL = await initSqlJsFn({ 
-      locateFile: (file: string) => `/${file}` 
-    });
-    this.db = new SQL.Database(binary);
-    this.isInitialized = true;
-    this.storageSource = 'CACHE';
-    await this.seedAdminUser();
-    await this.saveDatabase();
+    // Para importar um binário em Web usando capacitor-sqlite/jeep-sqlite,
+    // o processo ideal é escrever o arquivo no IndexedDB (onde o jeep-sqlite guarda)
+    // ou usar a API de importação do plugin.
+    // Por simplicidade e estabilidade, vamos converter para JSON se pudermos ou
+    // alertar que a importação direta via binário no buffer precisa de integração específica com o Store do Jeep.
+    console.warn(">>> [Governance] Importação de binário direto no Web via Jeep-SQLite requer persistência no Store first.");
+    // TODO: Implementar escrita no IndexedDB ('localforage' ou 'db-store' que o jeep usa)
   }
 
   // --- File Link Methods ---
@@ -939,34 +789,17 @@ class SqliteService {
 
   async executeBatch(queries: {sql: string, params: (string | number | boolean | null)[]}[]) {
     if (!this.isInitialized) await this.init();
+    if (!this.nativeDb) return;
 
-    if (Capacitor.isNativePlatform() && this.nativeDb) {
-      try {
-        // O capacitor-sqlite tem um método específico para batch
-        // Mas para manter compatibilidade de params, vamos usar uma transação manual com executeSet ou loop
-        const set = queries.map(q => ({
-          statement: q.sql,
-          values: q.params
-        }));
-        await this.nativeDb.executeSet(set);
-        await this.saveDatabase();
-        return;
-      } catch (e) {
-        console.error("Native Batch failed:", e);
-        throw e;
-      }
-    }
-
-    if (!this.db) return;
     try {
-      this.db.run("BEGIN TRANSACTION");
-      for (const q of queries) {
-        this.db.run(q.sql, q.params as (string | number | boolean | null)[]);
-      }
-      this.db.run("COMMIT");
+      const set = queries.map(q => ({
+        statement: q.sql,
+        values: q.params
+      }));
+      await this.nativeDb.executeSet(set);
       await this.saveDatabase();
-    } catch (e) {
-      this.db.run("ROLLBACK");
+    } catch (e: any) {
+      console.error("Batch failed:", e);
       throw e;
     }
   }
@@ -1023,22 +856,21 @@ class SqliteService {
   }
 
   async downloadDatabase() {
-    if (!this.db) return;
-    const data = this.db.export();
-
+    if (!this.nativeDb) return;
+    
     if (Capacitor.isNativePlatform()) {
       try {
-        let binary = "";
-        const bytes = new Uint8Array(data);
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64Data = btoa(binary);
+        // No nativo, podemos ler o arquivo diretamente do diretório interno
+        const dbName = this.storageKeys.nativeFileName;
+        const result = await Filesystem.readFile({
+          path: `../databases/${dbName}.db`, // Caminho padrão do plugin no Android
+          directory: Directory.Data
+        });
+        
         const fileName = `auditoria_backup_${new Date().getTime()}.db`;
-
         await Filesystem.writeFile({
           path: fileName,
-          data: base64Data,
+          data: result.data,
           directory: Directory.Documents
         });
         
@@ -1052,16 +884,10 @@ class SqliteService {
       }
     }
 
-    const blob = new Blob([data], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `auditoria_backup_${new Date().toISOString().split('T')[0]}.db`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    console.log(">>> [Governance] Backup manual exportado pelo usuário.");
+    // No Web, capacitor-sqlite não exporta o binário .db facilmente via API.
+    // Sugerimos usar a visualização de dados ou exportar JSON se necessário.
+    console.warn(">>> [Governance] Exportação binária direta .db não suportada em Web via unified driver.");
+    alert("No navegador, o backup binário direto (.db) está desabilitado temporariamente. Use a sincronização com a nuvem.");
   }
 }
 

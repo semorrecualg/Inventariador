@@ -1,6 +1,6 @@
 {
-  "name": "Inventário de Ativo Imobilizado",
-  "description": "Sistema de gestão e inventário para ativos imobilizados com suporte a Capacitor.",
+  "name": "GBR v24.50 KARDEK",
+  "description": "Sistema Profissional de Inventário e Auditoria de Ativo Imobilizado (Engine Nativa).",
   "requestFramePermissions": [
     "camera",
     "geolocation"

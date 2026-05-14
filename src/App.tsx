@@ -66,7 +66,8 @@ import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
-import { requestPersistentStorage } from './services/localDbService';
+import { requestPersistentStorage, localDb } from './services/localDbService';
+import { requestAllPermissions } from './services/permissionsService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
@@ -425,6 +426,9 @@ const App: React.FC = () => {
 
     const initApp = async () => {
       try {
+        console.log(">>> [App] Solicitando permissões nativas...");
+        await requestAllPermissions();
+        
         const success = await sqliteService.init();
         if (!isMounted) return;
 
