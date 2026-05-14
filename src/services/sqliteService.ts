@@ -435,8 +435,9 @@ class SqliteService {
             CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
           `);
           
-          const pathRes = await CapacitorSQLite.getDatabaseDefaultDirectory();
-          this.nativePath = `${pathRes.path}/${dbName}.db`;
+          // No Capacitor SQLite v6, getDatabaseDefaultDirectory não é implementado no Android.
+          // O plugin já gerencia o caminho interno automaticamente.
+          this.nativePath = `Internal SQLite Directory (${dbName}.db)`;
           
           this.storageSource = 'PHYSICAL';
           this.isInitialized = true;
