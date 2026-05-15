@@ -12,16 +12,34 @@ export const requestAllPermissions = async () => {
   try {
     console.log('>>> [Permissions] Solicitando permissões nativas (Soberania Mobile)...');
     
-    // GPS
-    await Geolocation.requestPermissions();
+    // GPS - Solicitação explícita por tipo
+    try {
+      const locationStatus = await Geolocation.checkPermissions();
+      if (locationStatus.location !== 'granted') {
+        await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
+      }
+    } catch (e) {
+      console.warn('Falha ao solicitar GPS:', e);
+    }
     
     // Camera
-    await Camera.requestPermissions();
+    try {
+      const cameraStatus = await Camera.checkPermissions();
+      if (cameraStatus.camera !== 'granted') {
+        await Camera.requestPermissions();
+      }
+    } catch (e) {
+      console.warn('Falha ao solicitar Câmera:', e);
+    }
     
-    // Filesystem
-    const fsStatus = await Filesystem.checkPermissions();
-    if (fsStatus.publicStorage !== 'granted') {
-        await Filesystem.requestPermissions();
+    // Filesystem - Tratamento especial para Android 13+ (API 33+)
+    try {
+      const fsStatus = await Filesystem.checkPermissions();
+      if (fsStatus.publicStorage !== 'granted') {
+          await Filesystem.requestPermissions();
+      }
+    } catch (e) {
+      console.warn('Falha ao solicitar Armazenamento:', e);
     }
 
     console.log('>>> [Permissions] Ciclo de permissões concluído.');

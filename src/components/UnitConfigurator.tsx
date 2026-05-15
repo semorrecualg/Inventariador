@@ -42,6 +42,7 @@ interface UnitConfiguratorProps {
   units: string[];
   onBack: () => void;
   onUpdateConfigs?: (configs: UnitConfig[]) => void;
+  onNavigate?: (screen: AppScreen) => void;
   initialUnit?: string | null;
 }
 
@@ -62,7 +63,7 @@ const MapController = ({ center }: { center: [number, number] }) => {
   return null;
 };
 
-const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, initialUnit }) => {
+const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, onNavigate, initialUnit }) => {
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
@@ -157,10 +158,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSelectUnit = (unit: string) => {
+    if (!unit) return;
     setSelectedUnit(unit);
-    const existing = configs.find(c => 
-      c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase()
-    );
+    const existing = configs.find(c => {
+      if (!c.unit_id) return false;
+      return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
+    });
     if (existing) {
       setCurrentConfig(existing);
       setMapCenter([existing.lat, existing.lng]);
@@ -249,7 +252,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         setConfigs(prev => {
           const newConfigs = [...prev];
           const idx = newConfigs.findIndex(c => 
-            c.unit_id?.trim().toUpperCase() === selectedUnit.trim().toUpperCase()
+            (c.unit_id?.trim().toUpperCase() === (selectedUnit?.trim().toUpperCase() || ''))
           );
           if (idx >= 0) {
             newConfigs[idx] = { ...newConfigs[idx], ...configToSave };
@@ -259,7 +262,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           return newConfigs;
         });
         setCurrentConfig(prev => ({ ...prev, ...configToSave }));
-        if (onUpdateConfigs) onUpdateConfigs([...configs]);
         setTimeout(() => setIsSheetExpanded(false), 2000);
       } else {
         const errorMsg = typeof result === 'string' ? result : 'Falha na comunicação com o banco';
@@ -273,9 +275,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
   };
 
-  const filteredUnits = units.filter(u => 
-    u.toLowerCase().includes(unitSearchTerm.toLowerCase())
-  );
+  const filteredUnits = units.filter(u => {
+    if (!u || typeof u !== 'string') return false;
+    return u.toLowerCase().includes(unitSearchTerm.toLowerCase());
+  });
 
   return (
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
@@ -376,9 +379,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       <div className="absolute bottom-32 right-4 z-40 flex flex-col space-y-3">
         <button 
           onClick={() => {
-            const win = window as unknown as { pushScreen: (screen: AppScreen) => void };
-            if (win.pushScreen) {
-              win.pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
+            if (onNavigate) {
+              onNavigate(AppScreen.CAMPAIGN_MANAGEMENT);
+            } else {
+              console.warn('onNavigate not provided to UnitConfigurator');
             }
           }}
           className="w-12 h-12 bg-amber-500 text-black rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border border-amber-400 group relative pointer-events-auto"
@@ -468,7 +472,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                     </div>
                     <div className="max-h-[300px] overflow-y-auto pr-1 space-y-2 no-scrollbar">
                       {filteredUnits.map((unit) => {
-                        const isConfigured = configs.some(c => c.unit_id?.trim().toUpperCase() === unit?.trim().toUpperCase());
+                        const isConfigured = configs.some(c => {
+                          if (!c.unit_id || !unit) return false;
+                          return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
+                        });
                         return (
                           <button
                             key={unit}

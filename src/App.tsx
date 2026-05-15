@@ -1666,7 +1666,7 @@ const App: React.FC = () => {
 
     // 1.5 If user is logged in but on LOGIN or REGISTER, go to appropriate screen
     if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
-      const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || user.email.toLowerCase() === ADMIN_EMAIL;
+      const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || (user.email && user.email.toLowerCase() === ADMIN_EMAIL);
       setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
       return;
     }
@@ -1694,7 +1694,7 @@ const App: React.FC = () => {
       const userList: User[] = saved ? JSON.parse(saved) : [];
       
       // Admin Padrão
-      const adminIndex = userList.findIndex(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+      const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
       if (adminIndex === -1) {
         userList.push({ 
           username: "ADMINISTRADOR", 
@@ -3789,7 +3789,7 @@ const App: React.FC = () => {
     }
     for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
     
-    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
     
     // Se for auditor ou admin e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
     // mesmo que ainda não existam ativos locais para elas
@@ -4200,7 +4200,7 @@ const App: React.FC = () => {
                 } else { 
                   // Se for ADMIN, vai para seleção de módulo
                   // Se for AUDITOR, vai para seleção de unidade (empresa)
-                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || u.email.toLowerCase() === ADMIN_EMAIL;
+                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
                   if (isAdmin) {
                     pushScreen(AppScreen.MODULE_SELECTION); 
                   } else {
@@ -4537,15 +4537,15 @@ const App: React.FC = () => {
           )}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
-              isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL}
-              onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
-              databaseMode={databaseMode}
-              units={fullCompaniesWithStatus
-                .filter(c => {
-                  // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
-                  // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
-                  // No modo local, mostramos todas as unidades encontradas na base
-                  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+              isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL)}
+   onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
+   databaseMode={databaseMode}
+   units={fullCompaniesWithStatus
+     .filter(c => {
+       // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
+       // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
+       // No modo local, mostramos todas as unidades encontradas na base
+       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
                   const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
                   
                   if (isAdmin) return true; // Admin vê tudo que foi detectado
@@ -4584,7 +4584,7 @@ const App: React.FC = () => {
               }} 
               onDownload={handleDownloadUnit}
               onBack={async () => { 
-                const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email.toLowerCase() === ADMIN_EMAIL;
+                const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
                 if (isAdmin) {
                   setCurrentModule(null);
                   localStorage.removeItem('app_current_module');
@@ -4623,6 +4623,7 @@ const App: React.FC = () => {
               units={unitNames}
               onBack={popScreen}
               onUpdateConfigs={handleUpdateUnitConfigs}
+              onNavigate={pushScreen}
               initialUnit={selectedUnit}
             />
           )}
