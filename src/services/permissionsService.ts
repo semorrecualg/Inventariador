@@ -13,22 +13,26 @@ export const requestAllPermissions = async () => {
     console.log('>>> [Permissions] Solicitando permissões em massa (GPS, Câmera, Arquivos)...');
     
     // GPS
+    console.log('>>> [Permissions] Verificando GPS...');
     const gpsStatus = await Geolocation.checkPermissions();
     if (gpsStatus.location !== 'granted') {
+      console.log('>>> [Permissions] Solicitando GPS...');
       await Geolocation.requestPermissions();
     }
     
     // Camera
+    console.log('>>> [Permissions] Verificando Câmera...');
     const cameraStatus = await Camera.checkPermissions();
     if (cameraStatus.camera !== 'granted' || cameraStatus.photos !== 'granted') {
+      console.log('>>> [Permissions] Solicitando Câmera...');
       await Camera.requestPermissions();
     }
     
     // Filesystem
+    console.log('>>> [Permissions] Verificando Filesystem...');
     const fsStatus = await Filesystem.checkPermissions();
     if (fsStatus.publicStorage !== 'granted') {
-        // No Android 10+, requestPermissions pode não disparar nada se já tiver o acesso necessário ao sandbox,
-        // mas chamamos para garantir.
+        console.log('>>> [Permissions] Solicitando Filesystem...');
         await Filesystem.requestPermissions();
     }
 

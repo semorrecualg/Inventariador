@@ -6,6 +6,7 @@ import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, Fold
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatErrorMessage } from '../utils/errorUtils';
 
+import { generateUUID } from '../services/supabaseService';
 import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
 import { saveInventory } from '../services/persistenceService';
 
@@ -35,6 +36,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
   
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,7 +163,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     for (const row of rows) {
       if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
 
-      const id = row.id || row.ID || row.PRIMARYKEY || crypto.randomUUID();
+      const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
       
       // Robust column finding
       const rowKeys = Object.keys(row);
@@ -216,7 +218,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         window.location.reload();
       }, 1500);
     } catch (sqlError: any) {
-      alert(`Falha ao salvar no banco local: ${sqlError.message}`);
+      if (showModal) {
+        showModal('Erro no Banco Local', sqlError.message, 'error');
+      } else {
+        addLog(`Carga FALHOU: ${sqlError.message}`);
+      }
       setStatus('ERROR');
     }
   };
@@ -247,7 +253,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
         } catch (innerError: any) {
           addLog(`Erro interno: ${innerError.message}`);
-          alert(`Erro no processamento: ${innerError.message}`);
+          if (showModal) showModal('Erro de Processamento', innerError.message, 'error');
           setStatus('ERROR');
         }
       };
@@ -273,11 +279,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const handleHardResetLocal = async () => {
-    const confirmar = window.confirm(
-      "ATENÇÃO: Deseja realmente limpar todas as tabelas locais e reiniciar o banco em branco? Esta ação não afetará o arquivo físico nativo."
-    );
-    if (!confirmar) return;
+    setShowHardResetConfirm(true);
+  };
 
+  const executeHardReset = async () => {
+    setShowHardResetConfirm(false);
     setStatus('LOADING');
     addLog('Executando limpeza de governança...');
 
@@ -526,6 +532,43 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               Tentar Novamente
             </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Local Confirmation Modal for Reset */}
+      <AnimatePresence>
+        {showHardResetConfirm && (
+          <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-xs bg-white rounded-[2rem] p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center text-red-500 mb-4">
+                <RefreshCw size={32} className="animate-spin" />
+              </div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-2">Hard Reset</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase leading-relaxed mb-8">
+                Deseja realmente limpar todas as tabelas locais e reiniciar o banco em branco?
+              </p>
+              
+              <div className="flex flex-col gap-2 w-full">
+                <button 
+                  onClick={executeHardReset}
+                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-red-200 active:scale-95 transition-all"
+                >
+                  Confirmar Limpeza
+                </button>
+                <button 
+                  onClick={() => setShowHardResetConfirm(false)}
+                  className="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

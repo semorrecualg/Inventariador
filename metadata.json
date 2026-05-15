@@ -3,6 +3,7 @@
   "description": "Sistema Profissional de Inventário e Auditoria de Ativo Imobilizado (Engine Nativa).",
   "requestFramePermissions": [
     "camera",
-    "geolocation"
+    "geolocation",
+    "storage"
   ]
 }

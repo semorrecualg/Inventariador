@@ -5,9 +5,14 @@ const config: CapacitorConfig = {
   appName: 'Inventário Expert',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    cleartext: true,
+    allowNavigation: ['*']
   },
   plugins: {
+    Filesystem: {
+      androidIsEncryption: false
+    },
     CapacitorSQLite: {
       iosDatabaseLocation: 'Library/CapacitorDatabase',
       iosIsEncryption: false,

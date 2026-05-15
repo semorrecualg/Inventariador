@@ -14,9 +14,10 @@ import {
   Calendar,
   ChevronUp,
   ChevronDown,
-  Map as MapIcon
+  Map as MapIcon,
+  WifiOff
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { getCurrentLocation } from '../utils/gpsUtils';
@@ -80,6 +81,20 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
   const [isSheetExpanded, setIsSheetExpanded] = useState(false);
   const [unitSearchTerm, setUnitSearchTerm] = useState('');
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     loadConfigs();
@@ -298,6 +313,27 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           )}
         </MapContainer>
       </div>
+
+      {/* Banner de Orientação Offline */}
+      <AnimatePresence>
+        {isOffline && (
+          <motion.div 
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-md pointer-events-none"
+          >
+            <div className="bg-amber-500/90 backdrop-blur-md border border-amber-400 p-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-white">
+              <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <WifiOff size={16} className="text-white" />
+              </div>
+              <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
+                Ambiente Offline: O mapa visual está indisponível, mas o GPS Nativo continua operacional. Use o botão "Minha Posição" para fixar o ponto com precisão.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Header */}
       <div className="absolute top-4 left-0 right-0 z-50 px-4 pointer-events-none">

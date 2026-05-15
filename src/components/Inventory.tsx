@@ -39,7 +39,8 @@ import {
   WifiOff,
   Flashlight,
   ArrowLeft,
-  Target
+  Target,
+  ShieldOff
 } from 'lucide-react';
 
 import { QRCodeSVG } from 'qrcode.react';
@@ -276,6 +277,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [showGpsFallback, setShowGpsFallback] = useState(false);
+  const [isContingencyModalOpen, setIsContingencyModalOpen] = useState(false);
+  const [contingencyReason, setContingencyReason] = useState('');
+  const [contingencyLat, setContingencyLat] = useState<string>('');
+  const [contingencyLng, setContingencyLng] = useState<string>('');
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
@@ -714,14 +720,58 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleForceLocation = async () => {
     if (!selectedUnit) return;
     setIsGeocoding(true);
+    setShowGpsFallback(false);
+    
+    // Timer de 10 segundos para oferecer a contingência
+    const fallbackTimer = setTimeout(() => {
+      setShowGpsFallback(true);
+    }, 10000);
+
     try {
       const loc = await getCurrentLocation(true);
+      clearTimeout(fallbackTimer);
       if (loc && onUpdateUnitConfig) {
         await onUpdateUnitConfig(selectedUnit, loc.lat, loc.lng);
       }
     } catch (err) {
+      clearTimeout(fallbackTimer);
       console.error('Erro ao forçar localização:', err);
-      alert('Erro ao obter localização: ' + (err instanceof Error ? err.message : String(err)));
+      setShowGpsFallback(true);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleContingencySubmit = async () => {
+    const lat = parseFloat(contingencyLat);
+    const lng = parseFloat(contingencyLng);
+    
+    if (isNaN(lat) || isNaN(lng) || !contingencyReason.trim()) {
+      alert('POR FAVOR, PREENCHA AS COORDENADAS E A JUSTIFICATIVA.');
+      return;
+    }
+
+    if (!selectedUnit || !onUpdateUnitConfig) return;
+    
+    setIsGeocoding(true);
+    try {
+      // Importação dinâmica para evitar dependências circulares ou problemas de bundle
+      const { logAuditEvent } = await import('../services/supabaseService');
+      await logAuditEvent({
+        user_email: user?.email || 'unknown',
+        action: 'GPS_CONTINGENCY',
+        details: `GPS Âncora configurado via CONTINGÊNCIA para ${selectedUnit}. Motivo: ${contingencyReason.toUpperCase()}. Coordenadas: ${lat}, ${lng}`,
+        _tenantid: user?._tenantid || user?.tenantid
+      });
+
+      await onUpdateUnitConfig(selectedUnit, lat, lng);
+      setIsContingencyModalOpen(false);
+      setContingencyReason('');
+      setContingencyLat('');
+      setContingencyLng('');
+    } catch (err) {
+      console.error('Erro na contingência:', err);
+      alert('Erro ao salvar contingência.');
     } finally {
       setIsGeocoding(false);
     }
@@ -1388,28 +1438,49 @@ const Inventory: React.FC<InventoryProps> = ({
             )}
 
             {!unitConfig && (
-              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2 animate-pulse">
+              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2">
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
+                    {isGeocoding && <Loader2 size={12} className="animate-spin text-red-600" />}
+                  </div>
                   <p className="text-[9px] text-red-600 font-bold uppercase leading-tight mt-1">
                     Configuração de GPS obrigatória para liberar o inventário.
                   </p>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleForceLocation();
-                    }}
-                    disabled={isGeocoding}
-                    className="mt-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 shadow-lg shadow-red-500/20 disabled:opacity-50"
-                  >
-                    {isGeocoding ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
+                  
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleForceLocation();
+                      }}
+                      disabled={isGeocoding}
+                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 shadow-lg shadow-red-500/20 disabled:opacity-50"
+                    >
                       <Target size={12} />
+                      <span>{isGeocoding ? 'Detectando...' : 'Fixar Âncora (GPS)'}</span>
+                    </button>
+
+                    {showGpsFallback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsContingencyModalOpen(true);
+                        }}
+                        className="bg-white border-2 border-red-200 text-red-600 px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 animate-bounce"
+                      >
+                        <ShieldOff size={12} />
+                        <span>Modo Contingência</span>
+                      </button>
                     )}
-                    <span>Forçar Localização (Fix Âncora)</span>
-                  </button>
+                  </div>
+
+                  {showGpsFallback && (
+                    <p className="text-[8px] text-red-400 font-bold uppercase mt-2 leading-relaxed">
+                      Sinal de satélite fraco? Ative o modo contingência para auditoria em áreas cobertas.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -2246,6 +2317,86 @@ const Inventory: React.FC<InventoryProps> = ({
         </div>,
         document.body
       )}
+
+          {/* Modal de Contingência GPS */}
+          {isContingencyModalOpen && createPortal(
+            <div className="fixed inset-0 z-[12000] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl animate-fadeIn">
+              <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col">
+                <div className="bg-red-600 p-8 text-white text-center relative shrink-0">
+                  <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/30">
+                    <ShieldOff size={32} />
+                  </div>
+                  <h3 className="text-sm font-black uppercase tracking-widest mb-1">Modo Contingência</h3>
+                  <p className="text-[9px] font-bold text-white/70 uppercase tracking-tight">Falha Crítica no Sinal de Satélite</p>
+                </div>
+
+                <div className="p-8 space-y-6">
+                  <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                    <p className="text-[10px] font-bold text-red-700 uppercase leading-relaxed text-center">
+                      Utilize este modo apenas se estiver em galpões de metal ou subsolos sem cobertura de GPS.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
+                        <input 
+                          type="number" 
+                          step="any"
+                          value={contingencyLat}
+                          onChange={(e) => setContingencyLat(e.target.value)}
+                          placeholder="-0.0000"
+                          className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 outline-none focus:border-red-500 transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Longitude</label>
+                        <input 
+                          type="number" 
+                          step="any"
+                          value={contingencyLng}
+                          onChange={(e) => setContingencyLng(e.target.value)}
+                          placeholder="-0.0000"
+                          className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 outline-none focus:border-red-500 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Justificativa de Auditoria</label>
+                      <textarea 
+                        value={contingencyReason}
+                        onChange={(e) => setContingencyReason(e.target.value.toUpperCase())}
+                        placeholder="EX: GALPÃO DE METAL SEM SINAL..."
+                        rows={3}
+                        className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-bold text-slate-800 outline-none focus:border-red-500 transition-all resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <button 
+                      onClick={handleContingencySubmit}
+                      disabled={isGeocoding}
+                      className="w-full py-5 bg-red-600 text-white rounded-[24px] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl shadow-red-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center space-x-3"
+                    >
+                      {isGeocoding ? <Loader2 size={18} className="animate-spin" /> : <ShieldOff size={18} />}
+                      <span>Liberar Inventário</span>
+                    </button>
+                    
+                    <button 
+                      onClick={() => setIsContingencyModalOpen(false)}
+                      className="w-full py-4 text-slate-400 font-bold uppercase text-[9px] tracking-widest hover:text-slate-600 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
     </div>
   );

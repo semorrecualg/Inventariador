@@ -17,7 +17,7 @@ const defaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = defaultIcon;
-import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff } from 'lucide-react';
 
 // Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
 declare module 'leaflet' {
@@ -189,12 +189,19 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
       }
     });
 
-    // Calcular Convex Hull para cada grupo
+    // Calcular Convex Hull para cada grupo com TRAVA DE AMOSTRAGEM (max 3000)
     Object.keys(groups).forEach(loc => {
       const group = groups[loc];
       if (group.points.length >= 3) {
-        // d3.polygonHull espera [[x, y], ...]
-        const hull = d3.polygonHull(group.points);
+        let pointsToProcess = group.points;
+        
+        // OTIMIZAÇÃO: Limite de 3.000 registros para evitar UI Lag / OOM
+        if (pointsToProcess.length > 3000) {
+          console.warn(`>>> [AssetMap] Amostragem ativada para ${loc}: ${pointsToProcess.length} registros. Limitando a 3.000.`);
+          pointsToProcess = pointsToProcess.slice(0, 3000);
+        }
+
+        const hull = d3.polygonHull(pointsToProcess);
         if (hull) {
           group.hull = hull as [number, number][];
         }
@@ -203,6 +210,21 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
 
     return groups;
   }, [filteredAssets]);
+
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const heatPoints = useMemo(() => {
     const validAssets = filteredAssets.filter(a => a._lat && a._lng);
@@ -453,6 +475,27 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
           })}
         </MapContainer>
       </div>
+
+      {/* Banner de Orientação Offline */}
+      <AnimatePresence>
+        {isOffline && (
+          <motion.div 
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-[1002] w-[90%] max-w-md"
+          >
+            <div className="bg-amber-500/90 backdrop-blur-md border border-amber-400 p-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-white">
+              <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <WifiOff size={16} className="text-white" />
+              </div>
+              <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
+                Ambiente Offline: O mapa visual está indisponível, mas o GPS Nativo continua operacional. Sua auditoria está protegida localmente.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Header & Navegação (Stripe Style) */}
       <div className="absolute top-0 left-0 right-0 z-[1001] px-6 pt-6 pb-6 bg-gradient-to-b from-[#0F172A]/80 to-transparent pointer-events-none">

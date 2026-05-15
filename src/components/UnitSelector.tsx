@@ -11,7 +11,7 @@ import {
   RefreshCw, 
   Cloud, 
   Download, 
-  Navigation,
+  Navigation as NavigationIcon,
   Database,
   Calendar,
   ChevronRight
@@ -183,23 +183,23 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                              <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasData ? 'text-blue-600' : 'text-gray-300'}`}>Dados</span>
                            </div>
 
-                           {/* Ícone de GPS */}
-                           <div 
-                             className="flex flex-col items-center gap-1 group/icon"
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               if (isAdmin && onConfigGPS) onConfigGPS(unit.name);
-                             }}
-                           >
-                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
-                               unit.hasGps 
-                                 ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
-                                 : 'bg-gray-50 text-gray-300 border-gray-100'
-                             } ${isAdmin ? 'cursor-pointer hover:scale-110 active:scale-95 hover:bg-emerald-100' : ''}`}>
-                               <Navigation size={14} />
+                             {/* Ícone de GPS */}
+                             <div 
+                               className="flex flex-col items-center gap-1 group/icon"
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 if (isAdmin && onConfigGPS) onConfigGPS(unit.name);
+                               }}
+                             >
+                               <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
+                                 unit.hasGps 
+                                   ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
+                                   : 'bg-rose-50 text-rose-500 border-rose-100'
+                               } ${isAdmin ? 'cursor-pointer hover:scale-110 active:scale-95 hover:bg-emerald-100' : ''}`}>
+                                 <NavigationIcon size={14} />
+                               </div>
+                               <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>GPS</span>
                              </div>
-                             <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-gray-300'}`}>GPS</span>
-                           </div>
  
                            {/* Ícone de Campanha */}
                            <div 
