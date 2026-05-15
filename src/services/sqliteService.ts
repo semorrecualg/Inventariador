@@ -190,6 +190,16 @@ class SqliteService {
 
   private nativePath: string | null = null;
   
+  async getStoragePath(): Promise<string> {
+    const platform = Capacitor.getPlatform();
+    if (platform === 'android') {
+      return 'Directory.Data/gbr_kardek.db'; 
+    } else if (platform === 'ios') {
+      return 'Library/LocalDatabase';
+    }
+    return 'web_indexeddb';
+  }
+  
   constructor() {
     localforage.config({
       name: 'AuditoriaInteligente',
@@ -452,7 +462,7 @@ class SqliteService {
         await this.sqliteConnection.saveToStore(dbName);
         this.storageSource = 'PHYSICAL';
       } else {
-        this.nativePath = `Internal SQLite Directory (${dbName}.db)`;
+        this.nativePath = await this.getStoragePath();
         this.storageSource = 'PHYSICAL';
       }
 
