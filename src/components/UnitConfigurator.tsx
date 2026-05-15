@@ -18,6 +18,7 @@ import {
   WifiOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { getCurrentLocation } from '../utils/gpsUtils';
@@ -108,7 +109,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   }, [initialUnit, units, loading, selectedUnit]);
 
   useEffect(() => {
-    if (onUpdateConfigs && configs.length > 0) {
+    if (typeof onUpdateConfigs === 'function' && configs.length > 0) {
       onUpdateConfigs(configs);
     }
   }, [configs, onUpdateConfigs]);
@@ -206,14 +207,48 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setLocating(true);
     setMessage(null);
     try {
-      const location = await getCurrentLocation(true);
-      setCurrentConfig(prev => ({ ...prev, lat: location.lat, lng: location.lng }));
-      setMapCenter([location.lat, location.lng]);
-      setMessage({ text: 'Localização atual capturada com sucesso.', type: 'success' });
+      console.log('>>> [GPS] Iniciando captura nativa (Capacitor)...');
+      
+      // 1. Verifica permissão em runtime (Capacitor Nativo)
+      const permission = await Geolocation.checkPermissions();
+      if (permission.location !== 'granted') {
+        console.log('>>> [GPS] Solicitando permissões explicitamente...');
+        const request = await Geolocation.requestPermissions();
+        if (request.location !== 'granted') {
+          setMessage({ text: 'PERMISSÃO DE LOCALIZAÇÃO NEGADA PELO USUÁRIO.', type: 'error' });
+          return;
+        }
+      }
+
+      // 2. Captura posição de forma direta (async/await)
+      // Usamos timeout curto para não travar a interface
+      const coordinates = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000
+      });
+
+      if (coordinates && coordinates.coords) {
+        const { latitude, longitude } = coordinates.coords;
+        console.log(`>>> [GPS] Coordenadas nativas obtidas: ${latitude}, ${longitude}`);
+        
+        setCurrentConfig(prev => ({ ...prev, lat: latitude, lng: longitude }));
+        setMapCenter([latitude, longitude]);
+        setMessage({ text: 'Localização capturada com sucesso (GPS Nativo).', type: 'success' });
+      }
     } catch (err: unknown) {
-      const error = err as Error;
-      console.error('Erro ao obter localização:', error);
-      setMessage({ text: error.message || 'Não foi possível obter sua localização atual.', type: 'error' });
+      console.error('>>> [GPS] Falha na captura nativa:', err);
+      
+      // Fallback para o utilitário web caso o nativo falhe (ex: ambiente web ou erro de plugin)
+      try {
+        console.log('>>> [GPS] Tentando fallback para Web API...');
+        const location = await getCurrentLocation(true);
+        setCurrentConfig(prev => ({ ...prev, lat: location.lat, lng: location.lng }));
+        setMapCenter([location.lat, location.lng]);
+        setMessage({ text: 'Capturado via Web API (Fallback).', type: 'success' });
+      } catch (fallbackErr) {
+        console.error('>>> [GPS] Falha total na obtenção de posição:', fallbackErr);
+        setMessage({ text: 'Não foi possível obter a posição. Verifique o GPS do aparelho.', type: 'error' });
+      }
     } finally {
       setLocating(false);
     }
@@ -344,7 +379,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           {/* Navigation & Search Row */}
           <div className="flex items-center space-x-3 pointer-events-auto">
             <button 
-              onClick={onBack}
+              onClick={() => {
+                if (typeof onBack === 'function') {
+                  onBack();
+                } else {
+                  console.warn('onBack prop is not a function');
+                }
+              }}
               className="w-12 h-12 bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center text-slate-800 shadow-xl active:scale-95 transition-all"
             >
               <ArrowLeft size={22} />
@@ -379,10 +420,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       <div className="absolute bottom-32 right-4 z-40 flex flex-col space-y-3">
         <button 
           onClick={() => {
-            if (onNavigate) {
+            if (typeof onNavigate === 'function') {
               onNavigate(AppScreen.CAMPAIGN_MANAGEMENT);
             } else {
-              console.warn('onNavigate not provided to UnitConfigurator');
+              console.warn('onNavigate not provided or is not a function');
             }
           }}
           className="w-12 h-12 bg-amber-500 text-black rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border border-amber-400 group relative pointer-events-auto"

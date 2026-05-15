@@ -1,4 +1,6 @@
 
+import { Geolocation } from '@capacitor/geolocation';
+
 /**
  * Utilitário para captura de geolocalização (GPS)
  */
@@ -11,138 +13,112 @@ export interface GpsLocation {
 
 let lastLocation: GpsLocation | null = null;
 let lastTimestamp: number = 0;
-let watchId: number | null = null;
+let watchId: string | null = null;
 
 /**
  * Inicia o rastreamento autônomo em segundo plano
  */
-export const startAutonomousTracking = () => {
-  if (watchId !== null || !navigator.geolocation) return;
+export const startAutonomousTracking = async () => {
+  if (watchId !== null) return;
 
-  console.log('Iniciando Rastreamento Autônomo GBR v24.50...');
+  console.log('Iniciando Rastreamento Autônomo (Capacitor/Web)...');
   
-  const options: PositionOptions = {
-    enableHighAccuracy: false,
-    timeout: 15000,
-    maximumAge: 60000
-  };
-
-  watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      lastLocation = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
-      };
-      lastTimestamp = Date.now();
-      // console.log('Autônomo: Coordenada renovada', lastLocation.lat, lastLocation.lng);
-    },
-    (err) => {
-      if (err.message.includes('permissions policy')) {
-        console.warn('GPS: Bloqueado por política de permissões do iframe.');
-        stopAutonomousTracking(); // Para de tentar se estiver bloqueado por política
-      } else {
-        console.warn('Autônomo: Erro no rastreio em tempo real', err.message);
+  try {
+    watchId = await Geolocation.watchPosition(
+      {
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 60000
+      },
+      (position, err) => {
+        if (err) {
+          console.warn('Autônomo: Erro no rastreio', err.message);
+          return;
+        }
+        if (position) {
+          lastLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          };
+          lastTimestamp = Date.now();
+        }
       }
-    },
-    options
-  );
+    );
+  } catch (e) {
+    console.error('Falha ao iniciar watchPosition:', e);
+  }
 };
 
 /**
  * Para o rastreamento autônomo
  */
-export const stopAutonomousTracking = () => {
+export const stopAutonomousTracking = async () => {
   if (watchId !== null) {
-    navigator.geolocation.clearWatch(watchId);
+    await Geolocation.clearWatch({ id: watchId });
     watchId = null;
     console.log('Rastreamento Autônomo Finalizado.');
   }
 };
 
-export const getCurrentLocation = (forceRefresh = false): Promise<GpsLocation> => {
+export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocation> => {
   const now = Date.now();
   
   // Retorna cache se for recente (30 segundos) e não for forçado
   if (!forceRefresh && lastLocation && (now - lastTimestamp < 30000)) {
-    return Promise.resolve(lastLocation);
+    return lastLocation;
   }
 
-  return new Promise((resolve, reject) => {
-    const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true' || localStorage.getItem('gbr_field_mode') === 'true';
-
-    if (!navigator.geolocation) {
-      if (isBypassed) {
-        const fallbackLoc = { lat: -15.7942, lng: -47.8822, accuracy: 100 };
-        resolve(fallbackLoc);
-      } else {
-        reject(new Error('Geolocalização não suportada pelo navegador.'));
-      }
-      return;
-    }
-
-    const options: PositionOptions = {
+  try {
+    // Tenta Capacitor (Nativo) primeiro
+    const coordinates = await Geolocation.getCurrentPosition({
       enableHighAccuracy: true,
-      timeout: 20000, // Aumentado para 20s para desktops/redes lentas
-      maximumAge: 30000 // Cache de 30s
-    };
+      timeout: 10000
+    });
 
-    const success = (position: GeolocationPosition) => {
+    if (coordinates && coordinates.coords) {
       const newLoc = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
+        lat: coordinates.coords.latitude,
+        lng: coordinates.coords.longitude,
+        accuracy: coordinates.coords.accuracy
       };
       lastLocation = newLoc;
       lastTimestamp = Date.now();
-      console.log(`>>> [GPS] Localização capturada com sucesso: ${newLoc.lat}, ${newLoc.lng} (Precisão: ${newLoc.accuracy}m)`);
-      resolve(newLoc);
-    };
+      return newLoc;
+    }
+  } catch (err) {
+    console.warn('>>> [GPS] Falha no Geolocation.getCurrentPosition Nativo, tentando Web API...', err);
+  }
 
-    const error = (err: GeolocationPositionError) => {
-      // Se falhou com alta precisão, tenta novamente com baixa precisão imediatamente
-      if (options.enableHighAccuracy) {
-        console.warn('>>> [GPS] Falha na alta precisão, tentando baixa precisão...', err.message);
-        options.enableHighAccuracy = false;
-        options.timeout = 10000; // Mais 10s para baixa precisão
-        navigator.geolocation.getCurrentPosition(success, finalError, options);
-      } else {
-        finalError(err);
-      }
-    };
+  // Fallback para Web Geolocation API
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocalização não suportada.'));
+      return;
+    }
 
-    const finalError = (err: GeolocationPositionError) => {
-      let msg = 'Erro ao obter localização.';
-      switch (err.code) {
-        case err.PERMISSION_DENIED:
-          msg = 'Permissão de localização negada pelo usuário.';
-          break;
-        case err.POSITION_UNAVAILABLE:
-          msg = 'Informação de localização indisponível.';
-          break;
-        case err.TIMEOUT:
-          msg = 'Tempo esgotado ao tentar obter localização.';
-          break;
-      }
-      
-      const isBypassed = localStorage.getItem('gbr_gps_bypass') === 'true' || localStorage.getItem('gbr_field_mode') === 'true';
-      if (isBypassed) {
-        console.warn('GPS Bypassed (Field Mode or Dev Mode): Fornecendo coordenadas de teste (Brasília).');
-        const fallbackLoc = { lat: -15.7942, lng: -47.8822, accuracy: 100 };
-        lastLocation = fallbackLoc;
-        resolve(fallbackLoc);
-        return;
-      }
-
-      if (lastLocation) {
-        console.warn('Usando localização em cache devido a erro final:', msg);
-        resolve(lastLocation);
-      } else {
-        reject(new Error(msg));
-      }
-    };
-
-    navigator.geolocation.getCurrentPosition(success, error, options);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const newLoc = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        };
+        lastLocation = newLoc;
+        lastTimestamp = Date.now();
+        resolve(newLoc);
+      },
+      (err) => {
+        let msg = 'Erro ao obter localização.';
+        if (err.code === err.PERMISSION_DENIED) msg = 'Permissão negada.';
+        if (lastLocation) {
+          resolve(lastLocation);
+        } else {
+          reject(new Error(msg));
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
   });
 };
 
