@@ -14,6 +14,16 @@ const FULL_SCHEMA = `
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS unit_anchors (
+    unit_id TEXT PRIMARY KEY,
+    tenant_id TEXT,
+    lat REAL,
+    lng REAL,
+    radius_meters REAL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS AUDIT_LOG (
     id TEXT PRIMARY KEY,
     usuario TEXT,
@@ -701,6 +711,44 @@ class SqliteService {
   // --- Configurações ---
   async getUnitConfigs(tenantId: string): Promise<Record<string, string | number | boolean | null>[]> {
     return await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tenantId]);
+  }
+
+  async getUnitConfigsFromSql(tenantId: string): Promise<UnitConfig[]> {
+    try {
+      const rows = await this.query("SELECT * FROM unit_anchors WHERE tenant_id = ?", [tenantId]);
+      return rows.map(row => ({
+        id: row.unit_id as string,
+        _tenantid: row.tenant_id as string,
+        _unitid: row.unit_id as string,
+        tenant_id: row.tenant_id as string,
+        unit_id: row.unit_id as string,
+        lat: Number(row.lat),
+        lng: Number(row.lng),
+        radius_meters: Number(row.radius_meters),
+        is_active: true,
+        updated_at: row.updated_at as string,
+        updated_by: row.updated_by as string
+      })) as UnitConfig[];
+    } catch (e) {
+      console.error("Erro ao buscar unit_anchors no SQLite:", e);
+      return [];
+    }
+  }
+
+  async saveUnitConfigToSql(config: any) {
+    const unitId = config._unitid || config.unit_id;
+    const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
+    const lat = Number(config.lat);
+    const lng = Number(config.lng);
+    const radius = Number(config.radius_meters || 500);
+    const updatedBy = String(config.updated_by || 'system');
+    const updatedAt = new Date().toISOString();
+
+    await this.execute(
+      `INSERT OR REPLACE INTO unit_anchors (unit_id, tenant_id, lat, lng, radius_meters, updated_at, updated_by) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [unitId, tenantId, lat, lng, radius, updatedAt, updatedBy]
+    );
   }
 
   async getAssetCount(): Promise<number> {

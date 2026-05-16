@@ -207,47 +207,44 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setLocating(true);
     setMessage(null);
     try {
-      console.log('>>> [GPS] Iniciando captura nativa (Capacitor)...');
+      console.log('>>> [GPS] Iniciando captura nativa (Capacitor/Soberano)...');
       
-      // 1. Verifica permissão em runtime (Capacitor Nativo)
-      const permission = await Geolocation.checkPermissions();
-      if (permission.location !== 'granted') {
-        console.log('>>> [GPS] Solicitando permissões explicitamente...');
-        const request = await Geolocation.requestPermissions();
-        if (request.location !== 'granted') {
-          setMessage({ text: 'PERMISSÃO DE LOCALIZAÇÃO NEGADA PELO USUÁRIO.', type: 'error' });
+      // 1. Verificação de Permissão Explícita
+      const status = await Geolocation.checkPermissions();
+      if (status.location !== 'granted') {
+        const req = await Geolocation.requestPermissions();
+        if (req.location !== 'granted') {
+          setMessage({ text: 'PERMISSÃO GPS NEGADA NO SISTEMA.', type: 'error' });
+          setLocating(false);
           return;
         }
       }
 
-      // 2. Captura posição de forma direta (async/await)
-      // Usamos timeout curto para não travar a interface
-      const coordinates = await Geolocation.getCurrentPosition({
+      // 2. Captura Direta
+      const pos = await Geolocation.getCurrentPosition({
         enableHighAccuracy: true,
-        timeout: 10000
+        timeout: 15000,
+        maximumAge: 0
       });
 
-      if (coordinates && coordinates.coords) {
-        const { latitude, longitude } = coordinates.coords;
-        console.log(`>>> [GPS] Coordenadas nativas obtidas: ${latitude}, ${longitude}`);
-        
+      if (pos && pos.coords) {
+        const { latitude, longitude } = pos.coords;
         setCurrentConfig(prev => ({ ...prev, lat: latitude, lng: longitude }));
         setMapCenter([latitude, longitude]);
-        setMessage({ text: 'Localização capturada com sucesso (GPS Nativo).', type: 'success' });
+        setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE!', type: 'success' });
+      } else {
+        throw new Error('Hardware retornou objeto vazio');
       }
-    } catch (err: unknown) {
-      console.error('>>> [GPS] Falha na captura nativa:', err);
+    } catch (e: any) {
+      console.warn('>>> [GPS] Falha nativa, tentando Web API:', e.message || 'Desconhecido');
       
-      // Fallback para o utilitário web caso o nativo falhe (ex: ambiente web ou erro de plugin)
       try {
-        console.log('>>> [GPS] Tentando fallback para Web API...');
-        const location = await getCurrentLocation(true);
-        setCurrentConfig(prev => ({ ...prev, lat: location.lat, lng: location.lng }));
-        setMapCenter([location.lat, location.lng]);
-        setMessage({ text: 'Capturado via Web API (Fallback).', type: 'success' });
-      } catch (fallbackErr) {
-        console.error('>>> [GPS] Falha total na obtenção de posição:', fallbackErr);
-        setMessage({ text: 'Não foi possível obter a posição. Verifique o GPS do aparelho.', type: 'error' });
+        const webLoc = await getCurrentLocation(true);
+        setCurrentConfig(prev => ({ ...prev, lat: webLoc.lat, lng: webLoc.lng }));
+        setMapCenter([webLoc.lat, webLoc.lng]);
+        setMessage({ text: 'POSIÇÃO FIXADA (WEB FALLBACK).', type: 'success' });
+      } catch (fallbackError: any) {
+        setMessage({ text: `ERRO GPS: ${fallbackError.message || 'Sinal indisponível'}`, type: 'error' });
       }
     } finally {
       setLocating(false);
@@ -255,56 +252,58 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   const handleSave = async () => {
-    const lat = currentConfig.lat !== undefined && currentConfig.lat !== null ? Number(currentConfig.lat) : NaN;
-    const lng = currentConfig.lng !== undefined && currentConfig.lng !== null ? Number(currentConfig.lng) : NaN;
+    const l_lat = currentConfig.lat;
+    const l_lng = currentConfig.lng;
+    const l_radius = currentConfig.radius_meters || 500;
 
-    if (!selectedUnit || isNaN(lat) || isNaN(lng)) {
-      setMessage({ text: 'COORDENADAS INVÁLIDAS. CLIQUE NO MAPA OU USE "MINHA POSIÇÃO".', type: 'error' });
+    if (!selectedUnit || l_lat === undefined || l_lng === undefined || isNaN(Number(l_lat))) {
+      setMessage({ text: 'SELECIONE UMA UNIDADE E MARQUE A POSIÇÃO NO MAPA.', type: 'error' });
       return;
     }
 
     setSaving(true);
     setMessage(null);
 
-    const configToSave: UnitConfig = {
-      id: currentConfig.id,
-      _tenantid: user._tenantid || user.tenantid || 'CICOPAL',
+    const configData: UnitConfig = {
+      _tenantid: user?._tenantid || user?.tenantid || 'CICOPAL',
       _unitid: selectedUnit,
-      tenant_id: user._tenantid || user.tenantid || 'CICOPAL',
+      tenant_id: user?._tenantid || user?.tenantid || 'CICOPAL',
       unit_id: selectedUnit,
-      lat: lat,
-      lng: lng,
-      radius_meters: currentConfig.radius_meters || 500,
+      lat: Number(l_lat),
+      lng: Number(l_lng),
+      radius_meters: Number(l_radius),
       is_active: true,
-      updated_by: user.email,
+      updated_by: user?.email || 'auditor',
       updated_at: new Date().toISOString()
     };
 
     try {
-      const result = await saveUnitConfig(configToSave);
-      if (result === true) {
-        setMessage({ text: 'CONFIGURAÇÃO GRAVADA COM SUCESSO!', type: 'success' });
+      // O método saveUnitConfig (em supabaseService) agora está roteado para SQLite no modo INTERNO
+      const ok = await saveUnitConfig(configData);
+      
+      if (ok === true || (typeof ok === 'string' && ok.includes('sucesso'))) {
+        setMessage({ text: 'ÂNCORA CONFIGURADA E REGISTRADA NO DISPOSITIVO!', type: 'success' });
+        
+        // Atualiza estado local
         setConfigs(prev => {
-          const newConfigs = [...prev];
-          const idx = newConfigs.findIndex(c => 
-            (c.unit_id?.trim().toUpperCase() === (selectedUnit?.trim().toUpperCase() || ''))
-          );
-          if (idx >= 0) {
-            newConfigs[idx] = { ...newConfigs[idx], ...configToSave };
-          } else {
-            newConfigs.push(configToSave);
-          }
-          return newConfigs;
+          const list = [...prev];
+          const i = list.findIndex(c => c.unit_id === selectedUnit);
+          if (i >= 0) list[i] = { ...list[i], ...configData };
+          else list.push(configData);
+          return list;
         });
-        setCurrentConfig(prev => ({ ...prev, ...configToSave }));
+
+        // Notifica o componente pai se houver callback
+        if (typeof onUpdateConfigs === 'function') {
+          onUpdateConfigs(configs);
+        }
+
         setTimeout(() => setIsSheetExpanded(false), 2000);
       } else {
-        const errorMsg = typeof result === 'string' ? result : 'Falha na comunicação com o banco';
-        setMessage({ text: `ERRO AO GRAVAR: ${errorMsg}`, type: 'error' });
+        setMessage({ text: `NAO FOI POSSÍVEL GRAVAR: ${ok}`, type: 'error' });
       }
-    } catch (err: unknown) {
-      const error = err as Error;
-      setMessage({ text: `ERRO CRÍTICO: ${error.message || 'Falha interna'}`, type: 'error' });
+    } catch (saveErr: any) {
+      setMessage({ text: `ERRO DE PERSISTÊNCIA: ${saveErr.message || 'Falha no banco local'}`, type: 'error' });
     } finally {
       setSaving(false);
     }

@@ -2116,51 +2116,57 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   try {
     const mode = localStorage.getItem('app_database_mode');
-  const isInternal = mode === 'INTERNAL';
-  
-  const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
-  const unitId = config._unitid || config.unit_id;
-  const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
-  
-  const payload = {
-    _unitid: unitId,
-    _tenantid: tenantId,
-    unit_id: unitId, // Legado
-    tenant_id: tenantId, // Legado
-    lat: Number(config.lat),
-    lng: Number(config.lng),
-    radius_meters: Number(config.radius_meters),
-    is_active: Boolean(config.is_active),
-    updated_by: String(config.updated_by || 'system'),
-    updated_at: new Date().toISOString()
-  };
+    const isInternal = mode === 'INTERNAL';
+    
+    // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
+    try {
+      const { sqliteService } = await import('./sqliteService');
+      await sqliteService.saveUnitConfigToSql(config);
+      console.log('>>> [Persistence] GPS persistido no SQLite Físico.');
+    } catch (sqlErr) {
+      console.error('>>> [Persistence] Falha ao gravar GPS no SQLite:', sqlErr);
+    }
 
-  console.log('>>> [Persistence] Salvando GPS Local-First:', unitKey);
+    const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
+    const unitId = config._unitid || config.unit_id;
+    const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
+    
+    const payload = {
+      _unitid: unitId,
+      _tenantid: tenantId,
+      unit_id: unitId, // Legado
+      tenant_id: tenantId, // Legado
+      lat: Number(config.lat),
+      lng: Number(config.lng),
+      radius_meters: Number(config.radius_meters),
+      is_active: Boolean(config.is_active),
+      updated_by: String(config.updated_by || 'system'),
+      updated_at: new Date().toISOString()
+    };
 
-  // 1. SALVAMENTO LOCAL (Obrigatório em ambos os modos para offline-first)
-  const localConfigs = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
-  localConfigs[unitKey] = payload;
-  localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
+    console.log('>>> [Persistence] Salvando GPS Local-First (Cache):', unitKey);
 
-  // Mirroring in Dexie for durability
-  try {
-    await localDb.unitConfigs.put({
-      ...payload,
-      unit_id: unitId,
-      tenant_id: tenantId
-    } as UnitConfig);
-    console.log('>>> [Persistence] GPS espelhado no Dexie.');
-  } catch (dexieErr) {
-    console.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
-  }
+    // 2. SALVAMENTO CACHE (LocalStorage + Dexie)
+    const localConfigs = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+    localConfigs[unitKey] = payload;
+    localStorage.setItem('local_unit_configs', JSON.stringify(localConfigs));
 
-  // Se for modo INTERNO, encerramos aqui (Isolamento Total)
-  if (isInternal) {
-    console.log('>>> [Local] GPS salvo localmente. Modo Mobile Puro ativo.');
-    return true;
-  }
+    try {
+      await localDb.unitConfigs.put({
+        ...payload,
+        unit_id: unitId,
+        tenant_id: tenantId
+      } as UnitConfig);
+    } catch (dexieErr) {
+      console.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
+    }
 
-  if (!supabase) return false;
+    // Se for modo INTERNO, encerramos aqui (Isolamento Total)
+    if (isInternal) {
+      return true;
+    }
+
+    if (!supabase) return false;
 
   // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Apenas modo SUPABASE)
   const syncToCloud = async () => {
@@ -2233,21 +2239,22 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       }
     }
 
-    // 1.1 Carrega do SQLite Físico se ainda estiver vazio e for modo interno
-    if (Object.keys(localData).length === 0 && isInternal) {
-      try {
-        const sqlConfig = await sqliteService.getInventoryConfig();
-        if (sqlConfig && sqlConfig.unitConfigs && Array.isArray(sqlConfig.unitConfigs)) {
-          console.log('>>> [Persistence] Recuperando UnitConfigs do SQLite físico...');
-          sqlConfig.unitConfigs.forEach((c: UnitConfig) => {
-            const key = `${c._tenantid || c.tenant_id}_${c._unitid || c.unit_id}`.replace(/\s+/g, '_');
-            localData[key] = c;
-          });
-          localStorage.setItem('local_unit_configs', JSON.stringify(localData));
+    // 1.1 Carrega do SQLite Físico (Soberania de Dados)
+    try {
+      const { sqliteService } = await import('./sqliteService');
+      const sqlConfigs = await sqliteService.getUnitConfigsFromSql(tenantid);
+      if (sqlConfigs && sqlConfigs.length > 0) {
+        sqlConfigs.forEach(c => {
+          const key = `${tenantid}_${c.unit_id}`.replace(/\s+/g, '_');
+          configs[key] = c;
+        });
+        if (isInternal) {
+           console.log(`>>> [SQL] fetchUnitConfigs retornando ${Object.values(configs).length} configs do SQLite.`);
+           return Object.values(configs);
         }
-      } catch (err) {
-        console.warn('>>> [Persistence] Erro ao recuperar UnitConfigs do SQLite:', err);
       }
+    } catch (err) {
+      console.warn('>>> [Persistence] Erro ao recuperar UnitConfigs do SQLite:', err);
     }
 
     Object.values(localData).forEach((c: unknown) => {
