@@ -38,6 +38,34 @@ const DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Error Boundary para isolamento total do Leaflet
+class MapErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error('>>> [MAP] Falha crítica no Leaflet:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full bg-slate-950 p-12 text-center">
+          <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
+            <WifiOff size={32} className="text-slate-600" />
+          </div>
+          <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Ambiente Soberano</h2>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed max-w-[240px]">
+            Interface Visual de Mapa Desativada por Falha de Driver ou Conexão. O Hardware GPS continua capturando a posição atual normalmente.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 interface UnitConfiguratorProps {
   user: User;
   units: string[];
@@ -318,37 +346,39 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
       {/* Background Map */}
       <div className="absolute inset-0 z-0">
-        <MapContainer 
-          center={mapCenter} 
-          zoom={15} 
-          zoomControl={false}
-          style={{ height: '100%', width: '100%' }}
-          className="z-0"
-        >
-          {mapType === 'street' ? (
-            <TileLayer
-              attribution='&copy; OpenStreetMap'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-          ) : (
-            <TileLayer
-              attribution='Tiles &copy; Esri'
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            />
-          )}
-          <MapController center={mapCenter} />
-          <MapEvents onClick={handleMapClick} />
-          {currentConfig.lat && currentConfig.lng && (
-            <>
-              <Marker position={[currentConfig.lat, currentConfig.lng]} />
-              <Circle 
-                center={[currentConfig.lat, currentConfig.lng]} 
-                radius={currentConfig.radius_meters || 500}
-                pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15, weight: 2 }}
+        <MapErrorBoundary>
+          <MapContainer 
+            center={mapCenter} 
+            zoom={15} 
+            zoomControl={false}
+            style={{ height: '100%', width: '100%' }}
+            className="z-0"
+          >
+            {mapType === 'street' ? (
+              <TileLayer
+                attribution='&copy; OpenStreetMap'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-            </>
-          )}
-        </MapContainer>
+            ) : (
+              <TileLayer
+                attribution='Tiles &copy; Esri'
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              />
+            )}
+            <MapController center={mapCenter} />
+            <MapEvents onClick={handleMapClick} />
+            {currentConfig.lat && currentConfig.lng && (
+              <>
+                <Marker position={[currentConfig.lat, currentConfig.lng]} />
+                <Circle 
+                  center={[currentConfig.lat, currentConfig.lng]} 
+                  radius={currentConfig.radius_meters || 500}
+                  pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15, weight: 2 }}
+                />
+              </>
+            )}
+          </MapContainer>
+        </MapErrorBoundary>
       </div>
 
       {/* Banner de Orientação Offline */}
@@ -542,7 +572,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 ) : (
                   /* Configuration Form */
                   <div className="space-y-6">
-                    {/* Lat/Lng Grid */}
+                    {/* Lat/Lng Grid - Always Available Fallback */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
@@ -551,7 +581,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                             type="number" 
                             step="any"
                             value={currentConfig.lat || ''} 
-                            onChange={(e) => setCurrentConfig(prev => ({ ...prev, lat: parseFloat(e.target.value) }))}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) setCurrentConfig(prev => ({ ...prev, lat: val }));
+                            }}
                             className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
                             placeholder="-0.0000"
                           />
@@ -564,7 +597,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                             type="number" 
                             step="any"
                             value={currentConfig.lng || ''} 
-                            onChange={(e) => setCurrentConfig(prev => ({ ...prev, lng: parseFloat(e.target.value) }))}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) setCurrentConfig(prev => ({ ...prev, lng: val }));
+                            }}
                             className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
                             placeholder="-0.0000"
                           />
