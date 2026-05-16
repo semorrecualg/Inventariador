@@ -352,7 +352,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       title: 'CONTROLE CONTÁBIL',
       fields: [
         { key: 'STATUS', label: 'STATUS OPERACIONAL', icon: ShieldCheck },
-        { key: 'CONTACONTABIL', label: TYPE_LABELS.ACCOUNT, icon: Briefcase },
+        { key: 'conta_contabil', label: TYPE_LABELS.ACCOUNT, icon: Briefcase },
         { key: 'DATABAIXA', label: 'DATA DE BAIXA', icon: Calendar },
         { key: 'Sn1_recno', label: 'ID PROTHEUS (SN1)', icon: Hash },
         { key: 'Sn3_recno', label: 'ID PROTHEUS (SN3)', icon: Hash }
@@ -369,8 +369,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     {
       title: 'GEOLOCALIZAÇÃO',
       fields: [
-        { key: '_lat', label: 'LATITUDE', icon: MapPin },
-        { key: '_lng', label: 'LONGITUDE', icon: MapPin }
+        { key: 'latitude', label: 'LATITUDE', icon: MapPin },
+        { key: 'longitude', label: 'LONGITUDE', icon: MapPin }
       ]
     }
   ], [unitMapping, ccMapping]);

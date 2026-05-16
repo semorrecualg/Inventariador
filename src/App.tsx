@@ -55,7 +55,7 @@ import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
 import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -798,12 +798,12 @@ const App: React.FC = () => {
       let hasRepaired = false;
       const repairedAssets = inventory.assets.map(a => {
         const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-        if (isConferido && (!a._lat || !a._lng)) {
+        if (isConferido && (!a.latitude || !a.longitude)) {
           const unitId = a.UNIDADE || a._unidade;
           const config = inventory.unitConfigs?.find(c => c.unit_id === unitId);
           if (config && config.lat && config.lng) {
             hasRepaired = true;
-            return { ...a, _lat: config.lat, _lng: config.lng };
+            return { ...a, latitude: config.lat, longitude: config.lng };
           }
         }
         return a;
@@ -1313,7 +1313,7 @@ const App: React.FC = () => {
         NOMEFORNECEDOR: '',
         NOTAFISCAL: '',
         ENDERECO: '',
-        CONTACONTABIL: '',
+        conta_contabil: '',
         CENTRODECUSTO: '',
         DATAAQUISIC_START: '',
         DATAAQUISIC_END: '',
@@ -1329,7 +1329,7 @@ const App: React.FC = () => {
         NOMEFORNECEDOR: '',
         NOTAFISCAL: '',
         ENDERECO: '',
-        CONTACONTABIL: '',
+        conta_contabil: '',
         CENTRODECUSTO: '',
         DATAAQUISIC_START: '',
         DATAAQUISIC_END: '',
@@ -2596,8 +2596,8 @@ const App: React.FC = () => {
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
         console.log(`>>> [DBA] Persistindo no SQLite ANTES de atualizar a UI...`);
-        // No modo interno, salvamos o registro no SQLite físico via bulkInsert que já trata a transação
-        await sqliteService.bulkInsertAssets([updatedAsset]);
+        // No modo interno, salvamos o registro no SQLite físico via localDb que já trata a transação e auditoria
+        await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
       } else {
         await syncAssetsToCloud([updatedAsset], user?.tenantid);
       }
@@ -2728,7 +2728,7 @@ const App: React.FC = () => {
     
     const assetWithHistory = {
       ...assetWithGps,
-      _campaignId: inventory.currentCampaignId || assetWithGps._campaignId,
+      currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
       _auditor: user?.email || assetWithGps._auditor,
@@ -2744,25 +2744,30 @@ const App: React.FC = () => {
         // Se falhar ou timeout, usa fallback da unidade
         const loc = await Promise.race([
           getCurrentLocation(),
-          new Promise<{lat: number, lng: number}>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+          new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
         ]).catch(e => {
           console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
+            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
-          return { lat: 0, lng: 0 };
+          return { lat: 0, lng: 0, altitude: 0 };
         });
 
-        console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}`);
+        console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
         
         // Injeta GPS no objeto e no registro da auditoria
-        assetWithHistory._lat = loc.lat;
-        assetWithHistory._lng = loc.lng;
+        assetWithHistory.latitude = loc.lat;
+        assetWithHistory.longitude = loc.lng;
+        
+        // GBR v25: Processamento Vertical (Z-Axis)
+        assetWithHistory._altitude_metros = loc.altitude || 0;
+        const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
+        assetWithHistory._id_andar = convertAltitudeToFloor(loc.altitude);
         
         // Atualiza a última entrada da trilha com a posição exata
         const lastIndex = assetWithHistory._history.length - 1;
         if (lastIndex >= 0) {
-          assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}]`;
+          assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}, Andar: ${assetWithHistory._id_andar}]`;
         }
       } catch (e) {
         console.error(">>> [GPS] Erro fatal na lógica de captura:", e);
@@ -3089,8 +3094,8 @@ const App: React.FC = () => {
         const updates = { 
           ...a, 
           ...(manualUpdates || {}), 
-          _lat: gpsCoords.lat, 
-          _lng: gpsCoords.lng,
+          latitude: gpsCoords.lat, 
+          longitude: gpsCoords.lng,
           _origemTransacao: origin // Aplica o código fixo
         };
         
@@ -3750,7 +3755,7 @@ const App: React.FC = () => {
         stats.unitIds.add(normalizeKey(a._unitid));
       }
 
-      if (!stats.hasAssetCampaign && !!a._campaignId) {
+      if (!stats.hasAssetCampaign && !!a.currentCampaignId) {
         stats.hasAssetCampaign = true;
       }
     }

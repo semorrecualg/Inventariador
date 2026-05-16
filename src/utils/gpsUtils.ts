@@ -9,6 +9,7 @@ export interface GpsLocation {
   lat: number;
   lng: number;
   accuracy?: number;
+  altitude?: number | null;
 }
 
 let lastLocation: GpsLocation | null = null;
@@ -39,7 +40,8 @@ export const startAutonomousTracking = async () => {
           lastLocation = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-            accuracy: position.coords.accuracy
+            accuracy: position.coords.accuracy,
+            altitude: position.coords.altitude
           };
           lastTimestamp = Date.now();
         }
@@ -80,7 +82,8 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
       const newLoc = {
         lat: coordinates.coords.latitude,
         lng: coordinates.coords.longitude,
-        accuracy: coordinates.coords.accuracy
+        accuracy: coordinates.coords.accuracy,
+        altitude: coordinates.coords.altitude
       };
       lastLocation = newLoc;
       lastTimestamp = Date.now();
@@ -102,7 +105,8 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
         const newLoc = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-          accuracy: position.coords.accuracy
+          accuracy: position.coords.accuracy,
+          altitude: position.coords.altitude
         };
         lastLocation = newLoc;
         lastTimestamp = Date.now();
@@ -138,4 +142,15 @@ export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c;
+};
+
+/**
+ * Converte altitude bruta em andar (Lógica GBR v25)
+ * Assume 3.0 metros por pavimento
+ */
+export const convertAltitudeToFloor = (altitude: number | null | undefined): number => {
+  if (altitude === null || altitude === undefined) return 0;
+  // Se altitude for negativa (subsolo), arredonda pra baixo
+  if (altitude < 0) return Math.floor(altitude / 3.0);
+  return Math.floor(altitude / 3.0);
 };

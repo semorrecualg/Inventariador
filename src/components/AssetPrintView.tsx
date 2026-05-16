@@ -132,7 +132,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                         {asset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO CADASTRAL'}
                         </h2>
                         <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                            {asset.CONTACONTABIL || 'SEM CONTA'} | {asset.CENTRODECUSTO || 'SEM CC'}
+                            {asset.conta_contabil || 'SEM CONTA'} | {asset.CENTRODECUSTO || 'SEM CC'}
                         </p>
                     </div>
                   </div>
@@ -180,7 +180,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                             &quot;{asset.AUDITOR_STATUS_CONFERENCIA || 'Conferência física realizada sem ressalvas.'}&quot;
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 uppercase mt-2">
-                            GeoRef: {asset._lat ? `${asset._lat}, ${asset._lng}` : 'Coordenadas não registradas'} | {asset.ENDERECO || 'Localidade indefinida'}
+                            GeoRef: {asset.latitude ? `${asset.latitude}, ${asset.longitude}` : 'Coordenadas não registradas'} | {asset.ENDERECO || 'Localidade indefinida'}
                         </p>
                     </div>
                   </div>

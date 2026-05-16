@@ -37,7 +37,7 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
     ENDERECO: 'Localização Física',
     REGISTRO: 'Número de Registro',
     SUBREG: 'Sub-registro',
-    CONTACONTABIL: 'Conta Contábil',
+    conta_contabil: 'Conta Contábil',
     PRIMARYKEY: 'Chave Primária'
   };
 

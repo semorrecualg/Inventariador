@@ -97,7 +97,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
 
     const filteredAssets = filterByCampaign && currentCampaignId 
-      ? assets.filter(a => a._campaignId === currentCampaignId)
+      ? assets.filter(a => a.currentCampaignId === currentCampaignId)
       : assets;
 
     for (let i = 0; i < filteredAssets.length; i++) {

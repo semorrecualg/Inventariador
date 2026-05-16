@@ -156,19 +156,20 @@ const Consultation: React.FC<ConsultationProps> = ({
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   
   // Selection list state
-  const [selectionModal, setSelectionModal] = useState<{ field: 'CONTACONTABIL' | 'CENTRODECUSTO' | null, searchTerm: string }>({ field: null, searchTerm: '' });
+  const [selectionModal, setSelectionModal] = useState<{ field: 'conta_contabil' | 'CENTRODECUSTO' | null, searchTerm: string }>({ field: null, searchTerm: '' });
 
   const uniqueValues = useMemo(() => {
     const contabilidade = new Set<string>();
     const custos = new Set<string>();
     
     assets.forEach(asset => {
-      if (asset.CONTACONTABIL) contabilidade.add(String(asset.CONTACONTABIL).trim());
+      const conta = asset.conta_contabil;
+      if (conta) contabilidade.add(String(conta).trim());
       if (asset.CENTRODECUSTO) custos.add(String(asset.CENTRODECUSTO).trim());
     });
     
     return {
-      CONTACONTABIL: Array.from(contabilidade).sort(),
+      conta_contabil: Array.from(contabilidade).sort(),
       CENTRODECUSTO: Array.from(custos).sort()
     };
   }, [assets]);
@@ -246,7 +247,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       NOMEFORNECEDOR: '',
       NOTAFISCAL: '',
       ENDERECO: '',
-      CONTACONTABIL: '',
+      conta_contabil: '',
       CENTRODECUSTO: '',
       DATAAQUISIC_START: '',
       DATAAQUISIC_END: '',
@@ -258,7 +259,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
   const renderInput = (field: keyof SearchFilters, label: string, icon: React.ReactNode) => {
     const isNumeric = isNumericField(field);
-    const isSelectable = field === 'CONTACONTABIL' || field === 'CENTRODECUSTO';
+    const isSelectable = field === 'conta_contabil' || field === 'CENTRODECUSTO';
     
     return (
       <div className="space-y-1.5">
@@ -270,14 +271,14 @@ const Consultation: React.FC<ConsultationProps> = ({
           <input 
             type="text"
             readOnly={isNumeric || isSelectable}
-            value={filters[field]}
+            value={filters[field] || ''}
             onChange={(e) => !isNumeric && !isSelectable && handleInputChange(field, e.target.value)}
             onClick={() => {
               if (isNumeric) {
                 setActiveField(field);
                 setShowNumericKeypad(true);
               } else if (isSelectable) {
-                setSelectionModal({ field: field as 'CONTACONTABIL' | 'CENTRODECUSTO', searchTerm: '' });
+                setSelectionModal({ field: field as 'conta_contabil' | 'CENTRODECUSTO', searchTerm: '' });
               } else {
                 setShowNumericKeypad(false);
                 setActiveField(null);
@@ -377,7 +378,7 @@ const Consultation: React.FC<ConsultationProps> = ({
               {renderInput('NOMEFORNECEDOR', TYPE_LABELS.VENDOR, <User size={16} />)}
               {renderInput('NOTAFISCAL', TYPE_LABELS.INVOICE, <FileText size={16} />)}
               {renderInput('ENDERECO', TYPE_LABELS.ADDRESS, <MapPin size={16} />)}
-              {renderInput('CONTACONTABIL', TYPE_LABELS.ACCOUNT, <LayoutGrid size={16} />)}
+              {renderInput('conta_contabil', TYPE_LABELS.ACCOUNT, <LayoutGrid size={16} />)}
               {renderInput('CENTRODECUSTO', TYPE_LABELS.COST_CENTER, <Tag size={16} />)}
               {renderInput('Sn1_recno', 'ID Protheus (SN1)', <Hash size={16} />)}
               {renderInput('Sn3_recno', 'ID Protheus (SN3)', <Hash size={16} />)}
@@ -543,7 +544,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             <div className="p-8 border-b border-accent/10">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-ink uppercase tracking-tight">
-                  {selectionModal.field === 'CONTACONTABIL' ? 'Conta Contábil' : 'Centro de Custo'}
+                  {selectionModal.field === 'conta_contabil' ? 'Conta Contábil' : 'Centro de Custo'}
                 </h3>
                 <button 
                   onClick={() => setSelectionModal({ field: null, searchTerm: '' })}

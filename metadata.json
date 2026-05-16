@@ -1,6 +1,6 @@
 {
-  "name": "GBR v24.50 KARDEK",
-  "description": "Sistema Profissional de Inventário e Auditoria de Ativo Imobilizado (Engine Nativa).",
+  "name": "GBR v25.0 KARDEK 3D",
+  "description": "Sistema Industrial de Inventário de Ativos (MapLibre 3D Ready, Soberania Nativa, Delta Auditoria GBRv24).",
   "requestFramePermissions": [
     "camera",
     "geolocation",

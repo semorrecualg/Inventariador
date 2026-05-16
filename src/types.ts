@@ -97,7 +97,7 @@ export interface Asset {
   REGISTRO?: string;
   SUBREG?: string;
   DATABAIXA?: string;
-  CONTACONTABIL?: string;
+  conta_contabil?: string; // Novo padrão v25
   PRIMARYKEY?: string;
   CENTRODECUSTO?: string;
   VLRAQUISIC?: string | number;
@@ -124,13 +124,15 @@ export interface Asset {
   _auditor?: string;
   _history?: AuditLogEntry[];
   _photoUrl?: string;
-  _lat?: number;
-  _lng?: number;
+  latitude?: number;  // Novo padrão v25
+  longitude?: number; // Novo padrão v25
+  _altitude_metros?: number; // Altitude para mapeamento vertical
+  _id_andar?: number; // Andar calculado (0=Térreo, 1=1º...)
   _aprovado?: boolean;
   _dataAprovacao?: string;
   _aprovador?: string;
   _assinatura?: string; // Base64 da assinatura
-  _campaignId?: string; // ID da Campanha de Inventário
+  currentCampaignId?: string; // Novo padrão v25
   _version?: number; // Controle de versão para concorrência otimista
   _is_deleted?: boolean; // Soft delete para auditoria
   _is_synced?: boolean; // Controle de sincronização local-first
@@ -333,7 +335,7 @@ export interface SearchFilters {
   NOMEFORNECEDOR: string;
   NOTAFISCAL: string;
   ENDERECO: string;
-  CONTACONTABIL: string;
+  conta_contabil: string; // Novo padrão v25
   CENTRODECUSTO: string;
   DATAAQUISIC_START: string;
   DATAAQUISIC_END: string;

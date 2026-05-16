@@ -429,7 +429,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       let gpsData = {};
       try {
         const loc = await getCurrentLocation(true);
-        gpsData = { _lat: loc.lat, _lng: loc.lng };
+        gpsData = { latitude: loc.lat, longitude: loc.lng };
         console.log('>>> [GPS] Localização capturada para o ativo:', gpsData);
       } catch (gpsErr) {
         console.warn('>>> [GPS] Falha ao capturar localização, salvando sem coordenadas:', gpsErr);

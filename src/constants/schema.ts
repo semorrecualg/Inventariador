@@ -6,15 +6,16 @@
 
 export const DB_ASSET_COLUMNS = [
   'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'VLRAQUISIC', 'DATAAQUISIC',
-  'CENTRODECUSTO', 'CONTACONTABIL', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
+  'CENTRODECUSTO', 'conta_contabil', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
   'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
-  'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 'SUBREG', 'DATABAIXA',
-  'PRIMARYKEY', '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
-  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
-  '_campaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
+  'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 
+  '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
+  '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
+  'currentCampaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
   '_isNew', '_is_unitized', '_is_divergent_baixa', 'Sn1_recno', 'Sn3_recno', 'DE_PARA',
-  'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', '_parent_id', '_is_synced'
+  'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', '_parent_id', '_is_synced',
+  '_altitude_metros', '_id_andar'
 ];
 
 export const SCHEMA_PRIORITY = {
@@ -58,6 +59,7 @@ export const SCHEMA_PRIORITY = {
     'N3_CCUSTO'
   ],
   ACCOUNT: [
+    'conta_contabil',
     'CONTACONTABIL',
     'CONTA_CONTABIL',
     'CONTA',

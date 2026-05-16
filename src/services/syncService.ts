@@ -29,7 +29,7 @@ export const processDataSyncQueue = async (): Promise<void> => {
   
   try {
     const unsyncedResults = await sqliteService.query(
-      "SELECT * FROM inventario_mestre WHERE _is_synced = 0 AND _is_deleted = 0 LIMIT 50"
+      "SELECT * FROM ativos WHERE _is_synced = 0 AND _is_deleted = 0 LIMIT 50"
     );
     
     if (unsyncedResults.length === 0) {
@@ -46,7 +46,7 @@ export const processDataSyncQueue = async (): Promise<void> => {
       // Marcar como sincronizado no SQLite
       const placeholders = syncedIds.map(() => '?').join(',');
       await sqliteService.execute(
-        `UPDATE inventario_mestre SET _is_synced = 1 WHERE id IN (${placeholders})`,
+        `UPDATE ativos SET _is_synced = 1 WHERE id IN (${placeholders})`,
         syncedIds
       );
       console.log(`[Sync] ${syncedIds.length} ativos marcados como sincronizados.`);
@@ -70,7 +70,7 @@ export const processDataSyncQueue = async (): Promise<void> => {
  */
 export const getUnsyncedAssetsCount = async (): Promise<number> => {
    try {
-     const result = await sqliteService.query("SELECT COUNT(*) as total FROM inventario_mestre WHERE _is_synced = 0 AND _is_deleted = 0");
+     const result = await sqliteService.query("SELECT COUNT(*) as total FROM ativos WHERE _is_synced = 0 AND _is_deleted = 0");
      return Number(result[0]?.total || 0);
    } catch (e) {
      console.error(e);

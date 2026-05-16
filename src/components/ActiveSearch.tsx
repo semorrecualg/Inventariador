@@ -80,7 +80,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
       'DESCRIÇÃO': a.DESCRICAODOATIVO,
       'LOCALIZAÇÃO': a.ENDERECO,
       'CENTRO DE CUSTO': a.CENTRODECUSTO,
-      'CONTA CONTÁBIL': a.CONTACONTABIL,
+      'CONTA CONTÁBIL': a.conta_contabil,
       'VALOR AQUISIÇÃO': a.VLRAQUISIC,
       'STATUS ATUAL': a.STATUS
     }));

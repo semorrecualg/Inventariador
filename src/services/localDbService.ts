@@ -11,7 +11,7 @@ const ASSET_COLUMNS = DB_ASSET_COLUMNS;
 // Helper para converter objeto em colunas e valores SQL, filtrando chaves inválidas
 const getUpsertSql = (table: string, obj: Record<string, unknown>) => {
   const keys = Object.keys(obj).filter(k => {
-    if (table === 'inventario_mestre') return ASSET_COLUMNS.includes(k);
+    if (table === 'ativos') return ASSET_COLUMNS.includes(k);
     return true; // Para outras tabelas, mantém comportamento original por enquanto
   });
   
@@ -32,16 +32,60 @@ const getUpsertSql = (table: string, obj: Record<string, unknown>) => {
 
 export const localDb = {
   assets: {
-    add: async (asset: Asset) => {
-      const { sql, values } = getUpsertSql('inventario_mestre', asset as unknown as Record<string, unknown>);
+    add: async (asset: Asset, userId?: string) => {
+      const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
       await sqliteService.execute(sql, values);
+      if (userId) {
+        await sqliteService.logAuditEvent(userId, 'CREATE', 'ativos', asset.id, 'Criação de ativo manual', JSON.stringify(asset));
+      }
     },
-    put: async (asset: Asset) => {
-      await localDb.assets.add(asset);
+    // Buffer de mutação para a "Regra dos 5" (GBR v25)
+    _mutationBuffer: [] as { sql: string; params: SqlValue[] }[],
+    
+    put: async (asset: Asset, userId?: string) => {
+      const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
+      localDb.assets._mutationBuffer.push({ sql, params: values });
+      
+      if (userId) {
+        // Log de auditoria também entra no buffer para ser atômico
+        const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        localDb.assets._mutationBuffer.push({ 
+          sql: `INSERT INTO AUDIT_LOG (id, usuario, acao, tabela, registro_id, details, delta, _status_sinc) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`, 
+          params: [logId, userId, 'CREATE', 'ativos', asset.id, 'Criação/Update via Buffer', JSON.stringify(asset)]
+        });
+      }
+
+      if (localDb.assets._mutationBuffer.length >= 10) { // 5 pares (Ativo + Log) ou 10 mutações
+        await localDb.assets.flush();
+      }
+    },
+    flush: async () => {
+      if (localDb.assets._mutationBuffer.length === 0) return;
+      console.log(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações.`);
+      await sqliteService.executeBatch(localDb.assets._mutationBuffer);
+      localDb.assets._mutationBuffer = [];
+    },
+    getMapData: async (campaignId: string): Promise<Asset[]> => {
+      const sql = `
+        SELECT 
+          id, latitude, longitude, _altitude_metros, _id_andar, VLRAQUISIC, 
+          ETIQUETA, DESCRICAODOATIVO, _conferido, AUDITOR_STATUS_CONFERENCIA,
+          _localMaster, ENDERECO, _origemTransacao, currentCampaignId, conta_contabil
+        FROM ativos 
+        WHERE currentCampaignId = ? 
+          AND latitude IS NOT NULL 
+          AND (conta_contabil != '131105001' OR conta_contabil IS NULL)
+          AND _is_deleted = 0
+      `;
+      const results = await sqliteService.query(sql, [campaignId]) as Record<string, unknown>[];
+      return results.map(row => ({
+        ...row,
+        _conferido: row._conferido === 1
+      })) as unknown as Asset[];
     },
     bulkAdd: async (assets: Asset[]) => {
       const commands = assets.map(asset => {
-        const { sql, values } = getUpsertSql('inventario_mestre', asset as unknown as Record<string, unknown>);
+        const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
         return { sql, params: values };
       });
       await sqliteService.executeBatch(commands);
@@ -49,21 +93,24 @@ export const localDb = {
     bulkPut: async (assets: Asset[]) => {
       await localDb.assets.bulkAdd(assets);
     },
-    update: async (id: string, changes: Partial<Asset>) => {
+    update: async (id: string, changes: Partial<Asset>, userId?: string) => {
       const keys = Object.keys(changes);
       const setClause = keys.map(k => `${k} = ?`).join(', ');
-      const sql = `UPDATE inventario_mestre SET ${setClause} WHERE id = ?`;
+      const sql = `UPDATE ativos SET ${setClause} WHERE id = ?`;
       await sqliteService.execute(sql, [...Object.values(changes) as SqlValue[], id]);
+      if (userId) {
+        await sqliteService.logAuditEvent(userId, 'UPDATE', 'ativos', id, 'Atualização de ativo', JSON.stringify(changes));
+      }
     },
     count: async () => {
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM inventario_mestre");
+      const res = await sqliteService.query("SELECT COUNT(*) as count FROM ativos");
       return (res[0] as unknown as { count: number })?.count || 0;
     },
     clear: async () => {
-      await sqliteService.execute("DELETE FROM inventario_mestre");
+      await sqliteService.execute("DELETE FROM ativos");
     },
     toArray: async () => {
-      const results = await sqliteService.query("SELECT * FROM inventario_mestre") as Record<string, unknown>[];
+      const results = await sqliteService.query("SELECT * FROM ativos") as Record<string, unknown>[];
       return results.map(row => {
         const asset = { ...row } as Record<string, unknown>;
         // Converte 0/1 de volta para boolean para o React
@@ -88,19 +135,19 @@ export const localDb = {
             // Suporte para chaves compostas ex: [ETIQUETA+UNIDADE_OPERACIONAL]
             const fields = field.replace('[', '').replace(']', '').split('+');
             const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            const res = await sqliteService.query(`SELECT * FROM inventario_mestre WHERE ${whereClause} LIMIT 1`, value);
+            const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} LIMIT 1`, value);
             return res[0] as unknown as Asset || null;
           }
-          const res = await sqliteService.query(`SELECT * FROM inventario_mestre WHERE ${field} = ? LIMIT 1`, [value]);
+          const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? LIMIT 1`, [value]);
           return res[0] as unknown as Asset || null;
         },
         toArray: async () => {
           if (Array.isArray(value)) {
             const fields = field.replace('[', '').replace(']', '').split('+');
             const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            return await sqliteService.query(`SELECT * FROM inventario_mestre WHERE ${whereClause}`, value) as unknown as Asset[];
+            return await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause}`, value) as unknown as Asset[];
           }
-          return await sqliteService.query(`SELECT * FROM inventario_mestre WHERE ${field} = ?`, [value]) as unknown as Asset[];
+          return await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ?`, [value]) as unknown as Asset[];
         }
       })
     }),
@@ -110,7 +157,7 @@ export const localDb = {
           COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') as displayName,
           COUNT(*) as total,
           SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
-        FROM inventario_mestre
+        FROM ativos
         WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ? OR GRUPO_EMPRESARIAL = ?)
           AND _is_deleted = 0
       `;
@@ -186,16 +233,16 @@ export const localDb = {
       await sqliteService.execute("DELETE FROM campaigns");
     }
   },
-  inventario_mestre: {
+  ativos: {
     bulkPut: async (items: Asset[]) => {
       const commands = items.map(item => {
-        const { sql, values } = getUpsertSql('inventario_mestre', item);
+        const { sql, values } = getUpsertSql('ativos', item);
         return { sql, params: values };
       });
       await sqliteService.executeBatch(commands);
     },
     toArray: async (): Promise<Asset[]> => {
-      return await sqliteService.query("SELECT * FROM inventario_mestre") as unknown as Asset[];
+      return await sqliteService.query("SELECT * FROM ativos") as unknown as Asset[];
     }
   },
   users: {

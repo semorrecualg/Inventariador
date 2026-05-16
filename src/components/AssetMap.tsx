@@ -1,28 +1,10 @@
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, Popup, Polygon, Tooltip, CircleMarker } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet.heat';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import maplibregl from 'maplibre-gl';
+import * as turf from '@turf/turf';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
-import * as d3 from 'd3';
 import { motion, AnimatePresence } from 'motion/react';
-
-// Configuração de ícones customizados para o Leaflet
-const defaultIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
-
-L.Marker.prototype.options.icon = defaultIcon;
-import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff } from 'lucide-react';
-
-// Extensão necessária para o TypeScript reconhecer o plugin leaflet.heat
-declare module 'leaflet' {
-  function heatLayer(latlngs: L.LatLngExpression[], options?: unknown): L.Layer;
-}
+import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff, Loader2 } from 'lucide-react';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -31,63 +13,278 @@ interface AssetMapProps {
   onSelectLocation?: (location: string) => void;
 }
 
-// Componente para gerenciar a camada de calor (Heatmap)
-const HeatmapLayer: React.FC<{ points: [number, number, number][] }> = ({ points }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!map) return;
-    if (points.length === 0) {
-      return;
-    }
-
-    const heatLayer = L.heatLayer(points as L.LatLngExpression[], {
-      radius: 15,
-      blur: 5,
-      maxZoom: 18,
-      gradient: {
-        0.2: '#3b82f6', // blue-500
-        0.4: '#06b6d4', // cyan-500
-        0.6: '#10b981', // emerald-500
-        0.8: '#f59e0b', // amber-500
-        1.0: '#ef4444'  // red-500
-      }
-    });
-
-    heatLayer.addTo(map);
-
-    if (points.length > 0) {
-      try {
-        const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]));
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [50, 50] });
-        }
-      } catch (e) {
-        console.warn('Error fitting bounds:', e);
-      }
-    }
-
-    return () => {
-      try {
-        if (map && map.hasLayer(heatLayer)) {
-          map.removeLayer(heatLayer);
-        }
-      } catch (e) {
-        console.warn('Error removing heatLayer:', e);
-      }
-    };
-  }, [map, points]);
-
-  return null;
-};
-
-const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSelectLocation }) => {
+const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<maplibregl.Map | null>(null);
+  
   const [showInfo, setShowInfo] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [selectedOrigin, setSelectedOrigin] = useState<TransactionOrigin | 'ALL'>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string | 'ALL'>('ALL');
+  const [selectedFloor, setSelectedFloor] = useState<number>(0);
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA' | 'GRID'>('AREA');
-  const [zoomLevel, setZoomLevel] = useState(13);
+  const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => {
+    initMap();
+    return () => {
+      if (mapInstance.current) mapInstance.current.remove();
+    };
+  }, []);
+
+  const initMap = () => {
+    if (!mapRef.current || mapInstance.current) return;
+    try {
+      const map = new maplibregl.Map({
+        container: mapRef.current,
+        style: {
+          version: 8,
+          sources: {
+            'osm-raster': {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors'
+            }
+          },
+          layers: [
+            {
+              id: 'osm-layer',
+              type: 'raster',
+              source: 'osm-raster',
+              minzoom: 0,
+              maxzoom: 19
+            }
+          ]
+        },
+        center: [initialCenter[1], initialCenter[0]],
+        zoom: 13
+      });
+
+      map.on('load', () => {
+        mapInstance.current = map;
+        setMapReady(true);
+        console.log('>>> [MAP] Asset Map LibLibre Inicializado (Offline Sovereignty).');
+        renderMapData();
+      });
+    } catch (err) {
+      console.error('>>> [MAP] Falha ao inicializar Asset Map:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (mapReady) {
+      renderMapData();
+    }
+  }, [mapReady, heatmapMode, geojsonAssets, geojsonArea, geojsonGrid]);
+
+  const geojsonAssets = useMemo(() => {
+    // GBR v25: Delegação para GPU. Enviamos todos os ativos (leves) e deixamos o shader filtrar.
+    const features = assets
+      .filter(a => a.latitude && a.longitude)
+      .map(a => {
+        const val = Number(a.VLRAQUISIC) || 0;
+        const lat = a.latitude!;
+        const lng = a.longitude!;
+        return {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [lng, lat]
+          },
+          properties: {
+            id: a.id || a.ETIQUETA,
+            label: a.ETIQUETA,
+            value: val,
+            intensity: val > 0 ? Math.log10(val) : 1,
+            id_andar: a._id_andar || 0,
+            origin: a._origemTransacao || 'ALL',
+            location: a._localMaster || a.ENDERECO || 'SEM LOCAL'
+          }
+        };
+      });
+
+    return { type: 'FeatureCollection', features };
+  }, [assets]);
+
+  // Perímetros de Auditoria (Turf.js) Otimizados via Reduce e Cache por Piso
+  const geojsonArea = useMemo(() => {
+    // Agrupamento Otimizado via Reduce (GBR v25 Pipeline)
+    const groups = filteredAssets.reduce((acc, a) => {
+      if (!a.latitude || !a.longitude) return acc;
+      const loc = a._localMaster || a.ENDERECO || 'SEM LOCAL';
+      if (!acc[loc]) acc[loc] = { points: [], totalValue: 0 };
+      acc[loc].points.push([a.longitude!, a.latitude!]);
+      acc[loc].totalValue += (Number(a.VLRAQUISIC) || 0);
+      return acc;
+    }, {} as Record<string, { points: [number, number][], totalValue: number }>);
+
+    const features = Object.entries(groups)
+      .filter(([, data]) => data.points.length >= 3)
+      .map(([loc, data]) => {
+        try {
+          const ptFeatures = data.points.map(p => turf.point(p));
+          const hull = turf.convex(turf.featureCollection(ptFeatures));
+          if (hull) {
+            return {
+              ...hull,
+              properties: {
+                location: loc,
+                value: data.totalValue,
+                id_andar: selectedFloor
+              }
+            };
+          }
+        } catch (e) {
+          console.warn(`[Turf] Erro no Convex Hull de ${loc}`, e);
+        }
+        return null;
+      })
+      .filter(f => f !== null);
+
+    return { type: 'FeatureCollection', features: features as maplibregl.GeoJSONFeature[] };
+  }, [filteredAssets, selectedFloor]);
+
+  const geojsonGrid = useMemo(() => {
+    if (heatmapMode !== 'GRID') return { type: 'FeatureCollection', features: [] };
+    const features = gridData.map(cell => ({
+      type: 'Feature',
+      geometry: cell.geometry,
+      properties: {
+        count: cell.count,
+        value: cell.value
+      }
+    }));
+
+    return {
+      type: 'FeatureCollection',
+      features
+    };
+  }, [gridData, heatmapMode]);
+
+  const renderMapData = () => {
+    if (!mapInstance.current || !mapReady) return;
+    const map = mapInstance.current;
+
+    try {
+      // 1. Gerenciar Fontes (Sources)
+      if (map.getSource('assets-source')) {
+        (map.getSource('assets-source') as maplibregl.GeoJSONSource).setData(geojsonAssets as maplibregl.GeoJSONFeatureSelection);
+      } else {
+        map.addSource('assets-source', { type: 'geojson', data: geojsonAssets as maplibregl.GeoJSONFeatureSelection });
+      }
+
+      if (map.getSource('area-source')) {
+        (map.getSource('area-source') as maplibregl.GeoJSONSource).setData(geojsonArea as maplibregl.GeoJSONFeatureSelection);
+      } else {
+        map.addSource('area-source', { type: 'geojson', data: geojsonArea as maplibregl.GeoJSONFeatureSelection });
+      }
+
+      if (map.getSource('grid-source')) {
+        (map.getSource('grid-source') as maplibregl.GeoJSONSource).setData(geojsonGrid as maplibregl.GeoJSONFeatureSelection);
+      } else {
+        map.addSource('grid-source', { type: 'geojson', data: geojsonGrid as maplibregl.GeoJSONFeatureSelection });
+      }
+
+      // 2. Gerenciar Camada de Perímetros (Retalhos de Auditoria - BASE)
+      // Visível se houver dados de área, independente do modo, para coexistência conforme solicitado
+      if (!map.getLayer('area-layer')) {
+        map.addLayer({
+          id: 'area-layer',
+          type: 'fill',
+          source: 'area-source',
+          paint: {
+            'fill-color': '#3b82f6',
+            'fill-opacity': 0.3,
+            'fill-outline-color': '#3b82f6'
+          }
+        });
+      }
+      map.setLayoutProperty('area-layer', 'visibility', geojsonArea.features.length > 0 ? 'visible' : 'none');
+
+      // 3. Gerenciar Camadas de Calor / Grade (SOBREPOSIÇÃO)
+      const overlayLayers = ['heatmap-layer', 'grid-layer'];
+      overlayLayers.forEach(lyr => {
+        if (map.getLayer(lyr)) map.setLayoutProperty(lyr, 'visibility', 'none');
+      });
+
+      if (heatmapMode === 'DENSITY' || heatmapMode === 'VALUE') {
+        const gpuFilter: maplibregl.FilterSpecification = [
+          'all',
+          ['==', ['get', 'id_andar'], selectedFloor],
+          selectedOrigin !== 'ALL' ? ['==', ['get', 'origin'], selectedOrigin] : true,
+          selectedLocation !== 'ALL' ? ['==', ['get', 'location'], selectedLocation] : true
+        ].filter(f => f !== true) as maplibregl.FilterSpecification;
+
+        if (!map.getLayer('heatmap-layer')) {
+          map.addLayer({
+            id: 'heatmap-layer',
+            type: 'heatmap',
+            source: 'assets-source',
+            maxzoom: 15,
+            filter: gpuFilter,
+            paint: {
+              'heatmap-weight': heatmapMode === 'VALUE' ? ['get', 'intensity'] : 1,
+              'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 15, 3],
+              'heatmap-color': [
+                'interpolate',
+                ['linear'],
+                ['heatmap-density'],
+                0, 'rgba(33,102,172,0)',
+                0.2, 'rgb(103,169,207)',
+                0.4, 'rgb(209,229,240)',
+                0.6, 'rgb(253,219,199)',
+                0.8, 'rgb(239,138,98)',
+                1, 'rgb(178,24,43)'
+              ],
+              'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 2, 15, 20],
+              'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 14, 1, 15, 0]
+            }
+          });
+        } else {
+          map.setPaintProperty('heatmap-layer', 'heatmap-weight', heatmapMode === 'VALUE' ? ['get', 'intensity'] : 1);
+          map.setFilter('heatmap-layer', gpuFilter);
+          map.setLayoutProperty('heatmap-layer', 'visibility', 'visible');
+          map.moveLayer('heatmap-layer');
+        }
+      } else if (heatmapMode === 'GRID') {
+        const gpuFilter: maplibregl.FilterSpecification = [
+          'all',
+          ['==', ['get', 'id_andar'], selectedFloor]
+        ].filter(f => f !== true) as maplibregl.FilterSpecification;
+
+        if (!map.getLayer('grid-layer')) {
+          const maxCount = gridData.length > 0 ? Math.max(1, ...gridData.map(c => c.count)) : 1;
+          map.addLayer({
+            id: 'grid-layer',
+            type: 'fill',
+            source: 'grid-source',
+            filter: gpuFilter,
+            paint: {
+              'fill-color': [
+                'interpolate',
+                ['linear'],
+                ['get', 'count'],
+                0, '#ffffb2',
+                maxCount * 0.25, '#fecc5c',
+                maxCount * 0.5, '#fd8d3c',
+                maxCount * 0.75, '#f03b20',
+                maxCount, '#bd0026'
+              ],
+              'fill-opacity': 0.6,
+              'fill-outline-color': '#ffffff'
+            }
+          });
+        } else {
+          map.setFilter('grid-layer', ['==', ['get', 'id_andar'], selectedFloor]);
+          map.setLayoutProperty('grid-layer', 'visibility', 'visible');
+          map.moveLayer('grid-layer');
+        }
+      }
+    } catch (err) {
+      console.warn('>>> [MAP] Erro ao renderizar dados no MapLibre:', err);
+    }
+  };
 
   // Contagem de filtros ativos
   const activeFiltersCount = useMemo(() => {
@@ -110,41 +307,6 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     return Array.from(locs).sort();
   }, [assets]);
 
-  useEffect(() => {
-    // Monitoramento de status online/offline removido pois não está sendo usado no novo design
-  }, []);
-
-  const ZoomHandler = () => {
-    const map = useMap();
-    
-    useEffect(() => {
-      if (!map) return;
-      const onZoom = () => setZoomLevel(map.getZoom());
-      map.on('zoomend', onZoom);
-      return () => {
-        map.off('zoomend', onZoom);
-      };
-    }, [map]);
-
-    // Efeito para auto-zoom ao trocar de localidade
-    useEffect(() => {
-      if (!map || selectedLocation === 'ALL' || filteredAssets.length === 0) return;
-      
-      const points = filteredAssets
-        .filter(a => a._lat && a._lng)
-        .map(a => [a._lat!, a._lng!] as [number, number]);
-        
-      if (points.length > 0) {
-        const bounds = L.latLngBounds(points);
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [100, 100], maxZoom: 18 });
-        }
-      }
-    }, [map, selectedLocation, filteredAssets]);
-
-    return null;
-  };
-
   const originOptions = [
     { label: 'TODAS AS ORIGENS', value: 'ALL' },
     { label: 'INVENTÁRIO (1000)', value: TransactionOrigin.INVENTORY },
@@ -152,9 +314,26 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     { label: 'CONCILIAÇÃO (3000)', value: TransactionOrigin.ACCOUNT_RECONCILIATION },
   ];
 
+  // Lista de andares únicos presentes nos ativos
+  const availableFloors = useMemo(() => {
+    const floors = new Set<number>();
+    assets.forEach(a => {
+      if (a._id_andar !== undefined) {
+        floors.add(a._id_andar);
+      } else {
+        floors.add(0); // Padrão Térreo
+      }
+    });
+    return Array.from(floors).sort((a, b) => b - a); // Ordem decrescente (topo para base)
+  }, [assets]);
+
   const filteredAssets = useMemo(() => {
     // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
     let filtered = assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    
+    // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
+    // Porém para cálculos de BI e grid aqui, ainda filtramos
+    filtered = filtered.filter(a => (a._id_andar || 0) === selectedFloor);
     
     if (selectedOrigin !== 'ALL') {
       filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
@@ -163,53 +342,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
       filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
     }
 
-    const withGps = filtered.filter(a => a._lat && a._lng).length;
-    console.log(`>>> [AssetMap] Ativos conferidos: ${filtered.length}, Com GPS: ${withGps}`);
-
     return filtered;
-  }, [assets, selectedOrigin, selectedLocation]);
-
-  // Agrupamento por Localidade para cálculo de Área Ocupada (Usando local de inventário)
-  const locationGroups = useMemo(() => {
-    const groups: Record<string, { points: [number, number][], hull: [number, number][] | null, totalValue: number, assets: Asset[] }> = {};
-    
-    filteredAssets.forEach(a => {
-      if (a._lat && a._lng) {
-        const loc = a._localMaster || a.ENDERECO || 'SEM LOCALIZAÇÃO';
-        if (!groups[loc]) {
-          groups[loc] = { points: [], hull: null, totalValue: 0, assets: [] };
-        }
-        groups[loc].points.push([a._lat, a._lng]);
-        groups[loc].assets.push(a);
-        
-        const val = typeof a.VLRAQUISIC === 'string' 
-          ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-          : (Number(a.VLRAQUISIC) || 0);
-        groups[loc].totalValue += (val || 0);
-      }
-    });
-
-    // Calcular Convex Hull para cada grupo com TRAVA DE AMOSTRAGEM (max 3000)
-    Object.keys(groups).forEach(loc => {
-      const group = groups[loc];
-      if (group.points.length >= 3) {
-        let pointsToProcess = group.points;
-        
-        // OTIMIZAÇÃO: Limite de 3.000 registros para evitar UI Lag / OOM
-        if (pointsToProcess.length > 3000) {
-          console.warn(`>>> [AssetMap] Amostragem ativada para ${loc}: ${pointsToProcess.length} registros. Limitando a 3.000.`);
-          pointsToProcess = pointsToProcess.slice(0, 3000);
-        }
-
-        const hull = d3.polygonHull(pointsToProcess);
-        if (hull) {
-          group.hull = hull as [number, number][];
-        }
-      }
-    });
-
-    return groups;
-  }, [filteredAssets]);
+  }, [assets, selectedOrigin, selectedLocation, selectedFloor]);
 
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -226,29 +360,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     };
   }, []);
 
-  const heatPoints = useMemo(() => {
-    const validAssets = filteredAssets.filter(a => a._lat && a._lng);
-    
-    if (heatmapMode === 'DENSITY') {
-      return validAssets.map(a => [a._lat!, a._lng!, 1] as [number, number, number]);
-    } else if (heatmapMode === 'VALUE') {
-      return validAssets.map(a => {
-        const rawVal = typeof a.VLRAQUISIC === 'string' 
-          ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-          : (Number(a.VLRAQUISIC) || 0);
-        
-        const val = Math.max(1, rawVal);
-        const intensity = Math.log10(val);
-        return [a._lat!, a._lng!, intensity] as [number, number, number];
-      });
-    }
-    return [];
-  }, [filteredAssets, heatmapMode]);
-
   const gridData = useMemo(() => {
     if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
 
-    const validAssets = filteredAssets.filter(a => a._lat && a._lng);
+    const validAssets = filteredAssets.filter(a => a.latitude && a.longitude);
     if (validAssets.length === 0) return [];
 
     // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
@@ -257,8 +372,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
     const bins: Record<string, { count: number, value: number, assets: Asset[], lat: number, lng: number }> = {};
 
     validAssets.forEach(a => {
-      const latBin = Math.floor(a._lat! / cellSizeDegrees) * cellSizeDegrees;
-      const lngBin = Math.floor(a._lng! / cellSizeDegrees) * cellSizeDegrees;
+      const latBin = Math.floor(a.latitude! / cellSizeDegrees) * cellSizeDegrees;
+      const lngBin = Math.floor(a.longitude! / cellSizeDegrees) * cellSizeDegrees;
       const key = `${latBin.toFixed(6)}|${lngBin.toFixed(6)}`;
 
       if (!bins[key]) {
@@ -302,178 +417,54 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
   }, [filteredAssets]);
 
   const initialCenter = useMemo(() => {
-    const validPoints = filteredAssets.filter(a => a._lat && a._lng);
+    const validPoints = filteredAssets.filter(a => a.latitude && a.longitude);
     if (validPoints.length === 0) return [-23.5505, -46.6333] as [number, number];
-    const sumLat = validPoints.reduce((acc, p) => acc + p._lat!, 0);
-    const sumLng = validPoints.reduce((acc, p) => acc + p._lng!, 0);
+    const sumLat = validPoints.reduce((acc, p) => acc + p.latitude!, 0);
+    const sumLng = validPoints.reduce((acc, p) => acc + p.longitude!, 0);
     return [sumLat / validPoints.length, sumLng / validPoints.length] as [number, number];
   }, [filteredAssets]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#0F172A] overflow-hidden relative font-sans">
-      {/* Mapa Fullscreen (Camada 0) */}
+    <div className="flex flex-col h-[100dvh] bg-[#0F172A] overflow-hidden relative font-sans text-white">
+      {/* Mapa Fullscreen Container */}
       <div className="absolute inset-0 z-0">
-        <MapContainer 
-          center={initialCenter} 
-          zoom={13} 
-          style={{ width: '100%', height: '100%' }}
-          zoomControl={false}
-        >
-          <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          
-          {heatmapMode !== 'AREA' && heatmapMode !== 'GRID' && <HeatmapLayer points={heatPoints} />}
-          <ZoomHandler />
+        <div 
+          ref={mapRef} 
+          id="gbr-asset-map" 
+          className="w-full h-full"
+        />
+        {!mapReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-12 text-center">
+            <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
+              <Loader2 className="text-blue-500 animate-spin" size={32} />
+            </div>
+            <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Motor Nativo</h2>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed max-w-[240px]">
+              Carregando Ambiente Cartográfico MapLibre GPU...
+            </p>
+          </div>
+        )}
+      </div>
 
-          {/* Visualização em Grade */}
-          {heatmapMode === 'GRID' && gridData.map((cell, i) => {
-            if (!cell) return null;
-            const maxCount = Math.max(...gridData.map(c => c?.count || 1));
-            const intensity = cell.count / maxCount;
-            const color = d3.interpolateYlOrRd(intensity);
-            const conferidos = cell.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
-            const divergencias = cell.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
-
-            return (
-              <Polygon
-                key={`grid-${i}`}
-                positions={cell.geometry.coordinates[0].map(coord => [coord[1], coord[0]] as [number, number])}
-                pathOptions={{
-                  color: color,
-                  fillColor: color,
-                  fillOpacity: 0.6,
-                  weight: 1
-                }}
-              >
-                <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase tracking-widest mb-1">Quadrante Técnico</span>
-                    <div className="flex flex-col space-y-1">
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-white/60 uppercase">Ativos:</span>
-                        <span className="text-[8px] font-bold text-white uppercase">{cell.count}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-emerald-400/60 uppercase">Conferidos:</span>
-                        <span className="text-[8px] font-bold text-emerald-400 uppercase">{conferidos}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-rose-400/60 uppercase">Divergências:</span>
-                        <span className="text-[8px] font-bold text-rose-400 uppercase">{divergencias}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-white/60 uppercase">Valor Total:</span>
-                        <span className="text-[8px] font-bold text-accent uppercase">
-                          {cell.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </Tooltip>
-              </Polygon>
-            );
-          })}
-          
-          {/* Visualização de Área Ocupada */}
-          {heatmapMode === 'AREA' && Object.entries(locationGroups).map(([loc, data]) => {
-            const conferidos = data.assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM').length;
-            const divergencias = data.assets.filter(a => String(a.TAG_INVENTARIO || '').toUpperCase() === 'DIVERGÊNCIA').length;
-
-            const polygon = (data.hull && data.hull.length >= 3) ? (
-              <Polygon 
-                key={`poly-${loc}`}
-                positions={data.hull}
-                pathOptions={{ 
-                  color: '#3b82f6', 
-                  fillColor: '#3b82f6', 
-                  fillOpacity: 0.15,
-                  weight: 3,
-                  dashArray: 'none'
-                }}
-              >
-                <Tooltip sticky direction="top" className="bg-slate-900 text-white border-none shadow-xl rounded-xl px-3 py-2">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase tracking-widest mb-1">{loc}</span>
-                    <div className="flex flex-col space-y-1">
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-white/60 uppercase">Ativos:</span>
-                        <span className="text-[8px] font-bold text-white uppercase">{data.assets.length}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-emerald-400/60 uppercase">Conferidos:</span>
-                        <span className="text-[8px] font-bold text-emerald-400 uppercase">{conferidos}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-rose-400/60 uppercase">Divergências:</span>
-                        <span className="text-[8px] font-bold text-rose-400 uppercase">{divergencias}</span>
-                      </div>
-                      <div className="flex justify-between space-x-4">
-                        <span className="text-[8px] font-bold text-white/60 uppercase">Valor:</span>
-                        <span className="text-[8px] font-bold text-accent uppercase">
-                          {data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </Tooltip>
-                <Popup className="custom-popup">
-                  <div className="p-2 flex flex-col space-y-2">
-                    <span className="text-[10px] font-bold uppercase text-slate-900">{loc}</span>
-                    <div className="flex items-center justify-between text-[8px] font-bold text-slate-500 uppercase mb-1">
-                      <span>Ativos: {data.assets.length}</span>
-                      <span className="text-accent">{data.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </div>
-                    <button 
-                      onClick={() => onSelectLocation?.(loc)}
-                      className="bg-accent text-white px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest hover:bg-accent/80 transition-all"
-                    >
-                      Iniciar Inventário
-                    </button>
-                  </div>
-                </Popup>
-              </Polygon>
-            ) : null;
-
-            const points = data.assets.map((a, i) => {
-              const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-              return (
-                <CircleMarker
-                  key={`point-${loc}-${a.id || i}`}
-                  center={[a._lat!, a._lng!]}
-                  radius={zoomLevel > 15 ? 6 : 4}
-                  pathOptions={{
-                    fillColor: isConferido ? '#10b981' : '#3b82f6',
-                    color: '#ffffff',
-                    weight: 2,
-                    fillOpacity: 0.9
-                  }}
-                >
-                  <Popup className="custom-popup">
-                    <div className="p-2 min-w-[180px]">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-accent uppercase tracking-widest">{a.ETIQUETA || 'S/E'}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase ${isConferido ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {isConferido ? 'Conferido' : 'Pendente'}
-                        </span>
-                      </div>
-                      <h4 className="text-[11px] font-bold text-ink leading-tight mb-1">{a.DESCRICAODOATIVO}</h4>
-                      <p className="text-[9px] text-ink-muted uppercase font-bold tracking-tight">{a._localMaster || a.ENDERECO || a.LOCALIZACAO || 'Sem Endereço'}</p>
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              );
-            });
-
-            return (
-              <React.Fragment key={loc}>
-                {polygon}
-                {points}
-              </React.Fragment>
-            );
-          })}
-        </MapContainer>
+      {/* Seletor de Andar Flutuante (Vertical) */}
+      <div className="absolute right-6 top-1/2 -translate-y-1/2 z-[1001] flex flex-col space-y-2 pointer-events-auto">
+        {availableFloors.map(floor => (
+          <button
+            key={floor}
+            onClick={() => setSelectedFloor(floor)}
+            className={`w-10 h-10 rounded-xl font-bold text-[10px] shadow-2xl border transition-all ${
+              selectedFloor === floor
+                ? 'bg-[#3B82F6] text-white border-[#3B82F6] scale-110'
+                : 'bg-white/10 backdrop-blur-md text-white/40 border-white/10 hover:bg-white/20'
+            }`}
+          >
+            {floor === 0 ? 'T' : `${floor}º`}
+          </button>
+        ))}
+        <div className="h-4" /> {/* Spacer */}
+        <div className="text-[8px] font-black text-white/30 uppercase text-center rotate-90 origin-center whitespace-nowrap">
+          Nível Vertical
+        </div>
       </div>
 
       {/* Banner de Orientação Offline */}
@@ -727,7 +718,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                 <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-1 flex flex-col">
                   <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Ativos</span>
                   <span className="text-xl font-bold text-white">
-                    {filteredAssets.filter(a => a._lat && a._lng).length}
+                    {filteredAssets.filter(a => a.latitude && a.longitude).length}
                   </span>
                 </div>
                 <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-[1.5] flex flex-col">
@@ -739,7 +730,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, onSel
                 <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-1 flex flex-col">
                   <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Locais</span>
                   <span className="text-xl font-bold text-emerald-400">
-                    {Object.keys(locationGroups).length}
+                    {geojsonArea.features.length}
                   </span>
                 </div>
               </div>

@@ -1,28 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { read, utils } from 'xlsx';
 import { sqliteService } from '../services/sqliteService';
-import { assetRepository } from '../services/assetRepository';
-import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, FolderOpen, ChevronLeft } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { localDb } from '../services/localDbService';
+import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, ChevronLeft } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/errorUtils';
 
 import { generateUUID } from '../services/supabaseService';
-import { Asset, InventoryCampaign, User, InventoryState, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
+import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
 import { saveInventory } from '../services/persistenceService';
 
 interface DatabaseLoaderProps {
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
   onBack?: () => void;
-  onOpenHelp?: () => void;
-  isSyncing?: boolean;
-  syncProgress?: { current: number; total: number } | null;
-  excludedAccounts?: string[];
-  campaigns?: InventoryCampaign[];
-  user?: User | null;
-  databaseMode?: DatabaseMode;
+  user: User;
   showModal?: (title: string, message: string, type: ModalConfig['type']) => void;
-  onRestore?: (state: InventoryState) => void;
-  onClearDatabase?: () => void;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
@@ -32,7 +24,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
-  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -154,7 +145,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
   };
 
-  const processRowsToDatabaseBatch = async (rows: any[]) => {
+  const processRowsToDatabaseBatch = async (rows: Record<string, unknown>[]) => {
     const CONTA_BAIXA = "131105001";
     const sqlStatements: string[] = [];
 
@@ -173,7 +164,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       };
 
       const codigoAtivo = String(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA']) || '').replace(/'/g, "''").trim();
-      const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL']) || '').replace(/'/g, "''").trim();
+      const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil']) || '').replace(/'/g, "''").trim();
       const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
       const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
       
@@ -189,20 +180,28 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
       const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
       const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
-      const subreg = String(findVal(['SUBREG', 'SALA', 'DEP']) || '').replace(/'/g, "''").trim();
+      /* const subreg = String(findVal(['SUBREG', 'SALA', 'DEP']) || '').replace(/'/g, "''").trim(); */
+
+      // GBR v25: Captura de Altitude e Cálculo de Andar Estático (Zero CPU boot cost)
+      const lat = Number(findVal(['LATITUDE', 'LAT', '_LAT']) || 0);
+      const lng = Number(findVal(['LONGITUDE', 'LNG', '_LNG']) || 0);
+      const altitude = Number(findVal(['ALTITUDE', 'ALT', '_ALTITUDE_METROS']) || 0);
+      const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
 
       // Inserção na tabela de ativos (espelhamento contábil)
       sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
       
       // Inserção na tabela mestre (inventário)
-      sqlStatements.push(`INSERT OR REPLACE INTO inventario_mestre (
-        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, CONTACONTABIL, 
+      sqlStatements.push(`INSERT OR REPLACE INTO ativos (
+        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
         UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
-        QT, GRUPO_EMPRESARIAL, ENDERECO, SUBREG, _origemTransacao
+        QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
+        latitude, longitude, _altitude_metros, _id_andar, currentCampaignId
       ) VALUES (
         '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
         '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
-        '${qt}', '${grupoEmp}', '${endereco}', '${subreg}', 'EXPERT_LOAD'
+        '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
+        ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, 'CAMP_2025_01'
       );`);
     }
 
@@ -217,11 +216,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       setTimeout(() => {
         window.location.reload();
       }, 1500);
-    } catch (sqlError: any) {
+    } catch (sqlError: unknown) {
+      const err = sqlError as Error;
       if (showModal) {
-        showModal('Erro no Banco Local', sqlError.message, 'error');
+        showModal('Erro no Banco Local', err.message, 'error');
       } else {
-        addLog(`Carga FALHOU: ${sqlError.message}`);
+        addLog(`Carga FALHOU: ${err.message}`);
       }
       setStatus('ERROR');
     }
@@ -245,24 +245,26 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           addLog("Parsing binário via XLSX...");
           const workbook = read(data, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
-          const rows: any[] = utils.sheet_to_json(workbook.Sheets[sheetName]);
+          const rows: Record<string, unknown>[] = utils.sheet_to_json(workbook.Sheets[sheetName]);
 
           if (rows.length === 0) throw new Error("Planilha vazia.");
 
           await processRowsToDatabaseBatch(rows);
 
-        } catch (innerError: any) {
-          addLog(`Erro interno: ${innerError.message}`);
-          if (showModal) showModal('Erro de Processamento', innerError.message, 'error');
+        } catch (innerError: unknown) {
+          const ie = innerError as Error;
+          addLog(`Erro interno: ${ie.message}`);
+          if (showModal) showModal('Erro de Processamento', ie.message, 'error');
           setStatus('ERROR');
         }
       };
 
       reader.readAsArrayBuffer(file);
 
-    } catch (error: any) {
-      console.error("Erro fatal ao carregar planilha:", error);
-      addLog(`Falha na carga: ${error.message}`);
+    } catch (error: unknown) {
+      const e = error as Error;
+      console.error("Erro fatal ao carregar planilha:", e);
+      addLog(`Falha na carga: ${e.message}`);
       setStatus('ERROR');
     }
   };
@@ -289,7 +291,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     try {
       await sqliteService.executeQuery("DROP TABLE IF EXISTS ativos_imobilizados;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS inventario_mestre;");
+      await sqliteService.executeQuery("DROP TABLE IF EXISTS ativos;");
       await sqliteService.executeQuery("DROP TABLE IF EXISTS unit_configs;");
       await sqliteService.executeQuery("DROP TABLE IF EXISTS AUDIT_LOG;");
       await sqliteService.executeQuery("DROP TABLE IF EXISTS localidades;");
@@ -302,8 +304,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       
       alert("Banco de dados resetado com sucesso!");
       window.location.reload();
-    } catch (err: any) {
-      alert(`Falha ao executar Hard Reset: ${err.message}`);
+    } catch (err: unknown) {
+      const e = err as Error;
+      alert(`Falha ao executar Hard Reset: ${e.message}`);
       setStatus('ERROR');
     }
   };
@@ -477,7 +480,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                   try {
                     setStatus('LOADING');
                     addLog("Ativando sistema...");
-                    const assets = await sqliteService.getAllAssets();
+                    
+                    // GBR v25: Projeção Magra (Mapping Exclusive)
+                    // Pega o ID da primeira campanha ativa ou gera um ID genérico
+                    const campaignId = 'CAMP_2025_01'; 
+                    const assets = await localDb.assets.getMapData(campaignId);
+                    
+                    addLog(`>>> [Projection] ${assets.length} ativos carregados via shader pipeline.`);
                     
                     // Sincroniza o cache do IndexedDB com o novo banco SQL carregado
                     const newState: InventoryState = {
@@ -494,10 +503,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     sessionStorage.setItem('app_just_finished_load', 'true');
                     onDataLoaded(assets, summary.companies);
                     setStatus('IDLE');
-                  } catch (err: any) {
-                    addLog(`Erro na ativação: ${err.message}`);
-                    setStatus('SUMMARY');
-                  }
+                  } catch (err: unknown) {
+            const innerError = err as Error;
+            addLog(`Erro na ativação: ${innerError.message}`);
+            setStatus('SUMMARY');
+          }
                 }
               }}
               className="w-full bg-emerald-600 text-white p-5 rounded-3xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"

@@ -22,7 +22,7 @@ export const normalizeToProtheus = (asset: Asset) => {
     N1_ITEM: '0001', // Padrão Protheus para item único
     N1_STATUS: asset.STATUS === 'ATIVO' ? '1' : '0', // Exemplo de mapeamento de status
     N1_LOCAL: asset.ENDERECO || '',
-    N3_CUSTBEM: asset.CONTACONTABIL || '',
+    N3_CUSTBEM: asset.conta_contabil || '',
     N3_CCUSTO: asset.CENTRODECUSTO || '',
     SN1_RECNO: asset.Sn1_recno,
     SN3_RECNO: asset.Sn3_recno

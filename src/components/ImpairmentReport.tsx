@@ -40,7 +40,7 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
     return impairmentAssets.filter(a => 
       String(a.ETIQUETA || '').toLowerCase().includes(term) ||
       String(a.DESCRICAODOATIVO || '').toLowerCase().includes(term) ||
-      String(a.CONTACONTABIL || '').toLowerCase().includes(term)
+      String(a.conta_contabil || '').toLowerCase().includes(term)
     );
   }, [impairmentAssets, searchTerm]);
 
@@ -52,7 +52,7 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
     const data = impairmentAssets.map(a => ({
       'Etiqueta': a.ETIQUETA,
       'Descrição': a.DESCRICAODOATIVO,
-      'Conta Contábil': a.CONTACONTABIL,
+      'Conta Contábil': a.conta_contabil,
       'Vlr Aquisição': a._valor_aquisicao || a.VLRAQUISIC,
       'Depr. Acumulada': a._depreciacao_acumulada || 0,
       'Vlr Contábil': (Number(a._valor_aquisicao || 0) || Number(a.VLRAQUISIC || 0)) - Number(a._depreciacao_acumulada || 0),

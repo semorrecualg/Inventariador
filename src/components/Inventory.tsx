@@ -7,14 +7,12 @@ import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
-import { assetRepository } from '../services/assetRepository';
 import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
-import { getCurrentLocation } from '../utils/gpsUtils';
 import { 
   MapPin, 
   Check,
@@ -39,8 +37,7 @@ import {
   WifiOff,
   Flashlight,
   ArrowLeft,
-  Target,
-  ShieldOff
+  Target
 } from 'lucide-react';
 
 import { QRCodeSVG } from 'qrcode.react';
@@ -150,7 +147,6 @@ interface InventoryProps {
   user: User | null;
   currentCampaignId?: string;
   unitConfig?: UnitConfig | null;
-  onUpdateUnitConfig?: (unitId: string, lat: number, lng: number) => Promise<void>;
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -182,8 +178,7 @@ const Inventory: React.FC<InventoryProps> = ({
   databaseMode,
   user,
   currentCampaignId,
-  unitConfig,
-  onUpdateUnitConfig
+  unitConfig
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -277,11 +272,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [showGpsFallback, setShowGpsFallback] = useState(false);
-  const [isContingencyModalOpen, setIsContingencyModalOpen] = useState(false);
-  const [contingencyReason, setContingencyReason] = useState('');
-  const [contingencyLat, setContingencyLat] = useState<string>('');
-  const [contingencyLng, setContingencyLng] = useState<string>('');
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
@@ -733,11 +723,6 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   };
 
-  const handleContingencySubmit = async () => {
-    // Função obsoleta mas mantida para evitar quebra de referências pendentes em outros lugares
-    setIsContingencyModalOpen(false);
-  };
-
   useEffect(() => {
     if (isSearchVisible) {
       setShowNumericKeypad(true);
@@ -1009,7 +994,7 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
-        _campaignId: currentCampaignId,
+        currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || "",
         _tenantid: user?.tenantid || '',
         _unitid: selectedUnit || user?.unitid || ''

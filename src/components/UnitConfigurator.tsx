@@ -1,6 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Save, 
   Target, 
@@ -17,54 +16,12 @@ import {
   Map as MapIcon,
   WifiOff
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
+import maplibregl from 'maplibre-gl';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { getCurrentLocation } from '../utils/gpsUtils';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-// Fix Leaflet icon issue
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-
-const DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
-
-// Error Boundary para isolamento total do Leaflet
-class MapErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false };
-  }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: any, errorInfo: any) {
-    console.error('>>> [MAP] Falha crítica no Leaflet:', error, errorInfo);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full bg-slate-950 p-12 text-center">
-          <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
-            <WifiOff size={32} className="text-slate-600" />
-          </div>
-          <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Ambiente Soberano</h2>
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed max-w-[240px]">
-            Interface Visual de Mapa Desativada por Falha de Driver ou Conexão. O Hardware GPS continua capturando a posição atual normalmente.
-          </p>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 interface UnitConfiguratorProps {
   user: User;
@@ -75,24 +32,11 @@ interface UnitConfiguratorProps {
   initialUnit?: string | null;
 }
 
-const MapEvents = ({ onClick }: { onClick: (lat: number, lng: number) => void }) => {
-  useMapEvents({
-    click(e) {
-      onClick(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-};
-
-const MapController = ({ center }: { center: [number, number] }) => {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom());
-  }, [center, map]);
-  return null;
-};
-
 const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, onNavigate, initialUnit }) => {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<maplibregl.Map | null>(null);
+  const markerRef = useRef<maplibregl.Marker | null>(null);
+  
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
@@ -112,6 +56,156 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const [isSheetExpanded, setIsSheetExpanded] = useState(false);
   const [unitSearchTerm, setUnitSearchTerm] = useState('');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    initMap();
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+      }
+    };
+  }, []);
+
+  const initMap = () => {
+    if (!mapRef.current || mapInstance.current) return;
+    
+    try {
+      const map = new maplibregl.Map({
+        container: mapRef.current,
+        style: {
+          version: 8,
+          sources: {
+            'osm-raster': {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors'
+            }
+          },
+          layers: [
+            {
+              id: 'osm-layer',
+              type: 'raster',
+              source: 'osm-raster',
+              minzoom: 0,
+              maxzoom: 19
+            }
+          ]
+        },
+        center: [mapCenter[1], mapCenter[0]], // MapLibre uses [lng, lat]
+        zoom: 15
+      });
+
+      map.on('load', () => {
+        mapInstance.current = map;
+        console.log('>>> [MAP] MapLibre GL JS Inicializado (Soberania Offline).');
+        updateMapDisplay();
+      });
+
+      map.on('click', (e) => {
+        handleMapClick(e.lngLat.lat, e.lngLat.lng);
+      });
+      
+    } catch (err) {
+      console.error('>>> [MAP] Falha ao inicializar MapLibre:', err);
+    }
+  };
+
+  const createGeoJSONCircle = (center: [number, number], radiusInMeters: number, points: number = 64) => {
+    const coords = { lat: center[0], lng: center[1] };
+    const kgRadius = radiusInMeters / 1000; // converter para km
+    const coordinates = [];
+    const distanceX = kgRadius / (111.32 * Math.cos((coords.lat * Math.PI) / 180));
+    const distanceY = kgRadius / 110.574;
+
+    for (let i = 0; i < points; i++) {
+      const theta = (i / points) * (2 * Math.PI);
+      const x = distanceX * Math.cos(theta);
+      const y = distanceY * Math.sin(theta);
+      coordinates.push([coords.lng + x, coords.lat + y]);
+    }
+    coordinates.push(coordinates[0]);
+
+    return {
+      type: 'Feature',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [coordinates]
+      }
+    } as maplibregl.GeoJSONFeatureSelection;
+  };
+
+  const updateMapDisplay = () => {
+    if (!mapInstance.current || !currentConfig.lat || !currentConfig.lng) return;
+
+    try {
+      const map = mapInstance.current;
+      const center: [number, number] = [currentConfig.lng, currentConfig.lat];
+
+      // 1. Atualizar Marcador
+      if (markerRef.current) {
+        markerRef.current.setLngLat(center);
+      } else {
+        markerRef.current = new maplibregl.Marker({ draggable: true })
+          .setLngLat(center)
+          .addTo(map);
+        
+        markerRef.current.on('dragend', () => {
+          const lngLat = markerRef.current!.getLngLat();
+          handleMapClick(lngLat.lat, lngLat.lng);
+        });
+      }
+
+      // 2. Atualizar Geofence (Círculo)
+      const radius = currentConfig.radius_meters || 500;
+      const geojson = createGeoJSONCircle([currentConfig.lat, currentConfig.lng], radius);
+
+      if (map.getSource('geofence')) {
+        (map.getSource('geofence') as maplibregl.GeoJSONSource).setData(geojson);
+      } else {
+        map.addSource('geofence', {
+          type: 'geojson',
+          data: geojson
+        });
+
+        map.addLayer({
+          id: 'geofence-fill',
+          type: 'fill',
+          source: 'geofence',
+          layout: {},
+          paint: {
+            'fill-color': '#3b82f6',
+            'fill-opacity': 0.2
+          }
+        });
+
+        map.addLayer({
+          id: 'geofence-outline',
+          type: 'line',
+          source: 'geofence',
+          layout: {},
+          paint: {
+            'line-color': '#3b82f6',
+            'line-width': 2,
+            'line-dasharray': [2, 1]
+          }
+        });
+      }
+
+      // 3. Centralizar Câmera
+      map.easeTo({ center, duration: 500 });
+      
+    } catch (err) {
+      console.warn('>>> [MAP] Erro ao atualizar display do mapa:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (mapInstance.current) {
+      // MapLibre switch logic if satellite was supported via another raster source
+      // For now we keep it simple with OSM
+    }
+  }, [mapType]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -211,17 +305,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   };
 
   useEffect(() => {
-    if (currentConfig.lat && currentConfig.lng) {
-      const lat = Number(currentConfig.lat);
-      const lng = Number(currentConfig.lng);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        setMapCenter(prev => {
-          if (prev[0] === lat && prev[1] === lng) return prev;
-          return [lat, lng];
-        });
-      }
+    if (mapInstance.current) {
+      updateMapDisplay();
     }
-  }, [currentConfig.lat, currentConfig.lng]);
+  }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
 
   const handleMapClick = (lat: number, lng: number) => {
     if (!selectedUnit) {
@@ -263,16 +350,18 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       } else {
         throw new Error('Hardware retornou objeto vazio');
       }
-    } catch (e: any) {
-      console.warn('>>> [GPS] Falha nativa, tentando Web API:', e.message || 'Desconhecido');
+    } catch (e: unknown) {
+      const err = e as Error;
+      console.warn('>>> [GPS] Falha nativa, tentando Web API:', err.message || 'Desconhecido');
       
       try {
         const webLoc = await getCurrentLocation(true);
         setCurrentConfig(prev => ({ ...prev, lat: webLoc.lat, lng: webLoc.lng }));
         setMapCenter([webLoc.lat, webLoc.lng]);
         setMessage({ text: 'POSIÇÃO FIXADA (WEB FALLBACK).', type: 'success' });
-      } catch (fallbackError: any) {
-        setMessage({ text: `ERRO GPS: ${fallbackError.message || 'Sinal indisponível'}`, type: 'error' });
+      } catch (fallbackError: unknown) {
+        const fe = fallbackError as Error;
+        setMessage({ text: `ERRO GPS: ${fe.message || 'Sinal indisponível'}`, type: 'error' });
       }
     } finally {
       setLocating(false);
@@ -330,8 +419,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       } else {
         setMessage({ text: `NAO FOI POSSÍVEL GRAVAR: ${ok}`, type: 'error' });
       }
-    } catch (saveErr: any) {
-      setMessage({ text: `ERRO DE PERSISTÊNCIA: ${saveErr.message || 'Falha no banco local'}`, type: 'error' });
+    } catch (saveErr: unknown) {
+      const se = saveErr as Error;
+      setMessage({ text: `ERRO DE PERSISTÊNCIA: ${se.message || 'Falha no banco local'}`, type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -344,41 +434,25 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
   return (
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
-      {/* Background Map */}
+      {/* Background Map Container */}
       <div className="absolute inset-0 z-0">
-        <MapErrorBoundary>
-          <MapContainer 
-            center={mapCenter} 
-            zoom={15} 
-            zoomControl={false}
-            style={{ height: '100%', width: '100%' }}
-            className="z-0"
-          >
-            {mapType === 'street' ? (
-              <TileLayer
-                attribution='&copy; OpenStreetMap'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-            ) : (
-              <TileLayer
-                attribution='Tiles &copy; Esri'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              />
-            )}
-            <MapController center={mapCenter} />
-            <MapEvents onClick={handleMapClick} />
-            {currentConfig.lat && currentConfig.lng && (
-              <>
-                <Marker position={[currentConfig.lat, currentConfig.lng]} />
-                <Circle 
-                  center={[currentConfig.lat, currentConfig.lng]} 
-                  radius={currentConfig.radius_meters || 500}
-                  pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15, weight: 2 }}
-                />
-              </>
-            )}
-          </MapContainer>
-        </MapErrorBoundary>
+        <div 
+          ref={mapRef} 
+          id="gbr-unit-map" 
+          className="w-full h-full"
+        />
+        {/* Camada de Interação (Caso o mapa native fique por baixo) */}
+        {!mapInstance.current && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm p-12 text-center">
+            <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
+              <Loader2 className="text-blue-500 animate-spin" size={32} />
+            </div>
+            <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Motor Nativo</h2>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed max-w-[240px]">
+              Inicializando MapLibre GL JS GPU acceleration...
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Banner de Orientação Offline */}
@@ -395,7 +469,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 <WifiOff size={16} className="text-white" />
               </div>
               <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
-                Ambiente Offline: O mapa visual está indisponível, mas o GPS Nativo continua operacional. Use o botão "Minha Posição" para fixar o ponto com precisão.
+                Ambiente Offline: O mapa visual está indisponível, mas o GPS Nativo continua operacional. Use o botão &quot;Minha Posição&quot; para fixar o ponto com precisão.
               </p>
             </div>
           </motion.div>

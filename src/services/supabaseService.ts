@@ -565,8 +565,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
       return {
         ...cleanAsset,
-        _lat: typeof cleanAsset._lat === 'number' ? cleanAsset._lat : null,
-        _lng: typeof cleanAsset._lng === 'number' ? cleanAsset._lng : null,
+        latitude: typeof cleanAsset.latitude === 'number' ? cleanAsset.latitude : null,
+        longitude: typeof cleanAsset.longitude === 'number' ? cleanAsset.longitude : null,
         _conferido: Boolean(cleanAsset._conferido),
         _tenantid: finalTenantId,
         _unitid: (cleanAsset._unitid || cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().trim() || null,
@@ -2088,14 +2088,14 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('_tenantid', tenantid)
-      .eq('_campaignId', campaignId);
+      .eq('currentCampaignId', campaignId);
 
     // Divergências nesta campanha
     const { count: divergenceCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('_tenantid', tenantid)
-      .eq('_campaignId', campaignId)
+      .eq('currentCampaignId', campaignId)
       .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
 
     return {

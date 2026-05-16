@@ -1,6 +1,7 @@
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Device } from '@capacitor/device';
 import { SQLiteConnection, SQLiteDBConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
 import { DatabaseStatus, Asset, InventoryCampaign, InventoryState } from '../types';
 import { SCHEMA_PRIORITY, findBestColumn } from '../utils/schema';
@@ -51,16 +52,15 @@ const FULL_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_ativos_conta ON ativos_imobilizados (conta_contabil);
   CREATE INDEX IF NOT EXISTS idx_ativos_recno ON ativos_imobilizados (Sn1_recno, Sn3_recno);
 
-CREATE TABLE IF NOT EXISTS inventario_mestre (
+  CREATE TABLE IF NOT EXISTS ativos (
     id TEXT PRIMARY KEY,
     ETIQUETA TEXT UNIQUE,
     REGISTRO TEXT,
     DESCRICAODOATIVO TEXT,
     VLRAQUISIC REAL,
     DATAAQUISIC TEXT,
-    DATAAQUSIC TEXT,
     CENTRODECUSTO TEXT,
-    CONTACONTABIL TEXT,
+    conta_contabil TEXT,
     TAG_INVENTARIO TEXT,
     ESTADO_CONSERVACAO TEXT,
     GRUPO_EMPRESARIAL TEXT,
@@ -72,9 +72,6 @@ CREATE TABLE IF NOT EXISTS inventario_mestre (
     NOMEFORNECEDOR TEXT,
     NOTAFISCAL TEXT,
     ENDERECO TEXT,
-    SUBREG TEXT,
-    DATABAIXA TEXT,
-    PRIMARYKEY TEXT,
     _tenantid TEXT,
     _unitid TEXT,
     _unidade TEXT,
@@ -84,9 +81,9 @@ CREATE TABLE IF NOT EXISTS inventario_mestre (
     _dataLeitura TEXT,
     _auditor TEXT,
     _photoUrl TEXT,
-    _lat REAL,
-    _lng REAL,
-    _campaignId TEXT,
+    latitude REAL,
+    longitude REAL,
+    currentCampaignId TEXT,
     _version INTEGER DEFAULT 1,
     _is_deleted INTEGER DEFAULT 0,
     _plaquetado INTEGER DEFAULT 0,
@@ -101,19 +98,21 @@ CREATE TABLE IF NOT EXISTS inventario_mestre (
     _is_divergent_baixa INTEGER DEFAULT 0,
     _parent_id TEXT,
     _is_synced INTEGER DEFAULT 0,
+    _altitude_metros REAL,
+    _id_andar INTEGER,
     Sn1_recno INTEGER,
     Sn3_recno INTEGER,
     DE_PARA TEXT,
     AUDITOR_STATUS_CONFERENCIA TEXT,
     _origemTransacao TEXT,
     timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_mestre_etiqueta ON inventario_mestre (ETIQUETA);
-CREATE INDEX IF NOT EXISTS idx_mestre_unit ON inventario_mestre (UNIDADE_OPERACIONAL);
-CREATE INDEX IF NOT EXISTS idx_mestre_unitid ON inventario_mestre (_unitid);
-CREATE INDEX IF NOT EXISTS idx_mestre_status ON inventario_mestre (TAG_INVENTARIO);
-CREATE INDEX IF NOT EXISTS idx_mestre_endereco ON inventario_mestre (ENDERECO);
-CREATE INDEX IF NOT EXISTS idx_mestre_localmaster ON inventario_mestre (_localMaster);
+  );
+  CREATE INDEX IF NOT EXISTS idx_mestre_etiqueta ON ativos (ETIQUETA);
+  CREATE INDEX IF NOT EXISTS idx_mestre_unit ON ativos (UNIDADE_OPERACIONAL);
+  CREATE INDEX IF NOT EXISTS idx_mestre_unitid ON ativos (_unitid);
+  CREATE INDEX IF NOT EXISTS idx_mestre_status ON ativos (TAG_INVENTARIO);
+  CREATE INDEX IF NOT EXISTS idx_mestre_endereco ON ativos (ENDERECO);
+  CREATE INDEX IF NOT EXISTS idx_mestre_localmaster ON ativos (_localMaster);
 
 CREATE TABLE IF NOT EXISTS localidades (
     id TEXT PRIMARY KEY,
@@ -188,6 +187,8 @@ class SqliteService {
   private activeFileHandle: FileSystemFileHandle | null = null;
   private permissionGrantedSession = false;
   private activeSchemaMappings: Record<string, string> = {};
+  private mutationCounter = 0;
+  private readonly MUTATION_THRESHOLD = 5;
   
   private storageKeys = {
     dbKey: 'sqlite_db_binary',
@@ -257,7 +258,7 @@ class SqliteService {
   async detectAndPersistSchema() {
     if (!this.nativeDb) return;
     try {
-      const res = await this.query("PRAGMA table_info(inventario_mestre)");
+      const res = await this.query("PRAGMA table_info(ativos)");
       if (!res || res.length === 0) return;
       const columns = res.map(row => row.name as string);
       
@@ -336,7 +337,7 @@ class SqliteService {
 
   private async ensureRequiredColumns() {
     if (!this.nativeDb) return;
-    const tables = ['inventario_mestre', 'campaigns'];
+    const tables = ['ativos', 'campaigns'];
     for (const table of tables) {
       const res = await this.query(`PRAGMA table_info(${table})`);
       if (res && res.length > 0) {
@@ -349,40 +350,68 @@ class SqliteService {
           if (!columns.includes('_unitid')) await this.execute("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
         }
         
-        if (table === 'inventario_mestre') {
+        if (table === 'ativos') {
           const required = [
-            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'CONTACONTABIL', 'QT',
-            '_campaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
+            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'conta_contabil', 'QT',
+            'currentCampaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
             '_conferido', '_lastUpdated', '_is_synced', '_parent_id',
-            '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', '_lat', '_lng',
+            '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
+            '_altitude_metros', '_id_andar',
             '_is_unitized', '_is_divergent_baixa', '_isNew', 'DE_PARA', 
             'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
           ];
           
           for (const col of required) {
             if (!columns.includes(col)) {
-              const type = col.startsWith('_is') || col === '_version' || col === '_conferido' ? 'INTEGER DEFAULT 0' : 'TEXT';
-              await this.execute(`ALTER TABLE inventario_mestre ADD COLUMN ${col} ${type}`);
+              let type = 'TEXT';
+              if (col.startsWith('_is') || col === '_version' || col === '_conferido' || col === '_id_andar') {
+                type = 'INTEGER DEFAULT 0';
+              } else if (col === 'latitude' || col === 'longitude' || col === '_altitude_metros' || col === '_lat' || col === '_lng') {
+                type = 'REAL';
+              }
+              try {
+                await this.execute(`ALTER TABLE ativos ADD COLUMN ${col} ${type}`);
+              } catch { /* Ignora se já existir */ }
               
               // Migração de Legado (Se existirem colunas antigas)
               if (col === 'DESCRICAODOATIVO' && columns.includes('DESCRICAODOBEM')) {
-                await this.execute("UPDATE inventario_mestre SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL");
+                try { await this.execute("UPDATE ativos SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL"); } catch (e) { console.warn(e); }
               }
               if (col === 'CENTRODECUSTO' && columns.includes('CC_CUSTO')) {
-                await this.execute("UPDATE inventario_mestre SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL");
+                try { await this.execute("UPDATE ativos SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL"); } catch (e) { console.warn(e); }
               }
-              if (col === 'CONTACONTABIL' && columns.includes('CONTA_CONTABIL')) {
-                await this.execute("UPDATE inventario_mestre SET CONTACONTABIL = CONTA_CONTABIL WHERE CONTACONTABIL IS NULL");
+              if (col === 'conta_contabil' && columns.includes('CONTACONTABIL')) {
+                try { await this.execute("UPDATE ativos SET conta_contabil = CONTACONTABIL WHERE conta_contabil IS NULL"); } catch (e) { console.warn(e); }
+              }
+              if (col === 'latitude' && columns.includes('_lat')) {
+                try { await this.execute("UPDATE ativos SET latitude = _lat WHERE latitude IS NULL"); } catch (e) { console.warn(e); }
+              }
+              if (col === 'longitude' && columns.includes('_lng')) {
+                try { await this.execute("UPDATE ativos SET longitude = _lng WHERE longitude IS NULL"); } catch (e) { console.warn(e); }
+              }
+              if (col === 'currentCampaignId' && columns.includes('_campaignId')) {
+                try { await this.execute("UPDATE ativos SET currentCampaignId = _campaignId WHERE currentCampaignId IS NULL"); } catch (e) { console.warn(e); }
               }
             }
           }
           
           // Garantir valores padrão para colunas vitais
           if (columns.includes('_version')) {
-             await this.execute("UPDATE inventario_mestre SET _version = 1 WHERE _version IS NULL");
+             try { await this.execute("UPDATE ativos SET _version = 1 WHERE _version IS NULL"); } catch (e) { console.warn(e); }
           }
         }
       }
+    }
+  }
+
+  private async createPostMigrationIndices() {
+    if (!this.nativeDb) return;
+    try {
+      console.log(">>> [Database] Aplicando índices v25 (Post-Migration)...");
+      await this.execute("CREATE INDEX IF NOT EXISTS idx_ativos_campanha_andar ON ativos (currentCampaignId, _id_andar)");
+      await this.execute("CREATE INDEX IF NOT EXISTS idx_ativos_recno_mestre ON ativos (Sn1_recno, Sn3_recno)");
+    } catch (e) {
+      console.error(">>> [Database] Falha ao criar índices compostos:", e);
     }
   }
 
@@ -478,14 +507,16 @@ class SqliteService {
 
       this.isInitialized = true;
       await this.ensureRequiredColumns();
+      await this.createPostMigrationIndices();
       await this.seedAdminUser();
       
       window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
       return true;
-    } catch (error: any) {
-      console.error(">>> [Database] Falha crítica no bootstrap do banco:", error);
-      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: String(error) } }));
-      throw new Error(`Bootstrap Falhou: ${error?.message || String(error)}`);
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      console.error(">>> [Database] Falha crítica no bootstrap do banco:", err);
+      window.dispatchEvent(new CustomEvent('gbr_db_init_failed', { detail: { error: String(err) } }));
+      throw new Error(`Bootstrap Falhou: ${err?.message || String(err)}`);
     } finally {
       this.isInitializingDb = false;
     }
@@ -565,17 +596,61 @@ class SqliteService {
     }
   }
 
+  private async checkBatterySafe(): Promise<boolean> {
+    if (!Capacitor.isNativePlatform()) return true;
+    try {
+      const info = await Device.getBatteryInfo();
+      if (info.batteryLevel !== undefined && info.batteryLevel < 0.05 && !info.isCharging) {
+        console.error(">>> [Hardware] BATERIA CRÍTICA! Bloqueando escrita para prevenir corrupção.");
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
   async execute(sql: string, params: (string | number | boolean | null)[] = []) {
     if (!this.isInitialized) await this.init();
     if (!this.nativeDb) return;
 
+    if (!(await this.checkBatterySafe())) {
+      throw new Error("Escrita bloqueada: Bateria abaixo de 5%");
+    }
+
     try {
       await this.nativeDb.run(sql, params);
-      await this.saveDatabase();
+      
+      this.mutationCounter++;
+      if (this.mutationCounter >= this.MUTATION_THRESHOLD) {
+        console.log(`>>> [Persistence] Regra dos 5 atingida (${this.mutationCounter}). Performing physical commit.`);
+        await this.saveDatabase();
+        this.mutationCounter = 0;
+      }
     } catch (err) {
       console.error("Execute failed:", sql, err);
       throw err;
     }
+  }
+
+  /**
+   * Força o commit físico imediato (Override da Regra dos 5)
+   */
+  async flush() {
+    if (this.mutationCounter > 0) {
+      await this.saveDatabase();
+      this.mutationCounter = 0;
+    }
+  }
+
+  /**
+   * Registra uma alteração no log de auditoria (GBR v24 Delta Protocol)
+   */
+  async logAuditEvent(userId: string, action: string, table: string, recordId: string, details: string, delta?: string) {
+    const id = `LOG_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const sql = `INSERT INTO AUDIT_LOG (id, usuario, acao, tabela, registro_id, details, delta, _status_sinc) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0)`;
+    await this.execute(sql, [id, userId, action, table, recordId, details, delta || null]);
   }
 
   /**
@@ -602,7 +677,7 @@ class SqliteService {
 
   // --- Ativos ---
   async getAssets(tenantId: string, unitId?: string | null): Promise<Asset[]> {
-    let sql = "SELECT * FROM inventario_mestre WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";
+    let sql = "SELECT * FROM ativos WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0";
     const params: (string | number | boolean | null)[] = [tenantId, tenantId];
     if (unitId) {
       sql += " AND (_unitid = ? OR UNIDADE_OPERACIONAL = ?)";
@@ -616,7 +691,7 @@ class SqliteService {
     const cols = validKeys.join(', ');
     const placeholders = validKeys.map(() => '?').join(', ');
     const values = validKeys.map(k => asset[k as keyof Asset]);
-    await this.execute(`INSERT OR REPLACE INTO inventario_mestre (${cols}) VALUES (${placeholders})`, values);
+    await this.execute(`INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`, values);
   }
 
   async saveAssetsBatch(assets: Asset[]) {
@@ -631,19 +706,20 @@ class SqliteService {
         const placeholders = validKeys.map(() => '?').join(', ');
         const values = validKeys.map(k => asset[k as keyof Asset]);
         return {
-          sql: `INSERT OR REPLACE INTO inventario_mestre (${cols}) VALUES (${placeholders})`,
+          sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
           params: values as (string | number | boolean | null)[]
         };
       });
       await this.executeBatch(queries);
-    } catch (e: any) {
+    } catch (error: unknown) {
+      const e = error as Error;
       console.error("saveAssetsBatch failed:", e);
       throw e;
     }
   }
 
   async deleteAsset(id: string) {
-    await this.execute("UPDATE inventario_mestre SET _is_deleted = 1 WHERE id = ?", [id]);
+    await this.execute("UPDATE ativos SET _is_deleted = 1 WHERE id = ?", [id]);
   }
 
   // --- Campanhas ---
@@ -704,7 +780,7 @@ class SqliteService {
 
   async deleteCampaignSql(id: string) {
     await this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
-    await this.execute("UPDATE inventario_mestre SET _campaignId = NULL WHERE _campaignId = ?", [id]);
+    await this.execute("UPDATE ativos SET currentCampaignId = NULL WHERE currentCampaignId = ?", [id]);
     await this.saveDatabase();
   }
 
@@ -735,7 +811,7 @@ class SqliteService {
     }
   }
 
-  async saveUnitConfigToSql(config: any) {
+  async saveUnitConfigToSql(config: Record<string, unknown>) {
     const unitId = config._unitid || config.unit_id;
     const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
     const lat = Number(config.lat);
@@ -752,12 +828,12 @@ class SqliteService {
   }
 
   async getAssetCount(): Promise<number> {
-    const res = await this.query("SELECT COUNT(*) as count FROM inventario_mestre WHERE _is_deleted = 0");
+    const res = await this.query("SELECT COUNT(*) as count FROM ativos WHERE _is_deleted = 0");
     return (res[0]?.count as number) || 0;
   }
 
   async getOperationalUnits(): Promise<string[]> {
-    const res = await this.query("SELECT DISTINCT UNIDADE_OPERACIONAL FROM inventario_mestre WHERE UNIDADE_OPERACIONAL IS NOT NULL AND UNIDADE_OPERACIONAL != ''");
+    const res = await this.query("SELECT DISTINCT UNIDADE_OPERACIONAL FROM ativos WHERE UNIDADE_OPERACIONAL IS NOT NULL AND UNIDADE_OPERACIONAL != ''");
     return res.map(row => row.UNIDADE_OPERACIONAL as string);
   }
 
@@ -770,7 +846,7 @@ class SqliteService {
   }
 
   async getAllAssets(): Promise<Asset[]> {
-    return await this.query("SELECT * FROM inventario_mestre WHERE _is_deleted = 0") as unknown as Asset[];
+    return await this.query("SELECT * FROM ativos WHERE _is_deleted = 0") as unknown as Asset[];
   }
 
   async saveUnitConfigSql(config: Record<string, unknown>) {
@@ -788,7 +864,7 @@ class SqliteService {
     await this.saveDatabase();
   }
 
-  async importDatabase(binary: Uint8Array) {
+  async importDatabase() {
     if (Capacitor.isNativePlatform()) {
       console.warn(">>> [Governance] importDatabase ignorado em plataforma nativa.");
       return;
@@ -878,7 +954,8 @@ class SqliteService {
       }));
       await this.nativeDb.executeSet(set);
       await this.saveDatabase();
-    } catch (e: any) {
+    } catch (error: unknown) {
+      const e = error as Error;
       console.error("Batch failed:", e);
       throw e;
     }

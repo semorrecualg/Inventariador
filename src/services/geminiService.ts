@@ -31,7 +31,7 @@ export const generateInventoryInsights = async (
   try {
     // Preparar dados resumidos para o prompt (evitar enviar milhares de linhas)
     const summaryData = campaigns.map(c => {
-      const campaignAssets = assets.filter(a => a._campaignId === c.id || a.UNIDADE === c.name);
+      const campaignAssets = assets.filter(a => a.currentCampaignId === c.id || a.UNIDADE === c.name);
       const total = campaignAssets.length;
       const conferidos = campaignAssets.filter(a => a._conferido || a.AUDITOR_STATUS_CONFERENCIA === 'SIM').length;
       const divergencias = campaignAssets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length;

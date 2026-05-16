@@ -26,7 +26,7 @@ export const QR_FIELD_ORDER = [
   'REGISTRO',
   'SUBREG',
   'DATABAIXA',
-  'CONTACONTABIL',
+  'conta_contabil',
   'PRIMARYKEY',
   'VLRAQUISIC' // Mapeado de VLRAQUISICAO
 ];

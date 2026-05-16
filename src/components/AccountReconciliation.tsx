@@ -262,7 +262,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
       if (isBaixado && !asset._conferido) return;
 
-      const account = asset.CONTACONTABIL || 'SEM CONTA';
+      const account = asset.conta_contabil || 'SEM CONTA';
       if (!stats[account]) {
         stats[account] = { total: 0, checked: 0 };
       }
@@ -289,7 +289,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
       if (isBaixado && !asset._conferido) return false;
 
-      const account = asset.CONTACONTABIL || 'SEM CONTA';
+      const account = asset.conta_contabil || 'SEM CONTA';
       const matchesAccount = account === selectedAccount;
       
       const matchesSearch = assetSearchTerm === '' || 

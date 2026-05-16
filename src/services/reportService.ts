@@ -14,7 +14,7 @@ export class ReportService {
         'PATRIMONIO': a.ETIQUETA || a.REGISTRO,
         'DESCRICAO': a.DESCRICAODOATIVO,
         'CENTRO_CUSTO': a.CENTRODECUSTO,
-        'CONTA': a.CONTACONTABIL,
+        'CONTA': a.conta_contabil,
         'UNIDADE': a.UNIDADE_OPERACIONAL,
         'ENDERECO': a.ENDERECO,
         'DATA_AUDITORIA': new Date().toLocaleDateString('pt-BR')

@@ -103,7 +103,7 @@ const AssetLedger: React.FC<AssetLedgerProps> = ({ asset, onBack }) => {
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Conta Contábil</p>
-                <p className="text-sm font-black text-slate-800">{asset._conta_contabil || asset.CONTACONTABIL || '---'}</p>
+                <p className="text-sm font-black text-slate-800">{asset.conta_contabil || '---'}</p>
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Unidade Operacional</p>
