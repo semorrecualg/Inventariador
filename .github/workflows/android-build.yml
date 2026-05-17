@@ -32,53 +32,23 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Sync Capacitor Android
+      - name: Ultimate Definitive Fix - Core Plugin Resolution (GBR Protocol v2.6)
         run: |
-          npm install @capacitor/cli@6.2.1 @capacitor/android@6.2.1 --no-save --legacy-peer-deps --force
-          npx cap add android || true
-          npx cap sync android
-
-      - name: Definitive CI/CD Fix - Global BouncyCastle Exclusion (GBR Protocol v2.6)
-        run: |
-          mkdir -p ~/.gradle
+          # 1. Remove o plugin antigo do capacitor/device que carrega a dependência incompatível
+          npm uninstall @capacitor/device
           
-          # Injeta uma regra de exclusão agressiva na raiz de resolução do Gradle
-          cat <<EOF > ~/.gradle/init.gradle
-          allprojects {
-              configurations.all { configuration ->
-                  // Remove o vínculo que faz o Gradle tentar baixar e validar o JAR assinado
-                  dependencies {
-                      modules {
-                          module("org.bouncycastle:bcprov-jdk18on") {
-                              replacedBy("org.bouncycastle:bcprov-jdk15to18", "Substituição de Criptografia para Java 17")
-                          }
-                      }
-                  }
-                  
-                  // Remove completamente a dependência transitiva do capacitor-device
-                  exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
-                  exclude group: 'org.bouncycastle', module: 'bcprov-ext-jdk18on'
-              }
-          }
-          EOF
-          echo ">>> [GBR] Global exclusion init.gradle created"
-
-          # Ajusta parâmetros de memória do Gradle para o ambiente virtualizado do GitHub
-          cat <<EOF > android/gradle.properties
-          org.gradle.parallel=false
-          org.gradle.workers.max=1
-          org.gradle.daemon=false
-          org.gradle.caching=false
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
-          echo ">>> [GBR] gradle.properties updated for CI environment"
+          # 2. Instala a versão atualizada e estável do plugin que removeu o Bouncy Castle do buildscript core
+          npm install @capacitor/device@6.0.2 --save-exact
+          
+          # 3. Sincroniza e força o Gradle a limpar metadados antigos de buildscripts
+          npx cap sync android
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-build-cache --stacktrace
+          # O flag '--no-daemon' impede que instâncias em segundo plano segurem caches corrompidos no runner
+          ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
 
       - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
