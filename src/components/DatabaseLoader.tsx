@@ -23,6 +23,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   showModal
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
@@ -147,84 +148,94 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const processRowsToDatabaseBatch = async (rows: Record<string, unknown>[]) => {
     const CONTA_BAIXA = "131105001";
-    const sqlStatements: string[] = [];
+    const CHUNK_SIZE = 200;
+    const totalItems = rows.length;
+    
+    setProgress({ current: 0, total: totalItems });
+    addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
 
-    addLog(`Mapeando ${rows.length} ativos. Preparando lote nativo...`);
+    for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const sqlStatements: string[] = ["BEGIN TRANSACTION;"];
 
-    for (const row of rows) {
-      if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
+      for (const row of chunk) {
+        if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
 
-      const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
-      
-      // Robust column finding
-      const rowKeys = Object.keys(row);
-      const findVal = (priorities: string[]) => {
-        const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_')));
-        return key ? row[key] : null;
-      };
+        const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
+        
+        // Robust column finding
+        const rowKeys = Object.keys(row);
+        const findVal = (priorities: string[]) => {
+          const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_')));
+          return key ? row[key] : null;
+        };
 
-      const codigoAtivo = String(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA']) || '').replace(/'/g, "''").trim();
-      const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil']) || '').replace(/'/g, "''").trim();
-      const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
-      const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
-      
-      const registro = String(findVal(['REGISTRO', 'RECORD']) || codigoAtivo || '').replace(/'/g, "''").trim();
-      const descricao = String(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''").trim();
-      
-      let unidadeOp = String(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').replace(/'/g, "''").trim().toUpperCase();
-      if (!unidadeOp || unidadeOp === 'NULL') unidadeOp = 'MATRIZ';
+        const codigoAtivo = String(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA']) || '').replace(/'/g, "''").trim();
+        const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil']) || '').replace(/'/g, "''").trim();
+        const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
+        const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
+        
+        const registro = String(findVal(['REGISTRO', 'RECORD']) || codigoAtivo || '').replace(/'/g, "''").trim();
+        const descricao = String(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''").trim();
+        
+        let unidadeOp = String(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').replace(/'/g, "''").trim().toUpperCase();
+        if (!unidadeOp || unidadeOp === 'NULL') unidadeOp = 'MATRIZ';
 
-      const centroCusto = String(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO']) || '').replace(/'/g, "''").trim();
-      const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
-      const dataAquisic = String(findVal(['DATAAQUISIC', 'DATA']) || '').replace(/'/g, "''").trim();
-      const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
-      const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
-      const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
-      /* const subreg = String(findVal(['SUBREG', 'SALA', 'DEP']) || '').replace(/'/g, "''").trim(); */
+        const centroCusto = String(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO']) || '').replace(/'/g, "''").trim();
+        const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
+        const dataAquisic = String(findVal(['DATAAQUISIC', 'DATA']) || '').replace(/'/g, "''").trim();
+        const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
+        const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
+        const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
 
-      // GBR v25: Captura de Altitude e Cálculo de Andar Estático (Zero CPU boot cost)
-      const lat = Number(findVal(['LATITUDE', 'LAT', '_LAT']) || 0);
-      const lng = Number(findVal(['LONGITUDE', 'LNG', '_LNG']) || 0);
-      const altitude = Number(findVal(['ALTITUDE', 'ALT', '_ALTITUDE_METROS']) || 0);
-      const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
+        // GBR v25: Captura de Altitude e Cálculo de Andar Estático (Zero CPU boot cost)
+        const lat = Number(findVal(['LATITUDE', 'LAT', '_LAT']) || 0);
+        const lng = Number(findVal(['LONGITUDE', 'LNG', '_LNG']) || 0);
+        const altitude = Number(findVal(['ALTITUDE', 'ALT', '_ALTITUDE_METROS']) || 0);
+        const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
 
-      // Inserção na tabela de ativos (espelhamento contábil)
-      sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
-      
-      // Inserção na tabela mestre (inventário)
-      sqlStatements.push(`INSERT OR REPLACE INTO ativos (
-        id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
-        UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
-        QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
-        latitude, longitude, _altitude_metros, _id_andar, currentCampaignId
-      ) VALUES (
-        '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
-        '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
-        '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
-        ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, 'CAMP_2025_01'
-      );`);
-    }
-
-    try {
-      addLog(`Injetando dados no SQLite Nativo...`);
-      await sqliteService.executeStatementsBatch(sqlStatements);
-      addLog("Carga concluída com sucesso!");
-      
-      if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
-      
-      // Forçamos a limpeza do cache de unidades para garantir que o resumo atualize
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    } catch (sqlError: unknown) {
-      const err = sqlError as Error;
-      if (showModal) {
-        showModal('Erro no Banco Local', err.message, 'error');
-      } else {
-        addLog(`Carga FALHOU: ${err.message}`);
+        // Inserção na tabela de ativos (espelhamento contábil)
+        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
+        
+        // Inserção na tabela mestre (inventário)
+        sqlStatements.push(`INSERT OR REPLACE INTO ativos (
+          id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
+          UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
+          QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
+          latitude, longitude, _altitude_metros, _id_andar, currentCampaignId
+        ) VALUES (
+          '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
+          '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
+          '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
+          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, 'CAMP_2025_01'
+        );`);
       }
-      setStatus('ERROR');
+
+      sqlStatements.push("COMMIT;");
+
+      try {
+        await sqliteService.executeStatementsBatch(sqlStatements);
+        const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
+        setProgress({ current: currentProgress, total: totalItems });
+        addLog(`Carregando: ${currentProgress.toLocaleString()} / ${totalItems.toLocaleString()} ativos`);
+        
+        // Respiro para a Thread do JS atualizar o DOM
+        await new Promise(resolve => setTimeout(resolve, 0));
+      } catch (chunkError: unknown) {
+        const err = chunkError as Error;
+        addLog(`Erro no lote ${i}: ${err.message}`);
+        // Tenta dar rollback se falhar
+        try { await sqliteService.execute("ROLLBACK;"); } catch { /* ignore */ }
+        throw err;
+      }
     }
+
+    addLog("Carga concluída com sucesso!");
+    if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
+    
+    setTimeout(() => {
+      window.location.reload();
+    }, 1500);
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,13 +417,44 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             key="importing"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex flex-col items-center gap-6 text-center"
+            className="flex flex-col items-center gap-6 text-center w-full max-w-xs"
           >
-            <div className="w-16 h-16 bg-blue-50 border-4 border-blue-500 border-t-transparent rounded-full animate-spin flex items-center justify-center" />
-            <div className="space-y-1">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Injetando Soberania</h3>
-              <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest animate-pulse">
-                {loadingMessage}
+            <div className="relative w-20 h-20">
+              <div className="absolute inset-0 border-4 border-slate-100 rounded-full" />
+              <motion.div 
+                className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <FileSpreadsheet className="w-8 h-8 text-blue-500" />
+              </div>
+            </div>
+
+            <div className="w-full space-y-3">
+              <div className="flex justify-between items-end">
+                <div className="text-left">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Importando</h3>
+                  <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest animate-pulse">
+                    Expert Load v25
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-slate-400 uppercase">
+                    {Math.round((progress.current / progress.total) * 100)}%
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(progress.current / progress.total) * 100}%` }}
+                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                />
+              </div>
+
+              <p className="text-[9px] font-mono text-slate-400 uppercase font-bold">
+                {progress.current.toLocaleString()} / {progress.total.toLocaleString()} itens
               </p>
             </div>
           </motion.div>
