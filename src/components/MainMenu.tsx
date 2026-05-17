@@ -8,7 +8,6 @@ import {
   Info,
   Search, 
   BarChart3, 
-  ArrowLeft, 
   ClipboardList, 
   Download, 
   FileText,
@@ -46,12 +45,11 @@ import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
 import AIChatModal from './AIChatModal';
 
-import AIInsightCard from './AIInsightCard';
 import { sqliteService } from '../services/sqliteService';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen, params?: NavigationParams) => void;
-  onLogout: () => void;
+  onLogout?: () => void;
   onExport: () => void;
   onBackup: () => void;
   onDownloadCloudData: () => void;
@@ -108,7 +106,6 @@ interface MainMenuProps {
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
   onNavigate, 
-  onLogout, 
   onExport, 
   onBackup,
   onDownloadCloudData,
@@ -119,7 +116,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   inventoryInfo, 
   autoConfirmOnScan, 
   onUpdateAutoConfirm, 
-  isFullscreen, 
   scanFeedbackMode,
   onUpdateScanFeedbackMode,
   initialDataMenuOpen = false,
@@ -156,8 +152,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   showModal,
   isAIAssistantOpen,
   setIsAIAssistantOpen,
-  onOpenHelp,
-  campaignsCount
+  onOpenHelp
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -306,32 +301,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       </div>
 
-      {/* USER PROFILE CARD - SIMPLIFIED */}
-      <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between z-20">
-        <div className="flex items-center">
-          <div className="w-12 h-12 bg-accent-soft rounded-full flex items-center justify-center text-accent font-bold text-lg shadow-sm">
-            {user?.username?.substring(0, 2).toUpperCase() || 'OP'}
-          </div>
-          <div className="ml-4">
-            <h2 className="text-sm font-bold text-ink leading-tight">
-              {user?.username || 'Operador'}
-            </h2>
-            <div className="flex items-center space-x-2 mt-1">
-              <div className={`w-2 h-2 rounded-full ${isFullscreen ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-              <span className="text-[10px] font-medium text-ink-muted uppercase tracking-wider">
-                {isFullscreen ? 'Modo Ativo' : 'Modo Standby'}
-              </span>
-            </div>
-          </div>
-        </div>
 
-        <button 
-          onClick={onLogout} 
-          className="w-10 h-10 bg-slate-50 rounded-xl text-slate-400 flex items-center justify-center active:scale-90 transition-all hover:bg-red-50 hover:text-red-500"
-        >
-          <ArrowLeft size={20} />
-        </button>
-      </div>
 
       {/* TOOL GRID - MINIMALIST */}
       <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between">
@@ -396,23 +366,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
-        {/* AI INSIGHT CARD */}
-        {(campaignsCount || 0) > 0 ? (
-          <AIInsightCard 
-            title="Insights de Auditoria"
-            suggestion={`Detectamos ${inventoryInfo.totalDatabase - inventoryInfo.count} itens pendentes na unidade ${selectedUnit || 'atual'}. Deseja iniciar a conferência inteligente?`}
-            onAction={() => onNavigate(AppScreen.INVENTORY)}
-            actionLabel="Iniciar Agora"
-          />
-        ) : (
-          <AIInsightCard 
-            title="Planejamento de Auditoria"
-            suggestion={`Não há campanhas ativas para ${selectedUnit || 'esta unidade'}. É necessário criar um evento de inventário para iniciar.`}
-            onAction={() => onNavigate(AppScreen.CAMPAIGN_MANAGEMENT)}
-            actionLabel="Criar Campanha"
-          />
-        )}
-
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.INVENTORY)}

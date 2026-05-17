@@ -147,7 +147,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const processRowsToDatabaseBatch = async (rows: Record<string, unknown>[]) => {
-    const CONTA_BAIXA = "131105001";
     const CHUNK_SIZE = 200;
     const totalItems = rows.length;
     
@@ -160,8 +159,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const sqlStatements: string[] = [`SAVEPOINT ${savepointName};`];
 
       for (const row of chunk) {
-        if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
-
         const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
         
         // Robust column finding
@@ -188,6 +185,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
         const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
         const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
+
+        // GBR v25: Mapeamento de Localidade via campo 'ENDERECO'
+        if (endereco && endereco !== '') {
+          const locId = `${grupoEmp}_${unidadeOp}_${endereco}`.replace(/\s/g, '_').toUpperCase();
+          sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${endereco}', '${unidadeOp}', '${grupoEmp}', '${unidadeOp}');`);
+        }
 
         // GBR v25: Captura de Altitude e Cálculo de Andar Estático (Zero CPU boot cost)
         const lat = Number(findVal(['LATITUDE', 'LAT', '_LAT']) || 0);

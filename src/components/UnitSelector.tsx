@@ -108,15 +108,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
           </div>
           <div className="flex items-center space-x-2">
-            {isAdmin && onLoadDatabase && (
-              <button 
-                onClick={onLoadDatabase}
-                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md bg-white text-indigo-600 border border-indigo-100 active:scale-95 hover:bg-indigo-50"
-                title="Carga Expert de Dados"
-              >
-                <Database size={20} />
-              </button>
-            )}
             {onSync && databaseMode !== DatabaseMode.INTERNAL && (
               <button 
                 onClick={onSync}
