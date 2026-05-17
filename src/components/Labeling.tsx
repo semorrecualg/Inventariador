@@ -1,11 +1,12 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Asset, TagInventario, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { parseAssetDate, formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { Virtuoso } from 'react-virtuoso';
+import { localDb } from '../services/localDbService';
 
 import { 
   Check,
@@ -20,6 +21,7 @@ import {
 
 interface LabelingProps {
   assets: Asset[];
+  selectedUnit?: string;
   onBack: () => void;
   onUpdateAsset: (asset: Asset) => void;
   onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void;
@@ -30,7 +32,9 @@ interface LabelingProps {
   scanFeedbackMode: ScanFeedbackMode;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
+  const [dbAssets, setDbAssets] = useState<Asset[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -46,17 +50,37 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
   const [advDateStart, setAdvDateStart] = useState('');
   const [advDateEnd, setAdvDateEnd] = useState('');
 
+  // GBR v25: Carregamento Direto via SQLite (Regra de Negócio Estrita)
+  useEffect(() => {
+    const fetchAssets = async () => {
+      if (!selectedUnit) return;
+      setLoading(true);
+      try {
+        const results = await localDb.assets.getLabelingAssets(selectedUnit);
+        setDbAssets(results);
+      } catch (error) {
+        console.error("Erro ao caragmapeamento de etiquetas:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAssets();
+  }, [selectedUnit, initialAssets]); // Recarregar se a base master mudar ou unidade mudar
+
   const normalize = (s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
 
   const assetsToLabel = useMemo(() => {
-    return assets.filter(a => 
-      String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+    // Se temos dbAssets (carregados via query), usamos eles. Caso contrário fallback no props.
+    const source = dbAssets.length > 0 ? dbAssets : initialAssets;
+    
+    return source.filter(a => 
+      String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR' || 
       String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
       a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
       a.TAG_INVENTARIO === TagInventario.ETIQUETADO ||
       a._plaquetado === true
     );
-  }, [assets]);
+  }, [dbAssets, initialAssets]);
 
   const pendingAssetsToLabel = useMemo(() => {
     return assetsToLabel.filter(a => !a._conferido);
@@ -104,8 +128,9 @@ const Labeling: React.FC<LabelingProps> = ({ assets, onBack, onUpdateAsset, onBu
       });
     }
 
+    // GBR v25: Ordenação Absoluta por CENTRODECUSTO ASC (Query UI fallback)
     return base.sort((a, b) => 
-      normalize(a.CENTRODECUSTO || '').localeCompare(normalize(b.CENTRODECUSTO || ''), undefined, { numeric: true })
+      String(a.CENTRODECUSTO || '').localeCompare(String(b.CENTRODECUSTO || ''), undefined, { numeric: true })
     );
   }, [assetsToLabel, activeTab, advDesc, advCC, advSupplier, advDateStart, advDateEnd]);
 

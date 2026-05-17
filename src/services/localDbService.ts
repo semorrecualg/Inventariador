@@ -74,7 +74,6 @@ export const localDb = {
         FROM ativos 
         WHERE currentCampaignId = ? 
           AND latitude IS NOT NULL 
-          AND (conta_contabil != '131105001' OR conta_contabil IS NULL)
           AND _is_deleted = 0
       `;
       const results = await sqliteService.query(sql, [campaignId]) as Record<string, unknown>[];
@@ -152,27 +151,27 @@ export const localDb = {
       })
     }),
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
+      // GBR v25: Soberania Nativa - Mapeamento absoluto via ENDERECO
       let sql = `
         SELECT 
-          COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') as displayName,
-          COUNT(*) as total,
-          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) as checked
+          COALESCE(NULLIF(TRIM(ENDERECO), ''), 'GERAL - NÃO ESPECIFICADO') AS displayName,
+          COUNT(*) AS total,
+          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS checked
         FROM ativos
-        WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ? OR GRUPO_EMPRESARIAL = ?)
+        WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ?)
           AND _is_deleted = 0
       `;
       const params: SqlValue[] = [
-        unitId.toUpperCase(), 
         unitId.toUpperCase(), 
         unitId.toUpperCase()
       ];
 
       if (searchTerm) {
-        sql += ` AND (COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') LIKE ? COLLATE NOCASE)`;
+        sql += ` AND (ENDERECO LIKE ? COLLATE NOCASE)`;
         params.push(`%${searchTerm}%`);
       }
 
-      sql += ` GROUP BY COALESCE(_localMaster, ENDERECO, LOCALIZACAO, 'SEM LOCAL') ORDER BY displayName COLLATE NOCASE`;
+      sql += ` GROUP BY displayName ORDER BY displayName COLLATE NOCASE`;
       
       const results = await sqliteService.query(sql, params) as { displayName: string; total: number; checked: number }[];
       return results.map(r => ({
@@ -181,6 +180,35 @@ export const localDb = {
         checked: r.checked,
         locKey: r.displayName.toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
       }));
+    },
+    getLabelingAssets: async (unitId: string): Promise<Asset[]> => {
+      const sql = `
+        SELECT * FROM ativos 
+        WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?) 
+          AND (
+            ETIQUETA = 'ETIQUETAR' OR 
+            _plaquetaMaster = 'ETIQUETAR' OR
+            TAG_INVENTARIO = 'ETIQUETADO' OR
+            _plaquetado = 1
+          )
+          AND _is_deleted = 0
+        ORDER BY CENTRODECUSTO ASC
+      `;
+      const results = await sqliteService.query(sql, [unitId.toUpperCase(), unitId.toUpperCase()]) as Record<string, unknown>[];
+      return results.map(row => {
+        const asset = { ...row } as Record<string, unknown>;
+        ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
+          if (Object.prototype.hasOwnProperty.call(asset, key)) {
+            asset[key] = asset[key] === 1;
+          }
+        });
+        ['DE_PARA', '_history'].forEach(key => {
+          if (typeof asset[key] === 'string' && (asset[key].startsWith('{') || asset[key].startsWith('['))) {
+            try { asset[key] = JSON.parse(asset[key]); } catch { /* ignore */ }
+          }
+        });
+        return asset as unknown as Asset;
+      });
     }
   },
   localidades: {

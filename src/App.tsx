@@ -4441,7 +4441,18 @@ const App: React.FC = () => {
               userRole={user?.role}
               isFieldMode={isFieldMode}
             >
-              <Labeling assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} onSelectAsset={handleSelectAsset} uniqueCentrosDeCusto={uniqueCentrosDeCusto} scannerMode={inventory.scannerMode || ScannerMode.BARCODE} onUpdateScannerMode={handleUpdateScannerMode} scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} />
+              <Labeling 
+                assets={filteredAssetsByUnit} 
+                selectedUnit={selectedUnit}
+                onBack={popScreen} 
+                onUpdateAsset={updateAsset} 
+                onBulkUpdateAssets={bulkUpdateAssets} 
+                onSelectAsset={handleSelectAsset} 
+                uniqueCentrosDeCusto={uniqueCentrosDeCusto} 
+                scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+                onUpdateScannerMode={handleUpdateScannerMode} 
+                scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+              />
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.CONSULTATION && (
@@ -4638,6 +4649,8 @@ const App: React.FC = () => {
               allAssets={inventory.assets}
               currentCampaignId={inventory.currentCampaignId}
               onBack={popScreen} 
+              onOpenInventory={() => (selectedUnit ? pushScreen(AppScreen.INVENTORY) : pushScreen(AppScreen.UNIT_SELECTION))}
+              onOpenLabeling={() => (selectedUnit ? pushScreen(AppScreen.LABELING) : pushScreen(AppScreen.UNIT_SELECTION))}
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
             />

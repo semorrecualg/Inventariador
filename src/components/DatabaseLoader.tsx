@@ -158,6 +158,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const savepointName = `expert_batch_${i}`;
       const sqlStatements: string[] = [`SAVEPOINT ${savepointName};`];
 
+      const cleanValue = (val: any): string => {
+        if (val === null || val === undefined) return '';
+        const s = String(val).trim();
+        const low = s.toLowerCase();
+        if (low === 'null' || low === 'undefined' || low === '') return '';
+        return s;
+      };
+
       for (const row of chunk) {
         const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
         
@@ -168,23 +176,23 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           return key ? row[key] : null;
         };
 
-        const codigoAtivo = String(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA']) || '').replace(/'/g, "''").trim();
-        const contaContabil = String(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil']) || '').replace(/'/g, "''").trim();
+        const codigoAtivo = cleanValue(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA'])).replace(/'/g, "''");
+        const contaContabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil'])).replace(/'/g, "''");
         const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
         const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
         
-        const registro = String(findVal(['REGISTRO', 'RECORD']) || codigoAtivo || '').replace(/'/g, "''").trim();
-        const descricao = String(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''").trim();
+        const registro = cleanValue(findVal(['REGISTRO', 'RECORD']) || codigoAtivo).replace(/'/g, "''");
+        const descricao = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''");
         
-        let unidadeOp = String(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').replace(/'/g, "''").trim().toUpperCase();
-        if (!unidadeOp || unidadeOp === 'NULL') unidadeOp = 'MATRIZ';
+        let unidadeOp = cleanValue(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').toUpperCase().replace(/'/g, "''");
+        if (!unidadeOp) unidadeOp = 'MATRIZ';
 
-        const centroCusto = String(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO']) || '').replace(/'/g, "''").trim();
+        const centroCusto = cleanValue(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO'])).replace(/'/g, "''");
         const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
-        const dataAquisic = String(findVal(['DATAAQUISIC', 'DATA']) || '').replace(/'/g, "''").trim();
-        const qt = String(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''").trim();
-        const grupoEmp = String(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA']) || '').replace(/'/g, "''").trim();
-        const endereco = String(findVal(['ENDERECO', 'LOCAL']) || '').replace(/'/g, "''").trim();
+        const dataAquisic = cleanValue(findVal(['DATAAQUISIC', 'DATA'])).replace(/'/g, "''");
+        const qt = cleanValue(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''");
+        const grupoEmp = cleanValue(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA'])).replace(/'/g, "''");
+        const endereco = cleanValue(findVal(['ENDERECO', 'LOCAL'])).replace(/'/g, "''");
 
         // GBR v25: Mapeamento de Localidade via campo 'ENDERECO'
         if (endereco && endereco !== '') {

@@ -44,6 +44,8 @@ interface DashboardProps {
   assets: Asset[];
   allAssets?: Asset[];
   onBack: () => void;
+  onOpenInventory?: () => void;
+  onOpenLabeling?: () => void;
   onOpenActiveSearch?: () => void;
   currentCampaignId?: string;
   user: {
@@ -55,7 +57,7 @@ interface DashboardProps {
   } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
@@ -401,6 +403,47 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
         
         {activeTab === 'overview' && (
           <>
+            {/* GBR Expert v25: Quick Action - INICIAR INVENTÁRIO */}
+            <div className="relative group cursor-pointer active:scale-[0.98] transition-all mb-4" onClick={onOpenInventory}>
+              <div className="absolute inset-0 bg-gradient-to-br from-accent to-blue-700 rounded-[2.5rem] shadow-xl shadow-accent/20 border border-white/20 overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform text-white">
+                   <CheckCircle2 size={120} />
+                </div>
+              </div>
+              <div className="relative p-8 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white text-xl font-black uppercase tracking-tight mb-1">INVENTÁRIO</h3>
+                  <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">Conferência Física de Campo</p>
+                </div>
+                <div className="w-14 h-14 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-white border border-white/20 group-hover:bg-white/20 transition-colors">
+                  <ArrowUpRight size={28} />
+                </div>
+              </div>
+            </div>
+
+            {/* GBR Expert v25: Quick Action - ETIQUETAR */}
+            <div className="relative group cursor-pointer active:scale-[0.98] transition-all mb-4" onClick={onOpenLabeling}>
+              <div className="absolute inset-0 bg-white rounded-[2.5rem] shadow-sm border border-border overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform text-accent">
+                   <AlertTriangle size={120} />
+                </div>
+              </div>
+              <div className="relative p-8 flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="w-16 h-16 bg-blue-50 rounded-[1.5rem] flex items-center justify-center text-accent border border-blue-100 shadow-inner">
+                    <TrendingUp size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-ink text-xl font-black uppercase tracking-tight mb-1">ETIQUETAR</h3>
+                    <p className="text-ink-muted text-[10px] font-bold uppercase tracking-widest">Itens sem Plaqueta</p>
+                  </div>
+                </div>
+                <div className="w-14 h-14 bg-bg-main rounded-2xl flex items-center justify-center text-ink-muted border border-border group-hover:bg-accent group-hover:text-white transition-all duration-300">
+                  <ArrowUpRight size={28} />
+                </div>
+              </div>
+            </div>
+            
             {/* Main KPI Card */}
             <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between mb-6">
