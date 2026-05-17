@@ -38,35 +38,47 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Ultimate Absolute Fix - Hard Cache Bypass (GBR Protocol v2.6)
+      - name: Definitive CI/CD Fix - Global BouncyCastle Exclusion (GBR Protocol v2.6)
         run: |
-          # 1. Cria a estrutura exata do cache que o Gradle está tentando acessar
-          mkdir -p /home/runner/.gradle/caches/jars-9/18366b31678c0171857be093a3b8ec22/
+          mkdir -p ~/.gradle
           
-          # 2. Injeta um arquivo JAR vazio válido para enganar o validador de arquivos do Gradle
-          echo "MOCK" > /home/runner/.gradle/caches/jars-9/18366b31678c0171857be093a3b8ec22/bcprov-jdk18on-1.79.jar
-          
-          # 3. Força a exclusão total do bloco bouncycastle no build.gradle nativo do plugin capacitor-device via sed
-          if [ -d "node_modules/@capacitor/device/android" ]; then
-            sed -i 's/implementation "org.bouncycastle:bcprov-jdk18on:1.79"/\/\/ Capped By GBR/g' node_modules/@capacitor/device/android/build.gradle
-            echo ">>> [GBR] capacitor-device plugin patched directly in node_modules"
-          fi
+          # Injeta uma regra de exclusão agressiva na raiz de resolução do Gradle
+          cat <<EOF > ~/.gradle/init.gradle
+          allprojects {
+              configurations.all { configuration ->
+                  // Remove o vínculo que faz o Gradle tentar baixar e validar o JAR assinado
+                  dependencies {
+                      modules {
+                          module("org.bouncycastle:bcprov-jdk18on") {
+                              replacedBy("org.bouncycastle:bcprov-jdk15to18", "Substituição de Criptografia para Java 17")
+                          }
+                      }
+                  }
+                  
+                  // Remove completamente a dependência transitiva do capacitor-device
+                  exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
+                  exclude group: 'org.bouncycastle', module: 'bcprov-ext-jdk18on'
+              }
+          }
+          EOF
+          echo ">>> [GBR] Global exclusion init.gradle created"
 
-          # 4. Configura propriedades limpas para estabilidade máxima
+          # Ajusta parâmetros de memória do Gradle para o ambiente virtualizado do GitHub
           cat <<EOF > android/gradle.properties
           org.gradle.parallel=false
           org.gradle.workers.max=1
           org.gradle.daemon=false
+          org.gradle.caching=false
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
-          echo ">>> [GBR] gradle.properties updated"
+          echo ">>> [GBR] gradle.properties updated for CI environment"
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-build-cache
+          ./gradlew assembleDebug --no-build-cache --stacktrace
 
       - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
