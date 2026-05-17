@@ -38,17 +38,41 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Patch Android Native Configuration (GBR Protocol v2.6)
+      - name: Patch Android Native Configuration via Init Script (GBR Protocol v2.6)
         run: |
-          # 1. Force Bouncy Castle Resolution in android/build.gradle
-          if [ -f "android/build.gradle" ]; then
-            sed -i '/allprojects {/a \    configurations.all {\n        resolutionStrategy {\n            force "org.bouncycastle:bcprov-jdk18on:1.79"\n        }\n    }' android/build.gradle
-            echo ">>> [GBR] applied bcprov patch to android/build.gradle"
-          fi
+          # 1. Invalidação preventiva de caches corrompidos no Runner
+          echo ">>> [GBR] Cleaning potential corrupt caches..."
+          rm -rf ~/.gradle/caches/jars-9/
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle/
+          
+          # 2. Criar um init.gradle global para forçar a dependência em ABSOLUTAMENTE TODOS os projetos e subprojetos
+          mkdir -p ~/.gradle
+          cat <<EOF > ~/.gradle/init.gradle
+          allprojects {
+              buildscript {
+                  configurations.all {
+                      resolutionStrategy {
+                          force 'org.bouncycastle:bcprov-jdk18on:1.79'
+                      }
+                  }
+              }
+              configurations.all {
+                  resolutionStrategy {
+                      force 'org.bouncycastle:bcprov-jdk18on:1.79'
+                      eachDependency { DependencyResolveDetails details ->
+                          if (details.requested.group == 'org.bouncycastle') {
+                              details.useVersion '1.79'
+                          }
+                      }
+                  }
+              }
+          }
+          EOF
+          echo ">>> [GBR] init.gradle globally registered"
 
-          # 2. Configure gradle.properties for stability
+          # 3. Configurar gradle.properties agressivo contra concorrência
           cat <<EOF > android/gradle.properties
-          # GBR PROTOCOL v2.6 - Estabilidade CI/CD
+          # GBR PROTOCOL v2.6 - Estabilidade CI/CD Suprema
           org.gradle.parallel=false
           org.gradle.workers.max=1
           org.gradle.daemon=false
