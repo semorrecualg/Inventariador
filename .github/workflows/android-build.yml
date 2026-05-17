@@ -32,22 +32,25 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Ultimate Definitive Fix - Core Plugin Resolution (GBR Protocol v2.6)
+      - name: Ultimate Definitive Fix - Core Plugin and Platform Resolution (GBR Protocol v2.6)
         run: |
-          # 1. Remove o plugin antigo do capacitor/device que carrega a dependência incompatível
+          # 1. Ajusta os plugins e remove versões defeituosas
           npm uninstall @capacitor/device
-          
-          # 2. Instala a versão atualizada e estável do plugin que removeu o Bouncy Castle do buildscript core
           npm install @capacitor/device@6.0.2 --save-exact
           
-          # 3. Sincroniza e força o Gradle a limpar metadados antigos de buildscripts
+          # 2. Re-injeta explicitamente o core do Android do Capacitor para garantir o mapeamento do CLI
+          npm install @capacitor/android@6.2.1 --save-exact
+          
+          # 3. Força a criação ou link da plataforma nativa caso ela tenha sido desvinculada
+          npx cap add android || true
+          
+          # 4. Sincroniza os ativos e metadados finais
           npx cap sync android
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
-          # O flag '--no-daemon' impede que instâncias em segundo plano segurem caches corrompidos no runner
           ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
 
       - name: Upload Android Debug APK
