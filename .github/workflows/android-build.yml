@@ -38,60 +38,38 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Patch Android Native Configuration via Init Script (GBR Protocol v2.6)
+      - name: Definitve Fix - Dependency Substitution (GBR Protocol v2.6)
         run: |
-          # 1. Invalidação preventiva de caches corrompidos no Runner
-          echo ">>> [GBR] Cleaning potential corrupt caches..."
-          rm -rf ~/.gradle/caches/jars-9/
-          rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle/
-          
-          # 2. Criar um init.gradle global para forçar a dependência em ABSOLUTAMENTE TODOS os projetos e subprojetos
           mkdir -p ~/.gradle
           cat <<EOF > ~/.gradle/init.gradle
           allprojects {
-              buildscript {
-                  configurations.all {
-                      resolutionStrategy {
-                          force 'org.bouncycastle:bcprov-jdk18on:1.79'
-                      }
-                  }
-              }
               configurations.all {
                   resolutionStrategy {
-                      force 'org.bouncycastle:bcprov-jdk18on:1.79'
-                      eachDependency { DependencyResolveDetails details ->
-                          if (details.requested.group == 'org.bouncycastle') {
-                              details.useVersion '1.79'
-                          }
+                      // Substitui a biblioteca problemática da JDK18 pela versão retrocompatível estável
+                      dependencySubstitution {
+                          substitute module('org.bouncycastle:bcprov-jdk18on') using module('org.bouncycastle:bcprov-jdk15to18:1.77')
                       }
+                      // Força a versão limpa para qualquer outra chamada transitiva
+                      force 'org.bouncycastle:bcprov-jdk15to18:1.77'
                   }
               }
           }
           EOF
-          echo ">>> [GBR] init.gradle globally registered"
 
-          # 3. Configurar gradle.properties agressivo contra concorrência
+          # Garante propriedades limpas de compilação
           cat <<EOF > android/gradle.properties
-          # GBR PROTOCOL v2.6 - Estabilidade CI/CD Suprema
           org.gradle.parallel=false
           org.gradle.workers.max=1
           org.gradle.daemon=false
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
-          echo ">>> [GBR] created/updated android/gradle.properties"
 
-      - name: Force Clean Corrupted Gradle Cache and Build APK
+      - name: Build Debug APK
         run: |
-          # Remove fisicamente qualquer JAR corrompido ou travado no runner
-          rm -rf /home/runner/.gradle/caches/jars-9/
-          rm -rf /home/runner/.gradle/caches/modules-2/
-          
-          # Executa a compilação
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-build-cache --refresh-dependencies --stacktrace
+          ./gradlew assembleDebug --no-build-cache
 
       - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
