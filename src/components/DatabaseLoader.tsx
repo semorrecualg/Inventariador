@@ -156,7 +156,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const sqlStatements: string[] = ["BEGIN TRANSACTION;"];
+      const savepointName = `expert_batch_${i}`;
+      const sqlStatements: string[] = [`SAVEPOINT ${savepointName};`];
 
       for (const row of chunk) {
         if (String(row.conta_contabil || row.CONTA || row.CONTACONTABIL || '') === CONTA_BAIXA) continue;
@@ -211,7 +212,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         );`);
       }
 
-      sqlStatements.push("COMMIT;");
+      sqlStatements.push(`RELEASE SAVEPOINT ${savepointName};`);
 
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
@@ -225,7 +226,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const err = chunkError as Error;
         addLog(`Erro no lote ${i}: ${err.message}`);
         // Tenta dar rollback se falhar
-        try { await sqliteService.execute("ROLLBACK;"); } catch { /* ignore */ }
+        try { await sqliteService.execute(`ROLLBACK TO SAVEPOINT ${savepointName};`); } catch { /* ignore */ }
         throw err;
       }
     }
