@@ -234,9 +234,77 @@ class SqliteService {
     await localforage.removeItem(this.storageKeys.statusKey);
     await localforage.removeItem(this.storageKeys.schemaMappingsKey);
     await localforage.removeItem('inventory_auditor_data');
+    
+    // GBR v25: Limpeza Total exige expurgo físico para evitar ressurreição de dados
+    if (Capacitor.isNativePlatform()) {
+      await this.deletePhysicalDatabase();
+    }
+  }
+
+  async deletePhysicalDatabase() {
+    console.log(">>> [Cleanup] Iniciando expurgo físico de arquivos .db...");
+    const dbName = this.storageKeys.nativeFileName;
+    const platform = Capacitor.getPlatform();
+    
+    // 1. Fechar conexões ativas
+    if (this.nativeDb) {
+      try {
+        await this.nativeDb.close();
+        if (this.sqliteConnection) {
+          await this.sqliteConnection.closeConnection(dbName, false);
+        }
+      } catch (e) {
+        console.warn(">>> [Cleanup] Aviso ao fechar banco:", e);
+      }
+      this.nativeDb = null;
+      this.isInitialized = false;
+    }
+
+    // 2. Deletar arquivos físicos no Directory.Data (específico para Android/iOS)
+    if (platform === 'android' || platform === 'ios') {
+      const filesToDelete = [
+        `../databases/${dbName}.db`,
+        `../databases/${dbName}.db-journal`,
+        `../databases/${dbName}.db-shm`,
+        `../databases/${dbName}.db-wal`,
+        'gbr_kardek.db',
+        'gbr_kardek.db.tmp',
+        'gbr_kardek.db-journal',
+        'gbr_kardek.db-shm',
+        'gbr_kardek.db-wal',
+        'gbr_inventario_expert.db',
+        'gbr_inventario_expert.db-journal',
+        'gbr_inventario_expert.db-shm',
+        'gbr_inventario_expert.db-wal'
+      ];
+
+      for (const file of filesToDelete) {
+        try {
+          await Filesystem.deleteFile({
+            path: file,
+            directory: Directory.Data
+          });
+          console.log(`>>> [Cleanup] Arquivo expurgado: ${file}`);
+        } catch {
+          // Arquivo não existe, apenas ignoramos
+        }
+      }
+    } else {
+      // No Web, o deleteDatabase do IndexedDB é suficiente
+      try {
+        await localforage.removeItem(`sqlite_db_binary_${dbName}`);
+        await this.sqliteConnection?.saveToStore(dbName);
+      } catch (e) {
+         console.warn(">>> [Cleanup] Falha ao limpar IndexedDB Store:", e);
+      }
+    }
+    
+    await this.setSystemStatus(DatabaseStatus.EMPTY);
+    console.log(">>> [Cleanup] Base física expurgada 100%.");
   }
 
   async hardResetDatabase() {
+    await this.deletePhysicalDatabase();
     await this.purgeAllCache();
     this.currentDbStatus = DatabaseStatus.EMPTY;
   }
@@ -431,6 +499,12 @@ class SqliteService {
   }
 
   private isInitializingDb = false;
+  private permissionsGranted = true; // Default true, will be set on boot
+
+  setPermissionsGranted(granted: boolean) {
+    this.permissionsGranted = granted;
+    console.log(`>>> [Governance] Estado de permissões atualizado: ${granted ? 'AUTORIZADO' : 'BLOQUEADO'}`);
+  }
 
   async init(force = false) {
     return await this.initializeDatabase(force);
@@ -616,6 +690,13 @@ class SqliteService {
 
     if (!(await this.checkBatterySafe())) {
       throw new Error("Escrita bloqueada: Bateria abaixo de 5%");
+    }
+
+    // GBR v25 - Blindagem de Escrita Segura
+    const isWrite = sql.toUpperCase().includes('INSERT') || sql.toUpperCase().includes('UPDATE') || sql.toUpperCase().includes('DELETE');
+    if (isWrite && !this.permissionsGranted) {
+       console.error(">>> [Governance] Gravação bloqueada por falta de permissões (Camera/GPS).");
+       throw new Error("Acesso negado: O App exige permissões de Câmera e Localização para gravar dados.");
     }
 
     try {

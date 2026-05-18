@@ -34,7 +34,6 @@ interface LabelingProps {
 
 const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
   const [dbAssets, setDbAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -54,14 +53,11 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
   useEffect(() => {
     const fetchAssets = async () => {
       if (!selectedUnit) return;
-      setLoading(true);
       try {
         const results = await localDb.assets.getLabelingAssets(selectedUnit);
         setDbAssets(results);
       } catch (error) {
         console.error("Erro ao caragmapeamento de etiquetas:", error);
-      } finally {
-        setLoading(false);
       }
     };
     fetchAssets();
@@ -74,11 +70,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     const source = dbAssets.length > 0 ? dbAssets : initialAssets;
     
     return source.filter(a => 
-      String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR' || 
-      String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
-      a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-      a.TAG_INVENTARIO === TagInventario.ETIQUETADO ||
-      a._plaquetado === true
+      String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR'
     );
   }, [dbAssets, initialAssets]);
 

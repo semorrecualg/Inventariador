@@ -8,7 +8,6 @@ import {
   Info,
   Search, 
   BarChart3, 
-  ClipboardList, 
   Download, 
   FileText,
   Users,
@@ -17,6 +16,7 @@ import {
   ShieldCheck,
   ChevronRight,
   DatabaseZap,
+  Building2,
   Trash2,
   SlidersHorizontal,
   Tag,
@@ -49,6 +49,7 @@ import { sqliteService } from '../services/sqliteService';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen, params?: NavigationParams) => void;
+  onChangeUnit?: () => void;
   onLogout?: () => void;
   onExport: () => void;
   onBackup: () => void;
@@ -106,6 +107,7 @@ interface MainMenuProps {
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
   onNavigate, 
+  onChangeUnit,
   onExport, 
   onBackup,
   onDownloadCloudData,
@@ -305,16 +307,28 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {/* TOOL GRID - MINIMALIST */}
       <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-1.5 md:space-x-4">
           <button 
             onClick={() => setIsPreferencesMenuOpen(true)} 
             className="flex flex-col items-center space-y-1 group"
           >
-            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
               <SlidersHorizontal size={20} />
             </div>
-            <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
+            <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
           </button>
+
+          {onChangeUnit && (
+            <button 
+              onClick={onChangeUnit} 
+              className="flex flex-col items-center space-y-1 group"
+            >
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 group-active:scale-90 transition-all group-hover:bg-blue-100">
+                <Building2 size={20} />
+              </div>
+              <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Unidades</span>
+            </button>
+          )}
 
           {isAdmin && (
             <button 
@@ -367,18 +381,31 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
         <button
-          disabled={!hasData}
-          onClick={() => onNavigate(AppScreen.INVENTORY)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+          onClick={() => onChangeUnit ? onChangeUnit() : onNavigate(AppScreen.UNIT_SELECTION)}
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
         >
-          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
-            <ClipboardList size={24} />
+          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+            <Building2 size={24} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-base font-bold text-ink tracking-tight">INVENTÁRIO</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conferência Física</p>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Seleção de Unidade</p>
           </div>
-          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-indigo-600 transition-colors" />
+        </button>
+
+        <button
+          onClick={() => onNavigate(AppScreen.UNIT_CONFIGURATOR)}
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+        >
+          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+            <MapIcon size={24} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className="text-base font-bold text-ink tracking-tight">MAPEAR LOCALIDADES</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Configuração de Geofencing</p>
+          </div>
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
         </button>
 
         <button
@@ -1308,7 +1335,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </p>
                 
                 <div className="space-y-2">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Contas (Ex: 131105001, 131105002)</label>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Contas (Ex: 1101, 1102)</label>
                   <textarea 
                     value={tempExcludedAccounts}
                     onChange={(e) => setTempExcludedAccounts(e.target.value)}
@@ -1499,7 +1526,7 @@ O **v24.50 KARDEK** é uma solução avançada para gestão de inventário físi
 - **Mapeamento v24**: Identifica automaticamente 18 colunas críticas (Empresa, Status, Etiqueta, etc.).
 - **Sn1_recno**: Captura obrigatória do identificador do Protheus para integração.
 - **Regras de Eliminação**:
-  - Itens baixados com contas contábeis específicas (131105001/002) são eliminados.
+  - Itens baixados com contas contábeis específicas (definidas nos filtros) são eliminados.
   - Itens baixados sem etiqueta são eliminados.
   - Itens baixados cuja etiqueta já existe em um registro ativo são eliminados para evitar duplicidade.
 

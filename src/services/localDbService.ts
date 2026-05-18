@@ -185,12 +185,7 @@ export const localDb = {
       const sql = `
         SELECT * FROM ativos 
         WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?) 
-          AND (
-            ETIQUETA = 'ETIQUETAR' OR 
-            _plaquetaMaster = 'ETIQUETAR' OR
-            TAG_INVENTARIO = 'ETIQUETADO' OR
-            _plaquetado = 1
-          )
+          AND ETIQUETA = 'ETIQUETAR'
           AND _is_deleted = 0
         ORDER BY CENTRODECUSTO ASC
       `;

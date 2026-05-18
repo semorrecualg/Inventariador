@@ -57,7 +57,7 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
+import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2, Camera } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -427,7 +427,13 @@ const App: React.FC = () => {
     const initApp = async () => {
       try {
         console.log(">>> [App] Solicitando permissões nativas...");
-        await requestAllPermissions();
+        const granted = await requestAllPermissions();
+        setPermissionsGranted(granted);
+        sqliteService.setPermissionsGranted(granted);
+        
+        if (Capacitor.isNativePlatform() && !granted) {
+          setShowAccessRequest(true);
+        }
         
         const success = await sqliteService.init();
         if (!isMounted) return;
@@ -569,7 +575,7 @@ const App: React.FC = () => {
     protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
     mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
     mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
-    excludedAccounts: JSON.parse(localStorage.getItem('app_excluded_accounts') || '["131105001", "131105002"]'),
+    excludedAccounts: JSON.parse(localStorage.getItem('app_excluded_accounts') || '[]'),
     databaseMode: mode,
     hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
   });
@@ -1796,6 +1802,8 @@ const App: React.FC = () => {
 
   const [isReadOnlyDetail, setIsReadOnlyDetail] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [permissionsGranted, setPermissionsGranted] = useState(true);
+  const [showAccessRequest, setShowAccessRequest] = useState(false);
   const [publicAsset, setPublicAsset] = useState<Asset | null>(null);
 
   const toggleFullscreen = useCallback(() => {
@@ -2510,22 +2518,20 @@ const App: React.FC = () => {
   };
 
   const handleToggleGpsBypass = (val: boolean) => {
-    if (val) {
-      localStorage.setItem('gbr_gps_bypass', 'true');
-      setModalConfig({
-        isOpen: true,
-        title: 'Bypass de GPS Ativado',
-        message: 'O sistema agora usará coordenadas simuladas (Brasília) para testes em desktop.',
-        type: 'success'
-      });
+    localStorage.setItem('gbr_gps_bypass', String(val));
+    updateConfig({ isFieldMode: val }); 
+    window.location.reload(); 
+  };
+
+  const handleApplyPermissions = async () => {
+    const granted = await requestAllPermissions();
+    setPermissionsGranted(granted);
+    sqliteService.setPermissionsGranted(granted);
+    if (granted) {
+      setShowAccessRequest(false);
+      showModal("Permissões Concedidas", "O acesso ao hardware foi validado com sucesso. O sistema está agora em modo operacional total.", "success");
     } else {
-      localStorage.removeItem('gbr_gps_bypass');
-      setModalConfig({
-        isOpen: true,
-        title: 'Bypass de GPS Desativado',
-        message: 'O sistema voltará a exigir localização real.',
-        type: 'info'
-      });
+      showModal("Acesso Negado", "As permissões são obrigatórias para o funcionamento do App. O sistema permanecerá em modo de Proteção de Integridade (Somente Leitura).", "error");
     }
   };
 
@@ -3571,32 +3577,35 @@ const App: React.FC = () => {
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
       sessionStorage.setItem('app_just_cleared_data', 'true');
-      if (selectedUnit) {
+      
+      // GBR v25: Reset de alertas e sanitização se for limpeza total
+      if (!selectedUnit) {
+        localStorage.setItem('app_excluded_accounts', '[]');
+        setInventory(prev => ({ 
+          ...prev, 
+          assets: [], 
+          companies: [], 
+          excludedAccounts: [],
+          status: DatabaseStatus.EMPTY 
+        }));
+        setIntegrityFailed(false);
+        setIsDataLoaded(false);
+      } else {
         const normalizedSel = selectedUnit.toUpperCase().trim();
         const remainingAssets = inventory.assets.filter(a => (a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
         
+        setInventory(prev => ({
+          ...prev,
+          assets: remainingAssets,
+          companies: prev.companies.filter(c => c.toUpperCase().trim() !== normalizedSel),
+          lastUpdated: new Date().toISOString(),
+          status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
+        }));
+
         if (remainingAssets.length === 0) {
           setSqliteStatus('EMPTY');
           await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
         }
-
-        setInventory(prev => ({
-          ...prev,
-          assets: remainingAssets,
-          lastUpdated: new Date().toISOString(),
-          status: remainingAssets.length > 0 ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY
-        }));
-      } else {
-        // Se não houver empresa selecionada, limpa tudo (comportamento padrão de segurança)
-        setSqliteStatus('EMPTY');
-        await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
-        setInventory(prev => ({ 
-          ...prev,
-          assets: [], 
-          companies: [], 
-          lastUpdated: null, 
-          status: DatabaseStatus.EMPTY
-        }));
       }
       
       setModalConfig({
@@ -4126,6 +4135,10 @@ const App: React.FC = () => {
                     <Activity size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
+                  <div className={`px-2 py-0.5 ${permissionsGranted ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'} border rounded-lg flex items-center space-x-1`}>
+                    <ShieldCheck size={10} />
+                    <span className="text-[7px] font-black uppercase tracking-widest">{permissionsGranted ? 'OPERACIONAL' : 'BLOQUEADO'}</span>
+                  </div>
                   {import.meta.env.VITE_GEMINI_API_KEY && (
                     <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
                       <Sparkles size={8} />
@@ -4271,11 +4284,14 @@ const App: React.FC = () => {
               onOpenHelp={() => setIsHelpMenuOpen(true)}
               onNavigate={pushScreen} 
               onLogout={() => { 
-                // Agora "Sair" do menu principal volta para a seleção de unidade
                 setSelectedUnit(null); 
                 setStartWithDataMenu(false);
                 pushScreen(AppScreen.UNIT_SELECTION); 
               }} 
+              onChangeUnit={() => {
+                setSelectedUnit(null);
+                pushScreen(AppScreen.UNIT_SELECTION);
+              }}
               onExport={handleExport} 
               onBackup={handleBackup}
               onDownloadCloudData={handleDownloadCloudData}
@@ -4342,6 +4358,37 @@ const App: React.FC = () => {
               campaignsCount={campaigns.length}
             />
           )}
+
+          <Modal
+            isOpen={showAccessRequest}
+            onClose={() => {}} // Bloqueante
+            title="Acesso Obrigatório"
+            type="security"
+            confirmText="Apply"
+            onConfirm={handleApplyPermissions}
+            message="Para garantir a governança e integridade das auditorias, o GBR requer acesso nativo à sua Câmera e Localização GPS. Negar o acesso impedirá a gravação de novos dados no dispositivo (Modo Proteção de Integridade)."
+          >
+            <div className="space-y-4 mt-6">
+              <div className="flex items-center space-x-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-blue-600">
+                  <Camera size={20} />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs font-bold text-slate-900 uppercase">Câmera Fotográfica</p>
+                  <p className="text-[10px] text-slate-500 font-medium leading-tight mt-0.5">Captura de evidências e leitura de etiquetas.</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-emerald-600">
+                  <Activity size={20} />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs font-bold text-slate-900 uppercase">Geolocalização GPS</p>
+                  <p className="text-[10px] text-slate-500 font-medium leading-tight mt-0.5">Tracking geográfico de auditoria (Campo).</p>
+                </div>
+              </div>
+            </div>
+          </Modal>
           {screen === AppScreen.LOAD_DATABASE && (
             isAdmin ? (
               <DatabaseLoader 
@@ -4649,8 +4696,12 @@ const App: React.FC = () => {
               allAssets={inventory.assets}
               currentCampaignId={inventory.currentCampaignId}
               onBack={popScreen} 
-              onOpenInventory={() => (selectedUnit ? pushScreen(AppScreen.INVENTORY) : pushScreen(AppScreen.UNIT_SELECTION))}
-              onOpenLabeling={() => (selectedUnit ? pushScreen(AppScreen.LABELING) : pushScreen(AppScreen.UNIT_SELECTION))}
+              onChangeUnit={() => {
+                setSelectedUnit(null);
+                pushScreen(AppScreen.UNIT_SELECTION);
+              }}
+              onOpenInventory={() => pushScreen(AppScreen.UNIT_SELECTION)}
+              onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
             />

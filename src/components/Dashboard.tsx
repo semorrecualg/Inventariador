@@ -44,6 +44,7 @@ interface DashboardProps {
   assets: Asset[];
   allAssets?: Asset[];
   onBack: () => void;
+  onChangeUnit?: () => void;
   onOpenInventory?: () => void;
   onOpenLabeling?: () => void;
   onOpenActiveSearch?: () => void;
@@ -57,7 +58,7 @@ interface DashboardProps {
   } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
@@ -345,6 +346,15 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           )}
         </div>
         <div className="flex items-center space-x-2">
+          {onChangeUnit && (
+            <button 
+              onClick={onChangeUnit}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl text-blue-600 active:scale-95 transition-all group"
+            >
+              <Building2 size={14} className="group-hover:rotate-12 transition-transform" />
+              <span className="text-[9px] font-bold uppercase tracking-widest whitespace-nowrap">Unidades</span>
+            </button>
+          )}
           {stats.syncConflicts24h > 0 && (
             <div className="flex items-center space-x-1 bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/20 animate-pulse">
               <ShieldAlert size={10} className="text-rose-500" />

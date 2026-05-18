@@ -158,7 +158,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const savepointName = `expert_batch_${i}`;
       const sqlStatements: string[] = [`SAVEPOINT ${savepointName};`];
 
-      const cleanValue = (val: any): string => {
+      const cleanValue = (val: unknown): string => {
         if (val === null || val === undefined) return '';
         const s = String(val).trim();
         const low = s.toLowerCase();
@@ -310,22 +310,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const executeHardReset = async () => {
     setShowHardResetConfirm(false);
     setStatus('LOADING');
-    addLog('Executando limpeza de governança...');
+    addLog('Executando limpeza de governança e expurgo físico...');
 
     try {
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS ativos_imobilizados;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS ativos;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS unit_configs;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS AUDIT_LOG;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS localidades;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS campaigns;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS inventory_config;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS campaign_snapshots;");
-      await sqliteService.executeQuery("DROP TABLE IF EXISTS users;");
-      
+      await sqliteService.hardResetDatabase();
       await sqliteService.initializeDatabase(true);
       
-      alert("Banco de dados resetado com sucesso!");
+      alert("Banco de dados resetado e arquivos físicos expurgados com sucesso!");
+      localStorage.removeItem('app_excluded_accounts');
       window.location.reload();
     } catch (err: unknown) {
       const e = err as Error;

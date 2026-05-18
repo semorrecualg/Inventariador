@@ -419,6 +419,10 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
         localforage.removeItem(keys.assets),
         localforage.removeItem(keys.config)
       ]);
+      // GBR v25: Limpeza Total exige expurgo físico do SQLite
+      if (mode === DatabaseMode.INTERNAL) {
+        await sqliteService.hardResetDatabase();
+      }
     }
   } catch (error) {
     console.error('Error clearing inventory from IndexedDB:', error);
