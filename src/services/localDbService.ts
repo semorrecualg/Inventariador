@@ -73,7 +73,6 @@ export const localDb = {
           _localMaster, ENDERECO, _origemTransacao, currentCampaignId, conta_contabil
         FROM ativos 
         WHERE currentCampaignId = ? 
-          AND latitude IS NOT NULL 
           AND _is_deleted = 0
       `;
       const results = await sqliteService.query(sql, [campaignId]) as Record<string, unknown>[];

@@ -536,7 +536,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
   
-  const CHUNK_SIZE = 100; // Reduzi o tamanho do lote para maior estabilidade em redes 4G
+  const CHUNK_SIZE = 200; // Tamanho consolidado para estabilidade do hardware (v25)
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
 
@@ -1088,7 +1088,7 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid (PAGINADO)
     let assets: Asset[] = [];
-    const PAGE_SIZE = 1000;
+    const PAGE_SIZE = 200;
     let from = 0;
     let hasMore = true;
 

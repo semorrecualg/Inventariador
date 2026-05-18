@@ -207,7 +207,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
 
         // Inserção na tabela de ativos (espelhamento contábil)
-        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 1000, 0);`);
+        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 200, 0);`);
         
         // Inserção na tabela mestre (inventário)
         sqlStatements.push(`INSERT OR REPLACE INTO ativos (
@@ -242,6 +242,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
     }
 
+    // 4. Inserção final e sincronização de estado
+    addLog("Conciliando índices e persistindo banco físico...");
+    await sqliteService.flush();
+    
     addLog("Carga concluída com sucesso!");
     if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
     

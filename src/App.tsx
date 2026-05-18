@@ -1414,9 +1414,17 @@ const App: React.FC = () => {
 
             // Validação de Schema Detalhada em caso de falha
             if (count > 0) {
-               const schema = await sqliteService.checkTableSchema('assets');
+               // Verificação física de integridade
+               const isHealthy = await sqliteService.checkIntegrity();
+               if (!isHealthy) {
+                 console.error(">>> [Auditoria] FALHA CRÍTICA: Banco SQLite corrompido fisicamente.");
+                 setIntegrityFailed(true);
+                 return;
+               }
+
+               const schema = await sqliteService.checkTableSchema('ativos');
                if (schema && Array.isArray(schema)) {
-                  const required = ['ETIQUETA', 'DESCRICAODOBEM', 'STATUS'];
+                  const required = ['ETIQUETA', 'DESCRICAODOATIVO', 'TAG_INVENTARIO'];
                   const missing = required.filter(col => !schema.find((s) => s['name'] === col));
                   if (missing.length > 0) {
                     console.error(">>> [Auditoria] FALHA DE SCHEMA: Colunas ausentes no arquivo físico:", missing);
@@ -2531,7 +2539,7 @@ const App: React.FC = () => {
       setShowAccessRequest(false);
       showModal("Permissões Concedidas", "O acesso ao hardware foi validado com sucesso. O sistema está agora em modo operacional total.", "success");
     } else {
-      showModal("Acesso Negado", "As permissões são obrigatórias para o funcionamento do App. O sistema permanecerá em modo de Proteção de Integridade (Somente Leitura).", "error");
+      showModal("ALERTA INDUSTRIAL", "O GBR KARDEK exige acesso à Câmera, GPS e Armazenamento Local para garantir a gravação segura dos dados em campo. O aplicativo funcionará em modo protegido com gravações suspensas.", "error");
     }
   };
 

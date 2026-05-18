@@ -24,8 +24,8 @@ export const stressTestService = {
         _conferido: false
       });
       
-      // Bulk add a cada 1000 para não estourar memória
-      if (assets.length >= 1000) {
+      // Bulk add a cada 200 para não estourar memória
+      if (assets.length >= 200) {
         await localDb.assets.bulkAdd(assets);
         assets.length = 0;
       }

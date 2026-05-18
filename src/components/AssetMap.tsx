@@ -309,9 +309,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
 
   const originOptions = [
     { label: 'TODAS AS ORIGENS', value: 'ALL' },
-    { label: 'INVENTÁRIO (1000)', value: TransactionOrigin.INVENTORY },
-    { label: 'ETIQUETAR (2000)', value: TransactionOrigin.LABELING },
-    { label: 'CONCILIAÇÃO (3000)', value: TransactionOrigin.ACCOUNT_RECONCILIATION },
+    { label: 'INVENTÁRIO (200)', value: TransactionOrigin.INVENTORY },
+    { label: 'ETIQUETAR (400)', value: TransactionOrigin.LABELING },
+    { label: 'CONCILIAÇÃO (600)', value: TransactionOrigin.ACCOUNT_RECONCILIATION },
   ];
 
   // Lista de andares únicos presentes nos ativos

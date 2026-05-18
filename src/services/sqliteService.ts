@@ -45,7 +45,7 @@ const FULL_SCHEMA = `
     id TEXT PRIMARY KEY,
     codigo_ativo TEXT,
     conta_contabil TEXT,
-    _origemTransacao INTEGER DEFAULT 1000,
+    _origemTransacao INTEGER DEFAULT 200,
     _status_sinc INTEGER DEFAULT 0
   );
 
@@ -54,7 +54,7 @@ const FULL_SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS ativos (
     id TEXT PRIMARY KEY,
-    ETIQUETA TEXT UNIQUE,
+    ETIQUETA TEXT,
     REGISTRO TEXT,
     DESCRICAODOATIVO TEXT,
     VLRAQUISIC REAL,
@@ -920,6 +920,26 @@ class SqliteService {
 
   async checkTableSchema(tableName: string): Promise<Record<string, string | number | boolean | null>[]> {
     return await this.query(`PRAGMA table_info(${tableName})`);
+  }
+
+  /**
+   * Executa uma verificação física de integridade no arquivo SQLite.
+   * Retorna true se o banco estiver saudável (ok).
+   */
+  async checkIntegrity(): Promise<boolean> {
+    if (!this.nativeDb) return false;
+    try {
+      const res = await this.query("PRAGMA integrity_check");
+      if (res && res.length > 0) {
+        const status = res[0]['integrity_check'] as string;
+        console.log(`>>> [Auditoria] SQLite Integrity Check: ${status}`);
+        return status === 'ok';
+      }
+      return false;
+    } catch (e) {
+      console.error(">>> [Auditoria] Falha ao executar integrity_check:", e);
+      return false;
+    }
   }
 
   async bulkInsertAssets(assets: Asset[]) {

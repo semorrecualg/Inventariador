@@ -25,10 +25,10 @@ export interface User {
 }
 
 export enum TransactionOrigin {
-  INVENTORY = '1000',
-  LABELING = '2000',
-  ACCOUNT_RECONCILIATION = '3000',
-  IMPAIRMENT_AUTOMATION = '4000'
+  INVENTORY = '200',
+  LABELING = '400',
+  ACCOUNT_RECONCILIATION = '600',
+  IMPAIRMENT_AUTOMATION = '800'
 }
 
 export interface AuditLogEntry {

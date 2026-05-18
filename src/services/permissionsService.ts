@@ -12,38 +12,28 @@ export const requestAllPermissions = async () => {
   try {
     console.log('>>> [Permissions] Solicitando permissões nativas (Soberania Mobile)...');
     
-    // GPS - Solicitação explícita por tipo
-    try {
-      const locationStatus = await Geolocation.checkPermissions();
-      if (locationStatus.location !== 'granted') {
-        await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
-      }
-    } catch (e) {
-      console.warn('Falha ao solicitar GPS:', e);
-    }
-    
-    // Camera
-    try {
-      const cameraStatus = await Camera.checkPermissions();
-      if (cameraStatus.camera !== 'granted') {
-        await Camera.requestPermissions();
-      }
-    } catch (e) {
-      console.warn('Falha ao solicitar Câmera:', e);
-    }
-    
-    // Filesystem - Tratamento especial para Android 13+ (API 33+)
-    try {
-      const fsStatus = await Filesystem.checkPermissions();
-      if (fsStatus.publicStorage !== 'granted') {
-          await Filesystem.requestPermissions();
-      }
-    } catch (e) {
-      console.warn('Falha ao solicitar Armazenamento:', e);
+    // Requisita Câmera, Localização e Armazenamento nativas
+    const cameraStatus = await Camera.requestPermissions();
+    const geoStatus = await Geolocation.requestPermissions();
+    const fsStatus = await Filesystem.requestPermissions();
+
+    const allGranted = (
+      cameraStatus.camera === 'granted' && 
+      geoStatus.location === 'granted' &&
+      (fsStatus.publicStorage === 'granted' || fsStatus.external === 'granted')
+    );
+
+    if (allGranted) {
+      console.log('>>> [Permissions] Todas as permissões essenciais foram concedidas.');
+    } else {
+      console.warn('>>> [Permissions] Algumas permissões foram negadas:', {
+        camera: cameraStatus.camera,
+        location: geoStatus.location,
+        filesystem: fsStatus.publicStorage
+      });
     }
 
-    console.log('>>> [Permissions] Ciclo de permissões concluído.');
-    return true;
+    return allGranted;
   } catch (err) {
     console.error('>>> [Permissions] Erro crítico ao solicitar permissões de hardware no boot:', err);
     return false;
