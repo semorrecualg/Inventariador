@@ -23,7 +23,8 @@ import {
   LayoutGrid,
   Calendar,
   Camera,
-  ArrowUp
+  ArrowUp,
+  ArrowLeft
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';

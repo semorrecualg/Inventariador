@@ -1512,14 +1512,16 @@ const Inventory: React.FC<InventoryProps> = ({
         <div className="flex items-center space-x-4">
           <button 
             onClick={onBack}
-            className="p-3 bg-slate-50 text-[#1E293B] hover:bg-slate-100 rounded-2xl transition-all active:scale-90 border border-slate-100"
+            className="flex items-center space-x-3 group"
           >
-            <ArrowLeft size={22} strokeWidth={2.5} />
+            <div className="p-3 bg-slate-50 text-slate-800 rounded-2xl group-active:scale-90 transition-all border border-slate-100 shadow-sm">
+              <ArrowLeft size={20} strokeWidth={3} />
+            </div>
+            <div className="text-left">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
+              <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none">Inventário</p>
+            </div>
           </button>
-          <div>
-            <h1 className="text-lg font-bold text-[#1E293B] leading-tight tracking-tight">Inventário</h1>
-            <p className="text-[9px] font-black text-[#64748B] uppercase tracking-[0.2em]">Soberania Local</p>
-          </div>
         </div>
 
         <div className="flex items-center space-x-2">

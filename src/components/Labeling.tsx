@@ -17,6 +17,7 @@ import {
   CheckSquare,
   X,
   Camera,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface LabelingProps {
