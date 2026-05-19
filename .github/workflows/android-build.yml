@@ -32,19 +32,12 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Ultimate Definitive Fix - Core Plugin and Platform Resolution (GBR Protocol v2.6)
+      - name: Native Sync (GBR Protocol v2.6)
         run: |
-          # 1. Ajusta os plugins e remove versões defeituosas
-          npm uninstall @capacitor/device
-          npm install @capacitor/device@6.0.2 --save-exact
+          # 1. Instala os plugins necessários sem reinstalar a plataforma do zero
+          npm install @capacitor/device@6.0.2 @capacitor/android@6.2.1 --save-exact
           
-          # 2. Re-injeta explicitamente o core do Android do Capacitor para garantir o mapeamento do CLI
-          npm install @capacitor/android@6.2.1 --save-exact
-          
-          # 3. Força a criação ou link da plataforma nativa caso ela tenha sido desvinculada
-          npx cap add android || true
-          
-          # 4. Sincroniza os ativos e metadados finais
+          # 2. Apenas sincroniza o build do React (dist) com a pasta nativa existente
           npx cap sync android
 
       - name: Build Debug APK
