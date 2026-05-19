@@ -607,6 +607,15 @@ const App: React.FC = () => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ name: string; count: number }>>([]);
+  const [sqlDashboardStats, setSqlDashboardStats] = useState<{
+    totalAtivos: number;
+    conferidoAtivos: number;
+    baixadosLocalizados: number;
+    totalLido: number;
+    pendentesAtivos: number;
+    avancoPercent: number;
+  } | null>(null);
 
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
@@ -753,6 +762,15 @@ const App: React.FC = () => {
       if (databaseMode === DatabaseMode.INTERNAL) {
         await sqliteService.forceSync();
         console.log(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
+
+        // v24.50: Recuperação de Contexto (Auto-Select Unit se vindo do SQL)
+        if (!selectedUnit) {
+          const sqlConfigs = await sqliteService.getUnitConfigs(tenantId);
+          if (sqlConfigs && sqlConfigs.length > 0 && sqlConfigs[0].selectedUnit) {
+            console.log(`>>> [Governance] Contexto recuperado do SQL: ${sqlConfigs[0].selectedUnit}`);
+            setSelectedUnit(sqlConfigs[0].selectedUnit as string);
+          }
+        }
       }
 
       // Configurações de GPS
@@ -760,15 +778,33 @@ const App: React.FC = () => {
       setUnitConfigs(gpsData);
       setInventory(prev => ({ ...prev, unitConfigs: gpsData }));
 
-    // Campanhas (Soberania SQL Local / Supabase)
-    // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
-    const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
-    const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
-    const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
-    console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
-    setLastQueryLog(resultMsg);
+      // Campanhas (Soberania SQL Local / Supabase)
+      // v25.50: Se estivermos na tela de gestão central, ignoramos o filtro de unidade para ver tudo
+      const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
+      const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
+      const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
+      console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
+      setLastQueryLog(resultMsg);
       
       setCampaigns([...(campaignData || [])]);
+
+      // v24.50: Busca Unidades Operacionais via SQL para performance
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        const sqlUnits = await sqliteService.getOperationalUnitsWithStats();
+        setSqliteOperationalUnits(sqlUnits);
+        console.log(`>>> [Governance] ${sqlUnits.length} Unidades carregadas via SQL.`);
+
+        // Busca métricas do Dashboard se houver unidade selecionada
+        if (selectedUnit) {
+          const stats = await sqliteService.getDashboardStats(selectedUnit, inventory.currentCampaignId || undefined);
+          setSqlDashboardStats(stats);
+        } else {
+          // Métricas globais se não houver unidade (Master view)
+          const stats = await sqliteService.getDashboardStats(undefined, inventory.currentCampaignId || undefined);
+          setSqlDashboardStats(stats);
+        }
+      }
+
       setRefreshVersion(prev => prev + 1);
     } catch (err) {
       console.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
@@ -3739,6 +3775,19 @@ const App: React.FC = () => {
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
     const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
     
+    // v24.50: Se temos unidades via SQL (Modo Interno), usamos elas como base prioritária
+    if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
+      sqliteOperationalUnits.forEach(u => {
+        companyStatsMap.set(u.name.toUpperCase().replace(/_/g, ' '), {
+          hasData: true,
+          hasActiveAssets: u.count > 0,
+          unitIds: new Set(),
+          hasAssetCampaign: false // Será verificado nos ativos abaixo se necessário
+        });
+      });
+    }
+
+    // Processamos os ativos para pegar campanhas e outras flags
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
@@ -4622,6 +4671,11 @@ const App: React.FC = () => {
                 setInventoryLocation(null); 
                 sessionStorage.removeItem('app_just_finished_load');
                 
+                // v24.50: Persiste o contexto no SQLite local
+                if (databaseMode === DatabaseMode.INTERNAL) {
+                  sqliteService.setUnitConfig(u);
+                }
+
                 // Dispara o sync para a unidade selecionada se estiver no modo nuvem
                 // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
                 if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
@@ -4690,6 +4744,7 @@ const App: React.FC = () => {
               onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
+              sqlStats={databaseMode === DatabaseMode.INTERNAL ? sqlDashboardStats : null}
             />
           )}
           {screen === AppScreen.ASSET_MAP && (

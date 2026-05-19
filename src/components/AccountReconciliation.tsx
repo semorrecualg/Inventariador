@@ -19,7 +19,8 @@ import {
   Hash,
   RefreshCw,
   Calendar,
-  User
+  User,
+  ArrowLeft
 } from 'lucide-react';
 
 const formatMonthYearBR = (val: string | number | null | undefined): string => {

@@ -113,6 +113,7 @@ const FULL_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_mestre_status ON ativos (TAG_INVENTARIO);
   CREATE INDEX IF NOT EXISTS idx_mestre_endereco ON ativos (ENDERECO);
   CREATE INDEX IF NOT EXISTS idx_mestre_localmaster ON ativos (_localMaster);
+  CREATE INDEX IF NOT EXISTS idx_ativos_unidade_campanha ON ativos (UNIDADE_OPERACIONAL, currentCampaignId);
 
 CREATE TABLE IF NOT EXISTS localidades (
     id TEXT PRIMARY KEY,
@@ -867,7 +868,24 @@ class SqliteService {
 
   // --- Configurações ---
   async getUnitConfigs(tenantId: string): Promise<Record<string, string | number | boolean | null>[]> {
+    const res = await this.query("SELECT selectedUnit, currentCampaignId FROM unit_configs WHERE id = '1'");
+    if (res.length > 0) return res;
     return await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tenantId]);
+  }
+
+  async setUnitConfig(unitId: string, campaignId?: string) {
+    if (campaignId) {
+      await this.execute(
+        "INSERT OR REPLACE INTO unit_configs (id, selectedUnit, currentCampaignId, updated_at) VALUES ('1', ?, ?, CURRENT_TIMESTAMP)",
+        [unitId, campaignId]
+      );
+    } else {
+      await this.execute(
+        "UPDATE unit_configs SET selectedUnit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = '1'",
+        [unitId]
+      );
+    }
+    await this.saveDatabase();
   }
 
   async getUnitConfigsFromSql(tenantId: string): Promise<UnitConfig[]> {
@@ -914,8 +932,81 @@ class SqliteService {
   }
 
   async getOperationalUnits(): Promise<string[]> {
-    const res = await this.query("SELECT DISTINCT UNIDADE_OPERACIONAL FROM ativos WHERE UNIDADE_OPERACIONAL IS NOT NULL AND UNIDADE_OPERACIONAL != ''");
+    const res = await this.query(`
+      SELECT UNIDADE_OPERACIONAL 
+      FROM ativos 
+      WHERE UNIDADE_OPERACIONAL IS NOT NULL 
+        AND UNIDADE_OPERACIONAL != '' 
+        AND _is_deleted = 0
+      GROUP BY UNIDADE_OPERACIONAL
+      ORDER BY UNIDADE_OPERACIONAL ASC
+    `);
     return res.map(row => row.UNIDADE_OPERACIONAL as string);
+  }
+
+  async getOperationalUnitsWithStats(): Promise<{ name: string; count: number }[]> {
+    const res = await this.query(`
+      SELECT UNIDADE_OPERACIONAL, COUNT(*) as total 
+      FROM ativos 
+      WHERE UNIDADE_OPERACIONAL IS NOT NULL 
+        AND UNIDADE_OPERACIONAL != '' 
+        AND _is_deleted = 0
+      GROUP BY UNIDADE_OPERACIONAL
+      ORDER BY UNIDADE_OPERACIONAL ASC
+    `);
+    return res.map(row => ({
+      name: row.UNIDADE_OPERACIONAL as string,
+      count: Number(row.total)
+    }));
+  }
+
+  /**
+   * Métricas de Dashboard via SQL (Performance v24.50)
+   * Calcula TOTAL_LIDO, PENDENTES e %_AVANÇO direto no motor SQL.
+   */
+  async getDashboardStats(unitId?: string, campaignId?: string) {
+    let query = `
+      SELECT 
+        COUNT(*) as total_geral,
+        SUM(CASE WHEN (STATUS NOT LIKE '%BAIXADO%' OR STATUS IS NULL OR STATUS = '') THEN 1 ELSE 0 END) as total_ativos,
+        SUM(CASE WHEN (_conferido = 1 OR AUDITOR_STATUS_CONFERENCIA = 'SIM') AND (STATUS NOT LIKE '%BAIXADO%' OR STATUS IS NULL OR STATUS = '') THEN 1 ELSE 0 END) as conferido_ativos,
+        SUM(CASE WHEN (_conferido = 1 OR AUDITOR_STATUS_CONFERENCIA = 'SIM') AND STATUS LIKE '%BAIXADO%' THEN 1 ELSE 0 END) as baixados_localizados
+      FROM ativos 
+      WHERE _is_deleted = 0
+    `;
+    
+    const params: (string | number)[] = [];
+    if (unitId && unitId !== 'SEM UNIDADE' && unitId !== 'undefined') {
+      // Usamos LIKE ou o mapping normalizado
+      query += ` AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?)`;
+      params.push(unitId, unitId);
+    }
+    
+    if (campaignId) {
+      query += ` AND currentCampaignId = ?`;
+      params.push(campaignId);
+    }
+
+    try {
+      const res = await this.query(query, params);
+      const row = res[0] || {};
+      
+      const totalAtivos = Number(row.total_ativos || 0);
+      const conferidoAtivos = Number(row.conferido_ativos || 0);
+      const baixadosLocalizados = Number(row.baixados_localizados || 0);
+      
+      return {
+        totalAtivos,
+        conferidoAtivos,
+        baixadosLocalizados,
+        totalLido: conferidoAtivos + baixadosLocalizados,
+        pendentesAtivos: totalAtivos - conferidoAtivos,
+        avancoPercent: totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0
+      };
+    } catch (e) {
+      console.error("Erro ao calcular métricas SQL Dashboard:", e);
+      return null;
+    }
   }
 
   async checkTableSchema(tableName: string): Promise<Record<string, string | number | boolean | null>[]> {

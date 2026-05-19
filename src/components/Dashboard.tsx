@@ -49,6 +49,14 @@ interface DashboardProps {
   onOpenLabeling?: () => void;
   onOpenActiveSearch?: () => void;
   currentCampaignId?: string;
+  sqlStats?: {
+    totalAtivos: number;
+    conferidoAtivos: number;
+    baixadosLocalizados: number;
+    totalLido: number;
+    pendentesAtivos: number;
+    avancoPercent: number;
+  } | null;
   user: {
     tenantid?: string;
     unitid?: string;
@@ -58,7 +66,7 @@ interface DashboardProps {
   } | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit, sqlStats }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
@@ -181,8 +189,17 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       statusMap[tag] = (statusMap[tag] || 0) + 1;
     }
 
-    s.totalConferidoGeral = s.conferidoAtivos + s.baixadosLocalizados;
-    s.percConferido = s.totalAtivos > 0 ? Math.round((s.conferidoAtivos / s.totalAtivos) * 100) : 0;
+    s.totalConferidoGeral = sqlStats ? sqlStats.totalLido : (s.conferidoAtivos + s.baixadosLocalizados);
+    s.percConferido = sqlStats ? sqlStats.avancoPercent : (s.totalAtivos > 0 ? Math.round((s.conferidoAtivos / s.totalAtivos) * 100) : 0);
+
+    // Override de métricas se vier via SQL (Performance v24.50)
+    if (sqlStats) {
+      s.totalAtivos = sqlStats.totalAtivos;
+      s.conferidoAtivos = sqlStats.conferidoAtivos;
+      s.baixadosLocalizados = sqlStats.baixadosLocalizados;
+      s.totalConferidoGeral = sqlStats.totalLido;
+      s.percConferido = sqlStats.avancoPercent;
+    }
 
     s.statusDistribution = Object.entries(statusMap).map(([name, value]) => ({ name, value }));
     s.unitData = Object.entries(unitMap)

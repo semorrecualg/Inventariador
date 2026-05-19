@@ -10,6 +10,9 @@ import { generateUUID } from '../services/supabaseService';
 import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
 import { saveInventory } from '../services/persistenceService';
 
+// GBR v24.50: Campanha de Auditoria Padrão (Static Context)
+const DEFAULT_CAMPAIGN_ID = 'CAMP_2025_01';
+
 interface DatabaseLoaderProps {
   onDataLoaded: (assets: Asset[], companies: string[]) => void;
   onBack?: () => void;
@@ -25,7 +28,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
-  const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
@@ -34,9 +36,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (msg: string) => {
-    console.log(`[DatabaseLoader] ${msg}`);
+    // Reduzido para log somente em desenvolvimento ou criticidade
+    if (msg.includes('Erro') || msg.includes('Falha') || msg.includes('TIMEOUT')) {
+      console.error(`[DatabaseLoader] ${msg}`);
+    }
     setLoadingMessage(msg);
-    setErrorLog(prev => [...prev.slice(-10), msg]);
   };
 
   const loadDataFlow = async (forceCache = false) => {
@@ -184,8 +188,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const registro = cleanValue(findVal(['REGISTRO', 'RECORD']) || codigoAtivo).replace(/'/g, "''");
         const descricao = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''");
         
-        let unidadeOp = cleanValue(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO', 'CENTRO_DE_CUSTO', 'CC']) || 'MATRIZ').toUpperCase().replace(/'/g, "''");
-        if (!unidadeOp) unidadeOp = 'MATRIZ';
+        // GBR v2.6: Mapeamento Estrito de Unidade Operacional com Fallback Blindado
+        let unidadeOp = (
+          cleanValue(row.UNIDADE_OPERACIONAL) || 
+          cleanValue(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO'])) || 
+          'MATRIZ'
+        ).trim().toUpperCase().replace(/'/g, "''");
+        
+        if (unidadeOp === '' || unidadeOp === 'NULL' || unidadeOp === 'UNDEFINED') {
+          unidadeOp = 'MATRIZ';
+        }
 
         const centroCusto = cleanValue(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO'])).replace(/'/g, "''");
         const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
@@ -219,7 +231,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
           '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
           '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
-          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, 'CAMP_2025_01'
+          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}'
         );`);
       }
 
@@ -533,7 +545,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     
                     // GBR v25: Projeção Magra (Mapping Exclusive)
                     // Pega o ID da primeira campanha ativa ou gera um ID genérico
-                    const campaignId = 'CAMP_2025_01'; 
+                    const campaignId = DEFAULT_CAMPAIGN_ID; 
                     const assets = await localDb.assets.getMapData(campaignId);
                     
                     addLog(`>>> [Projection] ${assets.length} ativos carregados via shader pipeline.`);
