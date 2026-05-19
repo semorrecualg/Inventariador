@@ -32,12 +32,64 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Native Sync (GBR Protocol v2.6)
+      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.6)
         run: |
-          # 1. Instala os plugins necessários sem reinstalar a plataforma do zero
-          npm install @capacitor/device@6.0.2 @capacitor/android@6.2.1 --save-exact
+          # 1. Garante a instalação do pacote core do Android
+          npm install @capacitor/android@6.2.1 --save-exact
           
-          # 2. Apenas sincroniza o build do React (dist) com a pasta nativa existente
+          # 2. Cria a pasta nativa na máquina virtual se ela não existir
+          npx cap add android || true
+          
+          # 3. Força a escrita das nossas permissões oficiais direto no Manifesto recém-criado do robô
+          echo '<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="GBR KARDEK"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme"
+                  android:requestLegacyExternalStorage="true">
+                  <activity
+                      android:name="com.gbr.kardek.MainActivity"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:exported="true"
+                      android:label="GBR KARDEK"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:launchMode="singleTop">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths"></meta-data>
+                  </provider>
+              </application>
+          </manifest>' > android/app/src/main/AndroidManifest.xml
+
+          # 4. Injeta dinamicamente a versão 2.6.0 no build.gradle gerado pelo robô
+          sed -i 's/versionCode 1/versionCode 26/g' android/app/build.gradle
+          sed -i 's/versionName "1.0"/versionName "2.6.0"/g' android/app/build.gradle
+          sed -i 's/io.ionic.starter/com.gbr.kardek/g' android/app/build.gradle
+          sed -i 's/com.example.app/com.gbr.kardek/g' android/app/build.gradle
+
+          # 5. Sincroniza os ativos web do React
           npx cap sync android
 
       - name: Build Debug APK
