@@ -1061,21 +1061,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <ChevronRight size={20} className="text-white/40" />
               </button>
 
-              <button 
-                onClick={() => { 
-                  sqliteService.downloadDatabase();
-                }} 
-                className="w-full flex items-center p-5 bg-indigo-600 text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-indigo-500/20 border-2 border-white/20"
-              >
-                <div className="w-12 h-12 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5 shadow-inner"><Download size={24} /></div>
-                <div className="flex-1">
-                  <h4 className="text-sm font-black uppercase tracking-tight">EXPORTAR BANCO (.DB)</h4>
-                  <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5 whitespace-pre-wrap">
-                    Download do arquivo físico SQLite real
-                  </p>
-                </div>
-                <ChevronRight size={20} className="text-white/40" />
-              </button>
 
               <button 
                 onClick={async () => { 

@@ -1,9 +1,12 @@
 {
-  "name": "GBR v25.0 KARDEK 3D",
-  "description": "Sistema Industrial de Inventário de Ativos (MapLibre 3D Ready, Soberania Nativa, Delta Auditoria GBRv24).",
+  "name": "GBR v24.50 KARDEK (v2.6)",
+  "description": "GBR v24.50 KARDEK - Sistema Industrial de Inventário de Ativos (Soberania Nativa, Delta Auditoria, Carga Expert Estabilizada v2.6).",
   "requestFramePermissions": [
     "camera",
     "geolocation",
     "storage"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

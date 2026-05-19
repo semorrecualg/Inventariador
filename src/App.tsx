@@ -2,6 +2,8 @@
 // v24.50.2 - Force Update to MPULMON Project
 console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { PermissionGate } from './components/PermissionGate';
+import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
@@ -57,7 +59,7 @@ import { sqliteService } from './services/sqliteService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2, Camera } from 'lucide-react';
+import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -2531,18 +2533,6 @@ const App: React.FC = () => {
     window.location.reload(); 
   };
 
-  const handleApplyPermissions = async () => {
-    const granted = await requestAllPermissions();
-    setPermissionsGranted(granted);
-    sqliteService.setPermissionsGranted(granted);
-    if (granted) {
-      setShowAccessRequest(false);
-      showModal("Permissões Concedidas", "O acesso ao hardware foi validado com sucesso. O sistema está agora em modo operacional total.", "success");
-    } else {
-      showModal("ALERTA INDUSTRIAL", "O GBR KARDEK exige acesso à Câmera, GPS e Armazenamento Local para garantir a gravação segura dos dados em campo. O aplicativo funcionará em modo protegido com gravações suspensas.", "error");
-    }
-  };
-
   const popScreen = useCallback(() => {
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
@@ -4088,6 +4078,23 @@ const App: React.FC = () => {
       </div>
     );
   }
+  if (showAccessRequest) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <PermissionGate 
+          onPermissionsGranted={() => {
+            setPermissionsGranted(true);
+            setShowAccessRequest(false);
+          }} 
+          setBootError={setInitError} 
+        />
+        <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">GBR KARDEK • MOBILE SOBERANO</p>
+        </footer>
+      </div>
+    );
+  }
+
   if (publicAsset) {
     return (
       <ErrorBoundary>
@@ -4367,36 +4374,7 @@ const App: React.FC = () => {
             />
           )}
 
-          <Modal
-            isOpen={showAccessRequest}
-            onClose={() => {}} // Bloqueante
-            title="Acesso Obrigatório"
-            type="security"
-            confirmText="Apply"
-            onConfirm={handleApplyPermissions}
-            message="Para garantir a governança e integridade das auditorias, o GBR requer acesso nativo à sua Câmera e Localização GPS. Negar o acesso impedirá a gravação de novos dados no dispositivo (Modo Proteção de Integridade)."
-          >
-            <div className="space-y-4 mt-6">
-              <div className="flex items-center space-x-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-blue-600">
-                  <Camera size={20} />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-bold text-slate-900 uppercase">Câmera Fotográfica</p>
-                  <p className="text-[10px] text-slate-500 font-medium leading-tight mt-0.5">Captura de evidências e leitura de etiquetas.</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-emerald-600">
-                  <Activity size={20} />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-bold text-slate-900 uppercase">Geolocalização GPS</p>
-                  <p className="text-[10px] text-slate-500 font-medium leading-tight mt-0.5">Tracking geográfico de auditoria (Campo).</p>
-                </div>
-              </div>
-            </div>
-          </Modal>
+          {/* Permission Modal removed in favor of PermissionGate */}
           {screen === AppScreen.LOAD_DATABASE && (
             isAdmin ? (
               <DatabaseLoader 

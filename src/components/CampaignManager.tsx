@@ -15,8 +15,7 @@ import {
   X,
   ArrowLeft,
   Trash2,
-  ShieldCheck,
-  Download
+  ShieldCheck
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
@@ -291,14 +290,6 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   <p>COUNT: {localCampaigns.length}</p>
                   <p>UNIT: {propsUnitId || user?._unitid || user?.unitid || 'N/A'}</p>
                   
-                  <button 
-                    onClick={() => sqliteService.downloadDatabase()}
-                    className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold rounded-lg border border-white/10 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Download size={12} />
-                    EXTRAIR ARQUIVO .DB (SISTEMA NATIVO)
-                  </button>
-
                   {errorMessage && <p className="text-rose-400 mt-2">ALERTA: {errorMessage}</p>}
                 </motion.div>
               )}

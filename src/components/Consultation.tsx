@@ -316,158 +316,70 @@ const Consultation: React.FC<ConsultationProps> = ({
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
-      {/* HEADER */}
-      <div className="bg-white px-5 pt-12 pb-4 border-b border-accent/10 relative z-20 shadow-sm">
+      {/* Header Fixo Blindado */}
+      <div className="bg-white border-b border-accent/10 px-6 pt-12 pb-6 sticky top-0 z-50 shrink-0 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Consulta de Ativos" />
-          <div className="flex items-center space-x-3">
-            <button 
-              onClick={clearFilters}
-              className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-400 border border-slate-200 text-[11px] font-bold uppercase tracking-widest active:scale-95 transition-all"
-            >
-              Limpar
-            </button>
-            <button 
-              onClick={() => setIsFilterOpen(!isFilterOpen)}
-              className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm transition-all active:scale-90 ${isFilterOpen ? 'bg-accent text-white' : 'bg-accent-soft text-accent border border-accent/10'}`}
-              title={isFilterOpen ? "Fechar Filtros" : "Abrir Filtros"}
-            >
-              {isFilterOpen ? <X size={24} /> : <Filter size={24} />}
-            </button>
-          </div>
-        </div>
+          <button 
+            onClick={onBack}
+            className="flex items-center space-x-3 group"
+          >
+            <div className="p-3 bg-slate-50 text-slate-800 rounded-2xl group-active:scale-90 transition-all border border-slate-100 shadow-sm">
+              <ArrowLeft size={20} strokeWidth={3} />
+            </div>
+            <div className="text-left">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
+              <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none">Consulta</p>
+            </div>
+          </button>
 
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Consulta Expert</h1>
-            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-1.5">Formulário Multifunção v24</p>
+          <div className="flex items-center space-x-2">
+             <button onClick={clearFilters} className="p-3 bg-slate-50 text-slate-400 rounded-xl active:scale-95 transition-all text-[9px] font-black uppercase tracking-widest">Reset</button>
+             <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-3 rounded-xl border transition-all shadow-sm active:scale-90 ${isFilterOpen ? 'bg-accent text-white' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+               {isFilterOpen ? <X size={20} /> : <Filter size={20} />}
+             </button>
           </div>
-          {!isFilterOpen && committedFilters && (
-            <button 
-              onClick={() => setIsFilterOpen(true)}
-              className="flex items-center space-x-2 px-3 py-2 bg-accent-soft rounded-lg border border-accent/10 animate-pulse"
-            >
-              <div className="w-2 h-2 bg-accent rounded-full"></div>
-              <span className="text-[10px] font-bold text-accent uppercase tracking-widest">Filtro Ativo</span>
-            </button>
-          )}
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         {/* SEARCH FORM - DYNAMIC PANEL */}
         {isFilterOpen && (
-          <div className="p-5 space-y-4 bg-white border-b border-accent/10 shadow-lg animate-slideDown relative z-10 overflow-y-auto max-h-[60vh] shrink-0 no-scrollbar">
-            <div className="flex items-center mb-4">
-              <button 
-                onClick={triggerSearch}
-                className="bg-accent text-white px-4 py-2.5 rounded-xl font-bold uppercase text-[10px] tracking-widest shadow-md active:scale-95 transition-all flex items-center space-x-2 mr-4 shrink-0"
-              >
-                <Search size={16} strokeWidth={3} />
-                <span>Executar Consulta</span>
-              </button>
-              <span className="text-[10px] font-bold text-accent uppercase tracking-[0.2em] whitespace-nowrap">Parâmetros de Busca</span>
-              <div className="h-px flex-1 bg-accent/10 ml-4"></div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {renderInput('ETIQUETA', TYPE_LABELS.TAG, <Barcode size={16} />)}
-              {renderInput('DESCRICAODOATIVO', TYPE_LABELS.DESCRIPTION, <FileText size={16} />)}
-              {renderInput('SERIAL', TYPE_LABELS.SERIAL, <Hash size={16} />)}
-              {renderInput('CNPJ', 'CNPJ', <Building2 size={16} />)}
-              {renderInput('NOMEFORNECEDOR', TYPE_LABELS.VENDOR, <User size={16} />)}
-              {renderInput('NOTAFISCAL', TYPE_LABELS.INVOICE, <FileText size={16} />)}
-              {renderInput('ENDERECO', TYPE_LABELS.ADDRESS, <MapPin size={16} />)}
-              {renderInput('conta_contabil', TYPE_LABELS.ACCOUNT, <LayoutGrid size={16} />)}
-              {renderInput('CENTRODECUSTO', TYPE_LABELS.COST_CENTER, <Tag size={16} />)}
-              {renderInput('Sn1_recno', 'ID Protheus (SN1)', <Hash size={16} />)}
-              {renderInput('Sn3_recno', 'ID Protheus (SN3)', <Hash size={16} />)}
-              
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (De)</label>
-                <div className="relative group">
-                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
-                    <Calendar size={16} />
-                  </div>
-                  <input 
-                    type="date"
-                    value={filters.DATAAQUISIC_START}
-                    onChange={(e) => handleInputChange('DATAAQUISIC_START', e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-bold text-ink-muted uppercase tracking-widest ml-1">Data Aquisição (Até)</label>
-                <div className="relative group">
-                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-accent transition-colors">
-                    <Calendar size={16} />
-                  </div>
-                  <input 
-                    type="date"
-                    value={filters.DATAAQUISIC_END}
-                    onChange={(e) => handleInputChange('DATAAQUISIC_END', e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-accent-soft border border-accent/10 rounded-xl outline-none focus:border-accent focus:bg-white transition-all text-xs font-bold text-ink shadow-inner"
-                  />
-                </div>
-              </div>
-            </div>
+          <div className="p-6 space-y-6 bg-white border-b border-accent/10 shadow-lg shrink-0">
+             <div className="grid grid-cols-1 gap-4">
+               {renderInput('ETIQUETA', 'Patrimônio', <Barcode size={16} />)}
+               {renderInput('DESCRICAODOATIVO', 'Descrição', <FileText size={16} />)}
+             </div>
+             <button 
+               onClick={triggerSearch}
+               className="w-full bg-accent text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-accent/20 active:scale-95 transition-all"
+             >
+               Confirmar Critérios
+             </button>
           </div>
         )}
 
-        {/* RESULTS */}
-        <div className="flex-1 relative flex flex-col min-h-0">
+        <div className="flex-1 min-h-0 relative">
           {committedFilters ? (
             filteredAssets.length > 0 ? (
-              <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-6 py-3 bg-slate-50/50 border-b border-slate-100 shrink-0">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Resultados</span>
-                  <span className="bg-accent-soft text-accent px-2 py-0.5 rounded-full text-[9px] font-bold">{filteredAssets.length}</span>
-                </div>
-                
-                <div className="flex-1 min-h-0" style={{ minHeight: '400px' }}>
-                  <Virtuoso
-                    ref={virtuosoRef}
-                    style={{ height: '100%', minHeight: '400px' }}
-                    data={filteredAssets}
-                    increaseViewportBy={500}
-                    atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
-                    itemContent={(index, asset) => {
-                      if (!asset || !asset.id) {
-                        console.warn(`>>> [Consultation] Ativo inválido no índice ${index}:`, asset);
-                        return null;
-                      }
-                      return (
-                        <div className="px-5 py-1.5" key={String(asset.id)}>
-                          <AssetListItem 
-                            asset={asset}
-                            onSelect={onSelectAsset}
-                            onShowQr={(a) => {
-                              setSelectedAssetForQr(a);
-                              setIsQrModalOpen(true);
-                            }}
-                            extraAction={isReturnMode && onReturnToInventory ? (
-                              <button 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  onReturnToInventory(asset.ETIQUETA || ''); 
-                                }} 
-                                className="h-11 px-4 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-xl active:scale-90 shadow-sm transition-all flex items-center space-x-2 mr-1"
-                                title="Voltar ao Inventário"
-                                id={`return-btn-${asset.id}`}
-                              >
-                                <Check size={16} strokeWidth={3} />
-                                <span className="text-[10px] font-black uppercase tracking-tighter">Selecionar</span>
-                              </button>
-                            ) : null}
-                          />
-                        </div>
-                      );
-                    }} 
-                  />
-                </div>
+              <Virtuoso
+            style={{ height: '100%' }}
+            data={filteredAssets}
+            components={{
+              Footer: () => <div className="h-32" />
+            }}
+            itemContent={(index, asset) => (
+              <div className="px-6 py-2">
+                <AssetListItem 
+                  asset={asset}
+                  onSelect={onSelectAsset}
+                  onShowQr={(a) => {
+                    setSelectedAssetForQr(a);
+                    setIsQrModalOpen(true);
+                  }}
+                />
               </div>
+            )} 
+          />
             ) : (
               <div className="flex flex-col items-center justify-center text-center py-20">
                 <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-6 border border-slate-100">
@@ -497,6 +409,10 @@ const Consultation: React.FC<ConsultationProps> = ({
           )}
         </div>
       </div>
+
+      <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
+        <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">GBR KARDEK • MOBILE SOBERANO</p>
+      </footer>
 
       {/* MODALS */}
       {isQrModalOpen && selectedAssetForQr && (

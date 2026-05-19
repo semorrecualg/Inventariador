@@ -29,7 +29,7 @@ export const processDataSyncQueue = async (): Promise<void> => {
   
   try {
     const unsyncedResults = await sqliteService.query(
-      "SELECT * FROM ativos WHERE _is_synced = 0 AND _is_deleted = 0 LIMIT 50"
+      "SELECT * FROM ativos WHERE _is_synced = 0 AND _is_deleted = 0 LIMIT 200"
     );
     
     if (unsyncedResults.length === 0) {

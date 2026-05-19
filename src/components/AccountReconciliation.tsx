@@ -349,125 +349,120 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
 
     return (
-      <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
-        {/* Header */}
-        <div className="bg-white border-b border-slate-200 shadow-sm z-20">
-          <div className="px-4 pt-12 pb-4">
-            <div className="mb-4">
-              <BackButton onClick={() => setSelectedAccount(null)} label="Voltar" subLabel="Conciliação por Conta" />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight truncate">
-                  {selectedAccount}
-                </h1>
-                <div className="flex items-center space-x-2 mt-1">
-                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-accent transition-all duration-500" 
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <span className="text-[10px] font-black text-accent uppercase">
-                    {stats.checked}/{stats.total} ({progress}%)
-                  </span>
+      <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+        {/* Header Fixo Blindado */}
+        <div className="bg-white border-b border-slate-200 px-6 pt-12 pb-6 sticky top-0 z-50 shrink-0 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <button 
+              onClick={() => setSelectedAccount(null)}
+              className="flex items-center space-x-3 group"
+            >
+              <div className="p-3 bg-slate-50 text-slate-800 rounded-2xl group-active:scale-90 transition-all border border-slate-100 shadow-sm">
+                <ArrowLeft size={20} strokeWidth={3} />
+              </div>
+              <div className="text-left">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
+                <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none italic">Conta Expert</p>
+              </div>
+            </button>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h1 className="text-lg font-black text-slate-900 uppercase tracking-tight truncate leading-none mb-2">
+                {selectedAccount}
+              </h1>
+              <div className="flex items-center space-x-2">
+                <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-accent transition-all duration-500" 
+                    style={{ width: `${progress}%` }}
+                  />
                 </div>
+                <span className="text-[10px] font-black text-accent uppercase">
+                  {progress}%
+                </span>
               </div>
             </div>
+          </div>
+        </div>
 
-            <div className="mt-4 flex items-center space-x-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text"
-                  value={assetSearchTerm}
-                  onChange={(e) => setAssetSearchTerm(e.target.value)}
-                  placeholder="PESQUISAR ITEM NA CONTA..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-accent transition-all"
-                />
-              </div>
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+          <div className="p-6 bg-white border-b border-slate-100 shrink-0 space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text"
+                value={assetSearchTerm}
+                onChange={(e) => setAssetSearchTerm(e.target.value)}
+                placeholder="CONTA: FILTRAR ITEM..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3.5 text-xs font-bold text-slate-900 outline-none"
+              />
+            </div>
+            <div className="flex bg-slate-100/50 p-1 rounded-xl">
               <button 
-                onClick={handleReconcileAll}
-                disabled={stats.checked === stats.total}
-                className="w-12 h-12 bg-accent text-white rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
-                title="Conciliar Pendentes"
+                onClick={() => setActiveFilter('pending')}
+                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeFilter === 'pending' ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
               >
-                <ListChecks size={20} />
+                Pendente
+              </button>
+              <button 
+                onClick={() => setActiveFilter('checked')}
+                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeFilter === 'checked' ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
+              >
+                Concluido
               </button>
             </div>
           </div>
 
-          {/* Standardized Tabs */}
-          <div className="flex border-t border-slate-100">
-            <button 
-              onClick={() => setActiveFilter('pending')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'pending' ? 'text-accent' : 'text-slate-400'}`}
-            >
-              Pendentes ({stats.total - stats.checked})
-              {activeFilter === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
-            </button>
-            <button 
-              onClick={() => setActiveFilter('checked')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeFilter === 'checked' ? 'text-accent' : 'text-slate-400'}`}
-            >
-              Inventariado ({stats.checked})
-              {activeFilter === 'checked' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent rounded-t-full" />}
-            </button>
+          <div className="flex-1 min-h-0 relative">
+            <Virtuoso
+              data={filteredAssets}
+              components={{
+                Footer: () => <div className="h-40" />
+              }}
+              itemContent={(index, asset) => (
+                <div className="px-6 py-2">
+                  <AssetCard 
+                    key={asset.id} 
+                    asset={asset} 
+                    onToggle={handleToggleReconcile} 
+                  />
+                </div>
+              )}
+            />
           </div>
         </div>
 
-        {/* Asset List with Virtuoso */}
-        <div className="flex-1 relative">
-          <Virtuoso
-            data={filteredAssets}
-            className="no-scrollbar"
-            totalCount={filteredAssets.length}
-            itemContent={(index, asset) => (
-              <div className="px-4 pt-3 pb-1">
-                <AssetCard 
-                  key={asset.id} 
-                  asset={asset} 
-                  onToggle={handleToggleReconcile} 
-                />
-              </div>
-            )}
-            components={{
-              Footer: () => (
-                <div className="py-20 flex flex-col items-center justify-center text-slate-300">
-                  {filteredAssets.length === 0 ? (
-                    <>
-                      <Search size={48} className="mb-4 opacity-20" />
-                      <p className="text-xs font-bold uppercase tracking-widest">Nenhum item encontrado</p>
-                    </>
-                  ) : (
-                    <div className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
-                  )}
-                </div>
-              )
-            }}
-          />
-        </div>
+        <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">GBR KARDEK • MOBILE SOBERANO</p>
+        </footer>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 pt-14 pb-6 shadow-sm">
-        <div className="mb-6">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Conciliação por Conta" />
+    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+      {/* Header Fixo Blindado */}
+      <div className="bg-white border-b border-slate-200 px-6 pt-12 pb-6 sticky top-0 z-50 shrink-0 shadow-sm">
+        <div className="flex items-center justify-between">
+          <button 
+            onClick={onBack}
+            className="flex items-center space-x-3 group"
+          >
+            <div className="p-3 bg-slate-50 text-slate-800 rounded-2xl group-active:scale-90 transition-all border border-slate-110 shadow-sm">
+              <ArrowLeft size={20} strokeWidth={3} />
+            </div>
+            <div className="text-left">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
+              <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none italic">Conciliação</p>
+            </div>
+          </button>
         </div>
-        
-        <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
-          Conciliação por Conta
-        </h1>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">
-          Auditoria de bens não etiquetáveis por grupo contábil
-        </p>
+      </div>
 
-        <div className="mt-6 relative">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar pb-32">
+        <div className="mt-4 relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
           <input 
             type="text"
@@ -477,10 +472,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
             className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 transition-all shadow-inner"
           />
         </div>
-      </div>
 
-      {/* Account List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar pb-32">
         {sortedAccounts.map(account => {
           const stats = accountStats[account];
           const progress = stats.total > 0 ? Math.round((stats.checked / stats.total) * 100) : 0;
@@ -538,6 +530,10 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
           </div>
         )}
       </div>
+
+      <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
+        <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">GBR KARDEK • MOBILE SOBERANO</p>
+      </footer>
     </div>
   );
 };
