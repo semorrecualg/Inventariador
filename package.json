@@ -1,7 +1,7 @@
 {
   "name": "inventario-ativo-imobilizado",
   "private": true,
-  "version": "1.0.26",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -2,7 +2,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.gbr.inventario.expert',
-  appName: 'Inventário Expert',
+  appName: 'GBR KARDEK',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
