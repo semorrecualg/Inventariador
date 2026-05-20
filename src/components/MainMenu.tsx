@@ -15,6 +15,7 @@ import {
   X,
   ShieldCheck,
   ChevronRight,
+  ChevronLeft,
   DatabaseZap,
   Building2,
   Trash2,
@@ -108,6 +109,7 @@ interface MainMenuProps {
 const MainMenu: React.FC<MainMenuProps> = ({ 
   onNavigate, 
   onChangeUnit,
+  onLogout,
   onExport, 
   onBackup,
   onDownloadCloudData,
@@ -260,6 +262,20 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {/* TOP STATUS BAR - REDESIGNED */}
       <div className="px-6 pt-10 pb-4 bg-white flex items-center justify-between z-30">
         <div className="flex items-center space-x-3">
+          <button 
+            id="main-menu-back-btn"
+            onClick={() => {
+              if (onLogout) {
+                onLogout();
+              } else {
+                onNavigate(AppScreen.LOAD_DATABASE);
+              }
+            }}
+            className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-500 active:scale-90 transition-all hover:bg-slate-100 mr-1"
+            title="Sair / Database Loader"
+          >
+            <ChevronLeft size={24} />
+          </button>
           <div className="w-10 h-10 bg-accent-soft rounded-xl flex items-center justify-center text-accent">
             <ShieldCheck size={24} />
           </div>
@@ -307,7 +323,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       {/* TOOL GRID - MINIMALIST */}
       <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between">
-        <div className="flex items-center space-x-1.5 md:space-x-4">
+        <div className="flex items-center space-x-1.5 md:space-x-4 font-sans">
           <button 
             onClick={() => setIsPreferencesMenuOpen(true)} 
             className="flex flex-col items-center space-y-1 group"
@@ -317,18 +333,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
             <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
           </button>
-
-          {onChangeUnit && (
-            <button 
-              onClick={onChangeUnit} 
-              className="flex flex-col items-center space-y-1 group"
-            >
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 group-active:scale-90 transition-all group-hover:bg-blue-100">
-                <Building2 size={20} />
-              </div>
-              <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Unidades</span>
-            </button>
-          )}
 
           {isAdmin && (
             <button 
@@ -379,10 +383,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
 
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar">
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans">
         <button
           onClick={() => onChangeUnit ? onChangeUnit() : onNavigate(AppScreen.UNIT_SELECTION)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
         >
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
             <Building2 size={24} />
@@ -395,23 +399,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </button>
 
         <button
-          onClick={() => onNavigate(AppScreen.UNIT_CONFIGURATOR)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
-        >
-          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-            <MapIcon size={24} />
-          </div>
-          <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">MAPEAR LOCALIDADES</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Configuração de Geofencing</p>
-          </div>
-          <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
-        </button>
-
-        <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.LABELING)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:100ms]"
         >
           <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
             <Tag size={24} />
@@ -426,7 +416,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         <button
           disabled={!hasData}
           onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
+          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:200ms]"
         >
           <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
             <Search size={24} />
@@ -434,21 +424,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <div className="flex-1 text-left">
             <h3 className="text-base font-bold text-ink tracking-tight">CONSULTA</h3>
             <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Busca de Ativo</p>
-          </div>
-          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
-        </button>
-
-        <button
-          disabled={!hasData}
-          onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group"
-        >
-          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
-            <ListChecks size={24} />
-          </div>
-          <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">CONCILIAÇÃO POR CONTA</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Auditoria de Bens Não Etiquetáveis</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
