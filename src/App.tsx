@@ -448,6 +448,28 @@ const App: React.FC = () => {
               setUsers(dbUsers);
               console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
             }
+
+            // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem)
+            try {
+              const savedUser = localStorage.getItem('app_current_user');
+              const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+              const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
+              
+              const sqlConfigs = await sqliteService.getUnitConfigs(tid);
+              if (sqlConfigs && sqlConfigs.length > 0 && sqlConfigs[0].selectedUnit) {
+                const recoveredUnit = sqlConfigs[0].selectedUnit as string;
+                console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}`);
+                setSelectedUnit(recoveredUnit);
+                
+                // Se o usuário já está logado, pula a triagem inicial e vai direto para MAIN_MENU
+                if (parsedUser) {
+                  console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
+                  setHistory([AppScreen.MAIN_MENU]);
+                }
+              }
+            } catch (bootErr) {
+              console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
+            }
           }
           setIsInitializing(false);
         } else {
@@ -2636,8 +2658,43 @@ const App: React.FC = () => {
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
         console.log(`>>> [DBA] Persistindo no SQLite ANTES de atualizar a UI...`);
-        // No modo interno, salvamos o registro no SQLite físico via localDb que já trata a transação e auditoria
-        await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
+        
+        const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
+        if (existing) {
+          const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
+          
+          Object.keys(updatedAsset).forEach(key => {
+            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
+            
+            const oldValue = existing[key as keyof Asset];
+            const newValue = updatedAsset[key as keyof Asset];
+            
+            if (String(oldValue || '') !== String(newValue || '')) {
+              changedFields.push({
+                field: key,
+                oldValue: oldValue !== undefined && oldValue !== null ? String(oldValue) : null,
+                newValue: newValue !== undefined && newValue !== null ? String(newValue) : null
+              });
+            }
+          });
+
+          if (changedFields.length > 0) {
+            console.log(`>>> [DBA] Detectadas ${changedFields.length} alterações de campo para o Buffer Atômico.`);
+            for (const change of changedFields) {
+              await sqliteService.bufferFieldChange(
+                updatedAsset,
+                change.field,
+                change.oldValue,
+                change.newValue,
+                user?.email || 'SISTEMA'
+              );
+            }
+          } else {
+            await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
+          }
+        } else {
+          await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
+        }
       } else {
         await syncAssetsToCloud([updatedAsset], user?.tenantid);
       }

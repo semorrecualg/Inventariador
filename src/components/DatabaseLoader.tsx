@@ -152,7 +152,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const processRowsToDatabaseBatch = async (rows: Record<string, unknown>[]) => {
-    const CHUNK_SIZE = 200;
+    const CHUNK_SIZE = 1000;
     const totalItems = rows.length;
     
     setProgress({ current: 0, total: totalItems });
@@ -160,8 +160,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const savepointName = `expert_batch_${i}`;
-      const sqlStatements: string[] = [`SAVEPOINT ${savepointName};`];
+      const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
 
       const cleanValue = (val: unknown): string => {
         if (val === null || val === undefined) return '';
@@ -236,7 +235,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         );`);
       }
 
-      sqlStatements.push(`RELEASE SAVEPOINT ${savepointName};`);
+      sqlStatements.push('COMMIT;');
 
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
@@ -250,7 +249,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const err = chunkError as Error;
         addLog(`Erro no lote ${i}: ${err.message}`);
         // Tenta dar rollback se falhar
-        try { await sqliteService.execute(`ROLLBACK TO SAVEPOINT ${savepointName};`); } catch { /* ignore */ }
+        try { await sqliteService.execute('ROLLBACK;'); } catch { /* ignore */ }
         throw err;
       }
     }
@@ -543,6 +542,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                   try {
                     setStatus('LOADING');
                     addLog("Ativando sistema...");
+                    await new Promise(resolve => setTimeout(resolve, 50));
                     
                     // GBR v25: Projeção Magra (Mapping Exclusive)
                     // Pega o ID da primeira campanha ativa ou gera um ID genérico
@@ -550,6 +550,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     const assets = await localDb.assets.getMapData(campaignId);
                     
                     addLog(`>>> [Projection] ${assets.length} ativos carregados via shader pipeline.`);
+                    await new Promise(resolve => setTimeout(resolve, 50));
                     
                     // Sincroniza o cache do IndexedDB com o novo banco SQL carregado
                     const newState: InventoryState = {
@@ -561,6 +562,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     };
                     
                     addLog("Sincronizando cache de segurança...");
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     await saveInventory(newState, assets);
 
                     sessionStorage.setItem('app_just_finished_load', 'true');

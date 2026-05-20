@@ -191,6 +191,10 @@ class SqliteService {
   private mutationCounter = 0;
   private readonly MUTATION_THRESHOLD = 5;
   
+  // GBR v24.50 KARDEK: Buffer Atômico - "Regra dos 5 Registros"
+  private assetFieldBuffer: { sql: string; params: (string | number | boolean | null)[] }[] = [];
+  private fieldChangesCount = 0;
+  
   private storageKeys = {
     dbKey: 'sqlite_db_binary',
     fileHandleKey: 'sqlite_file_handle',
@@ -605,6 +609,20 @@ class SqliteService {
       await this.nativeDb.execute(FULL_SCHEMA);
       console.log(">>> [Database] Schema DDL injetado/verificado com sucesso.");
 
+      // GBR v24.50 KARDEK: Migrações dinâmicas de colunas para a Trilha de Auditoria (Delta Log) se necessário
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN id_ativo TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN campo_modificado TEXT;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_anterior TEXT;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_novo TEXT;");
+      } catch { /* ignorado */ }
+
       // 5. Salvaguarda de Inicialização (Evita falha de tabela vazia no primeiro SELECT do App.tsx)
       const queryResult = await this.nativeDb.query("SELECT COUNT(*) as count FROM unit_configs;");
       const recordCount = (queryResult?.values?.[0]?.count as number) || 0;
@@ -782,17 +800,23 @@ class SqliteService {
     if (!this.nativeDb) return;
 
     try {
-      const queries = assets.map(asset => {
-        const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
-        const cols = validKeys.join(', ');
-        const placeholders = validKeys.map(() => '?').join(', ');
-        const values = validKeys.map(k => asset[k as keyof Asset]);
-        return {
-          sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
-          params: values as (string | number | boolean | null)[]
-        };
-      });
-      await this.executeBatch(queries);
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < assets.length; i += BATCH_SIZE) {
+        const chunk = assets.slice(i, i + BATCH_SIZE);
+        const queries = chunk.map(asset => {
+          const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
+          const cols = validKeys.join(', ');
+          const placeholders = validKeys.map(() => '?').join(', ');
+          const values = validKeys.map(k => asset[k as keyof Asset]);
+          return {
+            sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
+            params: values as (string | number | boolean | null)[]
+          };
+        });
+        await this.executeBatch(queries);
+        // Respiro para thread principal da UI
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     } catch (error: unknown) {
       const e = error as Error;
       console.error("saveAssetsBatch failed:", e);
@@ -888,6 +912,72 @@ class SqliteService {
     await this.saveDatabase();
   }
 
+  // --- GBR v24.50 KARDEK: Buffer Atômico e Trilha de Auditoria ---
+  getBufferedChangesCount(): number {
+    return this.fieldChangesCount;
+  }
+
+  async bufferFieldChange(asset: Asset, field: string, oldValue: string | null, newValue: string | null, userId: string) {
+    if (!this.isInitialized) await this.init();
+
+    // Determina o id_ativo (UUID para sobras ou Sn1_recno / Sn3_recno para itens nativos)
+    const id_ativo = asset.Sn1_recno !== undefined && asset.Sn1_recno !== null
+      ? String(asset.Sn1_recno)
+      : (asset.Sn3_recno !== undefined && asset.Sn3_recno !== null
+        ? String(asset.Sn3_recno)
+        : String(asset.id));
+
+    // 1. Prepara comando SQL para atualizar apenas este campo na tabela ativos
+    const updateSql = `UPDATE ativos SET ${field} = ?, _conferido = 1, _dataLeitura = ? WHERE id = ?`;
+    const timestamp = new Date().toISOString();
+    const updateParams = [newValue, timestamp, asset.id];
+
+    // 2. Prepara inserção na Trilha de Auditoria (Delta Log) mapeando as colunas obrigatórias
+    const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const logSql = `INSERT OR REPLACE INTO AUDIT_LOG (id, usuario, acao, tabela, registro_id, id_ativo, campo_modificado, valor_anterior, valor_novo, details, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const logParams = [
+      logId,
+      userId,
+      'FIELD_UPDATE',
+      'ativos',
+      asset.id,
+      id_ativo,
+      field,
+      oldValue,
+      newValue,
+      `Alteração no campo "${field}" de "${oldValue || ''}" para "${newValue || ''}" via Buffer`,
+      timestamp
+    ];
+
+    // Adiciona os comandos SQL ao buffer em memória
+    this.assetFieldBuffer.push({ sql: updateSql, params: updateParams });
+    this.assetFieldBuffer.push({ sql: logSql, params: logParams });
+    this.fieldChangesCount++;
+
+    console.log(`>>> [Buffer Atômico] Registro inserido no buffer: "${field}" para ativo: ${asset.id}. Acumulado: ${this.fieldChangesCount}/5`);
+
+    // Regra dos 5: Flush automático a cada 5 alterações de campo acumuladas
+    if (this.fieldChangesCount >= 5) {
+      await this.flushFieldChanges();
+    }
+  }
+
+  async flushFieldChanges() {
+    if (this.assetFieldBuffer.length === 0) return;
+    
+    console.log(`>>> [Buffer Atômico] Iniciando Commit em lote atômico de ${this.fieldChangesCount} alterações de campo...`);
+    try {
+      // executeBatch realiza uma única transação utilizando executeSet nativo
+      await this.executeBatch(this.assetFieldBuffer);
+      this.assetFieldBuffer = [];
+      this.fieldChangesCount = 0;
+      console.log(">>> [Buffer Atômico] Commit atômico finalizado com sucesso.");
+    } catch (error) {
+      console.error(">>> [Buffer Atômico] Erro crítico ao gravar alterações no SQLite:", error);
+      throw error;
+    }
+  }
+
   async getUnitConfigsFromSql(tenantId: string): Promise<UnitConfig[]> {
     try {
       const rows = await this.query("SELECT * FROM unit_anchors WHERE tenant_id = ?", [tenantId]);
@@ -933,31 +1023,45 @@ class SqliteService {
 
   async getOperationalUnits(): Promise<string[]> {
     const res = await this.query(`
-      SELECT UNIDADE_OPERACIONAL 
+      SELECT 
+        COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome
       FROM ativos 
-      WHERE UNIDADE_OPERACIONAL IS NOT NULL 
-        AND UNIDADE_OPERACIONAL != '' 
-        AND _is_deleted = 0
+      WHERE _is_deleted = 0
       GROUP BY UNIDADE_OPERACIONAL
-      ORDER BY UNIDADE_OPERACIONAL ASC
+      ORDER BY unidade_nome ASC
     `);
-    return res.map(row => row.UNIDADE_OPERACIONAL as string);
+    return res.map(row => {
+      const getVal = (target: string, fallback: unknown) => {
+        const key = Object.keys(row).find(k => k.toLowerCase() === target.toLowerCase());
+        return key ? row[key] : fallback;
+      };
+      const nameVal = getVal('unidade_nome', getVal('unidade_operacional', 'Unidade Não Informada'));
+      return String(nameVal || 'Unidade Não Informada').trim().toUpperCase();
+    });
   }
 
   async getOperationalUnitsWithStats(): Promise<{ name: string; count: number }[]> {
     const res = await this.query(`
-      SELECT UNIDADE_OPERACIONAL, COUNT(*) as total 
+      SELECT 
+        COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome, 
+        COUNT(*) AS total_ativos 
       FROM ativos 
-      WHERE UNIDADE_OPERACIONAL IS NOT NULL 
-        AND UNIDADE_OPERACIONAL != '' 
-        AND _is_deleted = 0
-      GROUP BY UNIDADE_OPERACIONAL
-      ORDER BY UNIDADE_OPERACIONAL ASC
+      WHERE _is_deleted = 0
+      GROUP BY UNIDADE_OPERACIONAL 
+      ORDER BY unidade_nome ASC
     `);
-    return res.map(row => ({
-      name: row.UNIDADE_OPERACIONAL as string,
-      count: Number(row.total)
-    }));
+    return res.map(row => {
+      const getVal = (target: string, fallback: unknown) => {
+        const key = Object.keys(row).find(k => k.toLowerCase() === target.toLowerCase());
+        return key ? row[key] : fallback;
+      };
+      const rawName = getVal('unidade_nome', getVal('unidade_exibicao', getVal('unidade_operacional', 'Unidade Não Informada')));
+      const countVal = getVal('total_ativos', getVal('total', 0));
+      return {
+        name: String(rawName || 'Unidade Não Informada').trim().toUpperCase(),
+        count: Number(countVal)
+      };
+    });
   }
 
   /**

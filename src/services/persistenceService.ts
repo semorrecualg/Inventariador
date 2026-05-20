@@ -206,10 +206,15 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       localforage.setItem(keys.assets, encryptedAssets)
     ]);
 
-    // Espelhamento Dexie para compatibilidade
+    // Espelhamento Dexie para compatibilidade em lotes para não travar a thread
     try {
       if (mode === DatabaseMode.INTERNAL) {
-        await localDb.assets.bulkPut(assets);
+        const BATCH_SIZE = 1000;
+        for (let i = 0; i < assets.length; i += BATCH_SIZE) {
+          const chunk = assets.slice(i, i + BATCH_SIZE);
+          await localDb.assets.bulkPut(chunk);
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
     } catch (dexieErr) {
       console.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);

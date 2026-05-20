@@ -10,6 +10,7 @@ import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
+import { BufferIndicator } from './BufferIndicator';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
@@ -1398,11 +1399,14 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
-            {/* Banner Offline Sutil */}
+            {/* Banner Offline Sutil e Buffer Atômico */}
             {databaseMode === 'INTERNAL' && (
-              <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex items-center space-x-3 mb-2">
-                <WifiOff size={14} className="text-amber-600" />
-                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Modo Offline Ativo</p>
+              <div className="space-y-3">
+                <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex items-center space-x-3 mb-2">
+                  <WifiOff size={14} className="text-amber-600" />
+                  <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Modo Offline Ativo</p>
+                </div>
+                <BufferIndicator />
               </div>
             )}
 
