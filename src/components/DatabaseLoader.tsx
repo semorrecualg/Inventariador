@@ -28,6 +28,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
+  const [errorLog, setErrorLog] = useState<string[]>([]);
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
@@ -36,11 +37,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (msg: string) => {
-    // Reduzido para log somente em desenvolvimento ou criticidade
     if (msg.includes('Erro') || msg.includes('Falha') || msg.includes('TIMEOUT')) {
       console.error(`[DatabaseLoader] ${msg}`);
     }
     setLoadingMessage(msg);
+    setErrorLog(prev => [...prev.slice(-10), msg]);
   };
 
   const loadDataFlow = async (forceCache = false) => {

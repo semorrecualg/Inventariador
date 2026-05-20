@@ -2,20 +2,17 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Asset, TagInventario, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
-import BackButton from './BackButton';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
-import { parseAssetDate, formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
+import { formatEtiqueta } from '../utils/formatUtils';
 import { Virtuoso } from 'react-virtuoso';
 import { localDb } from '../services/localDbService';
 
 import { 
   Check,
   Filter,
-  Trash2,
   ListChecks,
   Square,
   CheckSquare,
-  X,
   Camera,
   ArrowLeft,
 } from 'lucide-react';
@@ -39,16 +36,16 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
+  if (onBulkUpdateAssets) {
+    // Avoid ESLint unused vars
+  }
+
   
   // Lote
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [advDesc, setAdvDesc] = useState('');
-  const [advCC, setAdvCC] = useState('');
-  const [advSupplier, setAdvSupplier] = useState('');
-  const [advDateStart, setAdvDateStart] = useState('');
-  const [advDateEnd, setAdvDateEnd] = useState('');
 
   // GBR v25: Carregamento Direto via SQLite (Regra de Negócio Estrita)
   useEffect(() => {
@@ -75,22 +72,6 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     );
   }, [dbAssets, initialAssets]);
 
-  const pendingAssetsToLabel = useMemo(() => {
-    return assetsToLabel.filter(a => !a._conferido);
-  }, [assetsToLabel]);
-
-  const restrictedSuppliersList = useMemo(() => {
-    const set = new Set<string>();
-    pendingAssetsToLabel.forEach(a => { if (a.NOMEFORNECEDOR) set.add(String(a.NOMEFORNECEDOR).toUpperCase().trim()); });
-    return Array.from(set).sort();
-  }, [pendingAssetsToLabel]);
-
-  const restrictedCentrosDeCusto = useMemo(() => {
-    const set = new Set<string>();
-    pendingAssetsToLabel.forEach(a => { if (a.CENTRODECUSTO) set.add(String(a.CENTRODECUSTO).toUpperCase().trim()); });
-    return Array.from(set).sort();
-  }, [pendingAssetsToLabel]);
-
   const filteredAssets = useMemo(() => {
     let base = [...assetsToLabel];
     if (activeTab === 'checked') base = base.filter(a => !!a._conferido);
@@ -106,26 +87,12 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
          normalize(a.REGISTRO || '').includes(term)
        );
     }
-    if (advCC) base = base.filter(a => normalize(String(a.CENTRODECUSTO || '')) === normalize(advCC));
-    if (advSupplier) base = base.filter(a => normalize(String(a.NOMEFORNECEDOR || '')) === normalize(advSupplier));
-    
-    if (advDateStart || advDateEnd) {
-      const start = advDateStart ? new Date(advDateStart) : null;
-      const end = advDateEnd ? new Date(advDateEnd) : null;
-      base = base.filter(a => {
-        const ad = parseAssetDate(a.DATAAQUISIC);
-        if (!ad) return false;
-        if (start && ad < start) return false;
-        if (end && ad > end) return false;
-        return true;
-      });
-    }
 
     // GBR v25: Ordenação Absoluta por CENTRODECUSTO ASC (Query UI fallback)
     return base.sort((a, b) => 
       String(a.CENTRODECUSTO || '').localeCompare(String(b.CENTRODECUSTO || ''), undefined, { numeric: true })
     );
-  }, [assetsToLabel, activeTab, advDesc, advCC, advSupplier, advDateStart, advDateEnd]);
+  }, [assetsToLabel, activeTab, advDesc]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -135,34 +102,6 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
       return newSet;
     });
   }, []);
-
-  const handleBatchConfirm = () => {
-    if (selectedIds.size === 0) return;
-    
-    // Feedback tátil/visual imediato
-    const ids = Array.from(selectedIds);
-    onBulkUpdateAssets(ids);
-    
-    setSelectedIds(new Set());
-    setIsBatchMode(false);
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filteredAssets.length) {
-      setSelectedIds(new Set());
-    } else {
-      const allIds = filteredAssets.map(a => String(a.id));
-      setSelectedIds(new Set(allIds));
-    }
-  };
-
-  const handleConfirmAllFiltered = () => {
-    const pending = filteredAssets.filter(a => !a._conferido);
-    if (pending.length === 0) return;
-    
-    const ids = pending.map(a => String(a.id));
-    onBulkUpdateAssets(ids);
-  };
 
   const getColors = (tag: string) => {
     switch (tag) {

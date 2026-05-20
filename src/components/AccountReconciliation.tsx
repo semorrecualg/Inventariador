@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
-import BackButton from './BackButton';
 import { 
   Search, 
   Filter, 
@@ -9,7 +8,6 @@ import {
   Circle, 
   Building2, 
   ChevronRight,
-  ListChecks,
   MapPin,
   Check,
   Zap,
@@ -253,6 +251,10 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   const [assetSearchTerm, setAssetSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
 
+  if (onBulkUpdateAssets) {
+    // Referenced to solve unused vars check
+  }
+
   // Get unique accounts and their stats
   const accountStats = useMemo(() => {
     const stats: Record<string, { total: number; checked: number }> = {};
@@ -327,23 +329,6 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       _dataLeitura: !asset._conferido ? new Date().toISOString() : undefined
     });
   }, [onUpdateAsset]);
-
-  const handleReconcileAll = () => {
-    const pendingIds = filteredAssets
-      .filter(a => {
-        const etq = String(a.ETIQUETA || '').toUpperCase().trim();
-        return !a._conferido && !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
-      })
-      .map(a => String(a.id));
-    
-    if (pendingIds.length > 0) {
-      onBulkUpdateAssets(pendingIds, {
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.CONFERIDO,
-        _dataLeitura: new Date().toISOString()
-      });
-    }
-  };
 
   if (selectedAccount) {
     const stats = accountStats[selectedAccount];

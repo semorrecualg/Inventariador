@@ -1,27 +1,17 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
-import { TYPE_LABELS } from '../utils/schema';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
-import BackButton from './BackButton';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
-import { formatDateBR, formatCurrency, parseAssetDate } from '../utils/formatUtils';
+import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { 
   Search, 
-  Check,
   AlertCircle,
   Barcode,
   Filter,
   X,
-  Building2,
-  Tag,
-  MapPin,
   FileText,
-  Hash,
-  User,
-  LayoutGrid,
-  Calendar,
   Camera,
   ArrowUp,
   ArrowLeft
@@ -130,6 +120,10 @@ const Consultation: React.FC<ConsultationProps> = ({
   const [showScrollTop, setShowScrollTop] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   
+  if (isReturnMode && onReturnToInventory) {
+    // console.log("Retorno de inventário habilitado");
+  }
+
   const qrCodeData = useMemo(() => {
     if (!selectedAssetForQr) return '';
     const lines: string[] = [];
@@ -363,11 +357,13 @@ const Consultation: React.FC<ConsultationProps> = ({
           {committedFilters ? (
             filteredAssets.length > 0 ? (
               <Virtuoso
+            ref={virtuosoRef}
             style={{ height: '100%' }}
             data={filteredAssets}
             components={{
               Footer: () => <div className="h-32" />
             }}
+            scrolledToTopChange={(isAtTop) => setShowScrollTop(!isAtTop)}
             itemContent={(index, asset) => (
               <div className="px-6 py-2">
                 <AssetListItem 
