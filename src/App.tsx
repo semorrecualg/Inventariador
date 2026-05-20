@@ -639,6 +639,67 @@ const App: React.FC = () => {
     avancoPercent: number;
   } | null>(null);
 
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  // v24.50: Mecanismo de Soberania e Filtro Estrito indexado direto no SQLite
+  const [currentUnit, setCurrentUnit] = useState<string | null>(() => {
+    return localStorage.getItem('app_current_unit') || localStorage.getItem('app_selected_unit') || null;
+  });
+
+  const [sqliteUnitAssets, setSqliteUnitAssets] = useState<Asset[]>([]);
+
+  useEffect(() => {
+    if (selectedUnit) {
+      setCurrentUnit(selectedUnit);
+      localStorage.setItem('app_current_unit', selectedUnit);
+    } else {
+      setCurrentUnit(null);
+      localStorage.removeItem('app_current_unit');
+    }
+  }, [selectedUnit]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchUnitAssets = async () => {
+      if (!currentUnit) {
+        if (active) setSqliteUnitAssets([]);
+        return;
+      }
+      try {
+        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}"`);
+        const queryStr = "SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0";
+        const results = await sqliteService.query(queryStr, [currentUnit]) as Record<string, unknown>[];
+        
+        const parsedAssets = results.map(row => {
+          const asset = { ...row } as Record<string, unknown>;
+          ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
+            if (Object.prototype.hasOwnProperty.call(asset, key)) {
+              asset[key] = asset[key] === 1;
+            }
+          });
+          ['DE_PARA', '_history'].forEach(key => {
+            if (typeof asset[key] === 'string' && (asset[key].startsWith('{') || asset[key].startsWith('['))) {
+              try { asset[key] = JSON.parse(asset[key]); } catch { /* ignore */ }
+            }
+          });
+          return asset as unknown as Asset;
+        });
+
+        if (active) {
+          setSqliteUnitAssets(parsedAssets);
+          console.log(`>>> [KARDEK] Sucesso: ${parsedAssets.length} ativos carregados do SQLite indexado.`);
+        }
+      } catch (e) {
+        console.error(">>> [KARDEK] Erro ao carregar ativos para a unidade via SQLite:", e);
+      }
+    };
+
+    fetchUnitAssets();
+    return () => {
+      active = false;
+    };
+  }, [currentUnit, refreshVersion, sqliteStatus]);
+
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
     const setupKeyboardListeners = async () => {
@@ -677,8 +738,6 @@ const App: React.FC = () => {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
-
-  const [refreshVersion, setRefreshVersion] = useState(0);
 
   const currentTenantId = useMemo(() => {
     // 1. Prioridade: Tenant do usuário logado
@@ -2774,6 +2833,7 @@ const App: React.FC = () => {
         };
       });
       setLastLocalSave(new Date().toISOString());
+      setRefreshVersion(prev => prev + 1);
       console.log(`>>> [DATABASE] Operação confirmada e UI sincronizada para id: ${updatedAsset.id}`);
     } catch (err) {
       console.error(">>> [DATABASE] Falha Crítica de Escrita:", err);
@@ -3298,6 +3358,7 @@ const App: React.FC = () => {
         status: DatabaseStatus.IN_USE
       }));
       setLastLocalSave(new Date().toISOString());
+      setRefreshVersion(prev => prev + 1);
       
       // MARCA IDs como sujos para back-sync
       ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
@@ -3728,6 +3789,12 @@ const App: React.FC = () => {
 
   const filteredAssetsByUnit = useMemo(() => {
     if (!selectedUnit) return inventory.assets; 
+
+    // v24.50: No modo interno SQLite, as duas fontes de verdade estão perfeitamente sincronizadas de forma indexada
+    if (databaseMode === DatabaseMode.INTERNAL && sqliteUnitAssets.length > 0) {
+      return sqliteUnitAssets;
+    }
+
     const selKey = normalizeKey(selectedUnit);
     const filtered = [];
     for (let i = 0; i < inventory.assets.length; i++) {
@@ -3749,7 +3816,7 @@ const App: React.FC = () => {
       }
     }
     return filtered;
-  }, [inventory.assets, selectedUnit, normalizeKey]);
+  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets]);
 
   const filteredAssetsByLocation = useMemo(() => {
     if (!inventoryLocation) return [];
@@ -4714,7 +4781,7 @@ const App: React.FC = () => {
                   return true;
                 })
                 .map(c => ({ 
-                  name: c.name, 
+                  UNIDADE_OPERACIONAL: c.name, 
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
                   isDownloaded: downloadedUnits.includes(c.name),

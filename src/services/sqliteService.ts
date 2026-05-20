@@ -105,6 +105,8 @@ const FULL_SCHEMA = `
     DE_PARA TEXT,
     AUDITOR_STATUS_CONFERENCIA TEXT,
     _origemTransacao TEXT,
+    STATUS TEXT,
+    DATABAIXA TEXT,
     timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_mestre_etiqueta ON ativos (ETIQUETA);
@@ -622,6 +624,12 @@ class SqliteService {
       try {
         await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_novo TEXT;");
       } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN STATUS TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN DATABAIXA TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
 
       // 5. Salvaguarda de Inicialização (Evita falha de tabela vazia no primeiro SELECT do App.tsx)
       const queryResult = await this.nativeDb.query("SELECT COUNT(*) as count FROM unit_configs;");

@@ -22,7 +22,7 @@ import { DatabaseMode } from '../types';
 
 interface UnitSelectorProps {
   units: Array<{ 
-    name: string; 
+    UNIDADE_OPERACIONAL: string; 
     hasData: boolean; 
     isDownloaded?: boolean; 
     hasCampaign?: boolean;
@@ -45,15 +45,19 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
   const [searchTerm, setSearchTerm] = useState('');
   const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
-  const filteredUnits = units.filter(u => 
-    u.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const purifiedUnits = units.filter(u => 
+    u && u.UNIDADE_OPERACIONAL && u.UNIDADE_OPERACIONAL.trim() !== ''
+  );
+
+  const filteredUnits = purifiedUnits.filter(u => 
+    u.UNIDADE_OPERACIONAL.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Log para depuração de unidades
-  if (units.length === 0) {
-    console.warn('>>> [UnitSelector] Recebeu 0 unidades para exibir.');
+  if (purifiedUnits.length === 0) {
+    console.warn('>>> [UnitSelector] Recebeu 0 unidades purificadas para exibir.');
   } else {
-    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${units.length} unidades.`);
+    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${purifiedUnits.length} unidades purificadas.`);
   }
 
   const handleDownload = async (e: React.MouseEvent, unitName: string) => {
@@ -92,7 +96,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
     };
   };
 
-  console.log(`>>> [UnitSelector] Renderizando ${units.length} unidades. Unidades com campanha: ${units.filter(u => u.hasCampaign).map(u => u.name).join(', ') || 'NENHUMA'}`);
+  console.log(`>>> [UnitSelector] Renderizando ${purifiedUnits.length} unidades. Unidades com campanha: ${purifiedUnits.filter(u => u.hasCampaign).map(u => u.UNIDADE_OPERACIONAL).join(', ') || 'NENHUMA'}`);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
@@ -144,13 +148,19 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
             style={{ height: '100%' }}
             data={filteredUnits}
             itemContent={(index, unit) => {
-              const { style, Icon } = getUnitIdentity(unit.name, unit.hasData);
-              const isDownloading = downloadingUnit === unit.name;
+              // Garanta o uso rigoroso do campo oficial do projeto
+              if (!unit || !unit.UNIDADE_OPERACIONAL || unit.UNIDADE_OPERACIONAL.trim() === '') {
+                return null;
+              }
+
+              const displayName = unit.UNIDADE_OPERACIONAL.trim().toUpperCase();
+              const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
+              const isDownloading = downloadingUnit === unit.UNIDADE_OPERACIONAL;
               return (
                 <div className="px-5 py-1.5">
                   <div
-                    key={unit.name}
-                    onClick={() => unit.hasData && onSelect(unit.name)}
+                    key={displayName}
+                    onClick={() => unit.hasData && onSelect(displayName)}
                     className={`w-full bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border transition-all group overflow-hidden relative modern-card ${
                       unit.hasData 
                         ? 'hover:border-accent active:scale-[0.99] border-border cursor-pointer' 
@@ -163,7 +173,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                       </div>
                       <div className="text-left">
                         <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
-                          {unit.name}
+                          {unit.UNIDADE_OPERACIONAL.trim().toUpperCase()}
                         </h4>
                         <div className="flex items-center space-x-3 mt-2">
                            {/* Ícone de Dados */}
@@ -179,7 +189,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                                className="flex flex-col items-center gap-1 group/icon"
                                onClick={(e) => {
                                  e.stopPropagation();
-                                 if (isAdmin && onConfigGPS) onConfigGPS(unit.name);
+                                 if (isAdmin && onConfigGPS) onConfigGPS(unit.UNIDADE_OPERACIONAL);
                                }}
                              >
                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
@@ -197,7 +207,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                              className="flex flex-col items-center gap-1 group/icon"
                              onClick={(e) => {
                                e.stopPropagation();
-                               if (onCampaigns) onCampaigns(unit.name);
+                               if (onCampaigns) onCampaigns(unit.UNIDADE_OPERACIONAL);
                              }}
                            >
                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
@@ -216,7 +226,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                     <div className="flex items-center space-x-2 relative z-10">
                       {unit.hasData && onDownload && databaseMode !== DatabaseMode.INTERNAL && (
                         <button
-                          onClick={(e) => handleDownload(e, unit.name)}
+                          onClick={(e) => handleDownload(e, unit.UNIDADE_OPERACIONAL)}
                           disabled={isDownloading || unit.isDownloaded}
                           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                             unit.isDownloaded 
@@ -290,7 +300,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
              <p className="text-[9px] text-ink font-bold uppercase tracking-widest">Pipeline Ativo</p>
           </div>
           <p className="text-[9px] text-ink-muted font-bold uppercase tracking-widest">
-            {units.length} Entidades
+            {purifiedUnits.length} Entidades
           </p>
        </div>
      </div>

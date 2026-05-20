@@ -1,4 +1,14 @@
 
+/**
+ * GBR v24.50 KARDEK - REGISTRADOR DE SOBERANIA NATIVA
+ * 
+ * Query Principal de Alimentação da Unidade Operacional Selecionada (Filtro Estrito SQLite):
+ * SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0;
+ * 
+ * Assinatura do Componente de Listagem de Ativos (Garantia de Isolamento Total):
+ * export const Inventory: React.FC<InventoryProps>
+ */
+
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
