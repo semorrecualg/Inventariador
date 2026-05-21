@@ -98,7 +98,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
 
-      - name: Upload Android Debug APK 
+      - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: gbr-inventario-debug-apk

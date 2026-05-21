@@ -28,6 +28,12 @@ const uuidv4 = () => {
 };
 
 const FULL_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS APP_CONFIG (
+    chave TEXT PRIMARY KEY,
+    valor TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS unit_configs (
     id TEXT PRIMARY KEY,
     selectedUnit TEXT,
@@ -265,6 +271,24 @@ class SqliteService {
   async purgeAllCache() {
     await this.reset();
     sessionStorage.clear();
+    
+    // Limpa as chaves do localStorage geradas pelo Kardek
+    try {
+      Object.keys(localStorage).forEach(key => {
+        if (
+          key.startsWith('kardek_campanha_ativa_') || 
+          key === 'app_selected_unit' || 
+          key === 'app_current_unit' || 
+          key === 'app_screen_history' || 
+          key === 'app_screen_params'
+        ) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (e) {
+      console.warn(">>> [Cleanup] Falha ao limpar chaves do localStorage:", e);
+    }
+
     await localforage.removeItem(this.storageKeys.dbKey);
     await localforage.removeItem(this.storageKeys.fileHandleKey);
     await localforage.removeItem(this.storageKeys.statusKey);
@@ -979,6 +1003,70 @@ class SqliteService {
       );
     }
     await this.saveDatabase();
+  }
+
+  // --- ENGINE DE CONFIGURAÇÃO DE SESSÃO TÉCNICA (APP_CONFIG) ---
+  async salvarCampanhaAtiva(unitId: string, campaignId: string): Promise<void> {
+    try {
+      console.log(`>>> [sqliteService] salvarCampanhaAtiva: Unidade=${unitId}, Campanha=${campaignId}`);
+      await this.execute("BEGIN TRANSACTION;");
+      
+      await this.execute(
+        "INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('selected_unit', ?, CURRENT_TIMESTAMP);",
+        [unitId]
+      );
+      
+      await this.execute(
+        "INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('active_campaign', ?, CURRENT_TIMESTAMP);",
+        [campaignId]
+      );
+      
+      await this.execute("COMMIT;");
+      
+      // Espelha no localStorage para evitar delays de renderização sob o cache reativo duplo
+      const normUnit = unitId.toUpperCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .replace(/[_-]/g, ' ')
+        .replace(/\s+/g, ' ');
+        
+      localStorage.setItem(`kardek_campanha_ativa_${normUnit}`, 'true');
+      localStorage.setItem('app_selected_unit', unitId);
+      
+      await this.saveDatabase();
+    } catch (error) {
+      try {
+        await this.execute("ROLLBACK;");
+      } catch (rollbackError) {
+        console.warn("Rollback ao salvar campanha ativa falhou:", rollbackError);
+      }
+      console.error("Erro em salvarCampanhaAtiva:", error);
+      throw error;
+    }
+  }
+
+  async obterContextoAtivo(): Promise<{ selectedUnit: string | null; currentCampaignId: string | null }> {
+    try {
+      const rows = await this.query("SELECT chave, valor FROM APP_CONFIG WHERE chave IN ('selected_unit', 'active_campaign')");
+      let selectedUnit: string | null = null;
+      let currentCampaignId: string | null = null;
+      
+      if (rows && rows.length > 0) {
+        rows.forEach((row: Record<string, unknown>) => {
+          if (row.chave === 'selected_unit') {
+            selectedUnit = row.valor as string | null;
+          } else if (row.chave === 'active_campaign') {
+            currentCampaignId = row.valor as string | null;
+          }
+        });
+      }
+      
+      return { selectedUnit, currentCampaignId };
+    } catch (error) {
+      console.error("Erro em obterContextoAtivo:", error);
+      return { selectedUnit: null, currentCampaignId: null };
+    }
   }
 
   // --- GBR v24.50 KARDEK: Buffer Atômico e Trilha de Auditoria ---

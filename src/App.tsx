@@ -449,27 +449,55 @@ const App: React.FC = () => {
               console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
             }
 
-            // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem)
-            try {
-              const savedUser = localStorage.getItem('app_current_user');
-              const parsedUser = savedUser ? JSON.parse(savedUser) : null;
-              const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
-              
-              const sqlConfigs = await sqliteService.getUnitConfigs(tid);
-              if (sqlConfigs && sqlConfigs.length > 0 && sqlConfigs[0].selectedUnit) {
-                const recoveredUnit = sqlConfigs[0].selectedUnit as string;
-                console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}`);
-                setSelectedUnit(recoveredUnit);
-                
-                // Se o usuário já está logado, pula a triagem inicial e vai direto para MAIN_MENU
-                if (parsedUser) {
-                  console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
-                  setHistory([AppScreen.MAIN_MENU]);
-                }
-              }
-            } catch (bootErr) {
-              console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
-            }
+             // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem via APP_CONFIG)
+             try {
+               const savedUser = localStorage.getItem('app_current_user');
+               const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+               
+               const activeSession = await sqliteService.obterContextoAtivo();
+               let recoveredUnit = activeSession.selectedUnit;
+               let recoveredCampaign = activeSession.currentCampaignId;
+               
+               // Se não retornar da nova APP_CONFIG, tenta do unit_configs legado para compatibilidade
+               if (!recoveredUnit) {
+                 const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
+                 const sqlConfigs = await sqliteService.getUnitConfigs(tid);
+                 if (sqlConfigs && sqlConfigs.length > 0) {
+                   recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
+                   recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
+                 }
+               }
+               
+               if (recoveredUnit) {
+                 console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
+                 setSelectedUnit(recoveredUnit);
+                 
+                 if (recoveredCampaign) {
+                   setInventory(prev => ({
+                     ...prev,
+                     currentCampaignId: recoveredCampaign || undefined,
+                     status: DatabaseStatus.LOADED
+                   }));
+                 }
+                 
+                 // Se o usuário está logado e há contexto técnico ativo, pula a triagem inicial e vai direto para MAIN_MENU
+                 if (parsedUser && recoveredUnit && recoveredCampaign) {
+                   console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
+                   setHistory([AppScreen.MAIN_MENU]);
+                 } else if (parsedUser) {
+                   // Se faltar algum dos metadados técnicos, redireciona para a seleção de unidades
+                   console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
+                   setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                 }
+               } else {
+                 if (parsedUser) {
+                   console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
+                   setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                 }
+               }
+             } catch (bootErr) {
+               console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
+             }
           }
           setIsInitializing(false);
         } else {
@@ -916,6 +944,26 @@ const App: React.FC = () => {
       refreshCampaigns();
     }
   }, [screen, refreshCampaigns]);
+
+  // GBR v24.50 KARDEK: Route Guard de Inicialização Técnica
+  useEffect(() => {
+    const publicScreens = [
+      AppScreen.LOGIN,
+      AppScreen.REGISTER,
+      AppScreen.ONBOARDING,
+      AppScreen.LOAD_DATABASE,
+      AppScreen.UNIT_SELECTION
+    ];
+    
+    if (user && !publicScreens.includes(screen)) {
+      const campaignId = inventory.currentCampaignId;
+      if (!selectedUnit || !campaignId) {
+        console.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
+        setScreenParams(null);
+        setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+      }
+    }
+  }, [screen, selectedUnit, inventory.currentCampaignId, user]);
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
@@ -4039,14 +4087,17 @@ const App: React.FC = () => {
 
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
-      const hasDirectCampaign = unitsWithDirectCampaign.has(norm);
+      
+      // Cache reativo duplo para evitar "pisca-pisca" visual do botão CAMPANHA
+      const cachedActive = localStorage.getItem(`kardek_campanha_ativa_${norm}`) === 'true';
+      const hasDirectCampaign = unitsWithDirectCampaign.has(norm) || cachedActive;
       const hasGps = unitsWithGps.has(norm);
 
       return {
         name: unit.name,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
-        hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table enables button
+        hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table or cached enables button
         hasGps
       };
     });
@@ -4809,7 +4860,7 @@ const App: React.FC = () => {
                   hasGps: c.hasGps
                 }))
               } 
-              onSelect={(u) => { 
+              onSelect={async (u) => { 
                 setSelectedUnit(u); 
                 setIsInventorying(false); 
                 setInventoryLocation(null); 
@@ -4817,7 +4868,49 @@ const App: React.FC = () => {
                 
                 // v24.50: Persiste o contexto no SQLite local
                 if (databaseMode === DatabaseMode.INTERNAL) {
-                  sqliteService.setUnitConfig(u);
+                  await sqliteService.setUnitConfig(u);
+                  
+                  // v24.50: Tenta buscar se existe alguma campanha ativa para essa unidade para auto-ativar e salvar sessão em APP_CONFIG
+                  try {
+                    const activeCampaigns = campaigns.filter(c => {
+                      const uId = c._unitid || c.unit_id;
+                      return uId && normalizeKey(uId) === normalizeKey(u) && String(c.status) === 'ACTIVE';
+                    });
+                    
+                    if (activeCampaigns.length > 0) {
+                      const activeId = activeCampaigns[0].id;
+                      console.log(`>>> [Governance] Unidade selecionada. Campanha ativa de inventário vinculada e auto-ativada: ${activeCampaigns[0].name} (ID: ${activeId})`);
+                      await sqliteService.salvarCampanhaAtiva(u, activeId);
+                      setInventory(prev => ({
+                        ...prev,
+                        currentCampaignId: activeId,
+                        status: DatabaseStatus.LOADED
+                      }));
+                    } else {
+                      // Se não houver campanha ativa cadastrada direta, tenta do localStorage cache rápido ou limpa
+                      const cachedNormal = normalizeKey(u);
+                      const normCampaign = localStorage.getItem(`kardek_campanha_ativa_${cachedNormal}`) ? 'cached' : '';
+                      console.log(`>>> [Governance] Selecionada unidade sem campanha ativa vinculada direta no banco local.`);
+                      await sqliteService.salvarCampanhaAtiva(u, normCampaign);
+                      if (normCampaign) {
+                        setInventory(prev => ({
+                          ...prev,
+                          currentCampaignId: normCampaign,
+                          status: DatabaseStatus.LOADED
+                        }));
+                      } else {
+                        setInventory(prev => ({
+                          ...prev,
+                          currentCampaignId: undefined
+                        }));
+                      }
+                    }
+                  } catch (err) {
+                    console.error(">>> [Governance] Erro ao salvar sessão de campanha de unidade:", err);
+                  }
+                } else {
+                  // Se for modo nuvem, salvamos no localStorage para termos coerência instantânea
+                  localStorage.setItem('app_selected_unit', u);
                 }
 
                 // Dispara o sync para a unidade selecionada se estiver no modo nuvem
@@ -4969,6 +5062,18 @@ const App: React.FC = () => {
               user={user} 
               onBack={popScreen} 
               onActivate={async (id) => {
+                if (selectedUnit && databaseMode === DatabaseMode.INTERNAL) {
+                  try {
+                    await sqliteService.salvarCampanhaAtiva(selectedUnit, id);
+                  } catch (err) {
+                    console.error(">>> [App] Erro ao salvar campanha ativa corporativa no sqlite:", err);
+                  }
+                } else if (selectedUnit) {
+                  // Fallback para modo nuvem no localStorage para manter consistência rápida
+                  const normUnit = normalizeKey(selectedUnit);
+                  localStorage.setItem(`kardek_campanha_ativa_${normUnit}`, 'true');
+                }
+
                 setInventory(prev => ({ 
                   ...prev, 
                   currentCampaignId: id,
