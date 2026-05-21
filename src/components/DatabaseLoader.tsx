@@ -158,6 +158,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     setProgress({ current: 0, total: totalItems });
     addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
 
+    try {
+      // Limpa qualquer transação travada no driver nativo antes de iniciar a carga
+      await sqliteService.execute("ROLLBACK;"); 
+    } catch {
+      // Ignora de forma silenciosa se não houver nenhuma transação ativa
+    }
+
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
       const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
