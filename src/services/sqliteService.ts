@@ -7,6 +7,26 @@ import { DatabaseStatus, Asset, InventoryCampaign, InventoryState } from '../typ
 import { SCHEMA_PRIORITY, findBestColumn } from '../utils/schema';
 import { DB_ASSET_COLUMNS } from '../constants/schema';
 
+// Tipagem estrita para o payload de auditoria
+export interface AuditDelta {
+  campo: string;
+  valor_antigo: string | null;
+  valor_novo: string | null;
+}
+
+export interface AssetData {
+  Sn1_recno?: number;
+  Sn3_recno?: number;
+  [key: string]: string | number | boolean | null | undefined; // Permite indexação dinâmica para checagem de colunas
+}
+
+const uuidv4 = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 const FULL_SCHEMA = `
   CREATE TABLE IF NOT EXISTS unit_configs (
     id TEXT PRIMARY KEY,
@@ -34,10 +54,20 @@ const FULL_SCHEMA = `
     details TEXT,
     delta TEXT,
     _status_sinc INTEGER DEFAULT 0,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sn1_recno INTEGER,
+    sn3_recno INTEGER,
+    campo TEXT,
+    valor_antigo TEXT,
+    valor_novo TEXT,
+    data_hora TEXT,
+    id_ativo TEXT,
+    campo_modificado TEXT,
+    valor_anterior TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG(sn1_recno, sn3_recno);
 
   CREATE TABLE IF NOT EXISTS ativos_imobilizados (
     Sn1_recno INTEGER,
@@ -629,6 +659,24 @@ class SqliteService {
         await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_novo TEXT;");
       } catch { /* ignorado */ }
       try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN sn1_recno INTEGER;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN sn3_recno INTEGER;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN campo TEXT;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_antigo TEXT;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN data_hora TEXT;");
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run("CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG(sn1_recno, sn3_recno);");
+      } catch { /* ignorado */ }
+      try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN STATUS TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
       try {
@@ -925,6 +973,142 @@ class SqliteService {
   }
 
   // --- GBR v24.50 KARDEK: Buffer Atômico e Trilha de Auditoria ---
+  /**
+   * Captura o delta exato entre o estado atual do banco e as novas alterações.
+   * Roda dentro da mesma transação do UPDATE para garantir consistência.
+   */
+  private trackDelta(currentAsset: AssetData, newData: Partial<AssetData>): AuditDelta[] {
+    const deltas: AuditDelta[] = [];
+
+    Object.keys(newData).forEach((key) => {
+      // Ignora chaves de controle interno que não pertencem à auditoria de negócio
+      if (key === 'Sn1_recno' || key === 'Sn3_recno' || key.startsWith('_') || key === 'id') return;
+
+      const oldVal = currentAsset[key] !== undefined ? String(currentAsset[key]) : null;
+      const newVal = newData[key] !== undefined ? String(newData[key]) : null;
+
+      // Se houver alteração real de valor, registra o delta
+      if (oldVal !== newVal) {
+        deltas.push({
+          campo: key,
+          valor_antigo: oldVal,
+          valor_novo: newVal
+        });
+      }
+    });
+
+    return deltas;
+  }
+
+  /**
+   * Método centralizador de atualização de Ativos com auditoria injetada e Failsafe de Bateria
+   */
+  public async updateAssetFields(
+    sn1_recno: number, 
+    sn3_recno: number, 
+    newData: Partial<AssetData>,
+    batteryLevel: number,
+    userId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    
+    // Failsafe de Integridade Sensorial (Bloqueio crítico se bateria < 5%)
+    if (batteryLevel < 0.05) {
+      throw new Error("SQLITE_CORRUPT_PREVENTION: Gravação bloqueada. Bateria abaixo de 5%.");
+    }
+
+    try {
+      // 1. Busca o estado atual do registro para cálculo do Delta (Usa índice para performance)
+      const rows = await this.query(
+        `SELECT * FROM ativos WHERE Sn1_recno = ? AND Sn3_recno = ? LIMIT 1`,
+        [sn1_recno, sn3_recno]
+      );
+      
+      const currentAsset = rows.length > 0 ? (rows[0] as unknown as AssetData) : null;
+
+      if (!currentAsset) {
+        return { success: false, error: "Ativo não encontrado para auditoria." };
+      }
+
+      // 2. Calcula o Delta exato (Antes vs Depois)
+      const deltas = this.trackDelta(currentAsset, newData);
+
+      // Se não há mudanças reais, encerra o fluxo sem consumir I/O
+      if (deltas.length === 0) {
+        return { success: true };
+      }
+
+      // 3. Inicia bloco transacional atômico para persistência do Ativo + Auditoria
+      await this.execute("BEGIN TRANSACTION;");
+
+      try {
+        // 4. Executa o UPDATE dinâmico do Ativo
+        const keys = Object.keys(newData).filter(k => k !== 'Sn1_recno' && k !== 'Sn3_recno' && !k.startsWith('_') && k !== 'id');
+        if (keys.length > 0) {
+          const fieldsToUpdate = keys.map(key => `${key} = ?`).join(', ');
+          const values: (string | number | boolean | null | undefined)[] = keys.map(key => newData[key]);
+          values.push(sn1_recno, sn3_recno);
+
+          await this.execute(
+            `UPDATE ativos SET ${fieldsToUpdate} WHERE Sn1_recno = ? AND Sn3_recno = ?`,
+            values
+          );
+        }
+
+        // 5. Injeta os deltas gerados na tabela AUDIT_LOG
+        const timestamp = new Date().toISOString();
+
+        for (const delta of deltas) {
+          const logId = uuidv4();
+          await this.execute(`
+            INSERT INTO AUDIT_LOG (
+              id, usuario, acao, tabela, registro_id, sn1_recno, sn3_recno, campo, valor_antigo, valor_novo, data_hora, _status_sinc, id_ativo, campo_modificado, valor_anterior, timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+          `, [
+            logId,
+            userId,
+            'FIELD_UPDATE',
+            'ativos',
+            String(currentAsset.id || ''),
+            sn1_recno,
+            sn3_recno,
+            delta.campo,
+            delta.valor_antigo,
+            delta.valor_novo,
+            timestamp,
+            String(sn1_recno || currentAsset.id || ''),
+            delta.campo,
+            delta.valor_antigo,
+            timestamp
+          ]);
+        }
+
+        // 6. Confirma a transação
+        await this.execute("COMMIT;");
+      } catch (innerError) {
+        try {
+          await this.execute("ROLLBACK;");
+        } catch (rollbackError) {
+          console.warn("Rollback failed:", rollbackError);
+        }
+        throw innerError;
+      }
+
+      // 7. Regra dos 5 Registros (Flush Físico Atômico para o Filesystem do dispositivo)
+      this.fieldChangesCount += deltas.length; // Conta por alteração de campo cumulativa
+      if (this.fieldChangesCount >= 5) {
+        await this.saveDatabase();
+        this.fieldChangesCount = 0; // Reseta o contador pós-gravação física
+      }
+
+      return { success: true };
+
+    } catch (error: unknown) {
+      const err = error as Error;
+      return { success: false, error: err.message || "Erro interno na gravação." };
+    }
+  }
+
   getBufferedChangesCount(): number {
     return this.fieldChangesCount;
   }
