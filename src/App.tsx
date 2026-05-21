@@ -4237,17 +4237,37 @@ const App: React.FC = () => {
   if (initError) {
     return (
       <div className="w-full h-screen bg-[#1a0000] flex flex-col items-center justify-center p-10 text-white font-sans">
-        <AlertTriangle size={48} className="text-red-600 mb-8" />
+        <AlertTriangle size={48} className="text-red-600 mb-8 animate-pulse" />
         <h2 className="text-sm font-black uppercase tracking-[0.4em] mb-10 text-center">Erro de Inicialização</h2>
         <div className="bg-red-900/10 border border-red-500/20 p-6 rounded-3xl max-w-sm w-full mb-10 text-center shadow-2xl">
-          <p className="text-[10px] text-red-200/70 font-medium leading-relaxed font-mono break-all">{initError}</p>
+          <p className="text-[10px] text-red-200/70 font-medium leading-relaxed font-mono break-all mb-4">{initError}</p>
+          <p className="text-[9px] text-yellow-200/50 uppercase tracking-wider">Abaixo, escolha recarregar a página ou executar uma limpeza geral do motor local.</p>
         </div>
-        <button 
-          onClick={() => window.location.reload()}
-          className="bg-slate-950 border border-white/5 text-white w-full max-w-[240px] py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-slate-900"
-        >
-          Recarregar Aplicativo
-        </button>
+        <div className="flex flex-col gap-4 w-full max-w-[240px]">
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-slate-950 border border-slate-850 text-white w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-slate-900"
+          >
+            Recarregar Aplicativo
+          </button>
+          
+          <button 
+            onClick={async () => {
+              if (window.confirm("Aviso de Segurança: Esta operação realizará uma limpeza completa nos bancos e esquemas locais para resolver conflitos de DDL. Suas alterações não sincronizadas serão removidas. Proseguir com o Hard Reset do aplicativo?")) {
+                try {
+                  await sqliteService.hardResetDatabase();
+                  window.location.reload();
+                } catch (err) {
+                  console.error("Erro no hard reset:", err);
+                  alert("Houve um erro ao reiniciar automaticamente. Por favor, limpe os dados do navegador manualmente.");
+                }
+              }
+            }}
+            className="bg-red-950 border border-red-800 text-red-200 w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-red-900"
+          >
+            Limpeza Geral (Hard Reset)
+          </button>
+        </div>
       </div>
     );
   }

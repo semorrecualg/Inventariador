@@ -55,8 +55,8 @@ const FULL_SCHEMA = `
     delta TEXT,
     _status_sinc INTEGER DEFAULT 0,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    sn1_recno INTEGER,
-    sn3_recno INTEGER,
+    "Sn1_recno" INTEGER,
+    "Sn3_recno" INTEGER,
     campo TEXT,
     valor_antigo TEXT,
     valor_novo TEXT,
@@ -67,7 +67,6 @@ const FULL_SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_audit_registro ON AUDIT_LOG(registro_id);
-  CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG(sn1_recno, sn3_recno);
 
   CREATE TABLE IF NOT EXISTS ativos_imobilizados (
     Sn1_recno INTEGER,
@@ -659,6 +658,12 @@ class SqliteService {
         await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN valor_novo TEXT;");
       } catch { /* ignorado */ }
       try {
+        await this.nativeDb.run('ALTER TABLE AUDIT_LOG ADD COLUMN "Sn1_recno" INTEGER;');
+      } catch { /* ignorado */ }
+      try {
+        await this.nativeDb.run('ALTER TABLE AUDIT_LOG ADD COLUMN "Sn3_recno" INTEGER;');
+      } catch { /* ignorado */ }
+      try {
         await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN sn1_recno INTEGER;");
       } catch { /* ignorado */ }
       try {
@@ -674,8 +679,12 @@ class SqliteService {
         await this.nativeDb.run("ALTER TABLE AUDIT_LOG ADD COLUMN data_hora TEXT;");
       } catch { /* ignorado */ }
       try {
-        await this.nativeDb.run("CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG(sn1_recno, sn3_recno);");
-      } catch { /* ignorado */ }
+        await this.nativeDb.run('CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG ("Sn1_recno", "Sn3_recno");');
+      } catch {
+        try {
+          await this.nativeDb.run("CREATE INDEX IF NOT EXISTS idx_audit_recno ON AUDIT_LOG (sn1_recno, sn3_recno);");
+        } catch { /* ignorado */ }
+      }
       try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN STATUS TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
