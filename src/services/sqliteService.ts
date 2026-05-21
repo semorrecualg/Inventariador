@@ -316,6 +316,10 @@ class SqliteService {
     this.currentDbStatus = DatabaseStatus.EMPTY;
   }
 
+  async resetDatabaseLogico() {
+    await this.hardResetDatabase();
+  }
+
   getIsInitialized() { return this.isInitialized; }
   getStorageSource() { return this.storageSource; }
   getDbStatus() { return this.currentDbStatus; }

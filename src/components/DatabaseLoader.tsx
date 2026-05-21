@@ -166,6 +166,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
 
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+      try {
+        // Força a finalização de qualquer transação órfã antes de iniciar uma nova para este lote específico
+        await sqliteService.execute("ROLLBACK;");
+      } catch {
+        // Ignora silenciosamente se não houver transação aberta
+      }
+
       const chunk = rows.slice(i, i + CHUNK_SIZE);
       const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
 
@@ -336,15 +343,23 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     addLog('Executando limpeza de governança e expurgo físico...');
 
     try {
-      await sqliteService.hardResetDatabase();
-      await sqliteService.initializeDatabase(true);
+      // 1. Executa o reset lógico/físico do banco de dados local
+      await sqliteService.resetDatabaseLogico();
       
-      alert("Banco de dados resetado e arquivos físicos expurgados com sucesso!");
+      // 2. Garante que estados de navegação NÃO sejam setados aqui (sem reload ou redirecionamento)
       localStorage.removeItem('app_excluded_accounts');
-      window.location.reload();
+      
+      // 3. Apenas resete os estados locais para refletir o banco limpo
+      setFileInfo(null);
+      setSummary(null);
+      setErrorLog([]);
+
+      alert("Banco de dados limpo com sucesso! Aguardando Carga Expert (Excel).");
+      setStatus('EMPTY_STATE');
     } catch (err: unknown) {
       const e = err as Error;
-      alert(`Falha ao executar Hard Reset: ${e.message}`);
+      console.error("Falha ao limpar banco:", e);
+      addLog(`Falha ao executar Limpeza: ${e.message}`);
       setStatus('ERROR');
     }
   };
