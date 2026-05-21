@@ -174,7 +174,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
 
       const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
+      const sqlStatements: string[] = [];
 
       const cleanValue = (val: unknown): string => {
         if (val === null || val === undefined) return '';
@@ -248,8 +248,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}'
         );`);
       }
-
-      sqlStatements.push('COMMIT;');
 
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
