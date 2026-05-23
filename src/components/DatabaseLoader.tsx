@@ -322,6 +322,19 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
 
   const handleExpertLoadClick = async () => {
+    if (localStorage.getItem('is_system_locked') === 'true') {
+      if (showModal) {
+        showModal(
+          "Sistema Blindado",
+          "Esta operação foi bloqueada. A soberania e integridade da base física foram validadas pelo Administrador, congelando o arquivo 'gbr_kardek.db' contra sobregravação.",
+          "warning"
+        );
+      } else {
+        alert("Esta operação foi bloqueada. A base física está blindada.");
+      }
+      return;
+    }
+
     const fStatus = await sqliteService.getFileStatus();
     if (fStatus.handle && fStatus.status !== 'granted') {
       addLog("Solicitando permissão...");
@@ -332,6 +345,19 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const handleHardResetLocal = async () => {
+    if (localStorage.getItem('is_system_locked') === 'true') {
+      if (showModal) {
+        showModal(
+          "Sistema Blindado",
+          "O expurgo ou reset foi desativado. O sistema está congelado no modo 'Pronto para Campo' para proteger os inventários locais dos auditores contra apagões acidentais.",
+          "warning"
+        );
+      } else {
+        alert("O reset foi bloqueado. A base física está blindada.");
+      }
+      return;
+    }
+
     setShowHardResetConfirm(true);
   };
 

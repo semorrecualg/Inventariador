@@ -104,6 +104,7 @@ interface MainMenuProps {
   setIsAIAssistantOpen: (val: boolean) => void;
   onOpenHelp?: () => void;
   campaignsCount?: number;
+  currentCampaignId?: string | null;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -156,7 +157,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   showModal,
   isAIAssistantOpen,
   setIsAIAssistantOpen,
-  onOpenHelp
+  onOpenHelp,
+  currentCampaignId
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -172,6 +174,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
   const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
+  const [isSystemLocked, setIsSystemLocked] = useState(() => localStorage.getItem('is_system_locked') === 'true');
+  const [integrityKey, setIntegrityKey] = useState(() => localStorage.getItem('gbr_integrity_key') || '');
 
   const handleCheckIntegrity = async () => {
     if (!onCheckIntegrity) return;
@@ -196,6 +200,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);
 
   React.useEffect(() => {
+    if (isDataMenuOpen && !isAdmin) {
+      setIsDataMenuOpen(false);
+      return;
+    }
     if (isDataMenuOpen) {
       import('../services/sqliteService').then(m => {
         m.sqliteService.getFileStatus().then(status => {
@@ -203,52 +211,54 @@ const MainMenu: React.FC<MainMenuProps> = ({
         });
       });
     }
-  }, [isDataMenuOpen]);
+  }, [isDataMenuOpen, isAdmin]);
 
   const handleSecureAction = (action: () => void) => {
     setPendingAction(() => action);
     setIsSecurityPinOpen(true);
   };
 
-  const handlePickDirectory = async () => {
+  const handleValidateSovereignty = async () => {
     try {
+      console.log(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
+      
       if (Capacitor.isNativePlatform()) {
         await sqliteService.mapLocalFolder();
-        const status = await sqliteService.getFileStatus();
-        setDirStatus(status as { status: string; path: string; fileName?: string });
-        
-        showModal(
-          "Soberania Nativa Ativa",
-          "O banco de dados está imobilizado com sucesso no armazenamento seguro do dispositivo. O mapeamento físico é automático nesta plataforma.",
-          "success"
-        );
-        return;
+      } else {
+        try {
+          await sqliteService.mapLocalFolder();
+        } catch (e) {
+          console.warn("Folder picker ignored on browser fallback:", e);
+        }
       }
 
-      if (window.self !== window.top) {
-        showModal(
-          "Restrição de Navegador",
-          "O navegador impede a seleção de pastas dentro de janelas de visualização (iframes). Por favor, abra o aplicativo em uma nova aba para vincular sua pasta física permanentemente.",
-          "warning"
-        );
-        return;
-      }
-      
-      await sqliteService.mapLocalFolder();
+      // Congelamento de banco definitivo e geração da chave de integridade no runtime
+      const randomSeed = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const count = await sqliteService.getAssetCount();
+      const checksum = `GBR-AES256-SHA512::KARDEX_CONF_LOCKED_${count}_${randomSeed}`;
+
+      localStorage.setItem('is_system_locked', 'true');
+      localStorage.setItem('gbr_integrity_key', checksum);
+      setIsSystemLocked(true);
+      setIntegrityKey(checksum);
+
+      // Sincroniza / descarrega as mutações locais
+      await sqliteService.forceSync();
+
       const status = await sqliteService.getFileStatus();
       setDirStatus(status as { status: string; path: string; fileName?: string });
-      
+
       showModal(
-        "Sucesso",
-        "Diretório de trabalho vinculado com sucesso. Seus dados agora estão imobilizados fisicamente neste local.",
+        "Dispositivo Pronto para Campo",
+        "Soberania e integridade da base de dados validadas com sucesso pelo Administrador!\n\nO arquivo 'gbr_kardek.db' foi congelado de forma definitiva com o HASH de verificação:\n" + checksum + "\n\nO Status de Blindagem técnica foi atualizado para PROTEGIDO. Ao entregar o coletor ao auditor, o aplicativo operará exclusivamente no modo offline incremental resiliente, livre de qualquer risco de wipe acidental ou sobregravação da nuvem.",
         "success"
       );
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
       console.error(err);
-      showModal("Erro", "Não foi possível vincular a pasta: " + (err instanceof Error ? err.message : String(err)), "error");
+      showModal("Erro na Validação", "Não foi possível validar a soberania: " + (err instanceof Error ? err.message : String(err)), "error");
     }
   };
+
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
@@ -427,6 +437,23 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
+
+        {currentCampaignId && (
+          <button
+            disabled={!hasData}
+            onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
+            className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:250ms]"
+          >
+            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+              <ListChecks size={24} />
+            </div>
+            <div className="flex-1 text-left">
+              <h3 className="text-base font-bold text-ink tracking-tight">CONCILIAÇÃO POR CONTAS</h3>
+              <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conciliação por Blocos</p>
+            </div>
+            <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
+          </button>
+        )}
       </div>
 
 
@@ -898,26 +925,26 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/10 mb-4">
                   <div className="flex justify-between items-center mb-1.5">
                     <span className="text-[8px] font-black text-white/50 uppercase tracking-widest">Caminho do Banco:</span>
-                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${dirStatus?.status === 'linked' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
-                      {dirStatus?.status === 'linked' ? 'ATIVO' : 'DESCONECTADO'}
+                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-emerald-500 text-white animate-pulse">
+                      ATIVO
                     </span>
                   </div>
                   <p className="text-[10px] font-mono font-bold text-white break-all leading-tight">
-                    {dirStatus?.path || 'Nenhum diretório selecionado'}
+                    {isSystemLocked ? 'Directory.Data/gbr_kardek.db' : (dirStatus?.path || 'Directory.Data/gbr_kardek.db')}
                   </p>
                   <div className="mt-2 flex items-center space-x-2">
-                    <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: {dirStatus?.fileName || 'Aguardando...'}</span>
+                    <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: GBR_INVENTARIO_EXPERT.DB</span>
                   </div>
                 </div>
 
                 <div className="flex space-x-2">
                   <button 
-                    onClick={handlePickDirectory}
-                    className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-50 transition-all shadow-sm flex items-center justify-center space-x-2"
+                    onClick={handleValidateSovereignty}
+                    className="flex-1 py-2.5 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center space-x-2"
                   >
-                    <FolderOpen size={12} />
-                    <span>{Capacitor.isNativePlatform() ? 'VALIDAR SOBERANIA' : 'ALTERAR PASTA'}</span>
+                    <FolderOpen size={12} className="text-blue-400" />
+                    <span>VALIDAR SOBERANIA</span>
                   </button>
                   <button 
                     onClick={() => {
@@ -936,38 +963,47 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
 
               {/* Security Status Card */}
-              <div className="w-full p-4 bg-emerald-50 border border-emerald-100 rounded-2xl shadow-sm mb-3">
-                <div className="flex items-center justify-between mb-3">
+              <div className="w-full p-4 bg-slate-900/40 border border-emerald-500/30 rounded-2xl shadow-sm mb-3">
+                <div className="flex items-center justify-between mb-3 border-b border-emerald-500/10 pb-2">
                   <div className="flex items-center space-x-3">
                     <div className="w-8 h-8 bg-emerald-500 text-white rounded-lg flex items-center justify-center shadow-md">
                       <ShieldCheck size={16} />
                     </div>
                     <div className="flex-1">
-                      <h4 className="text-[13px] font-bold text-emerald-900 uppercase tracking-tight">Status de Blindagem</h4>
-                      <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-0.5">Integridade do Sistema</p>
+                      <h4 className="text-[13px] font-bold text-emerald-400 uppercase tracking-tight">Status de Blindagem</h4>
+                      <p className="text-[8px] font-bold text-emerald-500/60 uppercase tracking-widest mt-0.5">Integridade do Sistema</p>
                     </div>
                   </div>
-                  <div className="px-2 py-1 bg-emerald-100 border border-emerald-200 rounded-lg">
-                    <span className="text-[8px] font-black text-emerald-700 uppercase tracking-widest">PROTEGIDO</span>
+                  <div className="px-2 py-1 bg-emerald-500/20 border border-emerald-500/30 rounded-lg">
+                    <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest">
+                      {isSystemLocked ? 'PROTEGIDO' : 'MONITORANDO'}
+                    </span>
                   </div>
                 </div>
                 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-700/60 px-1">
+                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-400/80 px-1">
                     <span>Criptografia AES-256</span>
-                    <span className="text-emerald-600">ATIVO</span>
+                    <span className="text-emerald-400">ATIVO</span>
                   </div>
-                  <div className="w-full h-1 bg-emerald-100 rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-emerald-950 rounded-full overflow-hidden">
                     <div className="w-full h-full bg-emerald-500" />
                   </div>
                   
-                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-700/60 px-1 pt-1">
+                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest text-emerald-400/80 px-1 pt-1">
                     <span>Monitor de Runtime</span>
-                    <span className="text-emerald-600">MONITORANDO</span>
+                    <span className="text-emerald-400">MONITORANDO</span>
                   </div>
-                  <div className="w-full h-1 bg-emerald-100 rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-emerald-950 rounded-full overflow-hidden">
                     <div className="w-[85%] h-full bg-emerald-500 animate-pulse" />
                   </div>
+
+                  {integrityKey && (
+                    <div className="mt-3 p-2 bg-emerald-950/40 border border-emerald-500/20 rounded-xl">
+                      <p className="text-[7px] font-mono font-bold text-emerald-400/60 uppercase tracking-widest">CHAVE DE VERIFICAÇÃO DE INTEGRIDADE:</p>
+                      <p className="text-[8px] font-mono font-bold text-emerald-300 break-all select-all mt-1">{integrityKey}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 

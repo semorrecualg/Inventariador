@@ -56,6 +56,7 @@ import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
+import { telemetryService } from './services/telemetryService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
@@ -442,7 +443,18 @@ const App: React.FC = () => {
 
         if (success) {
           console.log(">>> [App] SQLite inicializado com sucesso.");
-          if (databaseMode === DatabaseMode.INTERNAL) {
+
+          const fileStatus = await sqliteService.getFileStatus();
+          const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
+          const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
+
+          if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
+            console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
+            setDatabaseMode(DatabaseMode.INTERNAL);
+            localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
+          }
+
+          if (databaseMode === DatabaseMode.INTERNAL || isDbLocked) {
             const dbUsers = await localDb.users.toArray();
             if (dbUsers.length > 0) {
               setUsers(dbUsers);
@@ -450,9 +462,21 @@ const App: React.FC = () => {
             }
 
              // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem via APP_CONFIG)
+             if (isFilePresent && isDbLocked) {
+               console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
+               console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
+             }
              try {
                const savedUser = localStorage.getItem('app_current_user');
                const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+
+               if (isFilePresent && isDbLocked) {
+                 // Força o status do banco para LOADED se estiver bloqueado / blindado
+                 setInventory(prev => ({
+                   ...prev,
+                   status: DatabaseStatus.LOADED
+                 }));
+               }
                
                const activeSession = await sqliteService.obterContextoAtivo();
                let recoveredUnit = activeSession.selectedUnit;
@@ -694,9 +718,14 @@ const App: React.FC = () => {
         return;
       }
       try {
-        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}"`);
-        const queryStr = "SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0";
-        const results = await sqliteService.query(queryStr, [currentUnit]) as Record<string, unknown>[];
+        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
+        let queryStr = "SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
+        const params: (string | null)[] = [currentUnit];
+        if (inventory.currentCampaignId) {
+          queryStr += " AND currentCampaignId = ?";
+          params.push(inventory.currentCampaignId);
+        }
+        const results = await sqliteService.query(queryStr, params) as Record<string, unknown>[];
         
         const parsedAssets = results.map(row => {
           const asset = { ...row } as Record<string, unknown>;
@@ -726,7 +755,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentUnit, refreshVersion, sqliteStatus]);
+  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId]);
 
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
@@ -1168,6 +1197,12 @@ const App: React.FC = () => {
     if (isSyncing) return;
     
     const mode = explicitMode || databaseMode;
+    const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
+
+    if (isDbLocked) {
+      console.log('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
+      return;
+    }
     
     // BLINDAGEM TOTAL: Se o modo for INTERNAL, não permite nenhuma chamada de rede
     if (mode === DatabaseMode.INTERNAL) {
@@ -1441,6 +1476,11 @@ const App: React.FC = () => {
   useEffect(() => {
     // Só processamos atualizações pendentes se o usuário estiver logado
     if (!user || !isCloudUpdatePending || isSyncing || databaseMode === DatabaseMode.INTERNAL) return;
+
+    if (localStorage.getItem('is_system_locked') === 'true') {
+      console.log('>>> [Sync] Sincronização pendente abortada: Sistema blindado.');
+      return;
+    }
 
     if (user?.isAdmin || user?.email === ADMIN_EMAIL) {
       // Admins sincronizam automaticamente sem modal
@@ -2945,18 +2985,29 @@ const App: React.FC = () => {
       console.log(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
       
       try {
-        // REGRA DE RIGOR: Aguarda até 3 segundos pela posição GPS antes de salvar
-        // Se falhar ou timeout, usa fallback da unidade
-        const loc = await Promise.race([
-          getCurrentLocation(),
-          new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
-        ]).catch(e => {
-          console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
+        const metrics = await telemetryService.getDeviceMetrics();
+        console.log(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
+        
+        let loc = { lat: 0, lng: 0, altitude: 0 };
+        if (metrics.battery > 5) {
+          // REGRA DE RIGOR: Aguarda até 3 segundos pela posição GPS antes de salvar
+          // Se falhar ou timeout, usa fallback da unidade
+          loc = await Promise.race([
+            getCurrentLocation(),
+            new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+          ]).catch(e => {
+            console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
+            if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+              return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+            }
+            return { lat: 0, lng: 0, altitude: 0 };
+          });
+        } else {
+          console.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de ${metrics.battery}% em ou abaixo de 5%!');
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+            loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
-          return { lat: 0, lng: 0, altitude: 0 };
-        });
+        }
 
         console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
         
@@ -3283,8 +3334,16 @@ const App: React.FC = () => {
 
     let gpsCoords: { lat?: number; lng?: number } = {};
     try {
-      const loc = await getCurrentLocation();
-      gpsCoords = { lat: loc.lat, lng: loc.lng };
+      const metrics = await telemetryService.getDeviceMetrics();
+      if (metrics.battery > 5) {
+        const loc = await getCurrentLocation();
+        gpsCoords = { lat: loc.lat, lng: loc.lng };
+      } else {
+        console.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
+        if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
+          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
+        }
+      }
     } catch (e) {
       console.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
       if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
@@ -3719,6 +3778,16 @@ const App: React.FC = () => {
   }, [history, pushScreen]);
 
   const handleClearDatabase = async () => {
+    if (localStorage.getItem('is_system_locked') === 'true') {
+      setModalConfig({
+        isOpen: true,
+        title: "Sistema Blindado",
+        message: "A limpeza ou remoção da base local foi desativada. O sistema está congelado no modo 'Pronto para Campo' pelo Administrador para blindar o Auditor em campo.",
+        type: "warning"
+      });
+      return;
+    }
+
     try {
       const now = new Date();
       const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
@@ -4202,6 +4271,12 @@ const App: React.FC = () => {
     const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
     const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
     const isTrulyEmpty = isEmpty && sqliteStatus !== 'ACTIVE';
+    const isSystemLocked = localStorage.getItem('is_system_locked') === 'true';
+
+    if (isSystemLocked) {
+      console.log('>>> [LoopGuard/SyncGuard] Sistema blindado. Sincronização automática e redirecionamentos pulados.');
+      return;
+    }
     
     if (screen === AppScreen.UNIT_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
       // Evita loops infinitos se o sync falhar ou retornar vazio
@@ -4612,9 +4687,10 @@ const App: React.FC = () => {
               onToggleGpsBypass={handleToggleGpsBypass}
               isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
               onCheckIntegrity={handleCheckIntegrity}
-              isAIAssistantOpen={isAIAssistantOpen}
+               isAIAssistantOpen={isAIAssistantOpen}
               setIsAIAssistantOpen={setIsAIAssistantOpen}
               campaignsCount={campaigns.length}
+              currentCampaignId={inventory.currentCampaignId}
             />
           )}
 

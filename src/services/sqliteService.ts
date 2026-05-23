@@ -542,6 +542,7 @@ class SqliteService {
       console.log(">>> [Database] Aplicando índices v25 (Post-Migration)...");
       await this.execute("CREATE INDEX IF NOT EXISTS idx_ativos_campanha_andar ON ativos (currentCampaignId, _id_andar)");
       await this.execute("CREATE INDEX IF NOT EXISTS idx_ativos_recno_mestre ON ativos (Sn1_recno, Sn3_recno)");
+      await this.execute("CREATE INDEX IF NOT EXISTS idx_ativos_conta_mestre ON ativos (conta_contabil)");
     } catch (e) {
       console.error(">>> [Database] Falha ao criar índices compostos:", e);
     }
@@ -1255,6 +1256,11 @@ class SqliteService {
     }
   }
 
+  async exportarBancoParaFilesystem() {
+    console.log(">>> [Persistence] Gravando no arquivo .db físico...");
+    await this.saveDatabase();
+  }
+
   async flushFieldChanges() {
     if (this.assetFieldBuffer.length === 0) return;
     
@@ -1265,6 +1271,9 @@ class SqliteService {
       this.assetFieldBuffer = [];
       this.fieldChangesCount = 0;
       console.log(">>> [Buffer Atômico] Commit atômico finalizado com sucesso.");
+      
+      // GBR v24.50: Flush atômico exporta o banco para o filesystem
+      await this.exportarBancoParaFilesystem();
     } catch (error) {
       console.error(">>> [Buffer Atômico] Erro crítico ao gravar alterações no SQLite:", error);
       throw error;
