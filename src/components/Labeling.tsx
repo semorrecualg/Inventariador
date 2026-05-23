@@ -3,7 +3,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Asset, TagInventario, ScannerMode, ScanFeedbackMode } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
-import { formatEtiqueta } from '../utils/formatUtils';
+import { formatEtiqueta, formatMonthYearBR } from '../utils/formatUtils';
 import { Virtuoso } from 'react-virtuoso';
 import { localDb } from '../services/localDbService';
 
@@ -49,16 +49,24 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
 
   // GBR v25: Carregamento Direto via SQLite (Regra de Negócio Estrita)
   useEffect(() => {
+    let active = true;
     const fetchAssets = async () => {
-      if (!selectedUnit) return;
       try {
         const results = await localDb.assets.getLabelingAssets(selectedUnit);
-        setDbAssets(results);
+        if (active) {
+          setDbAssets(results || []);
+        }
       } catch (error) {
-        console.error("Erro ao caragmapeamento de etiquetas:", error);
+        console.error("Erro ao carregar mapeamento de etiquetas:", error);
+        if (active) {
+          setDbAssets([]);
+        }
       }
     };
     fetchAssets();
+    return () => {
+      active = false;
+    };
   }, [selectedUnit, initialAssets]); // Recarregar se a base master mudar ou unidade mudar
 
   const normalize = (s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';

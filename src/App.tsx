@@ -700,6 +700,75 @@ const App: React.FC = () => {
 
   const [sqliteUnitAssets, setSqliteUnitAssets] = useState<Asset[]>([]);
 
+  const filteredAssetsByUnit = useMemo(() => {
+    if (!selectedUnit) return inventory.assets; 
+
+    // v24.50: No modo interno SQLite, as duas fontes de verdade estão perfeitamente sincronizadas de forma indexada
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      return sqliteUnitAssets;
+    }
+
+    const selKey = normalizeKey(selectedUnit);
+    const filtered = [];
+    for (let i = 0; i < inventory.assets.length; i++) {
+      const a = inventory.assets[i];
+      // Verifica _unitid (Prioridade), UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
+      const assetUnitId = normalizeKey(a._unitid || '');
+      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
+      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
+      
+      if (assetUnitId === selKey || 
+          assetUnitOp === selKey || 
+          assetTenant === selKey) {
+        const statusUpper = String(a.STATUS || '').toUpperCase();
+        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+        // Registro Ativo: Não pode estar baixado
+        if (!isBaixado) {
+          filtered.push(a);
+        }
+      }
+    }
+    return filtered;
+  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets]);
+
+  const [activeUnitAssetCount, setActiveUnitAssetCount] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    const fetchActiveCount = async () => {
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        if (active) {
+          setActiveUnitAssetCount(filteredAssetsByUnit.length);
+        }
+        return;
+      }
+      if (!selectedUnit) {
+        if (active) setActiveUnitAssetCount(0);
+        return;
+      }
+      try {
+        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
+        const params: string[] = [selectedUnit.toUpperCase().trim(), selectedUnit.toUpperCase().trim()];
+        if (inventory.currentCampaignId) {
+          queryStr += " AND currentCampaignId = ?";
+          params.push(inventory.currentCampaignId);
+        }
+        const res = await sqliteService.query(queryStr, params);
+        const count = (res[0]?.count as number) || 0;
+        if (active) {
+          setActiveUnitAssetCount(count);
+          console.log(`>>> [ActiveCount] ${count} ativos para Unidade: ${selectedUnit}, Campanha: ${inventory.currentCampaignId}`);
+        }
+      } catch (err) {
+        console.error(">>> [ActiveCount] Erro ao obter contagem:", err);
+      }
+    };
+    fetchActiveCount();
+    return () => {
+      active = false;
+    };
+  }, [selectedUnit, inventory.currentCampaignId, databaseMode, refreshVersion, sqliteStatus, filteredAssetsByUnit.length]);
+
   useEffect(() => {
     if (selectedUnit) {
       setCurrentUnit(selectedUnit);
@@ -719,8 +788,8 @@ const App: React.FC = () => {
       }
       try {
         console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
-        let queryStr = "SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
-        const params: (string | null)[] = [currentUnit];
+        let queryStr = "SELECT * FROM ativos WHERE TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
+        const params: (string | null)[] = [currentUnit.toUpperCase().trim()];
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
           params.push(inventory.currentCampaignId);
@@ -986,13 +1055,14 @@ const App: React.FC = () => {
     
     if (user && !publicScreens.includes(screen)) {
       const campaignId = inventory.currentCampaignId;
-      if (!selectedUnit || !campaignId) {
+      const isConfigValid = selectedUnit && (campaignId || databaseMode === DatabaseMode.INTERNAL);
+      if (!isConfigValid) {
         console.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
         setScreenParams(null);
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
     }
-  }, [screen, selectedUnit, inventory.currentCampaignId, user]);
+  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode]);
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
@@ -2800,137 +2870,158 @@ const App: React.FC = () => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    // PESIMISMO SAUDÁVEL: Tentamos salvar no banco PRIMEIRO
-    setIsProcessing(true);
-    try {
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        console.log(`>>> [DBA] Persistindo no SQLite ANTES de atualizar a UI...`);
-        
-        const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
-        if (existing) {
-          const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
-          
-          Object.keys(updatedAsset).forEach(key => {
-            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
-            
-            const oldValue = existing[key as keyof Asset];
-            const newValue = updatedAsset[key as keyof Asset];
-            
-            if (String(oldValue || '') !== String(newValue || '')) {
-              changedFields.push({
-                field: key,
-                oldValue: oldValue !== undefined && oldValue !== null ? String(oldValue) : null,
-                newValue: newValue !== undefined && newValue !== null ? String(newValue) : null
-              });
-            }
-          });
+    const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
+    const targetLoc = isReconciliationWorkflow
+      ? (updatedAsset.ENDERECO || "")
+      : (inventoryLocation 
+          ? inventoryLocation.toUpperCase().trim() 
+          : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
+    
+    const updates = { ...updatedAsset } as Asset;
+    // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
+    if (updates._conferido === undefined) {
+      updates._conferido = true;
+    }
+    if (!updates._dataLeitura) {
+      updates._dataLeitura = new Date().toISOString();
+    }
+    updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+    updates._origemTransacao = origin; // Aplica o código fixo
+    
+    // Garantir que tenant e unit estão definidos
+    if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+    if (!updates._unitid) updates._unitid = user?.unitid || '';
+    
+    // Log de Auditoria
+    const index = inventory.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
+    const historyEntry: AuditLogEntry = {
+      timestamp: new Date().toISOString(),
+      user: user?.name || user?.username || user?.email || 'SISTEMA',
+      action: index === -1 ? 'CREATE' : 'UPDATE',
+      details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
+      tenantid: user?.tenantid || '',
+      origin: origin // Aplica o código fixo no log
+    };
+    updates._history = [...(updates._history || []), historyEntry];
+    
+    const alteredFields = new Set<string>(updates._camposAlterados || []);
+    const existingAsset = index !== -1 ? inventory.assets[index] : null;
+    const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
 
-          if (changedFields.length > 0) {
-            console.log(`>>> [DBA] Detectadas ${changedFields.length} alterações de campo para o Buffer Atômico.`);
-            for (const change of changedFields) {
-              await sqliteService.bufferFieldChange(
-                updatedAsset,
-                change.field,
-                change.oldValue,
-                change.newValue,
-                user?.email || 'SISTEMA'
-              );
-            }
-          } else {
-            await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
+    if (existingAsset) {
+      const wasLabelingCandidate = 
+        String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+        String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
+        existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
+        existingAsset._plaquetado === true;
+
+      Object.keys(updates).forEach(key => {
+        if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
+        const k = key as keyof Asset;
+        if (String(updates[k]) !== String(existingAsset[k])) {
+          alteredFields.add(key);
+          if (originalValues[key] === undefined) {
+            originalValues[key] = existingAsset[k] as string | number | boolean | null;
           }
-        } else {
-          await localDb.assets.put(updatedAsset, user?.email || 'SISTEMA');
         }
-      } else {
-        await syncAssetsToCloud([updatedAsset], user?.tenantid);
+      });
+
+      if (wasLabelingCandidate) {
+        updates._plaquetado = true;
       }
+    }
+    updates._valoresOriginais = originalValues;
+    updates._camposAlterados = Array.from(alteredFields);
 
-      // SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
-      setInventory(prev => {
-        const newAssets = [...prev.assets];
-        const index = newAssets.findIndex(a => String(a.id) === String(updatedAsset.id));
-        
-        const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
+    // 1) Sincronizar o estado da UI imediatamente para reatividade máxima sem travar
+    setInventory(prev => {
+      const newAssets = [...prev.assets];
+      const idx = newAssets.findIndex(a => String(a.id) === String(updates.id));
+      if (idx !== -1) {
+        newAssets[idx] = updates;
+      } else {
+        newAssets.push(updates);
+      }
+      return {
+        ...prev,
+        assets: newAssets,
+        lastUpdated: new Date().toISOString()
+      };
+    });
 
-        const targetLoc = isReconciliationWorkflow
-          ? (updatedAsset.ENDERECO || "")
-          : (inventoryLocation 
-              ? inventoryLocation.toUpperCase().trim() 
-              : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
-        
-        const updates = { ...updatedAsset } as Asset;
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
-        updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-        updates._origemTransacao = origin; // Aplica o código fixo
-        
-        // Garantir que tenant e unit estão definidos
-        if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
-        if (!updates._unitid) updates._unitid = user?.unitid || '';
-        
-        // Log de Auditoria
-        const historyEntry: AuditLogEntry = {
-          timestamp: new Date().toISOString(),
-          user: user?.name || user?.username || user?.email || 'SISTEMA',
-          action: index === -1 ? 'CREATE' : 'UPDATE',
-          details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-          tenantid: user?.tenantid || '',
-          origin: origin // Aplica o código fixo no log
-        };
-        updates._history = [...(updates._history || []), historyEntry];
-        
-        const alteredFields = new Set<string>(updates._camposAlterados || []);
-        
-        const existingAsset = index !== -1 ? newAssets[index] : null;
-        const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
-
-        if (existingAsset) {
-          const wasLabelingCandidate = 
-            String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
-            String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
-            existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-            existingAsset._plaquetado === true;
-
-          Object.keys(updates).forEach(key => {
-            if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
-            const k = key as keyof Asset;
-            if (String(updates[k]) !== String(existingAsset[k])) {
-              alteredFields.add(key);
-              if (originalValues[key] === undefined) {
-                originalValues[key] = existingAsset[k] as string | number | boolean | null;
-              }
-            }
-          });
-
-          if (wasLabelingCandidate) {
-            updates._plaquetado = true;
-          }
-        }
-        
-        if (index !== -1) {
-          newAssets[index] = updates;
-        } else {
+    setSqliteUnitAssets(prev => {
+      const newAssets = [...prev];
+      const idx = newAssets.findIndex(a => String(a.id) === String(updates.id));
+      if (idx !== -1) {
+        newAssets[idx] = updates;
+      } else {
+        const isSameUnit = String(updates.UNIDADE_OPERACIONAL || '').toUpperCase().trim() === String(currentUnit || '').toUpperCase().trim();
+        if (isSameUnit) {
           newAssets.push(updates);
         }
-        
-        return {
-          ...prev,
-          assets: newAssets,
-          lastUpdated: new Date().toISOString()
-        };
+      }
+      return newAssets;
+    });
+
+    setLastLocalSave(new Date().toISOString());
+
+    // 2) Gravação assíncrona/background para o DB nativo ou Sync em nuvem
+    if (databaseMode === DatabaseMode.INTERNAL) {
+      console.log(`>>> [KARDEK] Persistindo no SQLite em background sem bloquear a UI...`);
+      Promise.resolve().then(async () => {
+        try {
+          if (existingAsset) {
+            const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
+            Object.keys(updates).forEach(key => {
+              if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
+              
+              const oldValue = existingAsset[key as keyof Asset];
+              const newValue = updates[key as keyof Asset];
+              
+              if (String(oldValue || '') !== String(newValue || '')) {
+                changedFields.push({
+                  field: key,
+                  oldValue: oldValue !== undefined && oldValue !== null ? String(oldValue) : null,
+                  newValue: newValue !== undefined && newValue !== null ? String(newValue) : null
+                });
+              }
+            });
+
+            if (changedFields.length > 0) {
+              for (const change of changedFields) {
+                await sqliteService.bufferFieldChange(
+                  updates,
+                  change.field,
+                  change.oldValue,
+                  change.newValue,
+                  user?.email || 'SISTEMA'
+                );
+              }
+            } else {
+              await localDb.assets.put(updates, user?.email || 'SISTEMA');
+            }
+          } else {
+            await localDb.assets.put(updates, user?.email || 'SISTEMA');
+          }
+          console.log(`>>> [KARDEK] Persistido com sucesso no SQLite para id: ${updates.id}`);
+        } catch (err) {
+          console.error(">>> [KARDEK] Falha ao persistir alterações no SQLite:", err);
+        }
       });
-      setLastLocalSave(new Date().toISOString());
-      setRefreshVersion(prev => prev + 1);
-      console.log(`>>> [DATABASE] Operação confirmada e UI sincronizada para id: ${updatedAsset.id}`);
-    } catch (err) {
-      console.error(">>> [DATABASE] Falha Crítica de Escrita:", err);
-      alert("ERRO SQL: " + (err instanceof Error ? err.message : String(err)));
-      // Não removemos do dirtyAssetsRef pois queremos tentar sync posterior
-    } finally {
-      setIsProcessing(false);
+    } else {
+      setIsProcessing(true);
+      try {
+        await syncAssetsToCloud([updates], user?.tenantid);
+        setRefreshVersion(prev => prev + 1);
+        console.log(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
+      } catch (err) {
+        console.error(">>> [KARDEK] Falha ao sincronizar com nuvem:", err);
+        alert("Erro SQL (Nuvem): " + (err instanceof Error ? err.message : String(err)));
+      } finally {
+        setIsProcessing(false);
+      }
     }
-  }, [history, inventoryLocation, databaseMode, user?.tenantid]);
+  }, [history, inventoryLocation, databaseMode, user, inventory.assets, currentUnit]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -3904,36 +3995,7 @@ const App: React.FC = () => {
 
   const isAdmin = useMemo(() => checkIsAdmin(user), [user]);
 
-  const filteredAssetsByUnit = useMemo(() => {
-    if (!selectedUnit) return inventory.assets; 
-
-    // v24.50: No modo interno SQLite, as duas fontes de verdade estão perfeitamente sincronizadas de forma indexada
-    if (databaseMode === DatabaseMode.INTERNAL && sqliteUnitAssets.length > 0) {
-      return sqliteUnitAssets;
-    }
-
-    const selKey = normalizeKey(selectedUnit);
-    const filtered = [];
-    for (let i = 0; i < inventory.assets.length; i++) {
-      const a = inventory.assets[i];
-      // Verifica _unitid (Prioridade), UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
-      const assetUnitId = normalizeKey(a._unitid || '');
-      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
-      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
-      
-      if (assetUnitId === selKey || 
-          assetUnitOp === selKey || 
-          assetTenant === selKey) {
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
-        // Registro Ativo: Não pode estar baixado
-        if (!isBaixado) {
-          filtered.push(a);
-        }
-      }
-    }
-    return filtered;
-  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets]);
+  // filteredAssetsByUnit defined above to avoid hosting temporal dead zone issues
 
   const filteredAssetsByLocation = useMemo(() => {
     if (!inventoryLocation) return [];
@@ -4154,6 +4216,21 @@ const App: React.FC = () => {
       }
     });
 
+    const sqlCountsMap = new Map<string, number>();
+    sqliteOperationalUnits.forEach(u => {
+      sqlCountsMap.set(normalizeKey(u.name), u.count);
+    });
+
+    const localCountsMap = new Map<string, number>();
+    if (inventory.databaseMode !== DatabaseMode.INTERNAL) {
+      assets.forEach(a => {
+        const company = getAssetUnit(a).replace(/_/g, ' ');
+        if (!company) return;
+        const norm = normalizeKey(company);
+        localCountsMap.set(norm, (localCountsMap.get(norm) || 0) + 1);
+      });
+    }
+
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
       
@@ -4162,12 +4239,17 @@ const App: React.FC = () => {
       const hasDirectCampaign = unitsWithDirectCampaign.has(norm) || cachedActive;
       const hasGps = unitsWithGps.has(norm);
 
+      const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL 
+        ? (sqlCountsMap.get(norm) || 0)
+        : (localCountsMap.get(norm) || 0);
+
       return {
         name: unit.name,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
         hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table or cached enables button
-        hasGps
+        hasGps,
+        assetCount
       };
     });
 
@@ -4186,13 +4268,20 @@ const App: React.FC = () => {
       }
       
       if (emergencyUnits.size > 0) {
-        return Array.from(emergencyUnits).map(name => ({
-          name,
-          hasData: true,
-          hasActiveAssets: true,
-          hasCampaign: false,
-          hasGps: false
-        }));
+        return Array.from(emergencyUnits).map(name => {
+          const norm = normalizeKey(name);
+          const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL 
+            ? (sqlCountsMap.get(norm) || 0)
+            : (localCountsMap.get(norm) || 0);
+          return {
+            name,
+            hasData: true,
+            hasActiveAssets: true,
+            hasCampaign: false,
+            hasGps: false,
+            assetCount
+          };
+        });
       }
     }
 
@@ -4638,8 +4727,8 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               inventoryInfo={{ 
-                count: filteredAssetsByUnit.length, 
-                totalDatabase: selectedUnit ? filteredAssetsByUnit.length : inventory.assets.length, 
+                count: activeUnitAssetCount, 
+                totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, 
                 date: inventory.lastUpdated 
               }} 
               autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
@@ -4933,7 +5022,8 @@ const App: React.FC = () => {
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
                   isDownloaded: downloadedUnits.includes(c.name),
                   hasCampaign: c.hasCampaign,
-                  hasGps: c.hasGps
+                  hasGps: c.hasGps,
+                  assetCount: (c as { assetCount?: number }).assetCount
                 }))
               } 
               onSelect={async (u) => { 

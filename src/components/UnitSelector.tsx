@@ -27,6 +27,7 @@ interface UnitSelectorProps {
     isDownloaded?: boolean; 
     hasCampaign?: boolean;
     hasGps?: boolean;
+    assetCount?: number;
   }>;
   onSelect: (unit: string) => void;
   onBack: () => void;
@@ -172,8 +173,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                         <Icon size={24} strokeWidth={2.5} />
                       </div>
                       <div className="text-left">
-                        <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
-                          {unit.UNIDADE_OPERACIONAL.trim().toUpperCase()}
+                        <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight flex items-baseline flex-wrap gap-x-2 ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
+                          <span>{unit.UNIDADE_OPERACIONAL.trim().toUpperCase()}</span>
+                          {typeof unit.assetCount === 'number' && (
+                            <span className="text-slate-400 font-semibold text-xs normal-case">
+                              - {unit.assetCount.toLocaleString('pt-BR')} ativos
+                            </span>
+                          )}
                         </h4>
                         <div className="flex items-center space-x-3 mt-2">
                            {/* Ícone de Dados */}

@@ -180,15 +180,29 @@ export const localDb = {
         locKey: r.displayName.toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
       }));
     },
-    getLabelingAssets: async (unitId: string): Promise<Asset[]> => {
-      const sql = `
-        SELECT * FROM ativos 
-        WHERE (UNIDADE_OPERACIONAL = ? OR _unitid = ?) 
-          AND ETIQUETA = 'ETIQUETAR'
-          AND _is_deleted = 0
-        ORDER BY CENTRODECUSTO ASC
+    getLabelingAssets: async (unitId?: string): Promise<Asset[]> => {
+      const ctx = await sqliteService.obterContextoAtivo();
+      const activeUnit = unitId || ctx.selectedUnit || localStorage.getItem('app_selected_unit') || '';
+      const activeCampaign = ctx.currentCampaignId;
+
+      if (!activeUnit) return [];
+
+      let sql = `
+         SELECT * FROM ativos 
+         WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) 
+           AND _is_deleted = 0
+           AND (ETIQUETA IS NULL OR TRIM(ETIQUETA) = '' OR TRIM(UPPER(ETIQUETA)) = 'ETIQUETAR' OR _plaquetado = 0)
       `;
-      const results = await sqliteService.query(sql, [unitId.toUpperCase(), unitId.toUpperCase()]) as Record<string, unknown>[];
+      const params: SqlValue[] = [activeUnit.toUpperCase().trim(), activeUnit.toUpperCase().trim()];
+
+      if (activeCampaign) {
+        sql += ` AND currentCampaignId = ?`;
+        params.push(activeCampaign);
+      }
+
+      sql += ` ORDER BY CENTRODECUSTO ASC`;
+
+      const results = await sqliteService.query(sql, params) as Record<string, unknown>[];
       return results.map(row => {
         const asset = { ...row } as Record<string, unknown>;
         ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
