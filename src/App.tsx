@@ -273,6 +273,7 @@ const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [dbInitialized, setDbInitialized] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isSessionValid, setIsSessionValid] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -842,7 +843,12 @@ const App: React.FC = () => {
                 setAuthLoading(true);
                 console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
                 const { data: { session } } = await supabase.auth.getSession();
-                if (!session) {
+                
+                // REQUISITO 1: Checagem Estrita do Objeto de Sessão
+                const isValid = !!session && !!session.user && typeof session.user.id === "string";
+                setIsSessionValid(isValid);
+                
+                if (!isValid) {
                   console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
                   setUser(null);
                   localStorage.removeItem('app_current_user');
@@ -851,7 +857,10 @@ const App: React.FC = () => {
                   console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
                 }
               } catch (jwtErr) {
-                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, limpando loaders de forma segura:", jwtErr);
+                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, limpando loaders de forma segura e forçando null na session (Purga de Cache):", jwtErr);
+                
+                // REQUISITO 3: Purga de Cache de Inicialização
+                setIsSessionValid(false);
                 setUser(null);
                 localStorage.removeItem('app_current_user');
                 setHistory([AppScreen.LOGIN]);
@@ -2813,7 +2822,9 @@ const App: React.FC = () => {
 
     // Verifica sessão atual ao montar
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+      const isValid = !!session && !!session.user && typeof session.user.id === "string";
+      setIsSessionValid(isValid);
+      if (isValid) {
         processSession(session);
       } else {
         if (!isInternalMode) {
@@ -2823,14 +2834,22 @@ const App: React.FC = () => {
           setHistory([AppScreen.LOGIN]);
         }
       }
+    }).catch(err => {
+      console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
+      setIsSessionValid(false);
+      setUser(null);
+      localStorage.removeItem('app_current_user');
+      setHistory([AppScreen.LOGIN]);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+      const isValid = !!session && !!session.user && typeof session.user.id === "string";
+      setIsSessionValid(isValid);
       
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+      if (isValid && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         processSession(session);
-      } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED') {
+      } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED' || !isValid) {
         // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
         const currentUser = localStorage.getItem('app_current_user');
         if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
@@ -2842,12 +2861,14 @@ const App: React.FC = () => {
             type: 'error',
             onConfirm: () => {
               import('./services/supabaseService').then(m => m.signOut());
+              setIsSessionValid(false);
               setUser(null);
               localStorage.removeItem('app_current_user');
               setHistory([AppScreen.LOGIN]);
             }
           });
-        } else if (event === 'SIGNED_OUT') {
+        } else if (event === 'SIGNED_OUT' || !isValid) {
+          setIsSessionValid(false);
           setUser(null);
           localStorage.removeItem('app_current_user');
           setHistory([AppScreen.LOGIN]);
@@ -4693,13 +4714,20 @@ const App: React.FC = () => {
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
-  console.log(">>> [MOBILE-SHIELD] Render State:", {
+  // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
+  const isSessionCurrentlyValid = isInternalMode || isSessionValid;
+  const isUserAuthenticated = !!user && isSessionCurrentlyValid;
+
+  console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
     sqliteStatus: sqliteStatus.status,
     sqliteLoading: sqliteStatus.loading,
     isInitializing,
     authLoading,
     dbInitialized,
     isInternalMode,
+    isSessionValid,
+    isSessionCurrentlyValid,
+    isUserAuthenticated,
     hasUser: !!user,
     currentScreen: screen
   });
@@ -4723,8 +4751,8 @@ const App: React.FC = () => {
     );
   }
 
-  // REQUISITO 3 - BLOCO DE SEGURANÇA (LOGIN FORÇADO)
-  if (dbInitialized && !isInitializing && !authLoading && !isInternalMode && !user) {
+  // REQUISITO 3 - BLOCO DE SEGURANÇA (LOGIN FORÇADO COM INTERCEPTOR ABSOLUTO)
+  if (dbInitialized && !isInitializing && !authLoading && !isUserAuthenticated) {
     console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DE SEGURANÇA (Formulário de Login Unificado).");
     return (
       <div className="w-full min-h-screen bg-slate-950 flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
