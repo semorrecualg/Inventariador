@@ -52,10 +52,12 @@ import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
 import AssetPrintView from './components/AssetPrintView';
 import SyncManager from './components/SyncManager';
+import SyncBadge from './components/SyncBadge';
 import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
 import { sqliteService } from './services/sqliteService';
+import { auditService } from './services/auditService';
 import { telemetryService } from './services/telemetryService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
@@ -64,8 +66,8 @@ import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldA
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig } from './services/supabaseService';
-import { getPendingSyncItems, processSyncQueue } from './services/syncService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig, isInternalMode } from './services/supabaseService';
+import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
@@ -142,8 +144,48 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
+  assets: [], 
+  companies: [], 
+  lastUpdated: null, 
+  status: DatabaseStatus.EMPTY,
+  editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
+  qrCodeFields: ['ETIQUETA'],
+  scannerMode: ScannerMode.BARCODE,
+  autoConfirmOnScan: false,
+  scanFeedbackMode: ScanFeedbackMode.BOTH,
+  inventorySearchMode: InventorySearchMode.MANUAL,
+  immersiveMode: false,
+  darkMode: localStorage.getItem('app_dark_mode') === 'true',
+  batterySaver: localStorage.getItem('app_battery_saver') === 'true',
+  protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
+  protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
+  mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
+  mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
+  excludedAccounts: JSON.parse(localStorage.getItem('app_excluded_accounts') || '[]'),
+  databaseMode: mode,
+  hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
+});
+
 // App Component
 const App: React.FC = () => {
+  const [sqliteStatus, setSqliteStatusState] = useState({
+    connected: false,
+    loading: true,
+    error: null as string | null,
+    status: DatabaseStatus.EMPTY as DatabaseStatus | string
+  });
+
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  const [inventory, setInventory] = useState<InventoryState>(() => {
+    const defaultMode = isInternalMode ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE;
+    const mode = (localStorage.getItem('app_database_mode') as DatabaseMode) || defaultMode;
+    return getInitialInventoryState(mode);
+  });
+
+  const [selectedUnit, setSelectedUnit] = useState<string | null>("CARREGANDO...");
+
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('app_current_user');
@@ -192,10 +234,6 @@ const App: React.FC = () => {
       return parsed;
     } catch { return null; }
   });
-  const userRef = useRef<User | null>(user);
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
@@ -207,14 +245,237 @@ const App: React.FC = () => {
   const [unsyncedAssetsCount, setUnsyncedAssetsCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
+    if (isInternalMode) return DatabaseMode.INTERNAL;
     const saved = localStorage.getItem('app_database_mode');
-    return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+    return (saved as DatabaseMode) || DatabaseMode.SUPABASE;
   });
 
-  // Monitor de Soberania de Arquivos (Modo Físico)
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [fileStatus, setFileStatus] = useState<{status: string, path: string, folderName?: string, fileName?: string, linkType?: string} | null>(null);
+
+  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
+  const [modalConfig, setModalConfig] = useState<ModalConfig>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+  const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
+    return localStorage.getItem('app_field_mode') === 'true';
+  });
+
+  const [, setCurrentModule] = useState<AppModule | null>(() => {
+    const saved = localStorage.getItem('app_current_module');
+    return (saved as AppModule) || null;
+  });
+
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [dbInitialized, setDbInitialized] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
+
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const [history, setHistory] = useState<AppScreen[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { /* ignore */ }
+    return [AppScreen.LOGIN];
+  });
+
+  const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_params');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
+
+  const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_downloaded_units');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ name: string; count: number }>>([]);
+  const [sqlDashboardStats, setSqlDashboardStats] = useState<{
+    totalAtivos: number;
+    conferidoAtivos: number;
+    baixadosLocalizados: number;
+    totalLido: number;
+    pendentesAtivos: number;
+    avancoPercent: number;
+  } | null>(null);
+
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  const [currentUnit, setCurrentUnit] = useState<string | null>(() => {
+    return localStorage.getItem('app_current_unit') || localStorage.getItem('app_selected_unit') || null;
+  });
+
+  const [sqliteUnitAssets, setSqliteUnitAssets] = useState<Asset[]>([]);
+
+  const [activeUnitAssetCount, setActiveUnitAssetCount] = useState<number>(0);
+
+  const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
+  const [integrityFailed, setIntegrityFailed] = useState(false);
+
+  const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
+  const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
+  const [startWithDataMenu, setStartWithDataMenu] = useState(false);
+  const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
+    try {
+      const saved = localStorage.getItem('app_consultation_filters');
+      return saved ? JSON.parse(saved) : {
+        ETIQUETA: '',
+        DESCRICAODOATIVO: '',
+        SERIAL: '',
+        CNPJ: '',
+        NOMEFORNECEDOR: '',
+        NOTAFISCAL: '',
+        ENDERECO: '',
+        conta_contabil: '',
+        CENTRODECUSTO: '',
+        DATAAQUISIC_START: '',
+        DATAAQUISIC_END: '',
+        Sn1_recno: '',
+        Sn3_recno: ''
+      };
+    } catch {
+      return {
+        ETIQUETA: '',
+        DESCRICAODOATIVO: '',
+        SERIAL: '',
+        CNPJ: '',
+        NOMEFORNECEDOR: '',
+        NOTAFISCAL: '',
+        ENDERECO: '',
+        conta_contabil: '',
+        CENTRODECUSTO: '',
+        DATAAQUISIC_START: '',
+        DATAAQUISIC_END: '',
+        Sn1_recno: '',
+        Sn3_recno: ''
+      };
+    }
+  });
+
+  const [committedConsultationFilters, setCommittedConsultationFilters] = useState<SearchFilters | null>(() => {
+    try {
+      const saved = localStorage.getItem('app_committed_consultation_filters');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_users');
+      const userList: User[] = saved ? JSON.parse(saved) : [];
+      
+      // Admin Padrão
+      const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
+      if (adminIndex === -1) {
+        userList.push({ 
+          username: "ADMINISTRADOR", 
+          name: "ADMINISTRADOR GLOBAL",
+          email: ADMIN_EMAIL, 
+          password: "admin", 
+          role: UserRole.ADMIN,
+          is_admin: true,
+          isAdmin: true, 
+          mustChangePassword: false,
+          _tenantid: '',
+          tenantid: ''
+        });
+      } else if (userList[adminIndex].password === 'admin') {
+        userList[adminIndex].password = "Glaucio@1970";
+        userList[adminIndex].mustChangePassword = false;
+      }
+      
+      return userList;
+    } catch { return []; }
+  });
+
+  const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
+
+  const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
+    return localStorage.getItem('app_inventory_location') || null;
+  });
+
+  const [isInventorying, setIsInventorying] = useState<boolean>(() => {
+    return localStorage.getItem('app_is_inventorying') === 'true';
+  });
+
+  const [isReadOnlyDetail, setIsReadOnlyDetail] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [permissionsGranted, setPermissionsGranted] = useState(true);
+  const [showAccessRequest, setShowAccessRequest] = useState(false);
+  const [publicAsset, setPublicAsset] = useState<Asset | null>(null);
+
+  const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
+
+  const [manualLocations, setManualLocations] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_manual_locations');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  const userRef = useRef<User | null>(user);
+  const isSyncRunningRef = useRef<boolean>(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyAssetsRef = useRef<Set<string>>(new Set());
+  const inventoryRef = useRef<InventoryState>(inventory);
+
+  const setSqliteStatus = useCallback((val: unknown) => {
+    setSqliteStatusState(prev => {
+      if (typeof val === 'string' || typeof val === 'number') {
+        const isConnected = val === 'ACTIVE' || val === DatabaseStatus.ACTIVE;
+        return {
+          ...prev,
+          status: val,
+          connected: isConnected,
+          loading: false
+        };
+      }
+      if (typeof val === 'function') {
+        const next = val(prev) as unknown;
+        if (typeof next === 'string' || typeof next === 'number') {
+          const isConnected = next === 'ACTIVE' || next === DatabaseStatus.ACTIVE;
+          return {
+            ...prev,
+            status: next,
+            connected: isConnected,
+            loading: false
+          };
+        }
+        return { ...prev, ...(next as Record<string, unknown>) };
+      }
+      return { ...prev, ...(val as Record<string, unknown>) };
+    });
+  }, []);
+
+
 
   const handleReconnectFile = async () => {
     if (isReconnecting) return;
@@ -293,17 +554,6 @@ const App: React.FC = () => {
     }
   };
 
-  const [pendingPhotosCount, setPendingPhotosCount] = useState(0);
-  const [modalConfig, setModalConfig] = useState<ModalConfig>({
-    isOpen: false,
-    title: '',
-    message: '',
-    type: 'info'
-  });
-  const [isFieldMode, setIsFieldMode] = useState<boolean>(() => {
-    return localStorage.getItem('app_field_mode') === 'true';
-  });
-
   const showModal = (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => {
     setModalConfig({
       isOpen: true,
@@ -359,6 +609,53 @@ const App: React.FC = () => {
      };
   }, [isSyncLocked, databaseMode]);
 
+  // Agendador Automático Oculto (Background Sync Timer)
+  useEffect(() => {
+    const triggerBackgroundSync = async () => {
+      // Se o dispositivo estiver offline ou uma sincronização já estiver ativa, aborta o ciclo
+      if (!navigator.onLine || isSyncRunningRef.current) {
+        return;
+      }
+
+      isSyncRunningRef.current = true;
+      console.log(">>> [Background Sync] Iniciando ciclo automático de atualização...");
+
+      try {
+        // 1. Processa primeiro o lote de metadados de ativos (Até 200 registros por loop)
+        const dataResult = await syncService.processDataSyncQueue();
+        
+        // 2. Na sequência, processa sequencialmente as imagens pendentes da fila
+        const photoResult = await photoSyncManager.processPhotoSyncQueue();
+        
+        if (dataResult.processedCount > 0 || photoResult.uploadCount > 0) {
+          console.log(`>>> [Background Sync Completed] Dados: ${dataResult.processedCount}, Fotos: ${photoResult.uploadCount}`);
+        }
+      } catch (syncError) {
+        console.error(">>> [Background Sync Fail] Erro no agendador oculto:", syncError);
+      } finally {
+        // Libera a trava para o próximo ciclo de 60 segundos ou evento
+        isSyncRunningRef.current = false;
+      }
+    };
+
+    // Configura o Timer Oculto para rodar a cada 60 segundos (60000ms)
+    const syncIntervalId = setInterval(triggerBackgroundSync, 60000);
+
+    // Gatilho reativo: Dispara imediatamente se o auditor sair de uma zona de sombra e o sinal voltar
+    const handleNetworkReconnection = () => {
+      console.log(">>> [Network Guard] Conexão restaurada detectada. Forçando sincronização...");
+      triggerBackgroundSync();
+    };
+
+    window.addEventListener('online', handleNetworkReconnection);
+
+    // Limpeza de memória ao desmontar o ecossistema do App
+    return () => {
+      clearInterval(syncIntervalId);
+      window.removeEventListener('online', handleNetworkReconnection);
+    };
+  }, []);
+
   // Rastreamento Autônomo v24.50
   useEffect(() => {
     if (!isFieldMode) {
@@ -369,10 +666,6 @@ const App: React.FC = () => {
     return () => stopAutonomousTracking();
   }, [isFieldMode]);
 
-  const [, setCurrentModule] = useState<AppModule | null>(() => {
-    const saved = localStorage.getItem('app_current_module');
-    return (saved as AppModule) || null;
-  });
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
@@ -410,8 +703,6 @@ const App: React.FC = () => {
     }
   }, [databaseMode]);
 
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -425,7 +716,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
-    console.log(">>> [App] Iniciando inicialização da infraestrutura local...");
+    console.log(">>> [App] Iniciando inicialização da infraestrutura local com proteção robusta ferveg...");
 
     const initApp = async () => {
       try {
@@ -438,92 +729,137 @@ const App: React.FC = () => {
           setShowAccessRequest(true);
         }
         
-        const success = await sqliteService.init();
+        let success = false;
+        try {
+          console.log(">>> [App] Tentando inicializar SQLite/Jeep-SQLite com timeout de 3.5 segundos...");
+          success = await Promise.race([
+            sqliteService.init(),
+            new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 3500))
+          ]);
+        } catch (dbErr) {
+          console.error(">>> [App - Failsafe] Falha ou Timeout (3.5s) ao inicializar o Jeep-SQLite. Entrando em modo degradado / contingência de memória.", dbErr);
+          success = true; // Força sucesso logico para avançar em contingência
+        } finally {
+          setDbInitialized(true);
+          setSqliteStatus('ACTIVE');
+        }
+
         if (!isMounted) return;
 
         if (success) {
-          console.log(">>> [App] SQLite inicializado com sucesso.");
+          console.log(">>> [App] SQLite pronto ou emulado com sucesso em ambiente seguro.");
 
-          const fileStatus = await sqliteService.getFileStatus();
-          const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
-          const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
+          try {
+            const fileStatus = await sqliteService.getFileStatus();
+            const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
+            const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
-          if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
-            console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
-            setDatabaseMode(DatabaseMode.INTERNAL);
-            localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
-          }
-
-          if (databaseMode === DatabaseMode.INTERNAL || isDbLocked) {
-            const dbUsers = await localDb.users.toArray();
-            if (dbUsers.length > 0) {
-              setUsers(dbUsers);
-              console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
+            if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
+              console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
+              setDatabaseMode(DatabaseMode.INTERNAL);
+              localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
             }
 
-             // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem via APP_CONFIG)
-             if (isFilePresent && isDbLocked) {
-               console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
-               console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
-             }
-             try {
-               const savedUser = localStorage.getItem('app_current_user');
-               const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+            if (databaseMode === DatabaseMode.INTERNAL || isDbLocked) {
+              const dbUsers = await localDb.users.toArray();
+              if (dbUsers.length > 0) {
+                setUsers(dbUsers);
+                console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
+              }
 
-               if (isFilePresent && isDbLocked) {
-                 // Força o status do banco para LOADED se estiver bloqueado / blindado
-                 setInventory(prev => ({
-                   ...prev,
-                   status: DatabaseStatus.LOADED
-                 }));
-               }
-               
-               const activeSession = await sqliteService.obterContextoAtivo();
-               let recoveredUnit = activeSession.selectedUnit;
-               let recoveredCampaign = activeSession.currentCampaignId;
-               
-               // Se não retornar da nova APP_CONFIG, tenta do unit_configs legado para compatibilidade
-               if (!recoveredUnit) {
-                 const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
-                 const sqlConfigs = await sqliteService.getUnitConfigs(tid);
-                 if (sqlConfigs && sqlConfigs.length > 0) {
-                   recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
-                   recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
-                 }
-               }
-               
-               if (recoveredUnit) {
-                 console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
-                 setSelectedUnit(recoveredUnit);
-                 
-                 if (recoveredCampaign) {
-                   setInventory(prev => ({
-                     ...prev,
-                     currentCampaignId: recoveredCampaign || undefined,
-                     status: DatabaseStatus.LOADED
-                   }));
-                 }
-                 
-                 // Se o usuário está logado e há contexto técnico ativo, pula a triagem inicial e vai direto para MAIN_MENU
-                 if (parsedUser && recoveredUnit && recoveredCampaign) {
-                   console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
-                   setHistory([AppScreen.MAIN_MENU]);
-                 } else if (parsedUser) {
-                   // Se faltar algum dos metadados técnicos, redireciona para a seleção de unidades
-                   console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
-                   setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
-                 }
-               } else {
-                 if (parsedUser) {
-                   console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
-                   setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
-                 }
-               }
-             } catch (bootErr) {
-               console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
-             }
+              // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem via APP_CONFIG)
+              if (isFilePresent && isDbLocked) {
+                console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
+                console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
+              }
+              try {
+                const savedUser = localStorage.getItem('app_current_user');
+                const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+
+                if (isFilePresent && isDbLocked) {
+                  // Força o status do banco para LOADED se estiver bloqueado / blindado
+                  setInventory(prev => ({
+                    ...prev,
+                    status: DatabaseStatus.LOADED
+                  }));
+                }
+                
+                const activeSession = await sqliteService.obterContextoAtivo();
+                let recoveredUnit = activeSession.selectedUnit;
+                let recoveredCampaign = activeSession.currentCampaignId;
+                
+                // Se não retornar da nova APP_CONFIG, tenta do unit_configs legado para compatibilidade
+                if (!recoveredUnit) {
+                  const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
+                  const sqlConfigs = await sqliteService.getUnitConfigs(tid);
+                  if (sqlConfigs && sqlConfigs.length > 0) {
+                    recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
+                    recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
+                  }
+                }
+                
+                if (recoveredUnit) {
+                  console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
+                  setSelectedUnit(recoveredUnit);
+                  
+                  if (recoveredCampaign) {
+                    setInventory(prev => ({
+                      ...prev,
+                      currentCampaignId: recoveredCampaign || undefined,
+                      status: DatabaseStatus.LOADED
+                    }));
+                  }
+                  
+                  // Se o usuário está logado e há contexto técnico ativo, pula a triagem inicial e vai direto para MAIN_MENU
+                  if (parsedUser && recoveredUnit && recoveredCampaign) {
+                    console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
+                    setHistory([AppScreen.MAIN_MENU]);
+                  } else if (parsedUser) {
+                    // Se faltar algum dos metadados técnicos, redireciona para a seleção de unidades
+                    console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
+                    setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                  }
+                } else {
+                  if (parsedUser) {
+                    console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
+                    setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                  }
+                }
+              } catch (bootErr) {
+                console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
+              }
+            }
+          } catch (sqliteErr) {
+            console.error(">>> [App - SQLite Access Error] Erro ao consultar tabelas físicas (modo contingência ativado):", sqliteErr);
           }
+
           setIsInitializing(false);
+
+          // Encadeamento Seguro de Autenticação (Soberania de Nuvem)
+          if (!isInternalMode) {
+            try {
+              setAuthLoading(true);
+              console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session) {
+                console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                setUser(null);
+                localStorage.removeItem('app_current_user');
+                setHistory([AppScreen.LOGIN]);
+              } else {
+                console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+              }
+            } catch (jwtErr) {
+              console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo:", jwtErr);
+              setUser(null);
+              localStorage.removeItem('app_current_user');
+              setHistory([AppScreen.LOGIN]);
+            } finally {
+              setAuthLoading(false);
+            }
+          } else {
+            setAuthLoading(false);
+          }
         } else {
           throw new Error("Falha ao inicializar o motor SQL.");
         }
@@ -532,6 +868,9 @@ const App: React.FC = () => {
         if (isMounted) {
           setInitError(err instanceof Error ? err.message : String(err));
           setIsInitializing(false);
+          setAuthLoading(false);
+          setDbInitialized(true);
+          setSqliteStatus('ACTIVE');
         }
       }
     };
@@ -583,124 +922,114 @@ const App: React.FC = () => {
     return () => clearInterval(monitorId);
   }, []);
 
-  const [isProcessing, setIsProcessing] = useState(false);
 
-  const [history, setHistory] = useState<AppScreen[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_screen_history');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const history = Array.isArray(parsed) && parsed.length > 0 ? parsed : [AppScreen.LOGIN];
-        // Sanitize: remove ONBOARDING from history as it's now an overlay
-        return history.filter(s => s !== AppScreen.ONBOARDING);
+
+  // Restore session context from SYSTEM_CONTEXT or localStorage backup
+  useEffect(() => {
+    const restoreContextFromDb = async () => {
+      let recoveredUnit: string | null = null;
+      let recoveredCampaign: string | null = null;
+
+      try {
+        if (databaseMode === DatabaseMode.INTERNAL) {
+          // Garante a existência da tabela SYSTEM_CONTEXT
+          await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+          
+          // Busca a unidade selecionada
+          const uRows = await sqliteService.query("SELECT value FROM SYSTEM_CONTEXT WHERE key = 'selected_unit'");
+          if (uRows && uRows.length > 0) {
+            recoveredUnit = uRows[0].value as string | null;
+            if (recoveredUnit === '') recoveredUnit = null;
+          }
+
+          // Busca a campanha ativa
+          const cRows = await sqliteService.query("SELECT value FROM SYSTEM_CONTEXT WHERE key = 'active_campaign'");
+          if (cRows && cRows.length > 0) {
+            recoveredCampaign = cRows[0].value as string | null;
+            if (recoveredCampaign === '') recoveredCampaign = null;
+          }
+          console.log(`>>> [SYSTEM_CONTEXT] Recuperado via query: Unidade=${recoveredUnit}, Campanha=${recoveredCampaign}`);
+        }
+      } catch (err) {
+        console.error(">>> [SYSTEM_CONTEXT] Erro ao ler contexto do SQLite:", err);
       }
-      return [AppScreen.LOGIN];
-    } catch { return [AppScreen.LOGIN]; }
-  });
 
-  useEffect(() => {
-    localStorage.setItem('app_screen_history', JSON.stringify(history));
-  }, [history]);
+      // Tratamento com coalescência elegante prático
+      const finalUnit = recoveredUnit || localStorage.getItem('app_selected_unit') || null;
+      setSelectedUnit(finalUnit);
 
-  const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
-    try {
-      const saved = localStorage.getItem('app_screen_params');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
+      const finalCampaign = recoveredCampaign || localStorage.getItem('app_current_campaign') || null;
+      if (finalUnit) {
+        localStorage.setItem('app_selected_unit', finalUnit);
+        if (finalCampaign) {
+          localStorage.setItem('app_current_campaign', finalCampaign);
+          setInventory(prev => ({
+            ...prev,
+            currentCampaignId: finalCampaign,
+            status: DatabaseStatus.LOADED
+          }));
+        }
+      } else {
+        localStorage.removeItem('app_selected_unit');
+      }
+    };
 
-  useEffect(() => {
-    if (screenParams) {
-      localStorage.setItem('app_screen_params', JSON.stringify(screenParams));
+    const currentStatus = typeof sqliteStatus === 'object' && sqliteStatus ? sqliteStatus.status : sqliteStatus;
+    if (currentStatus === 'ACTIVE' || isDataLoaded) {
+      restoreContextFromDb();
     } else {
-      localStorage.removeItem('app_screen_params');
+      const localUnit = localStorage.getItem('app_selected_unit') || null;
+      setSelectedUnit(localUnit);
     }
-  }, [screenParams]);
+  }, [sqliteStatus, isDataLoaded, databaseMode]);
 
-  const screen = history[history.length - 1] || AppScreen.LOGIN;
-
-  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
-    return localStorage.getItem('app_selected_unit') || null;
-  });
-
+  // Persists the unit to SQLite & localStorage on changes
   useEffect(() => {
-    if (selectedUnit) {
-      localStorage.setItem('app_selected_unit', selectedUnit);
-    } else {
-      localStorage.removeItem('app_selected_unit');
-    }
-  }, [selectedUnit]);
+    const persistSelectedUnit = async () => {
+      if (selectedUnit === "CARREGANDO...") return;
 
-  const [isLoading, setIsLoading] = useState(false);
+      if (selectedUnit) {
+        localStorage.setItem('app_selected_unit', selectedUnit);
+        localStorage.setItem('app_current_unit', selectedUnit);
+      } else {
+        localStorage.removeItem('app_selected_unit');
+        localStorage.removeItem('app_current_unit');
+      }
 
-  const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
-    assets: [], 
-    companies: [], 
-    lastUpdated: null, 
-    status: DatabaseStatus.EMPTY,
-    editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
-    qrCodeFields: ['ETIQUETA'],
-    scannerMode: ScannerMode.BARCODE,
-    autoConfirmOnScan: false,
-    scanFeedbackMode: ScanFeedbackMode.BOTH,
-    inventorySearchMode: InventorySearchMode.MANUAL,
-    immersiveMode: false,
-    darkMode: localStorage.getItem('app_dark_mode') === 'true',
-    batterySaver: localStorage.getItem('app_battery_saver') === 'true',
-    protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
-    protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
-    mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
-    mandatoryPhotoOnNewItem: localStorage.getItem('app_mandatory_photo_new') === 'true',
-    excludedAccounts: JSON.parse(localStorage.getItem('app_excluded_accounts') || '[]'),
-    databaseMode: mode,
-    hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
-  });
+      if (databaseMode === DatabaseMode.INTERNAL) {
+        try {
+          await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [selectedUnit || '']);
+          await sqliteService.saveDatabase();
+          console.log(`>>> [SYSTEM_CONTEXT] Persistido com sucesso no SQLite: '${selectedUnit}'`);
+        } catch (err) {
+          console.error(">>> [SYSTEM_CONTEXT] Erro ao persistir no SQLite:", err);
+        }
+      }
+    };
 
-  const [inventory, setInventory] = useState<InventoryState>(() => {
-    const mode = (localStorage.getItem('app_database_mode') as DatabaseMode) || DatabaseMode.INTERNAL;
-    return getInitialInventoryState(mode);
-  });
-
-  console.log("App render - hasCompletedOnboarding:", inventory.hasCompletedOnboarding);
-
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [sqliteStatus, setSqliteStatus] = useState<DatabaseStatus | string>(DatabaseStatus.EMPTY);
-  const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
-
-  const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_downloaded_units');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
-  const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ name: string; count: number }>>([]);
-  const [sqlDashboardStats, setSqlDashboardStats] = useState<{
-    totalAtivos: number;
-    conferidoAtivos: number;
-    baixadosLocalizados: number;
-    totalLido: number;
-    pendentesAtivos: number;
-    avancoPercent: number;
-  } | null>(null);
-
-  const [refreshVersion, setRefreshVersion] = useState(0);
-
-  // v24.50: Mecanismo de Soberania e Filtro Estrito indexado direto no SQLite
-  const [currentUnit, setCurrentUnit] = useState<string | null>(() => {
-    return localStorage.getItem('app_current_unit') || localStorage.getItem('app_selected_unit') || null;
-  });
-
-  const [sqliteUnitAssets, setSqliteUnitAssets] = useState<Asset[]>([]);
+    persistSelectedUnit();
+  }, [selectedUnit, databaseMode]);
 
   const filteredAssetsByUnit = useMemo(() => {
+    const isDbReady = !!(
+      sqliteStatus && (
+        (typeof sqliteStatus === 'object' && (
+          (sqliteStatus as { connected?: boolean; status?: string }).connected === true ||
+          String((sqliteStatus as { connected?: boolean; status?: string }).status || '').toUpperCase() === 'LOADED' ||
+          String((sqliteStatus as { connected?: boolean; status?: string }).status || '').toUpperCase() === 'ACTIVE'
+        )) ||
+        (typeof sqliteStatus === 'string' && (
+          sqliteStatus.toUpperCase() === 'LOADED' ||
+          sqliteStatus.toUpperCase() === 'ACTIVE'
+        ))
+      )
+    );
+
+    if (databaseMode === DatabaseMode.INTERNAL && !isDbReady) {
+      console.warn(">>> [Bootstrap Failsafe] sqliteStatus não está totalmente inicializado/conectado ainda. Retornando array vazio.");
+      return [];
+    }
     if (!selectedUnit) return inventory.assets; 
 
     // v24.50: No modo interno SQLite, as duas fontes de verdade estão perfeitamente sincronizadas de forma indexada
@@ -729,9 +1058,7 @@ const App: React.FC = () => {
       }
     }
     return filtered;
-  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets]);
-
-  const [activeUnitAssetCount, setActiveUnitAssetCount] = useState<number>(0);
+  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets, sqliteStatus]);
 
   useEffect(() => {
     let active = true;
@@ -747,7 +1074,7 @@ const App: React.FC = () => {
         return;
       }
       try {
-        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
+        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0";
         const params: string[] = [selectedUnit.toUpperCase().trim(), selectedUnit.toUpperCase().trim()];
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
@@ -788,8 +1115,8 @@ const App: React.FC = () => {
       }
       try {
         console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
-        let queryStr = "SELECT * FROM ativos WHERE TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
-        const params: (string | null)[] = [currentUnit.toUpperCase().trim()];
+        let queryStr = "SELECT * FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0";
+        const params: (string | null)[] = [currentUnit.toUpperCase().trim(), currentUnit.toUpperCase().trim()];
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
           params.push(inventory.currentCampaignId);
@@ -858,12 +1185,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const [showRecoveryToast, setShowRecoveryToast] = useState(false);
-  const [recoverySource, setRecoverySource] = useState<'PHYSICAL' | 'CACHE' | 'LEGACY' | 'CLOUD' | null>(null);
-  const [integrityFailed, setIntegrityFailed] = useState(false);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyAssetsRef = useRef<Set<string>>(new Set());
-  const inventoryRef = useRef<InventoryState>(inventory);
+
 
   const currentTenantId = useMemo(() => {
     // 1. Prioridade: Tenant do usuário logado
@@ -1582,53 +1904,7 @@ const App: React.FC = () => {
     }
   }, [isCloudUpdatePending, isSyncing, databaseMode, user, syncFromCloud, pushLocalChanges]);
 
-  const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
-  const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
-  const [startWithDataMenu, setStartWithDataMenu] = useState(false);
-  const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
-    try {
-      const saved = localStorage.getItem('app_consultation_filters');
-      return saved ? JSON.parse(saved) : {
-        ETIQUETA: '',
-        DESCRICAODOATIVO: '',
-        SERIAL: '',
-        CNPJ: '',
-        NOMEFORNECEDOR: '',
-        NOTAFISCAL: '',
-        ENDERECO: '',
-        conta_contabil: '',
-        CENTRODECUSTO: '',
-        DATAAQUISIC_START: '',
-        DATAAQUISIC_END: '',
-        Sn1_recno: '',
-        Sn3_recno: ''
-      };
-    } catch {
-      return {
-        ETIQUETA: '',
-        DESCRICAODOATIVO: '',
-        SERIAL: '',
-        CNPJ: '',
-        NOMEFORNECEDOR: '',
-        NOTAFISCAL: '',
-        ENDERECO: '',
-        conta_contabil: '',
-        CENTRODECUSTO: '',
-        DATAAQUISIC_START: '',
-        DATAAQUISIC_END: '',
-        Sn1_recno: '',
-        Sn3_recno: ''
-      };
-    }
-  });
-  const [committedConsultationFilters, setCommittedConsultationFilters] = useState<SearchFilters | null>(() => {
-    try {
-      const saved = localStorage.getItem('app_committed_consultation_filters');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+
 
   // Apply theme class to body based on databaseMode, darkMode and environment
   useEffect(() => {
@@ -1912,7 +2188,7 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+
 
   // Safety check to prevent getting stuck on screens with missing state
   useEffect(() => {
@@ -1979,37 +2255,6 @@ const App: React.FC = () => {
     }
   }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit]);
 
-  const [users, setUsers] = useState<User[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_users');
-      const userList: User[] = saved ? JSON.parse(saved) : [];
-      
-      // Admin Padrão
-      const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
-      if (adminIndex === -1) {
-        userList.push({ 
-          username: "ADMINISTRADOR", 
-          name: "ADMINISTRADOR GLOBAL",
-          email: ADMIN_EMAIL, 
-          password: "admin", 
-          role: UserRole.ADMIN,
-          is_admin: true,
-          isAdmin: true, 
-          mustChangePassword: false,
-          _tenantid: '',
-          tenantid: ''
-        });
-      } else if (userList[adminIndex].password === 'admin') {
-        // Atualiza a senha se for a padrão antiga para facilitar o acesso do usuário
-        userList[adminIndex].password = "Glaucio@1970";
-        userList[adminIndex].mustChangePassword = false;
-      }
-      
-      return userList;
-    } catch { return []; }
-  });
-
-  const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
@@ -2077,19 +2322,6 @@ const App: React.FC = () => {
     }
   }, [user?.email, databaseMode]);
 
-  const [inventoryLocation, setInventoryLocation] = useState<string | null>(() => {
-    return localStorage.getItem('app_inventory_location') || null;
-  });
-
-  const [isInventorying, setIsInventorying] = useState<boolean>(() => {
-    return localStorage.getItem('app_is_inventorying') === 'true';
-  });
-
-  const [isReadOnlyDetail, setIsReadOnlyDetail] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [permissionsGranted, setPermissionsGranted] = useState(true);
-  const [showAccessRequest, setShowAccessRequest] = useState(false);
-  const [publicAsset, setPublicAsset] = useState<Asset | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     try {
@@ -2171,9 +2403,6 @@ const App: React.FC = () => {
   }, []);
   
   // Estados para Modal de Duplicidade
-  const [pendingAssetUpdate, setPendingAssetUpdate] = useState<Asset | null>(null);
-  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
-  const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -2187,12 +2416,6 @@ const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [inventory]);
 
-  const [manualLocations, setManualLocations] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_manual_locations');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
 
   const { locationsWithStats, allLocations, uniqueCentrosDeCusto } = useMemo(() => {
     const stats: Record<string, { total: number; checked: number; displayName: string }> = {};
@@ -2380,7 +2603,7 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  const pushScreen = useCallback((s: AppScreen, params?: NavigationParams) => {
+  const pushScreen = useCallback(async (s: AppScreen, params?: NavigationParams) => {
     if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
       setModalConfig({
         isOpen: true,
@@ -2392,6 +2615,24 @@ const App: React.FC = () => {
     }
 
     setScreenParams(params || null);
+
+    // Ajuste de Navegação Failsafe para persistir o unitId/unitName no SYSTEM_CONTEXT se fornecido
+    const unitIdToPersist = params?.unitName;
+    if (unitIdToPersist && databaseMode === DatabaseMode.INTERNAL) {
+      try {
+        console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
+        await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [unitIdToPersist]);
+        
+        if (params?.campaign) {
+          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [params.campaign.id]);
+        }
+        await sqliteService.saveDatabase();
+        console.log(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
+      } catch (err) {
+        console.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
+      }
+    }
 
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
       console.log(`>>> [Navigation] Resetting history to: ${s}`);
@@ -2570,7 +2811,16 @@ const App: React.FC = () => {
 
     // Verifica sessão atual ao montar
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) processSession(session);
+      if (session) {
+        processSession(session);
+      } else {
+        if (!isInternalMode) {
+          console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+          setUser(null);
+          localStorage.removeItem('app_current_user');
+          setHistory([AppScreen.LOGIN]);
+        }
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -2971,6 +3221,17 @@ const App: React.FC = () => {
       Promise.resolve().then(async () => {
         try {
           if (existingAsset) {
+            // Registrar delta de auditoria síncrona/local-first no SQLite imediatamente antes da persistência
+            try {
+              await auditService.logAssetChange(
+                user?.email || 'SISTEMA',
+                existingAsset,
+                updates
+              );
+            } catch (auditErr) {
+              console.error(">>> [Audit Error] Erro ao registrar trilha em background:", auditErr);
+            }
+
             const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
             Object.keys(updates).forEach(key => {
               if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
@@ -4359,7 +4620,8 @@ const App: React.FC = () => {
     const rawTenants = user?.tenants || (user?.tenantid ? [user.tenantid] : []);
     const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
     const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
-    const isTrulyEmpty = isEmpty && sqliteStatus !== 'ACTIVE';
+    const currentStatus = typeof sqliteStatus === 'object' && sqliteStatus ? sqliteStatus.status : sqliteStatus;
+    const isTrulyEmpty = isEmpty && currentStatus !== 'ACTIVE';
     const isSystemLocked = localStorage.getItem('is_system_locked') === 'true';
 
     if (isSystemLocked) {
@@ -4431,19 +4693,73 @@ const App: React.FC = () => {
   
   console.log("App render - screen:", screen, "selectedUnit:", selectedUnit, "isInitializing:", isInitializing);
 
-  if (isInitializing) {
+  if (sqliteStatus.loading || isInitializing || authLoading) {
     return (
       <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center p-10 text-white font-sans">
         <div className="relative mb-10">
-          <div className="w-20 h-20 border-4 border-blue-500/10 rounded-full"></div>
-          <div className="absolute top-0 left-0 w-20 h-20 border-4 border-t-blue-500 rounded-full animate-spin"></div>
-          <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-blue-500 opacity-50" size={24} />
+          <div className="w-20 h-20 border-4 border-emerald-500/10 rounded-full"></div>
+          <div className="absolute top-0 left-0 w-20 h-20 border-4 border-t-emerald-500 rounded-full animate-spin"></div>
+          <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-50" size={24} />
         </div>
         <div className="flex flex-col items-center space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">GBR EXPERT v25</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">GBR KARDEK v24.50</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
-            Carregando Infraestrutura...
+            Iniciando Banco de Dados Seguro (Jeep-SQLite)...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (dbInitialized && !isInitializing && !authLoading && !isInternalMode && !user) {
+    return (
+      <div className="w-full min-h-screen bg-slate-950 flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
+        <div className="flex-1 relative z-[500] no-scrollbar flex items-center justify-center">
+          <Login 
+            users={users} 
+            databaseMode={databaseMode}
+            isDatabaseEmpty={inventory.assets.length === 0}
+            isKeyboardVisible={isKeyboardVisible}
+            onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
+            onUpdateScreen={(s) => setHistory([s])}
+            onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
+            onLogin={async (u) => { 
+              setUser(u); 
+              localStorage.setItem('app_current_user', safeStringify(u));
+              
+              if (databaseMode !== DatabaseMode.INTERNAL) {
+                setDatabaseMode(DatabaseMode.SUPABASE);
+                localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+              }
+
+              if (databaseMode !== DatabaseMode.INTERNAL) {
+                console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem...');
+                syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
+              }
+
+              if (u.mustChangePassword) { 
+                pushScreen(AppScreen.CHANGE_PASSWORD); 
+              } else { 
+                const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
+                if (isAdmin) {
+                  pushScreen(AppScreen.MODULE_SELECTION); 
+                } else {
+                  pushScreen(AppScreen.UNIT_SELECTION);
+                }
+              }
+
+              const bioSupported = await isBiometricSupported();
+              if (bioSupported) {
+                const username = (u.username || u.email || '').toLowerCase();
+                if (username) {
+                  const alreadyRegistered = await hasBiometricRegistered(username);
+                  if (!alreadyRegistered) {
+                    pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
+                  }
+                }
+              }
+            }} 
+          />
         </div>
       </div>
     );
@@ -4540,7 +4856,9 @@ const App: React.FC = () => {
                  </h2>
                </div>
                
-               <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
+               <div className="flex items-center space-x-2">
+                 <SyncBadge />
+                 <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
                   <div 
                     className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`} 
                     title={isSafeMode ? "Banco de Dados Protegido" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
@@ -4568,6 +4886,7 @@ const App: React.FC = () => {
                       <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
                     </div>
                   )}
+               </div>
                </div>
             </div>
           </div>
@@ -5027,25 +5346,24 @@ const App: React.FC = () => {
                 }))
               } 
               onSelect={async (u) => { 
-                setSelectedUnit(u); 
-                setIsInventorying(false); 
-                setInventoryLocation(null); 
-                sessionStorage.removeItem('app_just_finished_load');
-                
-                // v24.50: Persiste o contexto no SQLite local
-                if (databaseMode === DatabaseMode.INTERNAL) {
-                  await sqliteService.setUnitConfig(u);
-                  
-                  // v24.50: Tenta buscar se existe alguma campanha ativa para essa unidade para auto-ativar e salvar sessão em APP_CONFIG
-                  try {
+                setIsLoading(true);
+                try {
+                  // v24.50: Persiste o contexto no SQLite local de forma síncrona/bloqueante antes de atualizar o estado visual
+                  if (databaseMode === DatabaseMode.INTERNAL) {
+                    await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+                    await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [u]);
+
+                    // v24.50: Tenta buscar se existe alguma campanha ativa para essa unidade para auto-ativar e salvar sessão em APP_CONFIG e SYSTEM_CONTEXT
                     const activeCampaigns = campaigns.filter(c => {
                       const uId = c._unitid || c.unit_id;
                       return uId && normalizeKey(uId) === normalizeKey(u) && String(c.status) === 'ACTIVE';
                     });
                     
+                    let activeId = '';
                     if (activeCampaigns.length > 0) {
-                      const activeId = activeCampaigns[0].id;
-                      console.log(`>>> [Governance] Unidade selecionada. Campanha ativa de inventário vinculada e auto-ativada: ${activeCampaigns[0].name} (ID: ${activeId})`);
+                      activeId = activeCampaigns[0].id;
+                      console.log(`>>> [Governance/Failsafe] Unidade selecionada. Campanha ativa de inventário vinculada e auto-ativada: ${activeCampaigns[0].name} (ID: ${activeId})`);
+                      await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [activeId]);
                       await sqliteService.salvarCampanhaAtiva(u, activeId);
                       setInventory(prev => ({
                         ...prev,
@@ -5053,10 +5371,10 @@ const App: React.FC = () => {
                         status: DatabaseStatus.LOADED
                       }));
                     } else {
-                      // Se não houver campanha ativa cadastrada direta, tenta do localStorage cache rápido ou limpa
                       const cachedNormal = normalizeKey(u);
                       const normCampaign = localStorage.getItem(`kardek_campanha_ativa_${cachedNormal}`) ? 'cached' : '';
-                      console.log(`>>> [Governance] Selecionada unidade sem campanha ativa vinculada direta no banco local.`);
+                      console.log(`>>> [Governance/Failsafe] Selecionada unidade sem campanha ativa vinculada direta no banco local.`);
+                      await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [normCampaign]);
                       await sqliteService.salvarCampanhaAtiva(u, normCampaign);
                       if (normCampaign) {
                         setInventory(prev => ({
@@ -5071,22 +5389,33 @@ const App: React.FC = () => {
                         }));
                       }
                     }
-                  } catch (err) {
-                    console.error(">>> [Governance] Erro ao salvar sessão de campanha de unidade:", err);
-                  }
-                } else {
-                  // Se for modo nuvem, salvamos no localStorage para termos coerência instantânea
-                  localStorage.setItem('app_selected_unit', u);
-                }
 
-                // Dispara o sync para a unidade selecionada se estiver no modo nuvem
-                // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
-                if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
-                  // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
-                  syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
+                    // Força gravação física síncrona no .db local
+                    await sqliteService.saveDatabase();
+                    console.log(`>>> [Governance/Failsafe] Persistência pré-navegação concluída com confirmação física no SQLite.`);
+                  } else {
+                    // Se for modo nuvem, salvamos no localStorage para termos coerência instantânea
+                    localStorage.setItem('app_selected_unit', u);
+                  }
+
+                  setSelectedUnit(u); 
+                  setIsInventorying(false); 
+                  setInventoryLocation(null); 
+                  sessionStorage.removeItem('app_just_finished_load');
+
+                  // Dispara o sync para a unidade selecionada se estiver no modo nuvem
+                  // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
+                  if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
+                    // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
+                    syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
+                  }
+                  
+                  pushScreen(AppScreen.MAIN_MENU); 
+                } catch (err) {
+                  console.error(">>> [onSelect] Erro na persistência síncrona de navegação:", err);
+                } finally {
+                  setIsLoading(false);
                 }
-                
-                pushScreen(AppScreen.MAIN_MENU); 
               }} 
               onDownload={handleDownloadUnit}
               onBack={async () => { 

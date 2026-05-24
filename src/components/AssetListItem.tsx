@@ -165,6 +165,17 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 {visualStatus}
               </span>
             </div>
+            {Number(asset._is_synced) === 1 ? (
+              <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-tight bg-emerald-50/60 border border-emerald-100 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>
+                Sincronizado
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
+                <span className="w-1 h-1 bg-amber-400 rounded-full animate-ping"></span>
+                Pendente Nuvem
+              </span>
+            )}
             {asset.REGISTRO && (
               <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
                 REG: {asset.REGISTRO}

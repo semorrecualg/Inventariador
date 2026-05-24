@@ -751,12 +751,13 @@ const Inventory: React.FC<InventoryProps> = ({
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
     const term = normalizeKeyFast(committedSearch);
+    const searchUpper = committedSearch.toUpperCase().trim();
 
     if (!term) {
       const result = [];
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
-        
+
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
         const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
@@ -790,8 +791,11 @@ const Inventory: React.FC<InventoryProps> = ({
     
     for (let i = 0; i < targetAssets.length; i++) {
         const a = targetAssets[i];
+
         const etq = normalizeKeyFast(a.ETIQUETA || '');
-        if (etq === term || etq.includes(term)) {
+        const descText = String(a.DESCRICAODOATIVO || '').toUpperCase();
+
+        if (etq === term || etq.includes(term) || descText.includes(searchUpper)) {
             localMatches.push(a);
         }
     }

@@ -13,19 +13,21 @@ export interface ProvisionResult {
   existing?: boolean;
 }
 
-// Credenciais fixas para garantir conexão com o projeto correto (MPULMON)
-// Isso ignora o cache de variáveis de ambiente do navegador que está causando erros
-const CORRECT_URL = 'https://mpulmonxbcpqjxouzvuc.supabase.co';
-const CORRECT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wdWxtb254YmNwcWp4b3V6dnVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NTExMTUsImV4cCI6MjA4NzEyNzExNX0.itf1-hY2F8L4uwcYhugh_ZZOrKwK1PXm8JHFEMXQQaw';
+// ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
+// o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const isInternalMode = !supabaseUrl || !supabaseAnonKey;
 
-const supabaseUrl = CORRECT_URL;
-const supabaseAnonKey = CORRECT_KEY;
 // Limpeza robusta do schema para evitar caracteres como [ ] vindos de logs ou envs
 const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').replace(/[[]\]/g, '').trim();
 
 // Initialize client only if credentials exist to prevent crash
 // Blindagem Dinâmica: O modo é verificado em tempo real para evitar chamadas fantasmas
-const getDatabaseMode = () => localStorage.getItem('app_database_mode') || 'INTERNAL';
+export const getDatabaseMode = () => {
+  if (isInternalMode) return 'INTERNAL';
+  return localStorage.getItem('app_database_mode') || 'SUPABASE';
+};
 
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {

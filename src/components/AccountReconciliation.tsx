@@ -266,7 +266,6 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       if (isBaixado && !asset._conferido) return;
 
       const account = asset.conta_contabil || 'SEM CONTA';
-      if (account === '131105001') return; // Protocolo GBR de limpeza automática para contas restritas
       if (!stats[account]) {
         stats[account] = { total: 0, checked: 0 };
       }
@@ -294,7 +293,6 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       if (isBaixado && !asset._conferido) return false;
 
       const account = asset.conta_contabil || 'SEM CONTA';
-      if (account === '131105001') return false; // Protocolo GBR de limpeza automática para contas restritas
       const matchesAccount = account === selectedAccount;
       
       const matchesSearch = assetSearchTerm === '' || 

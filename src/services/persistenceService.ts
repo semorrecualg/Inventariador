@@ -171,23 +171,23 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     delete config._integrity_failed;
     delete config._integrity_hash;
 
-    // 1.1 Persistência Global em SQLite (Soberania de Dados)
-    if (mode === DatabaseMode.INTERNAL) {
-      console.log('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
-      await sqliteService.saveInventoryConfig(config);
-      
-      // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
-      // persistimos os ativos na tabela SQL física.
-      const assetsToSave = dirtyAssets || assets;
-      if (assetsToSave.length > 0) {
-        await sqliteService.bulkInsertAssets(assetsToSave);
-      }
-      
-      // Atualiza o status interno do banco físico para ACTIVE se houver ativos no banco
-      const assetCount = await sqliteService.getAssetCount();
-      if (assetCount > 0) {
-        await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
-      }
+    // 1.1 Persistência Global em SQLite (Soberania de Dados) / Injeção para o Jeep-SQLite
+    // Sincroniza e insere no SQLite físico independente de modo (seja INTERNAL ou SUPABASE na nuvem)
+    console.log('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
+    await sqliteService.saveInventoryConfig(config);
+    
+    // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
+    // persistimos os ativos na tabela SQL física de alta performance.
+    const assetsToSave = dirtyAssets || assets;
+    if (assetsToSave.length > 0) {
+      console.log(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no SQLite físico via buffer...`);
+      await sqliteService.bulkInsertAssets(assetsToSave);
+    }
+    
+    // Atualiza o status interno do banco físico para ACTIVE se houver ativos no banco
+    const assetCount = await sqliteService.getAssetCount();
+    if (assetCount > 0) {
+      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
     }
 
     // 1.2 Cálculo de Checksum
