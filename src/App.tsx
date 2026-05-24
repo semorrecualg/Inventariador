@@ -732,13 +732,13 @@ const App: React.FC = () => {
         
         let success = false;
         try {
-          console.log(">>> [App] Tentando inicializar SQLite/Jeep-SQLite com timeout de 3.5 segundos...");
+          console.log(">>> [App] Tentando inicializar SQLite/Jeep-SQLite com timeout de 25 segundos...");
           success = await Promise.race([
             sqliteService.init(),
-            new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 3500))
+            new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 25000))
           ]);
         } catch (dbErr) {
-          console.error(">>> [App - Failsafe] Falha ou Timeout (3.5s) ao inicializar o Jeep-SQLite. Entrando em modo degradado / contingência de memória.", dbErr);
+          console.error(">>> [App - Failsafe] Falha ou Timeout (25s) ao inicializar o Jeep-SQLite. Entrando em modo degradado / contingência de memória.", dbErr);
           success = true; // Força sucesso logico para avançar em contingência
         } finally {
           setDbInitialized(true);
@@ -4864,7 +4864,12 @@ const App: React.FC = () => {
                 syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
               }
 
-              if (u.mustChangePassword) { 
+              const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
+              if (isMasterAdminWithEmptyDb) {
+                console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
+                sessionStorage.removeItem('carga_inicial_prompted');
+                pushScreen(AppScreen.LOAD_DATABASE);
+              } else if (u.mustChangePassword) { 
                 pushScreen(AppScreen.CHANGE_PASSWORD); 
               } else { 
                 const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
@@ -5084,7 +5089,12 @@ const App: React.FC = () => {
                   syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
                 }
 
-                if (u.mustChangePassword) { 
+                const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
+                if (isMasterAdminWithEmptyDb) {
+                  console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
+                  sessionStorage.removeItem('carga_inicial_prompted');
+                  pushScreen(AppScreen.LOAD_DATABASE);
+                } else if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
                 } else { 
                   // Se for ADMIN, vai para seleção de módulo

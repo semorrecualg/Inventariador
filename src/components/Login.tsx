@@ -146,12 +146,6 @@ const Login: React.FC<LoginProps> = ({
     setIsLoading(true);
     console.log('[Login] Iniciando autenticação...', { databaseMode, username });
     
-    if (databaseMode === DatabaseMode.SUPABASE && !supabase) {
-      setIsLoading(false);
-      setError("O Supabase não está configurado. Verifique as variáveis de ambiente (URL e Anon Key) nas configurações do projeto.");
-      return;
-    }
-    
     // Timeout de segurança para não travar a UI (Aumentado para 45s para maior resiliência)
     const loginTimeout = setTimeout(() => {
       setIsLoading(prev => {
@@ -165,14 +159,77 @@ const Login: React.FC<LoginProps> = ({
     }, 45000);
 
     try {
-      let loggedUser: User | null = null;
-      const isEmail = username.trim().includes('@');
-      const isOnline = navigator.onLine;
-      let attemptSupabase = false;
+      const normalizedUsername = username.trim().toLowerCase();
+      
+      const isMasterLocal = (normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || normalizedUsername === 'semorr@gmail.com') && 
+                            (password === 'admin' || password === 'Glaucio@1970');
+      
+      const matchedLocalUser = users.find(u => 
+        (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
+        u.password === password
+      );
 
-      if (isOnline && (databaseMode === DatabaseMode.SUPABASE || isEmail)) {
-        attemptSupabase = true;
+      // BARREIRA LOCAL OFFLINE (Passo 1): 
+      // Se as credenciais casarem com o padrão admin físico local ou usuário SQLite cadastrado, login é aceito no ato, 100% offline
+      if (isMasterLocal || matchedLocalUser) {
+        console.log('[Login] [BARREIRA LOCAL] Credenciais correspondem a operador administrador mestre ou cadastrado localmente. Desviando fluxo do Supabase imediatamente.');
+        try {
+          let loggedUser: User;
+          if (matchedLocalUser) {
+            loggedUser = { ...matchedLocalUser };
+          } else {
+            // Se for mestre mas não estiver cadastrado no array (ou tabela SQLite ainda vazia), criamos a sessão mestre inicial
+            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
+            if (adminUser) {
+              loggedUser = { ...adminUser };
+            } else {
+              loggedUser = {
+                username: 'semorr',
+                name: 'Glaucio (Admin Mestre)',
+                email: 'semorr@gmail.com',
+                role: UserRole.ADMIN,
+                is_admin: true,
+                isAdmin: true,
+                mustChangePassword: false,
+                _tenantid: 'CICOPAL',
+                _unitid: 'MATRIZ',
+                tenantid: 'CICOPAL',
+                unitid: 'MATRIZ',
+                units: ['MATRIZ'],
+                tenants: ['CICOPAL']
+              };
+            }
+          }
+
+          console.log('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
+          localStorage.setItem('app_current_user', safeStringify(loggedUser));
+          
+          logAuditEvent({
+            user_email: loggedUser.email,
+            action: 'LOGIN',
+            details: `Login efetuado via Barreira Local Offline (SQLite Isolado)`,
+            _tenantid: loggedUser._tenantid || loggedUser.tenantid
+          });
+
+          onLogin(loggedUser);
+          clearTimeout(loginTimeout);
+          setIsLoading(false);
+          return; // ENCERRA O LOGOUT SEM COCORRER CÓDIGOS DO SUPABASE
+        } catch (localErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+          console.error('[Login] Falha inesperada na barreira local:', localErr);
+        }
       }
+
+      // Passo de Segurança: se o databaseMode for SUPABASE e as credenciais locais acima não serviram, verificamos se o cliente supabase existe
+      if (databaseMode === DatabaseMode.SUPABASE && !supabase) {
+        setIsLoading(false);
+        setError("O Supabase não está configurado. Verifique as variáveis de ambiente (URL e Anon Key) nas configurações do projeto.");
+        clearTimeout(loginTimeout);
+        return;
+      }
+
+      let loggedUser: User | null = null;
+      const isOnline = navigator.onLine;
 
       const doLocalAuthFallback = (): User => {
         console.log('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
@@ -182,7 +239,6 @@ const Login: React.FC<LoginProps> = ({
         );
 
         if (!localUser) {
-          // Fallback para admin padrão apenas se for o usuário mestre configurado localmente
           const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com' || username.trim().toLowerCase() === 'admin') && 
                                   (password === 'admin' || password === 'Glaucio@1970');
           
@@ -198,26 +254,39 @@ const Login: React.FC<LoginProps> = ({
         return { ...localUser };
       };
 
-      if (attemptSupabase) {
+      if (isOnline) {
         console.log('[Login] Autenticando via Supabase Auth (Soberania de Rede)...', { loginEmail: username.trim().toLowerCase() });
         
+        // ISOLAMENTO PREVENTIVO: se o objeto 'supabase' ou 'supabase.auth' estiver inacessível no hardware nativo, tratamos amigavelmente
+        if (!supabase || !supabase.auth) {
+          console.warn('[Login] Objeto supabase.auth inacessível no hardware nativo.');
+          setIsLoading(false);
+          setError("Sistema de nuvem inacessível no hardware móvel. Tente o acesso via usuário administrador local.");
+          clearTimeout(loginTimeout);
+          return;
+        }
+
         let loginEmail = username.trim().toLowerCase();
         
         // Se não for um e-mail, tenta buscar o e-mail pelo username
         if (!loginEmail.includes('@')) {
           console.log('[Login] Username detectado, buscando e-mail correspondente para a Nuvem...');
-          const foundEmail = await getEmailByUsername(username.trim());
-          if (!foundEmail) {
-            throw new Error("Username não encontrado na nuvem. Verifique se digitou corretamente ou use seu e-mail.");
+          try {
+            const foundEmail = await getEmailByUsername(username.trim());
+            if (!foundEmail) {
+              throw new Error("Username não encontrado na nuvem. Verifique se digitou corretamente ou use seu e-mail.");
+            }
+            loginEmail = foundEmail;
+          } catch (unameErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+            console.error('[Login] Erro ao obter e-mail por username:', unameErr);
+            throw new Error(unameErr.message || "Username não encontrado na nuvem.");
           }
-          loginEmail = foundEmail;
-          console.log('[Login] E-mail correspondente encontrado:', loginEmail);
         }
 
         try {
           console.log('[Login] Chamando signInWithPassword...');
           // 1. Autenticação via Supabase Auth (Oficial) com timeout
-          const signInPromise = supabase!.auth.signInWithPassword({
+          const signInPromise = supabase.auth.signInWithPassword({
             email: loginEmail,
             password: password
           });
@@ -259,7 +328,6 @@ const Login: React.FC<LoginProps> = ({
           
           console.log('[Login] Perfil processado.');
           
-          // Se o usuário logou com username, garantimos que o objeto User tenha esse username
           const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
 
           const normalizeValue = (val: string) => {
@@ -302,13 +370,19 @@ const Login: React.FC<LoginProps> = ({
         } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
           console.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
           
+          const rawMessage = typeof supErr === 'string' 
+            ? supErr 
+            : (supErr?.message || supErr?.error_description || String(supErr || ''));
+          const errorMsg = rawMessage.toLowerCase();
+          
           // Verificação se o erro é de fato um limite de rede ou conexão
           const isNetError = !navigator.onLine || 
-            (supErr?.message || '').toLowerCase().includes('failed to fetch') || 
-            (supErr?.message || '').toLowerCase().includes('network') ||
-            (supErr?.message || '').toLowerCase().includes('connection') ||
-            (supErr?.message || '').toLowerCase().includes('load failed') ||
+            errorMsg.includes('failed to fetch') || 
+            errorMsg.includes('network') ||
+            errorMsg.includes('connection') ||
+            errorMsg.includes('load failed') ||
             supErr?.status === 0 ||
+            errorMsg.includes('auth_timeout') ||
             supErr?.message === 'AUTH_TIMEOUT';
 
           if (isNetError) {
@@ -316,16 +390,20 @@ const Login: React.FC<LoginProps> = ({
             loggedUser = doLocalAuthFallback();
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
-            const errorMsg = (supErr?.message || '').toLowerCase();
             const isInvalidCreds = errorMsg.includes('invalid credentials') || 
                                    errorMsg.includes('invalid_credentials') || 
                                    errorMsg.includes('incorrect') || 
-                                   errorMsg.includes('senha');
+                                   errorMsg.includes('senha') ||
+                                   errorMsg.includes('invalid grant') ||
+                                   errorMsg.includes('user not found') ||
+                                   errorMsg.includes('user_not_found') ||
+                                   errorMsg.includes('invalid email') ||
+                                   errorMsg.includes('invalid password');
             
             if (isInvalidCreds) {
               throw new Error("E-mail ou senha incorretos na nuvem");
             } else {
-              throw supErr;
+              throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
             }
           }
         }

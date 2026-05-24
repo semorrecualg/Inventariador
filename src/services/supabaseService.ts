@@ -15,9 +15,12 @@ export interface ProvisionResult {
 
 // ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
 // o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const isInternalMode = !supabaseUrl || !supabaseAnonKey;
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const isInternalMode = !rawSupabaseUrl || !rawSupabaseAnonKey;
+
+const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
+const supabaseAnonKey = rawSupabaseAnonKey || 'placeholder-anon-key';
 
 // Limpeza robusta do schema para evitar caracteres como [ ] vindos de logs ou envs
 const supabaseSchema = (import.meta.env.VITE_SUPABASE_SCHEMA || 'public').replace(/[[]\]/g, '').trim();
@@ -32,7 +35,7 @@ export const getDatabaseMode = () => {
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {
   if (getDatabaseMode() === 'INTERNAL') return false;
-  if (!supabaseUrl || !supabaseAnonKey) return false;
+  if (!rawSupabaseUrl || !rawSupabaseAnonKey) return false;
   
   try {
     const restTest = await fetch(`${supabaseUrl}/rest/v1/`, { headers: { 'apikey': supabaseAnonKey } });
@@ -47,7 +50,7 @@ export const testSupabaseConnection = async () => {
   }
 };
 
-if (supabaseUrl && supabaseAnonKey) {
+if (rawSupabaseUrl && rawSupabaseAnonKey) {
   const currentMode = getDatabaseMode();
   if (currentMode !== 'INTERNAL') {
     console.log(`%c[Supabase] Conectado ao Ambiente: ${import.meta.env.VITE_ENVIRONMENT || 'development'}`, "color: #3ecf8e; font-weight: bold;");
@@ -60,18 +63,17 @@ if (supabaseUrl && supabaseAnonKey) {
 
 // O cliente Supabase é inicializado com persistência desativada se estivermos em modo interno no momento do load
 // No entanto, as funções individuais fazem a blindagem em tempo real
-export const supabase = (supabaseUrl && supabaseAnonKey) 
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      db: {
-        schema: supabaseSchema
-      },
-      auth: {
-        autoRefreshToken: getDatabaseMode() !== 'INTERNAL',
-        persistSession: getDatabaseMode() !== 'INTERNAL',
-        detectSessionInUrl: getDatabaseMode() !== 'INTERNAL'
-      }
-    })
-  : null;
+// Blindagem de Instância (Failsafe Guard): Nunca exportamos nulo para evitar Cannot read properties of null (reading 'auth')
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  db: {
+    schema: supabaseSchema
+  },
+  auth: {
+    autoRefreshToken: getDatabaseMode() !== 'INTERNAL',
+    persistSession: getDatabaseMode() !== 'INTERNAL',
+    detectSessionInUrl: getDatabaseMode() !== 'INTERNAL'
+  }
+});
 
 /**
  * Realiza o logout completo do sistema, limpando sessões locais e da nuvem
