@@ -18,12 +18,18 @@ interface DatabaseLoaderProps {
   onBack?: () => void;
   user: User;
   showModal?: (title: string, message: string, type: ModalConfig['type']) => void;
+  databaseMode?: DatabaseMode;
+  isSyncing?: boolean;
+  onCargaInicial?: () => void;
 }
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
   onDataLoaded,
   onBack,
-  showModal
+  showModal,
+  databaseMode,
+  isSyncing = false,
+  onCargaInicial
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -32,9 +38,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
+  const [showCargaPrompt, setShowCargaPrompt] = useState(false);
   
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (status === 'EMPTY_STATE' && onCargaInicial && databaseMode === DatabaseMode.INTERNAL && !isSyncing) {
+      const alerted = sessionStorage.getItem('carga_inicial_prompted');
+      if (!alerted) {
+        sessionStorage.setItem('carga_inicial_prompted', 'true');
+        setShowCargaPrompt(true);
+      }
+    }
+  }, [status, onCargaInicial, databaseMode, isSyncing]);
 
   const addLog = (msg: string) => {
     if (msg.includes('Erro') || msg.includes('Falha') || msg.includes('TIMEOUT')) {
@@ -430,6 +447,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             </div>
 
             <div className="grid grid-cols-1 gap-3 w-full mt-4">
+              {databaseMode === DatabaseMode.INTERNAL && onCargaInicial && (
+                <button
+                  type="button"
+                  onClick={onCargaInicial}
+                  disabled={isSyncing}
+                  className="flex items-center justify-center gap-4 bg-emerald-600 text-white p-5 rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-500/20 active:scale-95 transition-all group disabled:opacity-75"
+                >
+                  <div className="p-2 bg-white/20 rounded-xl group-hover:animate-bounce transition-transform">
+                    {isSyncing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                  </div>
+                  <span>{isSyncing ? "Sincronizando Lotes..." : "Carga Inicial da Nuvem"}</span>
+                </button>
+              )}
+
               <button
                 onClick={handleExpertLoadClick}
                 className="flex items-center justify-center gap-4 bg-accent text-white p-5 rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-accent/20 active:scale-95 transition-all group"
@@ -686,6 +717,46 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                   className="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
                 >
                   Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Carga Inicial Cloud Confirmation Modal */}
+      <AnimatePresence>
+        {showCargaPrompt && (
+          <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-xs bg-white rounded-[2rem] p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center"
+            >
+              <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-500 mb-4">
+                <RefreshCw size={32} className="animate-pulse" />
+              </div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-2">Base Local Vazia</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase leading-relaxed mb-8">
+                Detectamos que seu banco de dados físico local está vazio. Deseja obter a carga inicial da nuvem agora?
+              </p>
+              
+              <div className="flex flex-col gap-2 w-full">
+                <button 
+                  onClick={() => {
+                    setShowCargaPrompt(false);
+                    onCargaInicial?.();
+                  }}
+                  className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-emerald-200 active:scale-95 transition-all"
+                >
+                  Baixar Ativos da Nuvem
+                </button>
+                <button 
+                  onClick={() => setShowCargaPrompt(false)}
+                  className="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+                >
+                  Agora Não
                 </button>
               </div>
             </motion.div>

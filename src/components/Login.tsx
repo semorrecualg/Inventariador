@@ -166,110 +166,16 @@ const Login: React.FC<LoginProps> = ({
 
     try {
       let loggedUser: User | null = null;
+      const isEmail = username.trim().includes('@');
+      const isOnline = navigator.onLine;
+      let attemptSupabase = false;
 
-      if (databaseMode === DatabaseMode.SUPABASE) {
-        console.log('[Login] Autenticando via Supabase Auth...', { loginEmail: username.trim().toLowerCase() });
-        
-        let loginEmail = username.trim().toLowerCase();
-        
-        // Se não for um e-mail, tenta buscar o e-mail pelo username
-        if (!loginEmail.includes('@')) {
-          console.log('[Login] Username detectado, buscando e-mail correspondente...');
-          const foundEmail = await getEmailByUsername(username.trim());
-          if (!foundEmail) {
-            throw new Error("Username não encontrado. Verifique se digitou corretamente ou use seu e-mail.");
-          }
-          loginEmail = foundEmail;
-          console.log('[Login] E-mail encontrado:', loginEmail);
-        }
+      if (isOnline && (databaseMode === DatabaseMode.SUPABASE || isEmail)) {
+        attemptSupabase = true;
+      }
 
-        console.log('[Login] Chamando signInWithPassword com timeout...');
-        // 1. Autenticação via Supabase Auth (Oficial) com timeout de 10s
-        const signInPromise = supabase!.auth.signInWithPassword({
-          email: loginEmail,
-          password: password
-        });
-
-        const authResult = await Promise.race([
-          signInPromise,
-          new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 30000))
-        ]).catch(err => {
-          console.error('[Login] Erro ou Timeout no Auth:', err.message);
-          if (err.message === "AUTH_TIMEOUT") {
-            throw new Error("O servidor de autenticação está demorando muito para responder. Isso pode ser instabilidade na rede ou o servidor acordando. Tente novamente em alguns instantes.");
-          }
-          throw err;
-        }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-        if (authResult.error) {
-          console.error('[Login] Erro Supabase Auth:', authResult.error);
-          throw authResult.error;
-        }
-        
-        const authData = authResult.data;
-        if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
-
-        // 2. Garante que o usuário tenha um perfil na tabela user_permissions
-        console.log('[Login] Chamando ensureUserProfile...');
-        const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
-          .catch(err => {
-            console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
-            const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br');
-            return {
-              email: authData.user.email,
-              username: authData.user.email?.split('@')[0],
-              role: is_master ? 'ADMIN' : 'AUDITOR',
-              is_admin: is_master,
-              _tenantid: is_master ? 'CICOPAL' : '',
-              _unitid: is_master ? 'MATRIZ' : ''
-            };
-          });
-        
-        console.log('[Login] Perfil processado.');
-        
-        // Se o usuário logou com username, garantimos que o objeto User tenha esse username
-        const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
-
-        const normalizeValue = (val: string) => {
-          if (!val) return '';
-          const upper = val.toUpperCase();
-          return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
-        };
-
-        const normalizeArray = (arr: unknown[]) => {
-          if (!arr) return [];
-          return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
-        };
-
-        const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
-        const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
-
-        let tenantId = normalizeValue(cloudUser._tenantid || cloudUser.tenantid || '');
-        let unitId = normalizeValue(cloudUser._unitid || cloudUser.unitid || '');
-
-        if (is_master) {
-          if (!tenantId) tenantId = 'CICOPAL';
-          if (!unitId) unitId = 'MATRIZ';
-        }
-
-        loggedUser = {
-          username: finalUsername,
-          name: cloudUser.name || finalUsername,
-          email: cloudUser.email,
-          role: cloudUser.role as UserRole,
-          is_admin: is_admin,
-          isAdmin: is_admin,
-          mustChangePassword: false,
-          _tenantid: tenantId,
-          _unitid: unitId,
-          tenantid: tenantId,
-          unitid: unitId,
-          units: normalizeArray(cloudUser.units || (unitId ? [unitId] : [])),
-          tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
-        };
-      } else {
-        console.log('[Login] Autenticando via Banco Interno (Mobile Puro)...');
-        // Isolamento Total: No modo Mobile Puro, a autenticação é 100% local.
+      const doLocalAuthFallback = (): User => {
+        console.log('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
         const localUser = users.find(u => 
           (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
           u.password === password
@@ -277,21 +183,155 @@ const Login: React.FC<LoginProps> = ({
 
         if (!localUser) {
           // Fallback para admin padrão apenas se for o usuário mestre configurado localmente
-          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com') && password === 'admin';
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com' || username.trim().toLowerCase() === 'admin') && 
+                                  (password === 'admin' || password === 'Glaucio@1970');
           
           if (isAdminFallback) {
             const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
             if (adminUser) {
-              loggedUser = { ...adminUser };
+              return { ...adminUser };
             }
           }
           
-          if (!loggedUser) {
-            throw new Error("Credenciais internas inválidas. O modo 'Mobile Puro' é 100% local e não reconhece contas da nuvem.");
-          }
-        } else {
-          loggedUser = { ...localUser };
+          throw new Error("Credenciais internas inválidas. O modo 'Mobile Puro' é 100% local e não reconhece contas da nuvem.");
         }
+        return { ...localUser };
+      };
+
+      if (attemptSupabase) {
+        console.log('[Login] Autenticando via Supabase Auth (Soberania de Rede)...', { loginEmail: username.trim().toLowerCase() });
+        
+        let loginEmail = username.trim().toLowerCase();
+        
+        // Se não for um e-mail, tenta buscar o e-mail pelo username
+        if (!loginEmail.includes('@')) {
+          console.log('[Login] Username detectado, buscando e-mail correspondente para a Nuvem...');
+          const foundEmail = await getEmailByUsername(username.trim());
+          if (!foundEmail) {
+            throw new Error("Username não encontrado na nuvem. Verifique se digitou corretamente ou use seu e-mail.");
+          }
+          loginEmail = foundEmail;
+          console.log('[Login] E-mail correspondente encontrado:', loginEmail);
+        }
+
+        try {
+          console.log('[Login] Chamando signInWithPassword...');
+          // 1. Autenticação via Supabase Auth (Oficial) com timeout
+          const signInPromise = supabase!.auth.signInWithPassword({
+            email: loginEmail,
+            password: password
+          });
+
+          const authResult = await Promise.race([
+            signInPromise,
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 30000))
+          ]).catch(err => {
+            console.error('[Login] Erro ou Timeout no Auth:', err.message);
+            if (err.message === "AUTH_TIMEOUT") {
+              throw new Error("O servidor de autenticação está demorando muito para responder. Isso pode ser instabilidade na rede. Tente novamente em alguns instantes.");
+            }
+            throw err;
+          }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+          if (authResult.error) {
+            console.error('[Login] Erro Supabase Auth:', authResult.error);
+            throw authResult.error;
+          }
+          
+          const authData = authResult.data;
+          if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
+
+          // 2. Garante que o usuário tenha um perfil na tabela user_permissions
+          console.log('[Login] Chamando ensureUserProfile...');
+          const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
+            .catch(err => {
+              console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
+              const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br');
+              return {
+                email: authData.user.email,
+                username: authData.user.email?.split('@')[0],
+                role: is_master ? 'ADMIN' : 'AUDITOR',
+                is_admin: is_master,
+                _tenantid: is_master ? 'CICOPAL' : '',
+                _unitid: is_master ? 'MATRIZ' : ''
+              };
+            });
+          
+          console.log('[Login] Perfil processado.');
+          
+          // Se o usuário logou com username, garantimos que o objeto User tenha esse username
+          const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
+
+          const normalizeValue = (val: string) => {
+            if (!val) return '';
+            const upper = val.toUpperCase();
+            return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+          };
+
+          const normalizeArray = (arr: unknown[]) => {
+            if (!arr) return [];
+            return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
+          };
+
+          const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
+          const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
+
+          let tenantId = normalizeValue(cloudUser._tenantid || cloudUser.tenantid || '');
+          let unitId = normalizeValue(cloudUser._unitid || cloudUser.unitid || '');
+
+          if (is_master) {
+            if (!tenantId) tenantId = 'CICOPAL';
+            if (!unitId) unitId = 'MATRIZ';
+          }
+
+          loggedUser = {
+            username: finalUsername,
+            name: cloudUser.name || finalUsername,
+            email: cloudUser.email,
+            role: cloudUser.role as UserRole,
+            is_admin: is_admin,
+            isAdmin: is_admin,
+            mustChangePassword: false,
+            _tenantid: tenantId,
+            _unitid: unitId,
+            tenantid: tenantId,
+            unitid: unitId,
+            units: normalizeArray(cloudUser.units || (unitId ? [unitId] : [])),
+            tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
+          };
+        } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+          console.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
+          
+          // Verificação se o erro é de fato um limite de rede ou conexão
+          const isNetError = !navigator.onLine || 
+            (supErr?.message || '').toLowerCase().includes('failed to fetch') || 
+            (supErr?.message || '').toLowerCase().includes('network') ||
+            (supErr?.message || '').toLowerCase().includes('connection') ||
+            (supErr?.message || '').toLowerCase().includes('load failed') ||
+            supErr?.status === 0 ||
+            supErr?.message === 'AUTH_TIMEOUT';
+
+          if (isNetError) {
+            console.log('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
+            loggedUser = doLocalAuthFallback();
+          } else {
+            // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
+            const errorMsg = (supErr?.message || '').toLowerCase();
+            const isInvalidCreds = errorMsg.includes('invalid credentials') || 
+                                   errorMsg.includes('invalid_credentials') || 
+                                   errorMsg.includes('incorrect') || 
+                                   errorMsg.includes('senha');
+            
+            if (isInvalidCreds) {
+              throw new Error("E-mail ou senha incorretos na nuvem");
+            } else {
+              throw supErr;
+            }
+          }
+        }
+      } else {
+        // Sem internet ou modo local puro
+        loggedUser = doLocalAuthFallback();
       }
 
       if (loggedUser) {

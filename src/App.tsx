@@ -1772,6 +1772,91 @@ const App: React.FC = () => {
     }
   }, [databaseMode, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
 
+  const runCargaInicialLocal = useCallback(async () => {
+    if (isSyncing) return;
+
+    if (!navigator.onLine) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Dispositivo Offline',
+        message: 'Você precisa de conexão ativa com a internet para baixar a carga inicial de ativos da nuvem.',
+        type: 'error',
+        showCancel: false,
+        confirmText: 'Entendido'
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncError(null);
+    console.log('>>> [Carga Inicial Mobile] Baixando lote inicial de ativos da nuvem para o SQLite local...');
+
+    try {
+      // Usaremos o tenantid do usuário mestre para baixar os dados do cliente correto
+      const tid = user?.tenants || user?.tenantid || 'CICOPAL';
+      const tenantidList = Array.isArray(tid) ? tid : [tid];
+
+      console.log('>>> [Carga Inicial] Chamando fetchFullInventory para tenants:', tenantidList);
+      const cloudData = await fetchFullInventory(tenantidList);
+
+      if (!cloudData || !cloudData.assets || cloudData.assets.length === 0) {
+        throw new Error('Nenhum ativo encontrado na nuvem para este projeto/tenant.');
+      }
+
+      const assets = cloudData.assets;
+      console.log(`>>> [Carga Inicial] ${assets.length} ativos recebidos. Gravando no SQLite local em micro-batches de 1.000 itens...`);
+
+      // 1. Limpamos a tabela ou inserimos por micro-batches de 1000 itens para performance máxima no hardware
+      const batchSize = 1000;
+      for (let i = 0; i < assets.length; i += batchSize) {
+        const batch = assets.slice(i, i + batchSize);
+        console.log(`>>> [Carga Inicial] Gravando lote ${Math.floor(i / batchSize) + 1} de ${Math.ceil(assets.length / batchSize)} (${batch.length} itens)...`);
+        await sqliteService.bulkInsertAssets(batch);
+      }
+
+      // 2. Salva e atualiza o estado
+      const syncTimestamp = new Date().toISOString();
+      const extractedCompanies = Array.from(new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+
+      const newState: InventoryState = {
+        ...inventory,
+        ...cloudData.config,
+        assets: assets,
+        companies: extractedCompanies,
+        status: DatabaseStatus.LOADED,
+        lastUpdated: syncTimestamp,
+        databaseMode: DatabaseMode.INTERNAL
+      };
+
+      await saveInventory(newState);
+      setInventory(newState);
+      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
+
+      console.log('>>> [Carga Inicial] Carga e persistência concluídas com sucesso!');
+
+      setModalConfig({
+        isOpen: true,
+        title: 'Carga Inicial Concluída!',
+        message: `${assets.length} ativos foram baixados do Supabase e salvos com sucesso no seu banco físico local (SQLite). Agora o aplicativo está pronto para operar 100% offline.`,
+        type: 'success',
+        showCancel: false,
+        confirmText: 'Excelente'
+      });
+    } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      console.error('>>> [Carga Inicial] Falha durante o processamento:', err);
+      setModalConfig({
+        isOpen: true,
+        title: 'Falha na Carga Inicial',
+        message: `Ocorreu um erro ao importar dados da nuvem: ${err.message || String(err)}`,
+        type: 'error',
+        showCancel: false,
+        confirmText: 'Fechar'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing, inventory, user]);
+
   // Real-time Cloud Sync Listener
   useEffect(() => {
     // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
@@ -5157,6 +5242,7 @@ const App: React.FC = () => {
                 campaigns={campaigns}
                 user={user}
                 databaseMode={databaseMode}
+                onCargaInicial={runCargaInicialLocal}
                 showModal={showModal}
                 onRestore={(state) => {
                   setInventory(state);
@@ -5332,6 +5418,7 @@ const App: React.FC = () => {
               onBack={popScreen} 
               databaseMode={databaseMode}
               user={user}
+              onCargaInicial={runCargaInicialLocal}
               onOpenHelp={() => setIsHelpMenuOpen(true)}
               showModal={(title, message, type) => setModalConfig({ 
                 isOpen: true, title, message, type, 
