@@ -747,119 +747,121 @@ const App: React.FC = () => {
         if (!isMounted) return;
 
         if (success) {
-          console.log(">>> [App] SQLite pronto ou emulado com sucesso em ambiente seguro.");
+          console.log(">>> [App] SQLite pronto ou emulado com sucesso em ambiente seguro. Agendando carregamento de UI pós-boot...");
+          
+          // REQUISITO 1: Adotamos um setTimeout pós-determinação de inicialização para desvincular o fluxo
+          // de montagem reativa da UI principal de qualquer Toast de Soberania Nativa ou conflito de thread/bridge no Android
+          setTimeout(async () => {
+            if (!isMounted) return;
+            console.log(">>> [MOBILE-SHIELD] Iniciando carregamento assíncrono pós-boot do banco de dados de forma desacoplada.");
+            
+            try {
+              const fileStatus = await sqliteService.getFileStatus();
+              const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
+              const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
-          try {
-            const fileStatus = await sqliteService.getFileStatus();
-            const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
-            const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
-
-            if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
-              console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
-              setDatabaseMode(DatabaseMode.INTERNAL);
-              localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
-            }
-
-            if (databaseMode === DatabaseMode.INTERNAL || isDbLocked) {
-              const dbUsers = await localDb.users.toArray();
-              if (dbUsers.length > 0) {
-                setUsers(dbUsers);
-                console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
+              if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
+                console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
+                setDatabaseMode(DatabaseMode.INTERNAL);
+                localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
               }
 
-              // GBR v24.50 KARDEK: Boot Context - Soberania Nativa (Auto-skip de triagem via APP_CONFIG)
-              if (isFilePresent && isDbLocked) {
-                console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
-                console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
-              }
-              try {
-                const savedUser = localStorage.getItem('app_current_user');
-                const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+              if (databaseMode === DatabaseMode.INTERNAL || isDbLocked) {
+                const dbUsers = await localDb.users.toArray();
+                if (dbUsers.length > 0) {
+                  setUsers(dbUsers);
+                  console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
+                }
 
                 if (isFilePresent && isDbLocked) {
-                  // Força o status do banco para LOADED se estiver bloqueado / blindado
-                  setInventory(prev => ({
-                    ...prev,
-                    status: DatabaseStatus.LOADED
-                  }));
+                  console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
+                  console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
                 }
-                
-                const activeSession = await sqliteService.obterContextoAtivo();
-                let recoveredUnit = activeSession.selectedUnit;
-                let recoveredCampaign = activeSession.currentCampaignId;
-                
-                // Se não retornar da nova APP_CONFIG, tenta do unit_configs legado para compatibilidade
-                if (!recoveredUnit) {
-                  const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
-                  const sqlConfigs = await sqliteService.getUnitConfigs(tid);
-                  if (sqlConfigs && sqlConfigs.length > 0) {
-                    recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
-                    recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
-                  }
-                }
-                
-                if (recoveredUnit) {
-                  console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
-                  setSelectedUnit(recoveredUnit);
-                  
-                  if (recoveredCampaign) {
+                try {
+                  const savedUser = localStorage.getItem('app_current_user');
+                  const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+
+                  if (isFilePresent && isDbLocked) {
                     setInventory(prev => ({
                       ...prev,
-                      currentCampaignId: recoveredCampaign || undefined,
                       status: DatabaseStatus.LOADED
                     }));
                   }
                   
-                  // Se o usuário está logado e há contexto técnico ativo, pula a triagem inicial e vai direto para MAIN_MENU
-                  if (parsedUser && recoveredUnit && recoveredCampaign) {
-                    console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
-                    setHistory([AppScreen.MAIN_MENU]);
-                  } else if (parsedUser) {
-                    // Se faltar algum dos metadados técnicos, redireciona para a seleção de unidades
-                    console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
-                    setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                  const activeSession = await sqliteService.obterContextoAtivo();
+                  let recoveredUnit = activeSession.selectedUnit;
+                  let recoveredCampaign = activeSession.currentCampaignId;
+                  
+                  if (!recoveredUnit) {
+                    const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
+                    const sqlConfigs = await sqliteService.getUnitConfigs(tid);
+                    if (sqlConfigs && sqlConfigs.length > 0) {
+                      recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
+                      recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
+                    }
                   }
-                } else {
-                  if (parsedUser) {
-                    console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
-                    setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                  
+                  if (recoveredUnit) {
+                    console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
+                    setSelectedUnit(recoveredUnit);
+                    
+                    if (recoveredCampaign) {
+                      setInventory(prev => ({
+                        ...prev,
+                        currentCampaignId: recoveredCampaign || undefined,
+                        status: DatabaseStatus.LOADED
+                      }));
+                    }
+                    
+                    if (parsedUser && recoveredUnit && recoveredCampaign) {
+                      console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
+                      setHistory([AppScreen.MAIN_MENU]);
+                    } else if (parsedUser) {
+                      console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
+                      setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                    }
+                  } else {
+                    if (parsedUser) {
+                      console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
+                      setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                    }
                   }
+                } catch (bootErr) {
+                  console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
                 }
-              } catch (bootErr) {
-                console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
               }
+            } catch (sqliteErr) {
+              console.error(">>> [App - SQLite Access Error] Erro ao consultar tabelas físicas (modo contingência ativado):", sqliteErr);
+            } finally {
+              setIsInitializing(false);
             }
-          } catch (sqliteErr) {
-            console.error(">>> [App - SQLite Access Error] Erro ao consultar tabelas físicas (modo contingência ativado):", sqliteErr);
-          }
 
-          setIsInitializing(false);
-
-          // Encadeamento Seguro de Autenticação (Soberania de Nuvem)
-          if (!isInternalMode) {
-            try {
-              setAuthLoading(true);
-              console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
-              const { data: { session } } = await supabase.auth.getSession();
-              if (!session) {
-                console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+            // REQUISITO 2: Encadeamento Seguro de Autenticação (Soberania de Nuvem) pós-boot
+            if (!isInternalMode) {
+              try {
+                setAuthLoading(true);
+                console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                  console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                  setUser(null);
+                  localStorage.removeItem('app_current_user');
+                  setHistory([AppScreen.LOGIN]);
+                } else {
+                  console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+                }
+              } catch (jwtErr) {
+                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, limpando loaders de forma segura:", jwtErr);
                 setUser(null);
                 localStorage.removeItem('app_current_user');
                 setHistory([AppScreen.LOGIN]);
-              } else {
-                console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+              } finally {
+                setAuthLoading(false);
               }
-            } catch (jwtErr) {
-              console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo:", jwtErr);
-              setUser(null);
-              localStorage.removeItem('app_current_user');
-              setHistory([AppScreen.LOGIN]);
-            } finally {
+            } else {
               setAuthLoading(false);
             }
-          } else {
-            setAuthLoading(false);
-          }
+          }, 100);
         } else {
           throw new Error("Falha ao inicializar o motor SQL.");
         }
@@ -4691,9 +4693,19 @@ const App: React.FC = () => {
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
-  console.log("App render - screen:", screen, "selectedUnit:", selectedUnit, "isInitializing:", isInitializing);
+  console.log(">>> [MOBILE-SHIELD] Render State:", {
+    sqliteStatus: sqliteStatus.status,
+    sqliteLoading: sqliteStatus.loading,
+    isInitializing,
+    authLoading,
+    dbInitialized,
+    isInternalMode,
+    hasUser: !!user,
+    currentScreen: screen
+  });
 
   if (sqliteStatus.loading || isInitializing || authLoading) {
+    console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO LOADER (Splash Screen).");
     return (
       <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center p-10 text-white font-sans">
         <div className="relative mb-10">
@@ -4711,7 +4723,9 @@ const App: React.FC = () => {
     );
   }
 
+  // REQUISITO 3 - BLOCO DE SEGURANÇA (LOGIN FORÇADO)
   if (dbInitialized && !isInitializing && !authLoading && !isInternalMode && !user) {
+    console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DE SEGURANÇA (Formulário de Login Unificado).");
     return (
       <div className="w-full min-h-screen bg-slate-950 flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
         <div className="flex-1 relative z-[500] no-scrollbar flex items-center justify-center">
@@ -4764,6 +4778,8 @@ const App: React.FC = () => {
       </div>
     );
   }
+
+  console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DA APLICAÇÃO PRINCIPAL. Screen:", screen);
 
   if (initError) {
     return (
