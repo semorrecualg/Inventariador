@@ -9,6 +9,7 @@ export const DB_ASSET_COLUMNS = [
   'CENTRODECUSTO', 'conta_contabil', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
   'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
   'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 
+  'tenantId', 'filial',
   '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
   '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
   'currentCampaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',

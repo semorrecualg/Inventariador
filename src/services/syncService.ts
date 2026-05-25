@@ -156,7 +156,9 @@ export const syncService = {
         DESCRICAODOATIVO: asset.DESCRICAODOATIVO ? String(asset.DESCRICAODOATIVO) : null,
         Sn1_recno: asset.Sn1_recno ? Number(asset.Sn1_recno) : null,
         Sn3_recno: asset.Sn3_recno ? Number(asset.Sn3_recno) : null,
-        currentCampaignId: asset.currentCampaignId ? String(asset.currentCampaignId) : null
+        currentCampaignId: asset.currentCampaignId ? String(asset.currentCampaignId) : null,
+        tenantId: asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL'),
+        filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ')
       }));
 
       // 3. Executa o Upsert em lote na tabela remota do Supabase resolvendo conflitos pelo ID

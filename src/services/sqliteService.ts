@@ -271,6 +271,8 @@ const FULL_SCHEMA = `
     ENDERECO TEXT,
     _tenantid TEXT,
     _unitid TEXT,
+    tenantId TEXT,
+    filial TEXT,
     _unidade TEXT,
     _conferido INTEGER DEFAULT 0,
     _localMaster TEXT,
@@ -652,7 +654,7 @@ class SqliteService {
             '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
             '_altitude_metros', '_id_andar',
             '_is_unitized', '_is_divergent_baixa', '_isNew', 'DE_PARA', 
-            'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao'
+            'AUDITOR_STATUS_CONFERENCIA', '_origemTransacao', 'tenantId', 'filial'
           ];
           
           for (const col of required) {

@@ -439,6 +439,8 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         ...newAssetForm,
         ...gpsData,
         _tenantid: tenantid,
+        tenantId: tenantid,
+        filial: newAssetForm.UNIDADE_OPERACIONAL || 'MATRIZ',
         _valor_residual: newAssetForm._valor_residual || 0,
         _depreciacao_acumulada: newAssetForm._depreciacao_acumulada || 0,
         _status_contabil: newAssetForm._status_contabil || 'ATIVO',
