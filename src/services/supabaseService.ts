@@ -117,6 +117,8 @@ export const logAuditEvent = async (entry: {
   new_data?: unknown;
   details?: string;
   _tenantid?: string;
+  tenantid?: string;
+  tenant_id?: string;
   origin?: string;
 }) => {
   const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
@@ -140,14 +142,26 @@ export const logAuditEvent = async (entry: {
 
   try {
     // Sanitiza dados para evitar erros de estrutura circular
-    const sanitizedEntry = {
-      ...entry,
-      new_data: entry.new_data ? sanitizeForSupabase(entry.new_data) : undefined,
-      old_data: entry.old_data ? sanitizeForSupabase(entry.old_data) : undefined
+    const tenantVal = entry._tenantid || entry.tenantid || entry.tenant_id || '';
+    const dbPayload: Record<string, unknown> = {
+      user_email: entry.user_email,
+      action: entry.action,
+      table_name: entry.table_name || '',
+      record_id: entry.record_id || '',
+      details: entry.details || '',
+      origin: entry.origin || 'WEB',
+      tenant_id: tenantVal
     };
 
+    if (entry.new_data !== undefined) {
+      dbPayload.new_data = sanitizeForSupabase(entry.new_data);
+    }
+    if (entry.old_data !== undefined) {
+      dbPayload.old_data = sanitizeForSupabase(entry.old_data);
+    }
+
     const { error } = await Promise.race([
-      supabase.from('audit_logs').insert([sanitizedEntry]),
+      supabase.from('audit_logs').insert([dbPayload]),
       new Promise<null>((_, reject) => setTimeout(() => reject(new Error("LOG_TIMEOUT")), 2000))
     ]).catch(err => ({ error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -311,7 +325,7 @@ export const signUp = async (email: string, password: string, username: string, 
         name: name || username,
         role,
         is_admin: role === 'ADMIN' || role === 'MASTER',
-        _tenantid: tenantid,
+        tenant_id: tenantid,
         _unitid: unitid || '',
         units: units || (unitid ? [unitid] : []),
         tenants: [tenantid]
@@ -427,10 +441,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       role: finalRole,
       is_admin: is_admin,
       isAdmin: is_admin,
-      _tenantid: (profile._tenantid || profile.tenantid || profile.tenantId || '').trim(),
+      _tenantid: (profile.tenant_id || profile._tenantid || profile.tenantid || profile.tenantId || '').trim(),
       _unitid: (profile._unitid || profile.unitid || profile.unitId || '').trim(),
       units: parseArray(profile.units || profile.unitid || profile._unitid),
-      tenants: parseArray(profile.tenants || profile.tenantid || profile._tenantid)
+      tenants: parseArray(profile.tenants || profile.tenant_id || profile.tenantid || profile._tenantid)
     };
 
     console.log(`[Supabase] Perfil final processado para ${lowerEmail}:`, finalProfile);
@@ -450,7 +464,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     name: (metadata?.name || metadata?.username || lowerEmail.split('@')[0]).trim(),
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
-    _tenantid: fallbackTenant,
+    tenant_id: fallbackTenant,
     _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || '').trim(),
     ...(userId ? { id: userId } : {})
   };
@@ -471,7 +485,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     return {
       ...d,
       isAdmin: d.is_admin,
-      _tenantid: d._tenantid || fallbackTenant,
+      _tenantid: d.tenant_id || d._tenantid || fallbackTenant,
       _unitid: d._unitid || ''
     };
   }
@@ -813,7 +827,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
               name: name || username || email.split('@')[0],
               role: role || 'AUDITOR',
               is_admin: role === 'ADMIN' || role === 'MASTER',
-              _tenantid: tenantid || '',
+              tenant_id: tenantid || '',
               _unitid: unitid || '',
               units: units || (unitid ? [unitid] : []),
               tenants: tenants || (tenantid ? [tenantid] : [])
@@ -858,7 +872,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         name: name || username || email.split('@')[0],
         role: role || 'AUDITOR',
         is_admin,
-        _tenantid: normTenantId,
+        tenant_id: normTenantId,
         _unitid: normUnitId,
         units: normalizeArray(units || (normUnitId ? [normUnitId] : [])),
         tenants: normalizeArray(tenants || (normTenantId ? [normTenantId] : []))
@@ -902,7 +916,7 @@ export const syncUsersToCloud = async (users: User[]) => {
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
       const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
-      const _tenantid = normalizeValue(u._tenantid || u.tenantid || '');
+      const tenantVal = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
       const _unitid = normalizeValue(u._unitid || u.unitid || '');
       return {
         email: u.email.toLowerCase().trim(),
@@ -910,10 +924,10 @@ export const syncUsersToCloud = async (users: User[]) => {
         name: u.name || u.username,
         role: u.role,
         is_admin,
-        _tenantid,
+        tenant_id: tenantVal,
         _unitid,
         units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
-        tenants: normalizeArray(u.tenants || (_tenantid ? [_tenantid] : []))
+        tenants: normalizeArray(u.tenants || (tenantVal ? [tenantVal] : []))
       };
     });
 
@@ -968,7 +982,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     let query = supabase.from('user_permissions').select('*');
     
     if (tenantid && tenantid !== '') {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenant_id', tenantid);
     }
 
     const { data, error } = await query;
@@ -985,6 +999,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
       if (felipe) {
         console.log('>>> [Supabase] Felipe found in cloud:', {
           email: felipe.email,
+          tenant_id: felipe.tenant_id,
           _tenantid: felipe._tenantid,
           _unitid: felipe._unitid,
           units: felipe.units
@@ -1004,7 +1019,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
       const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
-      const _tenantid = normalizeValue(u._tenantid || u.tenantid || '');
+      const tenant_id = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
       const _unitid = normalizeValue(u._unitid || u.unitid || '');
       return {
         username: u.username || u.email.split('@')[0],
@@ -1015,12 +1030,12 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
         is_admin,
         isAdmin: is_admin,
         mustChangePassword: false,
-        _tenantid,
+        _tenantid: tenant_id,
         _unitid,
-        tenantid: _tenantid,
+        tenantid: tenant_id,
         unitid: _unitid,
         units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
-        tenants: normalizeArray(u.tenants || (_tenantid ? [_tenantid] : []))
+        tenants: normalizeArray(u.tenants || (tenant_id ? [tenant_id] : []))
       };
     });
   } catch (err) {
@@ -1534,7 +1549,7 @@ export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promi
     let query = supabase
       .from('audit_logs')
       .select('*')
-      .eq('_tenantid', tenantid)
+      .eq('tenant_id', tenantid)
       .order('timestamp', { ascending: false });
 
     if (recordId) {
@@ -1565,7 +1580,7 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
     let query = supabase
       .from('asset_logs')
       .select('*')
-      .eq('_tenantid', tenantid)
+      .eq('tenant_id', tenantid)
       .order('timestamp', { ascending: false });
 
     if (assetId) {

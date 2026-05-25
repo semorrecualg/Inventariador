@@ -211,30 +211,35 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           return key ? row[key] : null;
         };
 
-        const codigoAtivo = cleanValue(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA'])).replace(/'/g, "''");
-        const contaContabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil'])).replace(/'/g, "''");
-        const sn1 = row.Sn1_recno || row.SN1_RECNO || 'NULL';
-        const sn3 = row.Sn3_recno || row.SN3_RECNO || 'NULL';
-        
-        const registro = cleanValue(findVal(['REGISTRO', 'RECORD']) || codigoAtivo).replace(/'/g, "''");
-        const descricao = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''");
-        
-        // GBR v2.6: Mapeamento Estrito de Unidade Operacional com Fallback Blindado
-        let unidadeOp = (
-          cleanValue(row.UNIDADE_OPERACIONAL) || 
-          cleanValue(findVal(['UNIDADE_OPERACIONAL', 'UNIDADE', 'UNIT', 'FILIAL', 'LOCALIZACAO'])) || 
-          'MATRIZ'
-        ).trim().toUpperCase().replace(/'/g, "''");
-        
+        // Regra do Excel: 1ª Coluna = tenantId (que assume o lugar de grupoEmp)
+        const tenantIdVal = rowKeys[0] ? cleanValue(row[rowKeys[0]]) : 'CICOPAL';
+        const tenantId = (tenantIdVal || 'CICOPAL').trim();
+        const grupoEmp = tenantId.replace(/'/g, "''");
+
+        // Regra do Excel: 2ª Coluna = filial (que assume o lugar de unidadeOp)
+        const filialVal = rowKeys[1] ? cleanValue(row[rowKeys[1]]) : 'MATRIZ';
+        let unidadeOp = (filialVal || 'MATRIZ').trim().toUpperCase().replace(/'/g, "''");
         if (unidadeOp === '' || unidadeOp === 'NULL' || unidadeOp === 'UNDEFINED') {
           unidadeOp = 'MATRIZ';
         }
 
+        const codigoAtivo = cleanValue(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA'])).replace(/'/g, "''");
+        const contaContabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil'])).replace(/'/g, "''");
+        
+        // Garantindo que sn1_recno e sn3_recno sejam inteiros (bigint remotos)
+        const parsedSn1 = parseInt(String(row.Sn1_recno || row.SN1_RECNO || findVal(['SN1_RECNO']) || '0'), 10) || 0;
+        const parsedSn3 = parseInt(String(row.Sn3_recno || row.SN3_RECNO || findVal(['SN3_RECNO']) || '0'), 10) || 0;
+        
+        const registro = cleanValue(findVal(['REGISTRO', 'RECORD']) || codigoAtivo).replace(/'/g, "''");
+        const descricao = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''");
+        
         const centroCusto = cleanValue(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO'])).replace(/'/g, "''");
-        const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0);
+        
+        // vlraquisic como numérico de ponto flutuante
+        const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0) || 0;
+        
         const dataAquisic = cleanValue(findVal(['DATAAQUISIC', 'DATA'])).replace(/'/g, "''");
         const qt = cleanValue(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''");
-        const grupoEmp = cleanValue(findVal(['GRUPO_EMPRESARIAL', 'GRUPO', 'EMPRESA'])).replace(/'/g, "''");
         const endereco = cleanValue(findVal(['ENDERECO', 'LOCAL'])).replace(/'/g, "''");
 
         // GBR v25: Mapeamento de Localidade via campo 'ENDERECO'
@@ -250,19 +255,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
 
         // Inserção na tabela de ativos (espelhamento contábil)
-        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${sn1}, ${sn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 200, 0);`);
+        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${parsedSn1}, ${parsedSn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 200, 0);`);
         
         // Inserção na tabela mestre (inventário)
         sqlStatements.push(`INSERT OR REPLACE INTO ativos (
           id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
           UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
           QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
-          latitude, longitude, _altitude_metros, _id_andar, currentCampaignId
+          latitude, longitude, _altitude_metros, _id_andar, currentCampaignId,
+          _tenantid, _unitid, tenantId, filial
         ) VALUES (
           '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
           '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
           '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
-          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}'
+          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
+          '${grupoEmp}', '${unidadeOp}', '${tenantId}', '${unidadeOp}'
         );`);
       }
 

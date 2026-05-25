@@ -16,8 +16,10 @@ export interface User {
   is_admin?: boolean; // Novo padrão unificado
   isAdmin?: boolean; // Deprecated: use is_admin
   mustChangePassword?: boolean;
-  _tenantid: string;  // ID da Organização (ex: CICOPAL) - Unificado
-  _unitid?: string;   // Unidade Operacional Padrão - Unificado
+  tenantId: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
+  filial?: string;    // 2ª Coluna / Unidade Operacional - Oficial
+  _tenantid: string;  // ID da Organização (ex: CICOPAL) - Fallback
+  _unitid?: string;   // Unidade Operacional Padrão - Fallback
   tenantid: string;  // Deprecated: use _tenantid
   tenants?: string | string[];  // Deprecated: use _tenantid
   unitid?: string;   // Deprecated: use _unitid
@@ -79,6 +81,10 @@ export interface Asset {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any; 
   id: string | number;
+  
+  // As duas colunas em destaque e prioritárias do novo formato
+  tenantId: string;           // 1ª Coluna: ID do Tenant / Controle Global (with uppercase I!)
+  filial?: string;            // 2ª Coluna: Unidade Operacional (filial)
   
   // Estrutura Mestre v24 (Nomenclatura de Negócio)
   _tenantid?: string; // ID da Organização (Campo Unificado)

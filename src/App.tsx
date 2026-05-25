@@ -731,19 +731,30 @@ const App: React.FC = () => {
         }
         
         let success = false;
-        try {
-          console.log(">>> [App] Tentando inicializar SQLite/Jeep-SQLite com timeout de 25 segundos...");
-          success = await Promise.race([
-            sqliteService.init(),
-            new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 25000))
-          ]);
-        } catch (dbErr) {
-          console.error(">>> [App - Failsafe] Falha ou Timeout (25s) ao inicializar o Jeep-SQLite. Entrando em modo degradado / contingência de memória.", dbErr);
-          success = true; // Força sucesso logico para avançar em contingência
-        } finally {
-          setDbInitialized(true);
-          setSqliteStatus('ACTIVE');
+        let attempts = 0;
+        const maxAttempts = 3;
+        
+        while (attempts < maxAttempts && !success) {
+          attempts++;
+          try {
+            console.log(`>>> [App] Tentando inicializar SQLite/Jeep-SQLite (Tentativa ${attempts}/${maxAttempts})...`);
+            success = await Promise.race([
+              sqliteService.init(attempts > 1), // Se for a 2ª ou 3ª tentativa, força reset e reconexão limpa no registro
+              new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 12000)) // 12s de tempo limite por tentativa
+            ]);
+          } catch (dbErr) {
+            console.warn(`>>> [App - Warning] Falha na tentativa ${attempts} de bootstrap do SQLite:`, dbErr);
+            if (attempts < maxAttempts) {
+              console.log(">>> [App] Aguardando 1.5s para acomodação de threads de banco nativas antes da re-tentativa...");
+              await new Promise(resolve => setTimeout(resolve, 1500));
+            } else {
+              console.error(">>> [App - Failsafe] Todas as tentativas falharam ou esgotaram o limite de tempo. Entrando em modo degradado / contingência de memória.", dbErr);
+              success = true; // Avança o fluxo lógico com a contingência em memória ativa
+            }
+          }
         }
+        setDbInitialized(true);
+        setSqliteStatus('ACTIVE');
 
         if (!isMounted) return;
 
@@ -1213,11 +1224,15 @@ const App: React.FC = () => {
       if (firstValid) t = (firstValid._tenantid || firstValid.GRUPO_EMPRESARIAL || '').trim();
     }
 
+    if (t === "UNIDADE_DEFAULT_KARDEK" || t === "CARREGANDO...") return '';
+
     return t || '';
   }, [user, inventory.assets]);
 
   const currentUnitId = useMemo(() => {
-    return (selectedUnit || user?._unitid || user?.unitid || '').trim();
+    const val = (selectedUnit || user?._unitid || user?.unitid || '').trim();
+    if (val === "UNIDADE_DEFAULT_KARDEK" || val === "CARREGANDO...") return '';
+    return val;
   }, [selectedUnit, user]);
 
   useEffect(() => {
@@ -1765,8 +1780,50 @@ const App: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error('Erro ao sincronizar da nuvem:', error);
-      setSyncError('Erro na conexão');
+      const err = error as Record<string, unknown>;
+      console.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
+      const errMsg = String(err?.message || error || '').toLowerCase();
+      const isSuspendedNetwork = errMsg.includes('suspended') || 
+                                errMsg.includes('io') || 
+                                errMsg.includes('network') || 
+                                errMsg.includes('failed to fetch') || 
+                                errMsg.includes('fetch') || 
+                                errMsg.includes('timeout') ||
+                                errMsg.includes('abort') ||
+                                errMsg.includes('load failed') ||
+                                err?.status === 0;
+
+      if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
+        console.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
+        
+        // Chaveia estados para operação offline integrada
+        setDatabaseMode(DatabaseMode.INTERNAL);
+        localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
+        setIsFieldMode(true);
+        localStorage.setItem('kardek_field_mode', 'true');
+
+        try {
+          await sqliteService.forceSync();
+          const loaded = await sqliteService.loadStateCompleto();
+          if (loaded && loaded.assets && loaded.assets.length > 0) {
+            setInventory(loaded);
+            setRecoverySource('PHYSICAL');
+            setShowRecoveryToast(true);
+            setTimeout(() => setShowRecoveryToast(false), 5000);
+          }
+        } catch (sqliteLoadErr) {
+          console.error(">>> [Sync - Contingência] Não foi possível carregar dados estruturados via SQLite local pós-falha:", sqliteLoadErr);
+        }
+
+        setModalConfig({
+          isOpen: true,
+          title: 'Conexão Suspensa - Modo Local Ativo',
+          message: 'Foi identificada uma suspensão no canal de tráfego de rede da WebView. O aplicativo fez a transição dinâmica para o modo de Soberania Nativa (offline com base física SQLite) para proteger todas as suas operações locais.',
+          type: 'warning'
+        });
+      }
+
+      setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
     } finally {
       setIsSyncing(false);
     }
@@ -4859,9 +4916,17 @@ const App: React.FC = () => {
                 localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
               }
 
+              // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
+              const defaultTenant = u.tenants || u.tenantid || 'CICOPAL';
+              const defaultUnit = u.unitid || u._unitid || 'MATRIZ';
+              
+              setSelectedUnit(defaultUnit);
+              localStorage.setItem('app_selected_unit', defaultUnit);
+              localStorage.setItem('app_current_unit', defaultUnit);
+
               if (databaseMode !== DatabaseMode.INTERNAL) {
-                console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem...');
-                syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
+                console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem com contexto real...');
+                syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit);
               }
 
               const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
@@ -5082,11 +5147,19 @@ const App: React.FC = () => {
                   localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
                 }
 
+                // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
+                const defaultTenant = u.tenants || u.tenantid || 'CICOPAL';
+                const defaultUnit = u.unitid || u._unitid || 'MATRIZ';
+                
+                setSelectedUnit(defaultUnit);
+                localStorage.setItem('app_selected_unit', defaultUnit);
+                localStorage.setItem('app_current_unit', defaultUnit);
+
                 // Sempre tenta sincronizar no login para garantir dados frescos e permissões atualizadas
                 // Isso evita conflitos com caches locais ou sessões anteriores incompletas
                 if (databaseMode !== DatabaseMode.INTERNAL) {
-                  console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem...');
-                  syncFromCloud(u.tenants || u.tenantid, DatabaseMode.SUPABASE);
+                  console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem com contexto real...');
+                  syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit);
                 }
 
                 const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
