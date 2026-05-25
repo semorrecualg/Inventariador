@@ -179,8 +179,8 @@ const App: React.FC = () => {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [inventory, setInventory] = useState<InventoryState>(() => {
-    const defaultMode = isInternalMode ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE;
-    const mode = (localStorage.getItem('app_database_mode') as DatabaseMode) || defaultMode;
+    const savedMode = localStorage.getItem('app_database_mode') as DatabaseMode;
+    const mode = savedMode || DatabaseMode.SUPABASE;
     return getInitialInventoryState(mode);
   });
 
@@ -245,7 +245,6 @@ const App: React.FC = () => {
   const [unsyncedAssetsCount, setUnsyncedAssetsCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
-    if (isInternalMode) return DatabaseMode.INTERNAL;
     const saved = localStorage.getItem('app_database_mode');
     return (saved as DatabaseMode) || DatabaseMode.SUPABASE;
   });
@@ -2837,6 +2836,28 @@ const App: React.FC = () => {
         const resolvedTenantId = permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || (is_master ? 'CICOPAL' : '');
         const resolvedUnitId = permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || (is_master ? 'MATRIZ' : '');
 
+        if (!resolvedTenantId && !is_master) {
+          console.warn(`[Auth] Usuário logado sem tenantId associado: ${session.user.email}`);
+          setIsSessionValid(false);
+          setUser(null);
+          localStorage.removeItem('app_current_user');
+          setHistory([AppScreen.LOGIN]);
+          
+          if (supabase) {
+            await supabase.auth.signOut();
+          }
+
+          setModalConfig({
+            isOpen: true,
+            title: 'Erro de Configuração',
+            message: 'Erro de Configuração: Perfil de usuário sem vínculo de empresa ativo. Contate o administrador.',
+            type: 'error',
+            onConfirm: () => {}
+          });
+          setIsLoading(false);
+          return;
+        }
+
         const loggedUser: User = {
           id: session.user.id,
           email: session.user.email || '',
@@ -4907,6 +4928,7 @@ const App: React.FC = () => {
             onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
             onUpdateScreen={(s) => setHistory([s])}
             onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
+            onUpdateDatabaseMode={handleUpdateDatabaseMode}
             onLogin={async (u) => { 
               setUser(u); 
               localStorage.setItem('app_current_user', safeStringify(u));
@@ -5137,6 +5159,7 @@ const App: React.FC = () => {
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onUpdateScreen={(s) => setHistory([s])}
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
+              onUpdateDatabaseMode={handleUpdateDatabaseMode}
               onLogin={async (u) => { 
                 setUser(u); 
                 localStorage.setItem('app_current_user', safeStringify(u));

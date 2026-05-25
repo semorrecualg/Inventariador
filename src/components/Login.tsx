@@ -17,6 +17,7 @@ interface LoginProps {
   onShowModal: (config: Partial<ModalConfig>) => void;
   isDatabaseEmpty?: boolean;
   isKeyboardVisible?: boolean;
+  onUpdateDatabaseMode?: (mode: DatabaseMode) => void;
 }
 
 // Login Component
@@ -28,7 +29,8 @@ const Login: React.FC<LoginProps> = ({
   onUpdateScreen, 
   onShowModal,
   isDatabaseEmpty = false,
-  isKeyboardVisible = false
+  isKeyboardVisible = false,
+  onUpdateDatabaseMode
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -367,6 +369,33 @@ const Login: React.FC<LoginProps> = ({
             units: normalizeArray(cloudUser.units || (unitId ? [unitId] : [])),
             tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
           };
+
+          if (!tenantId && !is_master) {
+            console.warn('[Login] Bloqueando login pois tenantId está nulo ou vazio no perfil.');
+            if (supabase) {
+              await supabase.auth.signOut();
+            }
+            throw new Error("Erro de Configuração: Perfil de usuário sem vínculo de empresa ativo. Contate o administrador.");
+          }
+
+          // Persistência local no SQLite para habilitar login offline subsequente (Soberania Nativa)
+          try {
+            const userToPersist = {
+              id: loggedUser.id || loggedUser.email,
+              username: loggedUser.username,
+              name: loggedUser.name,
+              email: loggedUser.email,
+              password: password, // plaintext password Typed by user for offline matching
+              role: loggedUser.role,
+              is_admin: loggedUser.is_admin ? 1 : 0,
+              _tenantid: loggedUser._tenantid,
+              _unitid: loggedUser._unitid
+            };
+            console.log('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
+            await localDb.users.add(userToPersist as unknown as User);
+          } catch (dbPersistErr) {
+            console.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
+          }
         } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
           console.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
           
@@ -489,12 +518,23 @@ const Login: React.FC<LoginProps> = ({
       {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
       {!isKeyboardVisible && (
         <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
-          {/* Indicador de Plataforma */}
-          <div className="absolute top-0 right-0 bg-accent-soft px-2 py-0.5 rounded-full border border-accent/10">
-            <span className="text-[6px] font-black text-accent uppercase tracking-widest">
-              {databaseMode === DatabaseMode.INTERNAL ? 'MOBILE' : (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'MOBILE' : 'DESKTOP')}
+          {/* Seletor de Ambiente Dinâmico GBR v2.6 */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onUpdateDatabaseMode) {
+                const nextMode = databaseMode === DatabaseMode.INTERNAL ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
+                onUpdateDatabaseMode(nextMode);
+              }
+            }}
+            className="absolute top-0 right-0 bg-accent/10 border border-accent/20 hover:bg-accent/20 active:scale-95 transition-all px-2.5 py-1 rounded-full flex items-center gap-1.5 cursor-pointer z-[100]"
+            title="Clique para alternar o ambiente de dados"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${databaseMode === DatabaseMode.INTERNAL ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></span>
+            <span className="text-[7px] font-black text-ink uppercase tracking-wider">
+              {databaseMode === DatabaseMode.INTERNAL ? 'AMBIENTE: MOBILE (LOCAL)' : 'AMBIENTE: NUVEM (ONLINE)'}
             </span>
-          </div>
+          </button>
 
           <div className="w-24 h-24 bg-white border border-border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main">
             <img 
@@ -529,11 +569,17 @@ const Login: React.FC<LoginProps> = ({
 
       <div className="mb-4 max-w-sm mx-auto w-full">
         {databaseMode === DatabaseMode.INTERNAL && (
-          isDatabaseEmpty ? (
-            <div className="mt-3 p-3 bg-blue-50/50 border border-blue-100 rounded-2xl">
-              <p className="text-[8px] font-black text-blue-700 uppercase tracking-tight leading-tight text-center">
-                ⚠️ Banco de dados local vazio. Aguardando carga inicial do administrador.
-              </p>
+          (isDatabaseEmpty || users.length === 0) ? (
+            <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2 text-left">
+              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] font-black text-amber-800 uppercase tracking-wider leading-tight">
+                  Carga local vazia
+                </p>
+                <p className="text-[8.5px] font-bold text-amber-700 leading-normal uppercase mt-0.5">
+                  Realize o primeiro login online para sincronizar.
+                </p>
+              </div>
             </div>
           ) : users.length <= 1 ? (
             <div className="mt-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
