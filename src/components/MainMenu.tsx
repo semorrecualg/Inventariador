@@ -40,7 +40,8 @@ import {
   Calendar,
   FolderOpen,
   HardDrive,
-  HelpCircle
+  HelpCircle,
+  PenTool
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
@@ -157,8 +158,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   showModal,
   isAIAssistantOpen,
   setIsAIAssistantOpen,
-  onOpenHelp,
-  currentCampaignId
+  onOpenHelp
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
@@ -261,7 +261,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn relative overflow-hidden">
+    <div className="flex-1 w-full flex flex-col bg-bg-main animate-fadeIn relative overflow-hidden">
       <SecurityPinModal 
         isOpen={isSecurityPinOpen}
         onClose={() => setIsSecurityPinOpen(false)}
@@ -270,7 +270,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         description="Esta operação exige autenticação adicional com seu PIN de segurança."
       />
       {/* TOP STATUS BAR - REDESIGNED */}
-      <div className="px-6 pt-10 pb-4 bg-white flex items-center justify-between z-30">
+      <div className="px-6 pt-8 pb-4 bg-surface border-b border-border flex items-center justify-between z-30">
         <div className="flex items-center space-x-3">
           <button 
             id="main-menu-back-btn"
@@ -332,7 +332,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
       {/* TOOL GRID - MINIMALIST */}
-      <div className="px-6 py-4 bg-white border-b border-slate-50 flex items-center justify-between">
+      <div className="px-6 py-4 bg-surface border-b border-border flex items-center justify-between">
         <div className="flex items-center space-x-1.5 md:space-x-4 font-sans">
           <button 
             onClick={() => setIsPreferencesMenuOpen(true)} 
@@ -393,72 +393,101 @@ const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
 
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans">
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans w-full">
+        {/* Module 1: INVENTÁRIO */}
         <button
           onClick={() => onChangeUnit ? onChangeUnit() : onNavigate(AppScreen.UNIT_SELECTION)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
         >
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
             <Building2 size={24} />
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-base font-bold text-ink tracking-tight">INVENTÁRIO</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Seleção de Unidade</p>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Seleção de Unidade e Coleta</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-indigo-600 transition-colors" />
         </button>
 
+        {/* Module 2: FICHA DO ATIVO */}
         <button
-          disabled={!hasData}
+          onClick={() => onNavigate(AppScreen.CONSULTATION)}
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:50ms]"
+        >
+          <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+            <FileText size={24} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className="text-base font-bold text-ink tracking-tight">FICHA DO ATIVO</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Visualizar Kardex do Item</p>
+          </div>
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-purple-600 transition-colors" />
+        </button>
+
+        {/* Module 3: ETIQUETAR */}
+        <button
           onClick={() => onNavigate(AppScreen.LABELING)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:100ms]"
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:100ms]"
         >
           <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
             <Tag size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">ETIQUETAR</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Itens sem plaqueta</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">ETIQUETAR ATIVOS</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Itens sem plaqueta / Novas Tags</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
         </button>
 
+        {/* Module 4: CONSULTA */}
         <button
-          disabled={!hasData}
           onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:200ms]"
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:150ms]"
         >
-          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+          <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-amber-600 group-hover:text-white transition-colors">
             <Search size={24} />
           </div>
           <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">CONSULTA</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Busca de Ativo</p>
+            <h3 className="text-base font-bold text-ink tracking-tight">CONSULTA DE ATIVOS</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Busca rápida e localização</p>
           </div>
-          <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-amber-600 transition-colors" />
         </button>
 
-        {currentCampaignId && (
-          <button
-            disabled={!hasData}
-            onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
-            className="w-full flex items-center p-5 bg-white rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:250ms]"
-          >
-            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-              <ListChecks size={24} />
-            </div>
-            <div className="flex-1 text-left">
-              <h3 className="text-base font-bold text-ink tracking-tight">CONCILIAÇÃO POR CONTAS</h3>
-              <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conciliação por Blocos</p>
-            </div>
-            <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
-          </button>
-        )}
+        {/* Module 5: CONCILIACAO */}
+        <button
+          onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:200ms]"
+        >
+          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+            <ListChecks size={24} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className="text-base font-bold text-ink tracking-tight">CONCILIAÇÃO POR CONTAS</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Conciliação por blocos e contas</p>
+          </div>
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
+        </button>
+
+        {/* Module 6: ASSINATURA DIGITAL */}
+        <button
+          onClick={() => onNavigate(AppScreen.SIGNATURE)}
+          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:250ms]"
+        >
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+            <PenTool size={24} />
+          </div>
+          <div className="flex-1 text-left">
+            <h3 className="text-base font-bold text-ink tracking-tight">ASSINATURA DIGITAL</h3>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Termo de Encerramento Físico</p>
+          </div>
+          <ChevronRight size={20} className="text-slate-300 group-hover:text-rose-600 transition-colors" />
+        </button>
       </div>
 
 
-      <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center">
-        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.4em]">Auditoria Inteligente • SaaS</span>
+      <div className="p-4 bg-surface border-t border-border flex items-center justify-center">
+        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.4em]">Auditoria Inteligente • SaaS</span>
       </div>
 
       <AIChatModal 
