@@ -1,12 +1,13 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { APP_LOGO } from '../constants';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
+import { demoService } from '../services/demoService';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -103,9 +104,21 @@ const Login: React.FC<LoginProps> = ({
   };
 
   const handleClearSession = async () => {
+    // Busca telemetria de erro persistida localmente se houver
+    const lastDbErrorStr = localStorage.getItem('gbr_kardex_last_db_error');
+    let dbErrorMessage = '';
+    if (lastDbErrorStr) {
+      try {
+        const parsed = JSON.parse(lastDbErrorStr);
+        dbErrorMessage = `\n\n[TELEMETRIA DE ERRO DO BANCO]:\nErro: ${parsed.message || lastDbErrorStr}\nData/Hora: ${parsed.timestamp || ''}\n\n`;
+      } catch {
+        dbErrorMessage = `\n\n[TELEMETRIA DE ERRO DO BANCO]:\n${lastDbErrorStr}\n\n`;
+      }
+    }
+
     onShowModal({
       title: 'Redefinir Acesso Local',
-      message: 'Esta ação deslogará o usuário e redefinirá as configurações de acesso. Seus dados de auditoria salvos no SQLite permanecerão intactos. Deseja continuar?',
+      message: `Esta ação deslogará o usuário e redefinirá as configurações de acesso. Seus dados de auditoria salvos no SQLite permanecerão intactos.${dbErrorMessage}Deseja continuar?`,
       type: 'confirm',
       showCancel: true,
       confirmText: 'Redefinir Agora',
@@ -140,6 +153,38 @@ const Login: React.FC<LoginProps> = ({
         }
       }
     });
+  };
+
+  const handleDemoLogin = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      console.log('[Login] Inicializando modo de degustação DEMO...');
+      const success = await demoService.initDemoSession();
+      if (success) {
+        // Altera modo para usar SQLite localmente como fonte da verdade
+        onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
+        const demoUser = demoService.getDemoUser();
+        onLogin(demoUser);
+      } else {
+        const lastErrStr = localStorage.getItem('gbr_kardex_last_db_error');
+        let errorHint = '';
+        if (lastErrStr) {
+          try {
+            const parsed = JSON.parse(lastErrStr);
+            errorHint = `: ${parsed.message}`;
+          } catch {
+            errorHint = `: ${lastErrStr}`;
+          }
+        }
+        setError(`Erro ao iniciar base demonstrativa de dados locais${errorHint}.`);
+      }
+    } catch (err) {
+      console.error('[Login] Erro ao instanciar demonstração:', err);
+      setError(`Erro ao preparar banco de dados temporário: ${err instanceof Error ? err.message : String(err)}.`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -658,6 +703,17 @@ const Login: React.FC<LoginProps> = ({
           >
             <Fingerprint size={18} />
             <span>Entrar com Biometria</span>
+          </button>
+        )}
+
+        {!isLoading && (
+          <button 
+            type="button"
+            onClick={handleDemoLogin}
+            className="w-full bg-slate-900 hover:bg-slate-850 text-emerald-400 font-extrabold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] border border-emerald-500/20 transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+          >
+            <Sparkles size={16} className="text-emerald-400 animate-pulse" />
+            <span>Experimentar Grátis (Modo Demo)</span>
           </button>
         )}
       </form>

@@ -8,10 +8,47 @@ type SqlValue = string | number | boolean | null;
 // Colunas válidas para a tabela assets (conforme definido em sqliteService.ts)
 const ASSET_COLUMNS = DB_ASSET_COLUMNS;
 
+export const TABLE_COLUMNS: Record<string, string[]> = {
+  ativos: ASSET_COLUMNS,
+  users: ['id', 'username', 'name', 'email', 'password', 'role', 'is_admin', '_tenantid', '_unitid'],
+  unit_configs: ['id', 'selectedUnit', 'currentCampaignId', 'updated_at']
+};
+
+export const getCurrentTenantId = (): string => {
+  try {
+    const userStr = localStorage.getItem('app_current_user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      return user._tenantid || user.tenantid || 'DEMO_DEFAULT';
+    }
+  } catch { /* ignore */ }
+  return 'DEMO_DEFAULT';
+};
+
+const handleDemoAuditIncrement = () => {
+  try {
+    const sessionUser = localStorage.getItem('app_current_user');
+    if (sessionUser) {
+      const parsed = JSON.parse(sessionUser);
+      if (parsed && (parsed.role === 'DEMO' || parsed.role === 'usuario_demo')) {
+        const count = parseInt(localStorage.getItem('gbr_kardex_demo_audits') || '0', 10) + 1;
+        localStorage.setItem('gbr_kardex_demo_audits', count.toString());
+        console.log(`>>> [DEMO MODE] Coleta registrada! Nova contagem de coletas: ${count}/30`);
+      }
+    }
+  } catch { /* ignore */ }
+};
+
 // Helper para converter objeto em colunas e valores SQL, filtrando chaves inválidas
-const getUpsertSql = (table: string, obj: Record<string, unknown>) => {
+export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => {
+  const obj = { ...srcObj };
+  if (table === 'ativos') {
+    const tenant = getCurrentTenantId();
+    if (!obj.tenantId) obj.tenantId = tenant;
+    if (!obj._tenantid) obj._tenantid = tenant;
+  }
   const keys = Object.keys(obj).filter(k => {
-    if (table === 'ativos') return ASSET_COLUMNS.includes(k);
+    if (TABLE_COLUMNS[table]) return TABLE_COLUMNS[table].includes(k);
     return true; // Para outras tabelas, mantém comportamento original por enquanto
   });
   
@@ -26,7 +63,7 @@ const getUpsertSql = (table: string, obj: Record<string, unknown>) => {
     if (val !== null && typeof val === 'object') return JSON.stringify(val);
     return val as SqlValue;
   });
-
+  
   return { sql, values };
 };
 
@@ -35,6 +72,7 @@ export const localDb = {
     add: async (asset: Asset, userId?: string) => {
       const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
       await sqliteService.execute(sql, values);
+      handleDemoAuditIncrement();
       if (userId) {
         await sqliteService.logAuditEvent(userId, 'CREATE', 'ativos', asset.id, 'Criação de ativo manual', JSON.stringify(asset));
       }
@@ -45,6 +83,7 @@ export const localDb = {
     put: async (asset: Asset, userId?: string) => {
       const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
       localDb.assets._mutationBuffer.push({ sql, params: values });
+      handleDemoAuditIncrement();
       
       if (userId) {
         // Log de auditoria também entra no buffer para ser atômico
@@ -66,6 +105,7 @@ export const localDb = {
       localDb.assets._mutationBuffer = [];
     },
     getMapData: async (campaignId: string): Promise<Asset[]> => {
+      const tenant = getCurrentTenantId();
       const sql = `
         SELECT 
           id, latitude, longitude, _altitude_metros, _id_andar, VLRAQUISIC, 
@@ -74,8 +114,9 @@ export const localDb = {
         FROM ativos 
         WHERE currentCampaignId = ? 
           AND _is_deleted = 0
+          AND (tenantId = ? OR _tenantid = ?)
       `;
-      const results = await sqliteService.query(sql, [campaignId]) as Record<string, unknown>[];
+      const results = await sqliteService.query(sql, [campaignId, tenant, tenant]) as Record<string, unknown>[];
       return results.map(row => ({
         ...row,
         _conferido: row._conferido === 1
@@ -96,19 +137,22 @@ export const localDb = {
       const setClause = keys.map(k => `${k} = ?`).join(', ');
       const sql = `UPDATE ativos SET ${setClause} WHERE id = ?`;
       await sqliteService.execute(sql, [...Object.values(changes) as SqlValue[], id]);
+      handleDemoAuditIncrement();
       if (userId) {
         await sqliteService.logAuditEvent(userId, 'UPDATE', 'ativos', id, 'Atualização de ativo', JSON.stringify(changes));
       }
     },
     count: async () => {
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM ativos");
+      const tenant = getCurrentTenantId();
+      const res = await sqliteService.query("SELECT COUNT(*) as count FROM ativos WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]);
       return (res[0] as unknown as { count: number })?.count || 0;
     },
     clear: async () => {
       await sqliteService.execute("DELETE FROM ativos");
     },
     toArray: async () => {
-      const results = await sqliteService.query("SELECT * FROM ativos") as Record<string, unknown>[];
+      const tenant = getCurrentTenantId();
+      const results = await sqliteService.query("SELECT * FROM ativos WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]) as Record<string, unknown>[];
       return results.map(row => {
         const asset = { ...row } as Record<string, unknown>;
         // Converte 0/1 de volta para boolean para o React
@@ -129,23 +173,25 @@ export const localDb = {
     where: (field: string) => ({
       equals: (value: SqlValue | SqlValue[]) => ({
         first: async () => {
+          const tenant = getCurrentTenantId();
           if (Array.isArray(value)) {
             // Suporte para chaves compostas ex: [ETIQUETA+UNIDADE_OPERACIONAL]
             const fields = field.replace('[', '').replace(']', '').split('+');
             const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} LIMIT 1`, value);
+            const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} AND (tenantId = ? OR _tenantid = ?) LIMIT 1`, [...value, tenant, tenant]);
             return res[0] as unknown as Asset || null;
           }
-          const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? LIMIT 1`, [value]);
+          const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? AND (tenantId = ? OR _tenantid = ?) LIMIT 1`, [value, tenant, tenant]);
           return res[0] as unknown as Asset || null;
         },
         toArray: async () => {
+          const tenant = getCurrentTenantId();
           if (Array.isArray(value)) {
             const fields = field.replace('[', '').replace(']', '').split('+');
             const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            return await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause}`, value) as unknown as Asset[];
+            return await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} AND (tenantId = ? OR _tenantid = ?)`, [...value, tenant, tenant]) as unknown as Asset[];
           }
-          return await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ?`, [value]) as unknown as Asset[];
+          return await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? AND (tenantId = ? OR _tenantid = ?)`, [value, tenant, tenant]) as unknown as Asset[];
         }
       })
     }),

@@ -72,6 +72,7 @@ import { isBiometricSupported, hasBiometricRegistered } from './services/biometr
 import { safeStringify } from './services/utils';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
+import { demoService } from './services/demoService';
 import { requestAllPermissions } from './services/permissionsService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
@@ -1650,6 +1651,31 @@ const App: React.FC = () => {
     
     // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
     const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
+
+    // BACKUP PARA MOBILE_SINGLE
+    if (user && user.role === ('MOBILE_SINGLE' as unknown as UserRole)) {
+      console.log('>>> [Sync] Perfil MOBILE_SINGLE detectado. Iniciando backup automático em cloud...');
+      setIsSyncing(true);
+      try {
+        const { backupService } = await import('./services/backupService');
+        const res = await backupService.performMobileSingleBackup(user.id || user.email);
+        if (res.success) {
+          setLastSyncTime(new Date().toISOString());
+          setSyncError(null);
+          setRecoverySource('CLOUD');
+          setShowRecoveryToast(true);
+          setTimeout(() => setShowRecoveryToast(false), 5000);
+        } else {
+          setSyncError(res.error || 'Falha no backup cloud');
+        }
+      } catch (backupErr) {
+        console.error('[Sync] Falha crítica ao executar backup do Mobile Single:', backupErr);
+        setSyncError(String(backupErr));
+      } finally {
+        setIsSyncing(false);
+      }
+      return;
+    }
     
     console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
     
@@ -4878,7 +4904,7 @@ const App: React.FC = () => {
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
-  const isSessionCurrentlyValid = isInternalMode || isSessionValid;
+  const isSessionCurrentlyValid = isInternalMode || isSessionValid || (user && user.role === ('DEMO' as unknown as UserRole));
   const isUserAuthenticated = !!user && isSessionCurrentlyValid;
 
   console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
@@ -4985,6 +5011,68 @@ const App: React.FC = () => {
   }
 
   console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DA APLICAÇÃO PRINCIPAL. Screen:", screen);
+
+  // INTERCEPTOR DE EXPIRAÇÃO DA DEMONSTRAÇÃO (PERFIL DEMO)
+  if (user && user.role === ('DEMO' as unknown as UserRole) && demoService.checkDemoStatus().expired) {
+    const status = demoService.checkDemoStatus();
+    return (
+      <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center p-8 text-white font-sans">
+        <div className="bg-red-500/10 border border-red-500/30 p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
+          <AlertTriangle size={44} className="text-red-500 mx-auto mb-4 animate-bounce" />
+          <h2 className="text-sm font-black uppercase tracking-[0.2em] text-red-400 mb-2">Demonstração Expirada</h2>
+          <p className="text-[11px] text-slate-300 leading-relaxed mb-6 uppercase tracking-wider font-semibold">
+            {status.reason === 'days' 
+              ? 'Seu período de degustação de 7 dias expirou.' 
+              : `Você atingiu o limite de 30 auditorias no modo demonstração (${status.auditsCount}/30).`}
+            <br />
+            Para continuar utilizando o GBR Kardex de maneira profissional no galpão, realize o upgrade do seu licenciamento.
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                // Simula upgrade de demonstração para Mobile Single
+                setModalConfig({
+                  isOpen: true,
+                  title: 'Parabéns!',
+                  message: 'Upgrade simulado realizado com sucesso! Você agora possui uma licença MOBILE SINGLE ativa ilimitada.',
+                  type: 'success',
+                  onConfirm: () => {
+                    // Transiciona o usuário para MOBILE_SINGLE
+                    const updatedUser: User = {
+                      ...user,
+                      role: 'MOBILE_SINGLE' as unknown as UserRole,
+                      _tenantid: user.id || 'MOBILE_USER',
+                      tenantid: user.id || 'MOBILE_USER',
+                    };
+                    setUser(updatedUser);
+                    localStorage.setItem('app_current_user', safeStringify(updatedUser));
+                    // Salva no SQLite local
+                    localDb.users.add(updatedUser);
+                  }
+                });
+              }}
+              className="w-full bg-[#10B981] hover:bg-emerald-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95 shadow-md shadow-emerald-500/20"
+            >
+              Fazer Upgrade para Mobile Single (Ilimitado)
+            </button>
+            <button
+              onClick={async () => {
+                if (supabase) {
+                  await supabase.auth.signOut();
+                }
+                localStorage.removeItem('app_current_user');
+                setUser(null);
+                setHistory([AppScreen.LOGIN]);
+              }}
+              className="w-full bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-400 font-bold py-3 rounded-2xl text-[9px] uppercase tracking-wider transition-all"
+            >
+              Voltar ao Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (initError) {
     return (
@@ -5163,6 +5251,19 @@ const App: React.FC = () => {
               onLogin={async (u) => { 
                 setUser(u); 
                 localStorage.setItem('app_current_user', safeStringify(u));
+
+                if (u.role === ('DEMO' as unknown as UserRole)) {
+                  setInventory(prev => ({
+                    ...prev,
+                    currentCampaignId: 'DEMO_CAMPAIGN',
+                    status: DatabaseStatus.LOADED
+                  }));
+                  setSelectedUnit('MATRIZ');
+                  localStorage.setItem('app_selected_unit', 'MATRIZ');
+                  localStorage.setItem('app_current_unit', 'MATRIZ');
+                  setHistory([AppScreen.MAIN_MENU]);
+                  return;
+                }
                 
                 // Se logou via Supabase, garante que o modo está correto
                 if (databaseMode !== DatabaseMode.INTERNAL) {
