@@ -2584,6 +2584,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (sessionStorage.getItem('__gbr_allow_reload') === 'true') {
+        sessionStorage.removeItem('__gbr_allow_reload');
+        return;
+      }
       if (inventory.assets.length > 0 && inventory.status !== DatabaseStatus.EMPTY) {
         e.preventDefault();
         e.returnValue = 'Inventário em curso. Deseja realmente sair? Seus dados estão salvos no dispositivo.';
@@ -3040,8 +3044,18 @@ const App: React.FC = () => {
         processSession(session);
       } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED' || !isValid) {
         // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
-        const currentUser = localStorage.getItem('app_current_user');
-        if (currentUser && databaseMode === DatabaseMode.SUPABASE) {
+        const currentUserStr = localStorage.getItem('app_current_user');
+        let isLocalUser = false;
+        try {
+          if (currentUserStr) {
+            const parsed = JSON.parse(currentUserStr);
+            if (parsed.username === 'admin' || parsed.username === 'semorr' || parsed.role === 'DEMO' || parsed._tenantid === 'DEMO_DEFAULT' || parsed.tenantid === 'DEMO_DEFAULT') {
+              isLocalUser = true;
+            }
+          }
+        } catch { /* ignore */ }
+
+        if (currentUserStr && databaseMode === DatabaseMode.SUPABASE && !isLocalUser) {
           console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
           setModalConfig({
             isOpen: true,
@@ -3238,6 +3252,7 @@ const App: React.FC = () => {
         onConfirm: () => {
           // Recarrega a página para garantir que todos os serviços (Supabase, Sync, etc) 
           // sejam reinicializados com as novas flags de blindagem técnica.
+          sessionStorage.setItem('__gbr_allow_reload', 'true');
           window.location.reload();
         }
       });
@@ -5214,7 +5229,7 @@ const App: React.FC = () => {
           </div>
         )}
         
-        <div className="flex-1 relative overflow-y-auto z-[500] no-scrollbar">
+        <div className="flex-1 w-full flex flex-col relative overflow-y-auto z-[500] no-scrollbar min-h-0">
           {integrityFailed && (
         <div className="fixed top-20 left-4 right-4 z-[100] bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-white/20 animate-bounce flex items-center space-x-3">
           <AlertTriangle className="flex-shrink-0" size={24} />

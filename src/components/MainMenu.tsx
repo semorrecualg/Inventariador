@@ -261,7 +261,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
   return (
-    <div className="flex-1 w-full flex flex-col bg-bg-main animate-fadeIn relative overflow-hidden">
+    <div className="flex-1 w-full flex flex-col bg-bg-main animate-fadeIn relative overflow-hidden min-h-full">
       <SecurityPinModal 
         isOpen={isSecurityPinOpen}
         onClose={() => setIsSecurityPinOpen(false)}
