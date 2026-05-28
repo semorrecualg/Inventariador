@@ -17,4 +17,24 @@ export default [
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
   pluginReactConfig,
+  {
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        {
+          "name": "screen",
+          "message": "Use a local variable or a state variable instead of the global window.screen."
+        },
+        {
+          "name": "name",
+          "message": "Use a local variable instead of the global window.name."
+        },
+        {
+          "name": "length",
+          "message": "Use a local variable instead of the global window.length."
+        }
+      ]
+    }
+  }
 ];
+

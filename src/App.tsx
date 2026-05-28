@@ -278,7 +278,7 @@ const App: React.FC = () => {
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [history, setHistory] = useState<AppScreen[]>(() => {
+  const [history, setHistoryVal] = useState<AppScreen[]>(() => {
     try {
       const saved = localStorage.getItem('app_screen_history');
       if (saved) {
@@ -288,6 +288,27 @@ const App: React.FC = () => {
     } catch { /* ignore */ }
     return [AppScreen.LOGIN];
   });
+
+  const [screen, setScreenState] = useState<AppScreen>(() => {
+    try {
+      const saved = localStorage.getItem('app_screen_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed[parsed.length - 1];
+      }
+    } catch { /* ignore */ }
+    return AppScreen.LOGIN;
+  });
+
+  const setHistory = useCallback((update: AppScreen[] | ((prev: AppScreen[]) => AppScreen[])) => {
+    setHistoryVal(prev => {
+      const nextHistory = typeof update === 'function' ? update(prev) : update;
+      const finalHistory = Array.isArray(nextHistory) && nextHistory.length > 0 ? nextHistory : [AppScreen.LOGIN];
+      localStorage.setItem('app_screen_history', JSON.stringify(finalHistory));
+      setScreenState(finalHistory[finalHistory.length - 1] || AppScreen.LOGIN);
+      return finalHistory;
+    });
+  }, []);
 
   const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
     try {
@@ -853,28 +874,71 @@ const App: React.FC = () => {
               try {
                 setAuthLoading(true);
                 console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
-                const { data: { session } } = await supabase.auth.getSession();
+                
+                const sessionPromise = supabase.auth.getSession();
+                const timeoutPromise = new Promise<{ data: { session: null } }>(resolve => 
+                  setTimeout(() => resolve({ data: { session: null } }), 3500)
+                );
+                
+                const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
                 
                 // REQUISITO 1: Checagem Estrita do Objeto de Sessão
                 const isValid = !!session && !!session.user && typeof session.user.id === "string";
                 setIsSessionValid(isValid);
                 
                 if (!isValid) {
-                  console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
-                  setUser(null);
-                  localStorage.removeItem('app_current_user');
-                  setHistory([AppScreen.LOGIN]);
+                  // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
+                  const currentUserStr = localStorage.getItem('app_current_user');
+                  let isLocal = false;
+                  if (currentUserStr) {
+                    try {
+                      const parsed = JSON.parse(currentUserStr);
+                      const lowerEmail = (parsed.email || '').toLowerCase();
+                      const lowerUsername = (parsed.username || '').toLowerCase();
+                      if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                        isLocal = true;
+                      }
+                    } catch { /* ignore */ }
+                  }
+
+                  if (isLocal) {
+                    console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
+                    setIsSessionValid(true);
+                  } else {
+                    console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                    setUser(null);
+                    localStorage.removeItem('app_current_user');
+                    setHistory([AppScreen.LOGIN]);
+                  }
                 } else {
                   console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
                 }
               } catch (jwtErr) {
-                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, limpando loaders de forma segura e forçando null na session (Purga de Cache):", jwtErr);
+                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
                 
-                // REQUISITO 3: Purga de Cache de Inicialização
-                setIsSessionValid(false);
-                setUser(null);
-                localStorage.removeItem('app_current_user');
-                setHistory([AppScreen.LOGIN]);
+                const currentUserStr = localStorage.getItem('app_current_user');
+                let isLocal = false;
+                if (currentUserStr) {
+                  try {
+                    const parsed = JSON.parse(currentUserStr);
+                    const lowerEmail = (parsed.email || '').toLowerCase();
+                    const lowerUsername = (parsed.username || '').toLowerCase();
+                    if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                      isLocal = true;
+                    }
+                  } catch { /* ignore */ }
+                }
+
+                if (isLocal) {
+                  console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
+                  setIsSessionValid(true);
+                } else {
+                  // REQUISITO 3: Purga de Cache de Inicialização
+                  setIsSessionValid(false);
+                  setUser(null);
+                  localStorage.removeItem('app_current_user');
+                  setHistory([AppScreen.LOGIN]);
+                }
               } finally {
                 setAuthLoading(false);
               }
@@ -1401,7 +1465,7 @@ const App: React.FC = () => {
       AppScreen.UNIT_SELECTION
     ];
     
-    if (user && !publicScreens.includes(screen)) {
+    if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
       const isConfigValid = selectedUnit && (campaignId || databaseMode === DatabaseMode.INTERNAL);
       if (!isConfigValid) {
@@ -3020,6 +3084,26 @@ const App: React.FC = () => {
       if (isValid) {
         processSession(session);
       } else {
+        // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
+        const currentUserStr = localStorage.getItem('app_current_user');
+        let isLocal = false;
+        if (currentUserStr) {
+          try {
+            const parsed = JSON.parse(currentUserStr);
+            const lowerEmail = (parsed.email || '').toLowerCase();
+            const lowerUsername = (parsed.username || '').toLowerCase();
+            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+              isLocal = true;
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (isLocal) {
+          console.log('[Boot] Mantendo sessão local de soberania nativa apesar de sessão cloud nula/vazia.');
+          setIsSessionValid(true);
+          return;
+        }
+
         if (!isInternalMode) {
           console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
           setUser(null);
@@ -3029,6 +3113,26 @@ const App: React.FC = () => {
       }
     }).catch(err => {
       console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
+      
+      const currentUserStr = localStorage.getItem('app_current_user');
+      let isLocal = false;
+      if (currentUserStr) {
+        try {
+          const parsed = JSON.parse(currentUserStr);
+          const lowerEmail = (parsed.email || '').toLowerCase();
+          const lowerUsername = (parsed.username || '').toLowerCase();
+          if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+            isLocal = true;
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (isLocal) {
+        console.log('[Boot] Preservando sessão local ativa pós exceção do Supabase.');
+        setIsSessionValid(true);
+        return;
+      }
+
       setIsSessionValid(false);
       setUser(null);
       localStorage.removeItem('app_current_user');
@@ -3049,11 +3153,19 @@ const App: React.FC = () => {
         try {
           if (currentUserStr) {
             const parsed = JSON.parse(currentUserStr);
-            if (parsed.username === 'admin' || parsed.username === 'semorr' || parsed.role === 'DEMO' || parsed._tenantid === 'DEMO_DEFAULT' || parsed.tenantid === 'DEMO_DEFAULT') {
+            const lowerEmail = (parsed.email || '').toLowerCase();
+            const lowerUsername = (parsed.username || '').toLowerCase();
+            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
               isLocalUser = true;
             }
           }
         } catch { /* ignore */ }
+
+        if (isLocalUser) {
+          console.log('[Supabase Auth Listener] Sincronização offline/Soberania Nativa ativa. Ignorando evento auth da nuvem para o usuário local:', currentUserStr);
+          setIsSessionValid(true); // Garante validação da sessão local
+          return;
+        }
 
         if (currentUserStr && databaseMode === DatabaseMode.SUPABASE && !isLocalUser) {
           console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
@@ -4842,60 +4954,11 @@ const App: React.FC = () => {
     });
   }, [inventory.assets, inventory.companies, users, fullCompaniesWithStatus]);
 
-  // Auto-sync on Company Selection if base is empty
+  // Auto-sync on Company Selection has been disabled per Senior Offline-First architecture.
+  // The user initiates any synchronization or database loads manually via physical buttons.
   useEffect(() => {
-    const rawTenants = user?.tenants || (user?.tenantid ? [user.tenantid] : []);
-    const tenants = Array.isArray(rawTenants) ? rawTenants : [rawTenants];
-    const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
-    const currentStatus = typeof sqliteStatus === 'object' && sqliteStatus ? sqliteStatus.status : sqliteStatus;
-    const isTrulyEmpty = isEmpty && currentStatus !== 'ACTIVE';
-    const isSystemLocked = localStorage.getItem('is_system_locked') === 'true';
-
-    if (isSystemLocked) {
-      console.log('>>> [LoopGuard/SyncGuard] Sistema blindado. Sincronização automática e redirecionamentos pulados.');
-      return;
-    }
-    
-    if (screen === AppScreen.UNIT_SELECTION && isEmpty && databaseMode !== DatabaseMode.INTERNAL && !isSyncing && tenants.length > 0) {
-      // Evita loops infinitos se o sync falhar ou retornar vazio
-      const lastSyncAttempt = sessionStorage.getItem('last_auto_sync_attempt');
-      const now = Date.now();
-      
-      // Se acabamos de carregar dados (onDataLoaded), não devemos sincronizar imediatamente
-      // pois os dados podem ainda estar sendo processados ou o tenantid pode não bater
-      const justLoaded = sessionStorage.getItem('app_just_loaded_data') === 'true';
-      if (justLoaded) {
-        console.log('Auto-sync ignorado: Dados acabaram de ser carregados localmente.');
-        sessionStorage.removeItem('app_just_loaded_data');
-        return;
-      }
-
-      if (lastSyncAttempt && now - parseInt(lastSyncAttempt) < 30000) {
-        console.log('Auto-sync ignorado: tentativa recente detectada.');
-        return;
-      }
-      sessionStorage.setItem('last_auto_sync_attempt', now.toString());
-
-      console.log(`>>> [AutoSync] Iniciando sincronização automática para tenants: ${JSON.stringify(tenants)}`);
-      syncFromCloud(tenants, databaseMode).then(() => {
-        console.log('>>> [AutoSync] Sincronização automática concluída.');
-      });
-    } else if (screen === AppScreen.UNIT_SELECTION && isTrulyEmpty && isAdmin && !isSyncing && isDataLoaded) {
-      // Se entrou aqui vazio e não tem o que sincronizar (ou é interno), vai para a carga
-      // Evita loop: utiliza sessionStorage para persistir o bloqueio mesmo após refresh ou pop
-      const hasJustFinishedLoad = sessionStorage.getItem('app_just_finished_load') === 'true';
-      if (hasJustFinishedLoad) {
-        console.log('>>> [LoopGuard] Redirecionamento ignorado: Carga acabara de ser concluída.');
-        return;
-      }
-
-      const isSystemAdmin = checkIsAdmin(user);
-      if (isSystemAdmin) {
-        console.log('>>> [Redirect] Base vazia detectada após carregamento. Redirecionando para Carga Expert.');
-        pushScreen(AppScreen.LOAD_DATABASE);
-      }
-    }
-  }, [screen, inventory.assets.length, fullCompaniesWithStatus.length, databaseMode, isSyncing, user, syncFromCloud, isAdmin, pushScreen, isDataLoaded, sqliteStatus]);
+    console.log('>>> [Offline-First] Auto-sync e redirecionamentos automáticos desativados. Aguardando ação física do operador.');
+  }, [screen]);
 
   // Auto-select unit if only one is available for the auditor
   useEffect(() => {
@@ -4918,8 +4981,16 @@ const App: React.FC = () => {
 
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
+  // SOBERANIA OFFLINE: Se temos o objeto user e seu perfil é local/offline, a sessão é considerada válida por padrão.
+  const isProfileLocal = useMemo(() => {
+    if (!user) return false;
+    const lowerEmail = (user.email || '').toLowerCase();
+    const lowerUsername = (user.username || '').toLowerCase();
+    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
+  }, [user]);
+
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
-  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || (user && user.role === ('DEMO' as unknown as UserRole));
+  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || (user && user.role === ('DEMO' as unknown as UserRole));
   const isUserAuthenticated = !!user && isSessionCurrentlyValid;
 
   console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
@@ -5307,29 +5378,19 @@ const App: React.FC = () => {
                 localStorage.setItem('app_selected_unit', defaultUnit);
                 localStorage.setItem('app_current_unit', defaultUnit);
 
-                // Sempre tenta sincronizar no login para garantir dados frescos e permissões atualizadas
-                // Isso evita conflitos com caches locais ou sessões anteriores incompletas
+                // Sempre tenta sincronizar de forma assíncrona e silenciosa em segundo plano no login para garantir dados frescos e permissões atualizadas
                 if (databaseMode !== DatabaseMode.INTERNAL) {
-                  console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem com contexto real...');
-                  syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit);
+                  console.log('[App] Login detectado. Iniciando sincronização opcional e silenciosa com a nuvem...');
+                  syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
+                    console.warn('[Sync] Sincronização inicial em background falhou:', err);
+                  });
                 }
 
-                const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
-                if (isMasterAdminWithEmptyDb) {
-                  console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
-                  sessionStorage.removeItem('carga_inicial_prompted');
-                  pushScreen(AppScreen.LOAD_DATABASE);
-                } else if (u.mustChangePassword) { 
+                if (u.mustChangePassword) { 
                   pushScreen(AppScreen.CHANGE_PASSWORD); 
                 } else { 
-                  // Se for ADMIN, vai para seleção de módulo
-                  // Se for AUDITOR, vai para seleção de unidade (empresa)
-                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
-                  if (isAdmin) {
-                    pushScreen(AppScreen.MODULE_SELECTION); 
-                  } else {
-                    pushScreen(AppScreen.UNIT_SELECTION);
-                  }
+                  // SOBERANIA OFFLINE: Direciona obrigatoriamente para o MAIN_MENU pós login para acesso imediato.
+                  pushScreen(AppScreen.MAIN_MENU);
                 }
 
                 // Oferecer registro de biometria se suportado e ainda não registrado

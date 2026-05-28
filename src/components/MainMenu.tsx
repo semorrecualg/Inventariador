@@ -7,7 +7,6 @@ import BackButton from './BackButton';
 import { 
   Info,
   Search, 
-  BarChart3, 
   Download, 
   FileText,
   Users,
@@ -25,8 +24,6 @@ import {
   Vibrate,
   Volume2,
   Battery,
-  TrendingUp,
-  TrendingDown,
   ListChecks,
   Database,
   Cloud,
@@ -93,7 +90,6 @@ interface MainMenuProps {
   syncQueueLength?: number;
   unsyncedAssetsCount?: number;
   deletedAssetsCount?: number;
-  impairmentAssetsCount?: number;
   excludedAccounts?: string[];
   onUpdateExcludedAccounts?: (accounts: string[]) => void;
   onResetGPS?: () => void;
@@ -148,7 +144,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   syncQueueLength = 0,
   unsyncedAssetsCount = 0,
   deletedAssetsCount = 0,
-  impairmentAssetsCount = 0,
   excludedAccounts = [],
   onUpdateExcludedAccounts,
   onResetGPS,
@@ -162,7 +157,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
-  const [isAnalyticsMenuOpen, setIsAnalyticsMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isSelectiveClearOpen, setIsSelectiveClearOpen] = useState(false);
@@ -356,17 +350,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </button>
           )}
 
-          {isAdmin && (
-            <button 
-              onClick={() => setIsAnalyticsMenuOpen(true)} 
-              className="flex flex-col items-center space-y-1 group"
-            >
-              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
-                <BarChart3 size={20} />
-              </div>
-              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Insights</span>
-            </button>
-          )}
+
 
           {isAdmin && (
             <button 
@@ -832,92 +816,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       )}
 
-      {isAnalyticsMenuOpen && (
-        <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
-          <div className="fixed top-8 left-6 z-[10001]">
-            <BackButton onClick={() => setIsAnalyticsMenuOpen(false)} label="Voltar" />
-          </div>
-          
-          <div className="w-full max-w-sm space-y-4">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-accent text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent shadow-xl shadow-accent/20">
-                <BarChart3 size={32} />
-              </div>
-              <h2 className="text-xl font-bold text-white uppercase tracking-tight">Análise e Painéis</h2>
-              <p className="text-[9px] font-bold text-accent uppercase tracking-[0.3em] mt-1.5 opacity-70">Indicadores de Performance</p>
-            </div>
 
-            <div className="space-y-3">
-              <button 
-                disabled={!hasData} 
-                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.DASHBOARD); }} 
-                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
-              >
-                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
-                  <BarChart3 size={20} />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Painel de Progresso</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Acompanhamento Unitário</p>
-                </div>
-                <ChevronRight size={14} className="text-white/20" />
-              </button>
-
-              <button 
-                disabled={!hasData} 
-                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.GLOBAL_PERFORMANCE); }} 
-                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
-              >
-                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
-                  <TrendingUp size={20} />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Rendimento Global</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Análise Diária de Auditoria</p>
-                </div>
-                <ChevronRight size={14} className="text-white/20" />
-              </button>
-
-              <button 
-                disabled={!hasData} 
-                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.ASSET_MAP); }} 
-                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
-              >
-                <div className="w-10 h-10 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30">
-                  <MapIcon size={20} />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Mapa de Calor</h4>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Geotagging de Ativos</p>
-                </div>
-                <ChevronRight size={14} className="text-white/20" />
-              </button>
-
-              <button 
-                disabled={!hasData} 
-                onClick={() => { setIsAnalyticsMenuOpen(false); onNavigate(AppScreen.IMPAIRMENT_REPORT); }} 
-                className="w-full flex items-center p-4 bg-white/5 border border-white/10 rounded-2xl active:scale-[0.98] disabled:opacity-30 transition-all text-left"
-              >
-                <div className="w-10 h-10 bg-red-500/20 text-red-500 rounded-lg flex items-center justify-center mr-4 border border-red-500/30">
-                  <TrendingDown size={20} />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2">
-                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Relatório de Impairment</h4>
-                    {impairmentAssetsCount > 0 && (
-                      <span className="bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse">
-                        {impairmentAssetsCount}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">CPC 01 - Perdas por Desvalorização</p>
-                </div>
-                <ChevronRight size={14} className="text-white/20" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isDataMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
