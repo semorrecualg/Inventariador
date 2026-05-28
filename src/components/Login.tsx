@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles, Database } from 'lucide-react';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -39,6 +39,8 @@ const Login: React.FC<LoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
+  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  const [isPressingLogo, setIsPressingLogo] = useState(false);
 
   // Reset loading state when database mode changes to prevent "stuck" UI
   React.useEffect(() => {
@@ -153,6 +155,69 @@ const Login: React.FC<LoginProps> = ({
         }
       }
     });
+  };
+
+  const handleCargaExpertInstantBypass = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      console.log('>>> [Carga Expert] Iniciando limpeza bruta e injeção forçada de contingência...');
+      
+      // 1. Purga física do arquivo e execução de VACUUM
+      await localDb.purgeDatabase();
+      
+      // 2. Injeção atômica dos 50+ ativos em lote com tenantId: "DEMO_DEFAULT"
+      await localDb.forceInjectDemoSeed();
+      
+      // Altera modo para usar SQLite localmente como fonte da verdade
+      onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
+      const demoUser = demoService.getDemoUser();
+      
+      onShowModal({
+        title: '⚡ CARGA EXPERT ATIVA',
+        message: 'Banco físico limpo com sucesso e contingência implantada com 50+ ativos. Redirecionando agora...',
+        type: 'success',
+        onConfirm: () => {
+          onLogin(demoUser);
+        }
+      });
+    } catch (err) {
+      console.error('[Carga Expert] Falha crítica:', err);
+      
+      // Tentativa de cura em Memória se houver falha persistente
+      try {
+        console.warn('[Carga Expert Fallback] Aplicando motor em Memória após falha do banco físico...');
+        const success = await demoService.initDemoSession();
+        if (success) {
+          onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
+          const demoUser = demoService.getDemoUser();
+          onLogin(demoUser);
+          return;
+        }
+      } catch (innerErr) {
+        console.error('[Carga Expert Drop] Fallback em memória também falhou:', innerErr);
+      }
+      
+      setError(`Falha crítica na injeção da Carga Expert: ${err instanceof Error ? err.message : String(err)}.`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startPressLogo = () => {
+    setIsPressingLogo(true);
+    const timer = setTimeout(() => {
+       handleCargaExpertInstantBypass();
+    }, 3000); // 3 segundos
+    setLongPressTimer(timer);
+  };
+
+  const endPressLogo = () => {
+    setIsPressingLogo(false);
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
   };
 
   const handleDemoLogin = async () => {
@@ -581,11 +646,19 @@ const Login: React.FC<LoginProps> = ({
             </span>
           </button>
 
-          <div className="w-24 h-24 bg-white border border-border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main">
+          <div 
+            onTouchStart={startPressLogo}
+            onTouchEnd={endPressLogo}
+            onMouseDown={startPressLogo}
+            onMouseUp={endPressLogo}
+            onMouseLeave={endPressLogo}
+            className={`w-24 h-24 bg-white border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
+            title="Mantenha pressionado por 3 segundos para contra-medida Carga Expert"
+          >
             <img 
               src={APP_LOGO} 
               alt="GBR Auditoria Logo" 
-              className="w-full h-full object-cover rounded-full"
+              className="w-full h-full object-cover rounded-full pointer-events-none"
               referrerPolicy="no-referrer"
             />
           </div>
@@ -710,10 +783,21 @@ const Login: React.FC<LoginProps> = ({
           <button 
             type="button"
             onClick={handleDemoLogin}
-            className="w-full bg-slate-900 hover:bg-slate-850 text-emerald-400 font-extrabold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] border border-emerald-500/20 transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+            className="w-full bg-slate-900 hover:bg-slate-850 text-emerald-400 font-extrabold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] border border-emerald-500/20 transition-all mt-2 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2"
           >
             <Sparkles size={16} className="text-emerald-400 animate-pulse" />
             <span>Experimentar Grátis (Modo Demo)</span>
+          </button>
+        )}
+
+        {!isLoading && (
+          <button 
+            type="button"
+            onClick={handleCargaExpertInstantBypass}
+            className="w-full bg-amber-950/20 hover:bg-amber-900/30 text-amber-500 font-black py-4 rounded-2xl border border-amber-500/30 active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/5 hover:border-amber-400"
+          >
+            <Database size={16} className="text-amber-500 animate-pulse" />
+            <span>⚡ CARGA EXPERT (FORÇAR CONTINGÊNCIA)</span>
           </button>
         )}
       </form>

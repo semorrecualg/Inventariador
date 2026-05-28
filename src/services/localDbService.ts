@@ -357,6 +357,34 @@ export const localDb = {
     if (typeof callback === 'function') {
       return await (callback as () => Promise<void>)();
     }
+  },
+  
+  purgeDatabase: async () => {
+    console.log('>>> [DBA] Executando purge manual de todas as tabelas...', { source: 'Carga Expert Bypass' });
+    try {
+      await sqliteService.execute("DELETE FROM ativos;");
+      await sqliteService.execute("DELETE FROM users;");
+      await sqliteService.execute("DELETE FROM unit_configs;");
+      try {
+        await sqliteService.execute("VACUUM;");
+      } catch (e) {
+        console.warn('>>> [DBA] Vacuum não suportado neste driver ou falhou:', e);
+      }
+      await sqliteService.saveDatabase();
+      console.log('>>> [DBA] Purge completo e base reestruturada com VACUUM.');
+    } catch (err) {
+      console.error('>>> [DBA] Falha crítica no purge do banco de dados:', err);
+      throw err;
+    }
+  },
+  
+  forceInjectDemoSeed: async () => {
+    console.log('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de 50+ ativos Demo).');
+    const { demoService } = await import('./demoService');
+    const res = await demoService.initDemoSession();
+    if (!res) {
+      throw new Error("Erro de processamento da transação interna no initDemoSession");
+    }
   }
 };
 

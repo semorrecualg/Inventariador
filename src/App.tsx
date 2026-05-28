@@ -4959,6 +4959,19 @@ const App: React.FC = () => {
               setUser(u); 
               localStorage.setItem('app_current_user', safeStringify(u));
               
+              if (u.role === ('DEMO' as unknown as UserRole)) {
+                setInventory(prev => ({
+                  ...prev,
+                  currentCampaignId: 'DEMO_CAMPAIGN',
+                  status: DatabaseStatus.LOADED
+                }));
+                setSelectedUnit('MATRIZ');
+                localStorage.setItem('app_selected_unit', 'MATRIZ');
+                localStorage.setItem('app_current_unit', 'MATRIZ');
+                setHistory([AppScreen.MAIN_MENU]);
+                return;
+              }
+              
               if (databaseMode !== DatabaseMode.INTERNAL) {
                 setDatabaseMode(DatabaseMode.SUPABASE);
                 localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
