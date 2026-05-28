@@ -61,6 +61,21 @@ export const demoService = {
         const userUpsert = getUpsertSql('users', demoUser as unknown as Record<string, unknown>);
         await sqliteService.execute(userUpsert.sql, userUpsert.values);
 
+        // Insere o usuário administrador de backup de contingência nativa
+        const backupAdminUser = {
+          id: 'admin_backup_id',
+          username: 'admin',
+          name: 'Backup Administrator',
+          email: 'admin@gbrauditoria.com.br',
+          password: '123456',
+          role: 'ADMIN',
+          is_admin: 1,
+          _tenantid: 'DEMO_DEFAULT',
+          _unitid: 'MATRIZ'
+        };
+        const backupUpsert = getUpsertSql('users', backupAdminUser as unknown as Record<string, unknown>);
+        await sqliteService.execute(backupUpsert.sql, backupUpsert.values);
+
         // Insere a massa de ativos demonstrativos (50+ ativos)
         const seedAssets = getDemoSeedAssets();
         for (const asset of seedAssets) {
@@ -111,6 +126,21 @@ export const demoService = {
         const demoUser = demoService.getDemoUser();
         const userUpsert = getUpsertSql('users', demoUser as unknown as Record<string, unknown>);
         await sqliteService.execute(userUpsert.sql, userUpsert.values);
+
+        // Insere o usuário administrador de backup de contingência nativa
+        const backupAdminUser = {
+          id: 'admin_backup_id',
+          username: 'admin',
+          name: 'Backup Administrator',
+          email: 'admin@gbrauditoria.com.br',
+          password: '123456',
+          role: 'ADMIN',
+          is_admin: 1,
+          _tenantid: 'DEMO_DEFAULT',
+          _unitid: 'MATRIZ'
+        };
+        const backupUpsert = getUpsertSql('users', backupAdminUser as unknown as Record<string, unknown>);
+        await sqliteService.execute(backupUpsert.sql, backupUpsert.values);
 
         const seedAssets = getDemoSeedAssets();
         for (const asset of seedAssets) {

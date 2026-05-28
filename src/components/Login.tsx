@@ -173,13 +173,14 @@ const Login: React.FC<LoginProps> = ({
       onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
       const demoUser = demoService.getDemoUser();
       
+      // FORÇA NAVEGAÇÃO IMEDIATAMENTE (Bypass de Rota para o Menu Principal)
+      onLogin(demoUser);
+      
       onShowModal({
         title: '⚡ CARGA EXPERT ATIVA',
         message: 'Banco físico limpo com sucesso e contingência implantada com 50+ ativos. Redirecionando agora...',
         type: 'success',
-        onConfirm: () => {
-          onLogin(demoUser);
-        }
+        onConfirm: () => {}
       });
     } catch (err) {
       console.error('[Carga Expert] Falha crítica:', err);
