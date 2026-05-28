@@ -4904,7 +4904,7 @@ const App: React.FC = () => {
   const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
   
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
-  const isSessionCurrentlyValid = isInternalMode || isSessionValid || (user && user.role === ('DEMO' as unknown as UserRole));
+  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || (user && user.role === ('DEMO' as unknown as UserRole));
   const isUserAuthenticated = !!user && isSessionCurrentlyValid;
 
   console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
