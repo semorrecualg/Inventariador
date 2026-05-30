@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { read, utils } from 'xlsx';
 import { sqliteService } from '../services/sqliteService';
 import { localDb } from '../services/localDbService';
-import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, ChevronLeft } from 'lucide-react';
+import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, ChevronLeft, DownloadCloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/errorUtils';
 
@@ -20,6 +20,7 @@ interface DatabaseLoaderProps {
   showModal?: (title: string, message: string, type: ModalConfig['type']) => void;
   databaseMode?: DatabaseMode;
   isSyncing?: boolean;
+  syncProgress?: { processed: number; total: number; percentage: number } | null;
   onCargaInicial?: () => void;
 }
 
@@ -29,6 +30,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   showModal,
   databaseMode,
   isSyncing = false,
+  syncProgress = null,
   onCargaInicial
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
@@ -420,7 +422,52 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   return (
     <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[300px] safe-area-p">
       <AnimatePresence mode="wait">
-        {status === 'LOADING' && (
+        {isSyncing && syncProgress ? (
+          <motion.div 
+            key="sync_progress"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center gap-6 text-center w-full max-w-xs animate-fadeIn"
+          >
+            <div className="relative w-20 h-20">
+              <div className="absolute inset-0 border-4 border-slate-100 rounded-full" />
+              <motion.div 
+                className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <DownloadCloud className="w-8 h-8 text-emerald-500 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="w-full space-y-3">
+              <div className="flex justify-between items-end">
+                <div className="text-left font-black text-slate-800 text-[10px] uppercase tracking-widest">
+                  Sincronizando
+                  <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest animate-pulse mt-0.5">
+                    Banco SQLite
+                  </p>
+                </div>
+                <div className="text-right font-black text-emerald-600 text-xs">
+                  {syncProgress.percentage}%
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${syncProgress.percentage}%` }}
+                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                />
+              </div>
+
+              <p className="text-[9px] font-mono text-slate-400 uppercase font-bold tracking-widest">
+                {syncProgress.processed.toLocaleString()} / {syncProgress.total.toLocaleString()} ativos
+              </p>
+            </div>
+          </motion.div>
+        ) : status === 'LOADING' && (
           <motion.div 
             key="loading"
             initial={{ opacity: 0, scale: 0.9 }}

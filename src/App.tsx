@@ -6,7 +6,7 @@ import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
-import { getAssetUnit, normalizeKey } from './utils/schema';
+import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -323,6 +323,7 @@ const App: React.FC = () => {
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ processed: number; total: number; percentage: number } | null>(null);
   const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('app_downloaded_units');
@@ -1160,12 +1161,36 @@ const App: React.FC = () => {
         return;
       }
       try {
-        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0";
-        const params: string[] = [selectedUnit.toUpperCase().trim(), selectedUnit.toUpperCase().trim()];
+        const normalizedUnit = selectedUnit.toUpperCase().trim();
+        const unitCode = normalizedUnit.match(/^\d+/)?.[0];
+
+        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE _is_deleted = 0 AND (";
+        const params: (string | number)[] = [];
+
+        queryStr += "TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+        params.push(normalizedUnit, normalizedUnit, normalizedUnit);
+
+        if (unitCode) {
+          queryStr += " OR TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+          params.push(unitCode, unitCode, unitCode);
+
+          const numCode = parseInt(unitCode, 10);
+          if (!isNaN(numCode)) {
+            queryStr += " OR CAST(UNIDADE_OPERACIONAL AS INTEGER) = ? OR CAST(filial AS INTEGER) = ?";
+            params.push(numCode, numCode);
+          }
+        }
+
+        queryStr += " OR ? LIKE '%' || TRIM(UNIDADE_OPERACIONAL) || '%' OR TRIM(UNIDADE_OPERACIONAL) LIKE '%' || ? || '%'";
+        params.push(normalizedUnit, normalizedUnit);
+
+        queryStr += ")";
+
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
           params.push(inventory.currentCampaignId);
         }
+
         const res = await sqliteService.query(queryStr, params);
         const count = (res[0]?.count as number) || 0;
         if (active) {
@@ -1201,8 +1226,31 @@ const App: React.FC = () => {
       }
       try {
         console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
-        let queryStr = "SELECT * FROM ativos WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) AND _is_deleted = 0";
-        const params: (string | null)[] = [currentUnit.toUpperCase().trim(), currentUnit.toUpperCase().trim()];
+        const normalizedUnit = currentUnit.toUpperCase().trim();
+        const unitCode = normalizedUnit.match(/^\d+/)?.[0];
+
+        let queryStr = "SELECT * FROM ativos WHERE _is_deleted = 0 AND (";
+        const params: (string | number)[] = [];
+
+        queryStr += "TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+        params.push(normalizedUnit, normalizedUnit, normalizedUnit);
+
+        if (unitCode) {
+          queryStr += " OR TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+          params.push(unitCode, unitCode, unitCode);
+
+          const numCode = parseInt(unitCode, 10);
+          if (!isNaN(numCode)) {
+            queryStr += " OR CAST(UNIDADE_OPERACIONAL AS INTEGER) = ? OR CAST(filial AS INTEGER) = ?";
+            params.push(numCode, numCode);
+          }
+        }
+
+        queryStr += " OR ? LIKE '%' || TRIM(UNIDADE_OPERACIONAL) || '%' OR TRIM(UNIDADE_OPERACIONAL) LIKE '%' || ? || '%'";
+        params.push(normalizedUnit, normalizedUnit);
+
+        queryStr += ")";
+
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
           params.push(inventory.currentCampaignId);
@@ -1952,15 +2000,13 @@ const App: React.FC = () => {
       }
 
       const assets = cloudData.assets;
-      console.log(`>>> [Carga Inicial] ${assets.length} ativos recebidos. Gravando no SQLite local em micro-batches de 1.000 itens...`);
+      console.log(`>>> [Carga Inicial] ${assets.length} ativos recebidos. Gravando no SQLite local via bulkInsertAssetsOfflineFirst...`);
 
-      // 1. Limpamos a tabela ou inserimos por micro-batches de 1000 itens para performance máxima no hardware
-      const batchSize = 1000;
-      for (let i = 0; i < assets.length; i += batchSize) {
-        const batch = assets.slice(i, i + batchSize);
-        console.log(`>>> [Carga Inicial] Gravando lote ${Math.floor(i / batchSize) + 1} de ${Math.ceil(assets.length / batchSize)} (${batch.length} itens)...`);
-        await sqliteService.bulkInsertAssets(batch);
-      }
+      // 1. Ingestão otimizada em lotes fixos de 200 itens com yield no macro-task e callback de progresso reativo
+      setSyncProgress({ processed: 0, total: assets.length, percentage: 0 });
+      await sqliteService.bulkInsertAssetsOfflineFirst(assets, (progress) => {
+        setSyncProgress(progress);
+      });
 
       // 2. Salva e atualiza o estado
       const syncTimestamp = new Date().toISOString();
@@ -2002,6 +2048,7 @@ const App: React.FC = () => {
       });
     } finally {
       setIsSyncing(false);
+      setSyncProgress(null);
     }
   }, [isSyncing, inventory, user]);
 
@@ -4468,11 +4515,14 @@ const App: React.FC = () => {
     setInventory(newInventory);
     setIsDataLoaded(true);
     setSqliteStatus('ACTIVE');
+    setRefreshVersion(prev => prev + 1);
     
     // 3. Persistência de Segurança (Cache) - Importante para o modo Interno
     try {
       await saveInventory(newInventory, assets);
       await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
+      console.log('>>> [App] Sincronizando estado de campanhas e contadores locais...');
+      await refreshCampaigns();
     } catch (e) {
       console.warn('>>> [App] Falha ao persistir cache após carga:', e);
     }
@@ -4499,7 +4549,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.UNIT_SELECTION);
       }
     }, 150);
-  }, [history, pushScreen]);
+  }, [history, pushScreen, refreshCampaigns]);
 
   const handleClearDatabase = async () => {
     if (localStorage.getItem('is_system_locked') === 'true') {
@@ -4872,9 +4922,20 @@ const App: React.FC = () => {
       const hasDirectCampaign = unitsWithDirectCampaign.has(norm) || cachedActive;
       const hasGps = unitsWithGps.has(norm);
 
-      const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL 
-        ? (sqlCountsMap.get(norm) || 0)
-        : (localCountsMap.get(norm) || 0);
+      let assetCount = 0;
+      if (inventory.databaseMode === DatabaseMode.INTERNAL) {
+        for (const [sqlKey, count] of sqlCountsMap.entries()) {
+          if (matchUnitKeys(sqlKey, norm)) {
+            assetCount += count;
+          }
+        }
+      } else {
+        for (const [localKey, count] of localCountsMap.entries()) {
+          if (matchUnitKeys(localKey, norm)) {
+            assetCount += count;
+          }
+        }
+      }
 
       return {
         name: unit.name,
@@ -5567,6 +5628,7 @@ const App: React.FC = () => {
                 onOpenHelp={() => setIsHelpMenuOpen(true)}
                 onBack={popScreen} 
                 isSyncing={isSyncing}
+                syncProgress={syncProgress}
                 excludedAccounts={inventory.excludedAccounts}
                 campaigns={campaigns}
                 user={user}
@@ -5756,6 +5818,7 @@ const App: React.FC = () => {
               campaigns={campaigns}
               excludedAccounts={inventory.excludedAccounts}
               isSyncing={isSyncing}
+              syncProgress={syncProgress}
               onRestore={(state) => {
                 setInventory(state);
                 popScreen();

@@ -36,6 +36,36 @@ export const normalizeKey = (s: unknown): string => {
 };
 
 /**
+ * Compara de forma resiliente duas chaves de Unidade Operacional.
+ * Aceita correspondências exatas, por código do início (ex: "010101" com "010101 CICOPAL GO")
+ * ou por contenção mútua resiliente.
+ */
+export const matchUnitKeys = (keyA: string, keyB: string): boolean => {
+  const normA = normalizeKey(keyA);
+  const normB = normalizeKey(keyB);
+  if (!normA || !normB) return false;
+  if (normA === normB) return true;
+  
+  // Extrai prefixos numéricos (ex: "010101" de "010101 CICOPAL GO")
+  const numA = normA.match(/^\d+/)?.[0];
+  const numB = normB.match(/^\d+/)?.[0];
+  if (numA && numB && numA === numB) return true;
+
+  // Se um dos códigos sem zeros bater com o outro
+  if (numA && numB) {
+    if (parseInt(numA, 10) === parseInt(numB, 10)) return true;
+  }
+  
+  // Suporte a correspondência por contenção (LIKE) para acomodação de strings mais longas
+  if (normA.includes(normB) || normB.includes(normA)) {
+    const minLen = Math.min(normA.length, normB.length);
+    if (minLen >= 4) return true;
+  }
+  
+  return false;
+};
+
+/**
  * Encontra a melhor coluna disponível em um objeto (row) ou array de chaves com base na prioridade.
  * Implementa a estratégia de "Best Match" para resiliência de schema.
  */

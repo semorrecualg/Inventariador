@@ -1120,10 +1120,19 @@ class SqliteService {
   }
 
   async saveAsset(asset: Asset) {
-    const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
+    const assetData = {
+      ...asset,
+      _is_synced: asset._is_synced !== undefined ? (asset._is_synced ? 1 : 0) : 1,
+      _is_deleted: asset._is_deleted ? 1 : 0
+    };
+    const validKeys = Object.keys(assetData).filter(k => DB_ASSET_COLUMNS.includes(k));
     const cols = validKeys.join(', ');
     const placeholders = validKeys.map(() => '?').join(', ');
-    const values = validKeys.map(k => asset[k as keyof Asset]);
+    const values = validKeys.map(k => {
+      const val = assetData[k as keyof Asset];
+      if (typeof val === 'boolean') return val ? 1 : 0;
+      return val;
+    });
     await this.execute(`INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`, values);
   }
 
@@ -1137,10 +1146,19 @@ class SqliteService {
       for (let i = 0; i < assets.length; i += BATCH_SIZE) {
         const chunk = assets.slice(i, i + BATCH_SIZE);
         const queries = chunk.map(asset => {
-          const validKeys = Object.keys(asset).filter(k => DB_ASSET_COLUMNS.includes(k));
+          const assetData = {
+            ...asset,
+            _is_synced: asset._is_synced !== undefined ? (asset._is_synced ? 1 : 0) : 1,
+            _is_deleted: asset._is_deleted ? 1 : 0
+          };
+          const validKeys = Object.keys(assetData).filter(k => DB_ASSET_COLUMNS.includes(k));
           const cols = validKeys.join(', ');
           const placeholders = validKeys.map(() => '?').join(', ');
-          const values = validKeys.map(k => asset[k as keyof Asset]);
+          const values = validKeys.map(k => {
+            const val = assetData[k as keyof Asset];
+            if (typeof val === 'boolean') return val ? 1 : 0;
+            return val;
+          });
           return {
             sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
             params: values as (string | number | boolean | null)[]
@@ -1606,6 +1624,38 @@ class SqliteService {
   }
 
   /**
+   * REQUISITO v25.01: Consulta de contagem por filial parametrizada respeitando a arquitetura
+   * Concilia as chaves de controle (tenantId/_tenantid e filial/UNIDADE_OPERACIONAL)
+   */
+  async getAssetCountByFilial(tenantId: string, filialId: string): Promise<number> {
+    const res = await this.query(
+      `SELECT COUNT(*) as total FROM ativos 
+       WHERE _is_deleted = 0 
+         AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+         AND (_tenantid = ? OR tenantId = ?) 
+         AND (filial = ? OR UNIDADE_OPERACIONAL = ? OR TRIM(UNIDADE_OPERACIONAL) = ? OR TRIM(filial) = ?)`,
+      [tenantId, tenantId, filialId, filialId, filialId.trim(), filialId.trim()]
+    ).catch(async () => {
+      // Fallback simplificado se houver problemas de trim/casting
+      return this.query(
+        `SELECT COUNT(*) as total FROM ativos 
+         WHERE _is_deleted = 0 
+           AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+           AND (_tenantid = ? OR tenantId = ?) 
+           AND (filial = ? OR UNIDADE_OPERACIONAL = ?)`,
+        [tenantId, tenantId, filialId, filialId]
+      );
+    });
+
+    if (res && res.length > 0) {
+      const row = res[0];
+      const key = Object.keys(row).find(k => k.toLowerCase() === 'total');
+      if (key) return Number(row[key] || 0);
+    }
+    return 0;
+  }
+
+  /**
    * Métricas de Dashboard via SQL (Performance v24.50)
    * Calcula TOTAL_LIDO, PENDENTES e %_AVANÇO direto no motor SQL.
    */
@@ -1678,8 +1728,99 @@ class SqliteService {
     }
   }
 
+  async debugLocalDatabaseStructure(): Promise<{
+    sampleRowsCount: number;
+    samples: Record<string, unknown>[];
+    distinctUnitOperacional: Record<string, unknown>[];
+    distinctFilial: Record<string, unknown>[];
+    distinctTenantId: Record<string, unknown>[];
+  }> {
+    try {
+      const countRes = await this.query("SELECT COUNT(*) as total FROM ativos");
+      const total = countRes[0]?.total || 0;
+      
+      const samples = await this.query("SELECT id, ETIQUETA, UNIDADE_OPERACIONAL, filial, tenantId, _tenantid, _unitid FROM ativos LIMIT 5");
+      
+      const distinctUnitOperacional = await this.query("SELECT UNIDADE_OPERACIONAL, COUNT(*) as count FROM ativos GROUP BY UNIDADE_OPERACIONAL");
+      const distinctFilial = await this.query("SELECT filial, COUNT(*) as count FROM ativos GROUP BY filial");
+      const distinctTenantId = await this.query("SELECT tenantId, _tenantid, COUNT(*) as count FROM ativos GROUP BY tenantId, _tenantid");
+      
+      console.log("=== DB DEBUG STRUCTURE ===");
+      console.log("Total assets in DB:", total);
+      console.log("Samples of rows:", JSON.stringify(samples, null, 2));
+      console.log("Distinct UNIDADE_OPERACIONAL in DB:", JSON.stringify(distinctUnitOperacional, null, 2));
+      console.log("Distinct filial in DB:", JSON.stringify(distinctFilial, null, 2));
+      console.log("Distinct tenantId / _tenantid in DB:", JSON.stringify(distinctTenantId, null, 2));
+      console.log("==========================");
+
+      return {
+        sampleRowsCount: Number(total),
+        samples,
+        distinctUnitOperacional,
+        distinctFilial,
+        distinctTenantId
+      };
+    } catch (e) {
+      console.error(">>> debugLocalDatabaseStructure failed:", e);
+      throw e;
+    }
+  }
+
   async bulkInsertAssets(assets: Asset[]) {
     return await this.saveAssetsBatch(assets);
+  }
+
+  async bulkInsertAssetsOfflineFirst(
+    assets: Asset[],
+    onProgress?: (progress: { processed: number; total: number; percentage: number }) => void
+  ): Promise<void> {
+    if (assets.length === 0) return;
+    if (!this.isInitialized) await this.init();
+    if (!this.nativeDb) return;
+
+    try {
+      const BATCH_SIZE = 200; // lotes fixos de 200 itens
+      const total = assets.length;
+      let processed = 0;
+
+      for (let i = 0; i < total; i += BATCH_SIZE) {
+        const chunk = assets.slice(i, i + BATCH_SIZE);
+        const queries = chunk.map(asset => {
+          // Garante que o ativo baixado/importado tenha _is_synced = 1 (já sincronizado com a nuvem)
+          const assetData = {
+            ...asset,
+            _is_synced: 1,
+            _is_deleted: asset._is_deleted ? 1 : 0
+          };
+          const validKeys = Object.keys(assetData).filter(k => DB_ASSET_COLUMNS.includes(k));
+          const cols = validKeys.join(', ');
+          const placeholders = validKeys.map(() => '?').join(', ');
+          const values = validKeys.map(k => {
+            const val = assetData[k as keyof Asset];
+            if (typeof val === 'boolean') return val ? 1 : 0;
+            return val;
+          });
+          return {
+            sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
+            params: values as (string | number | boolean | null)[]
+          };
+        });
+
+        await this.executeBatch(queries);
+        processed += chunk.length;
+
+        if (onProgress) {
+          const percentage = Math.round((processed / total) * 100);
+          onProgress({ processed, total, percentage });
+        }
+
+        // Respirador de Event Loop para manter a UI reativa
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    } catch (error) {
+      console.error("bulkInsertAssetsOfflineFirst failed:", error);
+      throw error;
+    }
   }
 
   async getAllAssets(): Promise<Asset[]> {
