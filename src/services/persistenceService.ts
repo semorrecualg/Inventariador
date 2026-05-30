@@ -155,12 +155,12 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   }
 };
 
-export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false): Promise<void> => {
+export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {
   try {
     const mode = data.databaseMode || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
     
-    console.log(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode})...`);
+    console.log(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode}, skipSqlAssetsInsert: ${skipSqlAssetsInsert})...`);
     
     // 1. Salva localmente primeiro (Offline-First)
     const config = { ...data } as Record<string, unknown>;
@@ -179,7 +179,7 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
     // persistimos os ativos na tabela SQL física de alta performance.
     const assetsToSave = dirtyAssets || assets;
-    if (assetsToSave.length > 0) {
+    if (assetsToSave.length > 0 && !skipSqlAssetsInsert) {
       console.log(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no SQLite físico via buffer...`);
       await sqliteService.bulkInsertAssets(assetsToSave);
     }
@@ -208,7 +208,7 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
 
     // Espelhamento Dexie para compatibilidade em lotes para não travar a thread
     try {
-      if (mode === DatabaseMode.INTERNAL) {
+      if (mode === DatabaseMode.INTERNAL && !skipSqlAssetsInsert) {
         const BATCH_SIZE = 1000;
         for (let i = 0; i < assets.length; i += BATCH_SIZE) {
           const chunk = assets.slice(i, i + BATCH_SIZE);

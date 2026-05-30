@@ -434,6 +434,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             </div>
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Processando</h3>
             <p className="text-[10px] text-blue-600 font-bold uppercase animate-pulse">{loadingMessage}</p>
+            
+            <button
+              onClick={() => setStatus('SUMMARY')}
+              className="mt-4 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-300 font-black text-[10px] uppercase tracking-widest rounded-2xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            >
+              Cancelar e Voltar
+            </button>
           </motion.div>
         )}
 
@@ -647,7 +654,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     
                     addLog("Sincronizando cache de segurança...");
                     await new Promise(resolve => setTimeout(resolve, 100));
-                    await saveInventory(newState, assets);
+                    // skipSqlAssetsInsert = true, pois a carga física já foi inserida no SQLite via chunks.
+                    await saveInventory(newState, undefined, false, true);
 
                     sessionStorage.setItem('app_just_finished_load', 'true');
                     onDataLoaded(assets, summary.companies);
