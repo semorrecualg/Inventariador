@@ -1355,36 +1355,7 @@ const App: React.FC = () => {
     }
   }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
 
-  // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
-  useEffect(() => {
-    if (!dbInitialized || !user) return;
 
-    const checkDatabaseEmptiness = async () => {
-      try {
-        const count = databaseMode === DatabaseMode.INTERNAL ? await sqliteService.getAssetCount() : inventory.assets.length;
-        const isReallyEmpty = count === 0;
-        
-        if (isReallyEmpty) {
-          const exemptScreens = [
-            AppScreen.LOGIN, 
-            AppScreen.LOAD_DATABASE, 
-            AppScreen.REGISTER, 
-            AppScreen.CHANGE_PASSWORD,
-            AppScreen.DATABASE_MANAGER
-          ];
-          
-          if (!exemptScreens.includes(screen)) {
-            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Carga Inicial.");
-            pushScreen(AppScreen.LOAD_DATABASE);
-          }
-        }
-      } catch (e) {
-        console.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
-      }
-    };
-    
-    checkDatabaseEmptiness();
-  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, pushScreen]);
 
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
@@ -2927,6 +2898,37 @@ const App: React.FC = () => {
       delete window.pushScreen;
     };
   }, [pushScreen]);
+
+  // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
+  useEffect(() => {
+    if (!dbInitialized || !user) return;
+
+    const checkDatabaseEmptiness = async () => {
+      try {
+        const count = databaseMode === DatabaseMode.INTERNAL ? await sqliteService.getAssetCount() : inventory.assets.length;
+        const isReallyEmpty = count === 0;
+        
+        if (isReallyEmpty) {
+          const exemptScreens = [
+            AppScreen.LOGIN, 
+            AppScreen.LOAD_DATABASE, 
+            AppScreen.REGISTER, 
+            AppScreen.CHANGE_PASSWORD,
+            AppScreen.DATABASE_MANAGER
+          ];
+          
+          if (!exemptScreens.includes(screen)) {
+            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Carga Inicial.");
+            pushScreen(AppScreen.LOAD_DATABASE);
+          }
+        }
+      } catch (e) {
+        console.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
+      }
+    };
+    
+    checkDatabaseEmptiness();
+  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, pushScreen]);
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
