@@ -6,7 +6,6 @@ import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, Chev
 import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/errorUtils';
 import { Device } from '@capacitor/device';
-import { Capacitor } from '@capacitor/core';
 
 import { generateUUID } from '../services/supabaseService';
 import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
@@ -174,34 +173,26 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   const processRowsToDatabaseBatch = async (rows: unknown[]) => {
     // 1. Validação preventiva de Bateria Crítica (Soberania de Energia v26)
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const batteryInfo = await Device.getBatteryInfo();
-        if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
-          throw new Error("Carga bloqueada: Bateria abaixo de 5% sem fonte de carregamento ativa.");
-        }
-      } catch (err: unknown) {
-        const error = err as Error;
-        if (error.message && error.message.includes("Bateria abaixo de 5%")) {
-          addLog("ERRO: Bateria abaixo de 5% sem fonte de carregamento ativa.");
-          if (showModal) showModal("Bateria Crítica", "Erro de estabilidade: Bateria abaixo de 5% sem carregador.", "error");
-          throw err;
-        }
+    try {
+      const batteryInfo = await Device.getBatteryInfo();
+      if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
+        throw new Error("Carga bloqueada: Bateria abaixo de 5% sem fonte de carregamento ativa.");
       }
+    } catch (err: unknown) {
+      const error = err as Error;
+      if (error.message && error.message.includes("Bateria abaixo de 5%")) {
+        addLog("ERRO: Bateria abaixo de 5% sem fonte de carregamento ativa.");
+        if (showModal) showModal("Bateria Crítica", "Erro de estabilidade: Bateria abaixo de 5% sem carregador.", "error");
+        throw err;
+      }
+      console.warn("Monitor de bateria indisponível ou não suportado na plataforma atual:", error.message);
     }
 
-    const CHUNK_SIZE = 1000;
+    const CHUNK_SIZE = 200;
     const totalItems = rows.length;
     
     setProgress({ current: 0, total: totalItems });
     addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
-
-    try {
-      // Limpa qualquer transação travada no driver nativo antes de iniciar a carga
-      await sqliteService.execute("ROLLBACK;"); 
-    } catch {
-      // Ignora de forma silenciosa se não houver nenhuma transação ativa
-    }
 
     const cleanValue = (val: unknown): string => {
       if (val === null || val === undefined) return '';
@@ -212,16 +203,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     };
 
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
-      try {
-        // Força a finalização de qualquer transação órfã antes de iniciar uma nova para este lote específico
-        await sqliteService.execute("ROLLBACK;");
-      } catch {
-        // Ignora silenciosamente se não houver transação aberta
-      }
-
       const chunk = rows.slice(i, i + CHUNK_SIZE);
-      // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros)
-      const sqlStatements: string[] = ["BEGIN TRANSACTION;"];
+      // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros - sem comandos manuais)
+      const sqlStatements: string[] = [];
 
       for (const row of chunk) {
         let rTenantId = 'CICOPAL';
@@ -352,9 +336,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         );`);
       }
 
-      // GBR v26: Confirma transação ao final de cada bloco de forma atômica
-      sqlStatements.push("COMMIT;");
-
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
         const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
@@ -366,8 +347,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       } catch (chunkError: unknown) {
         const err = chunkError as Error;
         addLog(`Erro no lote ${i}: ${err.message}`);
-        // Tenta dar rollback se falhar
-        try { await sqliteService.execute('ROLLBACK;'); } catch { /* ignore */ }
         throw err;
       }
     }
