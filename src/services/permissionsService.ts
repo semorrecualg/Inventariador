@@ -1,18 +1,46 @@
 import { Capacitor } from '@capacitor/core';
-import { Geolocation } from '@capacitor/geolocation';
 import { Camera } from '@capacitor/camera';
+import { Geolocation } from '@capacitor/geolocation';
 import { Filesystem } from '@capacitor/filesystem';
 
-export const requestAllPermissions = async () => {
+/**
+ * Checa o status atual das permissões de forma assíncrona, sem bloquear o boot ou forçar prompts nativos.
+ * Essencial para cumprir regras da App Store/Google Play sem causar travamentos em tempo de login.
+ */
+export const checkPastPermissions = async (): Promise<boolean> => {
   if (Capacitor.getPlatform() === 'web') {
-    console.log('>>> [Permissions] Modo WEB: Permissões de hardware via navegador conforme demanda.');
+    return true;
+  }
+  try {
+    const cameraStatus = await Camera.checkPermissions();
+    const geoStatus = await Geolocation.checkPermissions();
+    
+    // Retorna se estão prontas, mas NÃO bloqueia o app se não estiverem
+    return cameraStatus.camera === 'granted' && geoStatus.location === 'granted';
+  } catch (error) {
+    console.error('[Permissions] Erro ao checar permissões', error);
+    return false;
+  }
+};
+
+/**
+ * Solicita ativamente todas as permissões em tempo de execução de forma assíncrona sob demanda.
+ */
+export const requestAllPermissions = async (): Promise<boolean> => {
+  if (Capacitor.getPlatform() === 'web') {
+    console.log('>>> [Permissions] Modo WEB: Permissões assumidas como aceitas sob demanda.');
     return true;
   }
 
   try {
-    console.log('>>> [Permissions] Solicitando permissões nativas (Soberania Mobile)...');
+    console.log('>>> [Permissions] Iniciando request assíncrono nativo (Câmera, GPS, FS)...');
     
-    // Requisita Câmera, Localização e Armazenamento nativas
+    // Verifica primeiro se já estão pré-concedidas
+    const alreadyGranted = await checkPastPermissions();
+    if (alreadyGranted) {
+      return true;
+    }
+
     const cameraStatus = await Camera.requestPermissions();
     const geoStatus = await Geolocation.requestPermissions();
     const fsStatus = await Filesystem.requestPermissions();
@@ -23,19 +51,11 @@ export const requestAllPermissions = async () => {
       (fsStatus.publicStorage === 'granted' || fsStatus.external === 'granted')
     );
 
-    if (allGranted) {
-      console.log('>>> [Permissions] Todas as permissões essenciais foram concedidas.');
-    } else {
-      console.warn('>>> [Permissions] Algumas permissões foram negadas:', {
-        camera: cameraStatus.camera,
-        location: geoStatus.location,
-        filesystem: fsStatus.publicStorage
-      });
-    }
-
+    console.log('>>> [Permissions] Conclusão do request nativo:', { allGranted });
     return allGranted;
   } catch (err) {
-    console.error('>>> [Permissions] Erro crítico ao solicitar permissões de hardware no boot:', err);
+    console.error('>>> [Permissions] Erro ao solicitar permissões nativas:', err);
     return false;
   }
 };
+

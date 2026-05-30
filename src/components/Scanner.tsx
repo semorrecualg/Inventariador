@@ -189,6 +189,25 @@ const Scanner: React.FC<ScannerProps> = ({
       await stopScanner();
     }
 
+    // No ambiente nativo do Capacitor, solicita a permissão de forma ativa antes de iniciar a captura
+    if (typeof window !== 'undefined' && 'Capacitor' in window) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Cap = (window as any).Capacitor;
+      if (Cap.isNativePlatform()) {
+        try {
+          const { Camera } = await import('@capacitor/camera');
+          const perms = await Camera.requestPermissions();
+          if (perms.camera !== 'granted') {
+            setError("Para usar esta função, ative a câmera nas configurações do Android.");
+            setIsLoading(false);
+            return;
+          }
+        } catch (perErr) {
+          console.warn(">>> [Scanner] Erro ao requisitar permissões do Capacitor:", perErr);
+        }
+      }
+    }
+
     currentModeRef.current = mode;
 
     const formats = mode === ScannerMode.BARCODE 
@@ -323,7 +342,13 @@ const Scanner: React.FC<ScannerProps> = ({
       isStartingRef.current = false;
       if (isMounted.current) {
         console.error("Scanner start error", err);
-        setError(err instanceof Error ? err.message : "Erro ao acessar câmera. Verifique as permissões.");
+        const errMsg = err instanceof Error ? err.message : "";
+        const isPermissionDenied = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("not allowed") || errMsg.toLowerCase().includes("denied");
+        if (isPermissionDenied) {
+          setError("Para usar esta função, ative a câmera nas configurações do Android/iOS.");
+        } else {
+          setError(errMsg || "Erro ao acessar câmera. Verifique as permissões de hardware.");
+        }
         setIsLoading(false);
       }
     }

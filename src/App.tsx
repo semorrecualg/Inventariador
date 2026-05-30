@@ -73,7 +73,7 @@ import { safeStringify } from './services/utils';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
-import { requestAllPermissions } from './services/permissionsService';
+import { checkPastPermissions } from './services/permissionsService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
@@ -742,13 +742,13 @@ const App: React.FC = () => {
 
     const initApp = async () => {
       try {
-        console.log(">>> [App] Solicitando permissões nativas...");
-        const granted = await requestAllPermissions();
+        console.log(">>> [App] Verificando permissões prévias (Soberania Mobile - Não Bloqueante)...");
+        const granted = await checkPastPermissions();
         setPermissionsGranted(granted);
         sqliteService.setPermissionsGranted(granted);
         
         if (Capacitor.isNativePlatform() && !granted) {
-          setShowAccessRequest(true);
+          console.log(">>> [App] Permissões pendentes detectadas. Serão solicitadas sob demanda nas telas operacionais.");
         }
         
         let success = false;
@@ -1354,6 +1354,37 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
     }
   }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
+
+  // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
+  useEffect(() => {
+    if (!dbInitialized || !user) return;
+
+    const checkDatabaseEmptiness = async () => {
+      try {
+        const count = databaseMode === DatabaseMode.INTERNAL ? await sqliteService.getAssetCount() : inventory.assets.length;
+        const isReallyEmpty = count === 0;
+        
+        if (isReallyEmpty) {
+          const exemptScreens = [
+            AppScreen.LOGIN, 
+            AppScreen.LOAD_DATABASE, 
+            AppScreen.REGISTER, 
+            AppScreen.CHANGE_PASSWORD,
+            AppScreen.DATABASE_MANAGER
+          ];
+          
+          if (!exemptScreens.includes(screen)) {
+            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Carga Inicial.");
+            pushScreen(AppScreen.LOAD_DATABASE);
+          }
+        }
+      } catch (e) {
+        console.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
+      }
+    };
+    
+    checkDatabaseEmptiness();
+  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, pushScreen]);
 
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
