@@ -5,6 +5,8 @@ import { localDb } from '../services/localDbService';
 import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, ChevronLeft, DownloadCloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/errorUtils';
+import { Device } from '@capacitor/device';
+import { Capacitor } from '@capacitor/core';
 
 import { generateUUID } from '../services/supabaseService';
 import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
@@ -170,7 +172,24 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
   };
 
-  const processRowsToDatabaseBatch = async (rows: Record<string, unknown>[]) => {
+  const processRowsToDatabaseBatch = async (rows: unknown[]) => {
+    // 1. Validação preventiva de Bateria Crítica (Soberania de Energia v26)
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const batteryInfo = await Device.getBatteryInfo();
+        if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
+          throw new Error("Carga bloqueada: Bateria abaixo de 5% sem fonte de carregamento ativa.");
+        }
+      } catch (err: unknown) {
+        const error = err as Error;
+        if (error.message && error.message.includes("Bateria abaixo de 5%")) {
+          addLog("ERRO: Bateria abaixo de 5% sem fonte de carregamento ativa.");
+          if (showModal) showModal("Bateria Crítica", "Erro de estabilidade: Bateria abaixo de 5% sem carregador.", "error");
+          throw err;
+        }
+      }
+    }
+
     const CHUNK_SIZE = 1000;
     const totalItems = rows.length;
     
@@ -184,6 +203,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       // Ignora de forma silenciosa se não houver nenhuma transação ativa
     }
 
+    const cleanValue = (val: unknown): string => {
+      if (val === null || val === undefined) return '';
+      const s = String(val).trim();
+      const low = s.toLowerCase();
+      if (low === 'null' || low === 'undefined' || low === '') return '';
+      return s;
+    };
+
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
       try {
         // Força a finalização de qualquer transação órfã antes de iniciar uma nova para este lote específico
@@ -193,87 +220,140 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
 
       const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const sqlStatements: string[] = [];
-
-      const cleanValue = (val: unknown): string => {
-        if (val === null || val === undefined) return '';
-        const s = String(val).trim();
-        const low = s.toLowerCase();
-        if (low === 'null' || low === 'undefined' || low === '') return '';
-        return s;
-      };
+      // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros)
+      const sqlStatements: string[] = ["BEGIN TRANSACTION;"];
 
       for (const row of chunk) {
-        const id = row.id || row.ID || row.PRIMARYKEY || generateUUID();
-        
-        // Robust column finding
-        const rowKeys = Object.keys(row);
-        const findVal = (priorities: string[]) => {
-          const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_')));
-          return key ? row[key] : null;
-        };
+        let rTenantId = 'CICOPAL';
+        let rFilial = 'MATRIZ';
+        let rStatus = 'PENDENTE';
+        let rEtiqueta = '';
+        let rQt = '1';
+        let rDescricaodoativo = 'Importado via Expert';
+        let rSerial = '';
+        let rDataaqusic = '';
+        let rCnpj = '';
+        let rNomefornecedor = '';
+        let rNotafiscal = '';
+        let rEndereco = '';
+        let rRegistro = '';
+        let rSubreg = '';
+        let rDatabaixa = '';
+        let rContacontabil = '';
+        let rPrimarykey = '';
+        let rCentrodecusto = '';
+        let rVlrAquisic = 0;
+        let rSn1Recno = 0;
+        let rSn3Recno = 0;
 
-        // Regra do Excel: 1ª Coluna = tenantId (que assume o lugar de grupoEmp)
-        const tenantIdVal = rowKeys[0] ? cleanValue(row[rowKeys[0]]) : 'CICOPAL';
-        const tenantId = (tenantIdVal || 'CICOPAL').trim();
-        const grupoEmp = tenantId.replace(/'/g, "''");
+        if (Array.isArray(row)) {
+          // Extração posicional com a exata ordem do layout enviado (Carga Expert v2.6)
+          rTenantId = cleanValue(row[0]) || 'CICOPAL';
+          rFilial = cleanValue(row[1]) || 'MATRIZ';
+          rStatus = cleanValue(row[2]) || 'PENDENTE';
+          rEtiqueta = cleanValue(row[3]);
+          rQt = cleanValue(row[4]) || '1';
+          rDescricaodoativo = cleanValue(row[5]) || 'Importado via Expert';
+          rSerial = cleanValue(row[6]);
+          rDataaqusic = cleanValue(row[7]);
+          rCnpj = cleanValue(row[8]);
+          rNomefornecedor = cleanValue(row[9]);
+          rNotafiscal = cleanValue(row[10]);
+          rEndereco = cleanValue(row[11]);
+          rRegistro = cleanValue(row[12]) || rEtiqueta;
+          rSubreg = cleanValue(row[13]);
+          rDatabaixa = cleanValue(row[14]);
+          rContacontabil = cleanValue(row[15]);
+          rPrimarykey = cleanValue(row[16]);
+          rCentrodecusto = cleanValue(row[17]);
+          rVlrAquisic = Number(row[18]) || 0;
+          rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
+          rSn3Recno = parseInt(String(row[20] || '0'), 10) || 0;
+        } else if (row && typeof row === 'object') {
+          // Fallback robusto por nome de coluna se vier como objeto
+          const rObj = row as Record<string, unknown>;
+          const rowKeys = Object.keys(rObj);
+          const findVal = (priorities: string[]) => {
+            const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_').replace(/_/g, '')));
+            return key ? rObj[key] : null;
+          };
 
-        // Regra do Excel: 2ª Coluna = filial (que assume o lugar de unidadeOp)
-        const filialVal = rowKeys[1] ? cleanValue(row[rowKeys[1]]) : 'MATRIZ';
-        let unidadeOp = (filialVal || 'MATRIZ').trim().toUpperCase().replace(/'/g, "''");
-        if (unidadeOp === '' || unidadeOp === 'NULL' || unidadeOp === 'UNDEFINED') {
-          unidadeOp = 'MATRIZ';
+          rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
+          rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
+          rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
+          rEtiqueta = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
+          rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
+          rDescricaodoativo = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
+          rSerial = cleanValue(findVal(['SERIAL', 'NUMERO_SERIE', 'SERIE']));
+          rDataaqusic = cleanValue(findVal(['DATAAQUISIC', 'DATA_AQUISICAO', 'DATA_AQUISIC', 'DATAAQUSIC']));
+          rCnpj = cleanValue(findVal(['CNPJ', 'CNPJ_FORNECEDOR']));
+          rNomefornecedor = cleanValue(findVal(['NOMEFORNECEDOR', 'FORNECEDOR', 'NOME_FORNECEDOR']));
+          rNotafiscal = cleanValue(findVal(['NOTAFISCAL', 'NF', 'NOTA_FISCAL']));
+          rEndereco = cleanValue(findVal(['ENDERECO', 'LOCALIZACAO', 'LOCAL']));
+          rRegistro = cleanValue(findVal(['REGISTRO', 'PATRIMONIO'])) || rEtiqueta;
+          rSubreg = cleanValue(findVal(['SUBREG', 'SUB_REGISTRO', 'SUBREGISTRO']));
+          rDatabaixa = cleanValue(findVal(['DATABAIXA', 'DATA_BAIXA']));
+          rContacontabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA']));
+          rPrimarykey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
+          rCentrodecusto = cleanValue(findVal(['CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC', 'CCUSTO']));
+          rVlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR_AQUISICAO', 'VALOR', 'PRECO']) || 0) || 0;
+          rSn1Recno = parseInt(String(findVal(['SN1_RECNO', 'SN1_REC_NO']) || '0'), 10) || 0;
+          rSn3Recno = parseInt(String(findVal(['SN3_RECNO', 'SN3_REC_NO']) || '0'), 10) || 0;
         }
 
-        const codigoAtivo = cleanValue(findVal(['ETIQUETA', 'CODIGO', 'REGISTRO', 'PLAQUETA'])).replace(/'/g, "''");
-        const contaContabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA', 'CONTA_CONTABIL', 'conta_contabil'])).replace(/'/g, "''");
-        
-        // Garantindo que sn1_recno e sn3_recno sejam inteiros (bigint remotos)
-        const parsedSn1 = parseInt(String(row.Sn1_recno || row.SN1_RECNO || findVal(['SN1_RECNO']) || '0'), 10) || 0;
-        const parsedSn3 = parseInt(String(row.Sn3_recno || row.SN3_RECNO || findVal(['SN3_RECNO']) || '0'), 10) || 0;
-        
-        const registro = cleanValue(findVal(['REGISTRO', 'RECORD']) || codigoAtivo).replace(/'/g, "''");
-        const descricao = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM']) || 'Importado via Expert').replace(/'/g, "''");
-        
-        const centroCusto = cleanValue(findVal(['CENTRODECUSTO', 'CC', 'CCUSTO'])).replace(/'/g, "''");
-        
-        // vlraquisic como numérico de ponto flutuante
-        const vlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR', 'PRECO']) || 0) || 0;
-        
-        const dataAquisic = cleanValue(findVal(['DATAAQUISIC', 'DATA'])).replace(/'/g, "''");
-        const qt = cleanValue(findVal(['QT', 'QUANTIDADE']) || '1').replace(/'/g, "''");
-        const endereco = cleanValue(findVal(['ENDERECO', 'LOCAL'])).replace(/'/g, "''");
+        const id = rPrimarykey || rEtiqueta || generateUUID();
+        const cleanId = String(id).replace(/'/g, "''");
+        const cleanEtiqueta = String(rEtiqueta).replace(/'/g, "''");
+        const cleanRegistro = String(rRegistro || rEtiqueta).replace(/'/g, "''");
+        const cleanDesc = String(rDescricaodoativo).replace(/'/g, "''");
+        const cleanContacontabil = String(rContacontabil).replace(/'/g, "''");
+        const cleanCentrodecusto = String(rCentrodecusto).replace(/'/g, "''");
+        const cleanEndereco = String(rEndereco).replace(/'/g, "''");
+        const cleanSerial = String(rSerial).replace(/'/g, "''");
+        const cleanCnpj = String(rCnpj).replace(/'/g, "''");
+        const cleanNomefornecedor = String(rNomefornecedor).replace(/'/g, "''");
+        const cleanNotafiscal = String(rNotafiscal).replace(/'/g, "''");
+        const cleanSubreg = String(rSubreg).replace(/'/g, "''");
+        const cleanPrimarykey = String(rPrimarykey).replace(/'/g, "''");
+        const cleanDatabaixa = String(rDatabaixa).replace(/'/g, "''");
+        const cleanDataaqusic = String(rDataaqusic).replace(/'/g, "''");
+        const cleanQt = String(rQt).replace(/'/g, "''");
 
-        // GBR v25: Mapeamento de Localidade via campo 'ENDERECO'
-        if (endereco && endereco !== '') {
-          const locId = `${grupoEmp}_${unidadeOp}_${endereco}`.replace(/\s/g, '_').toUpperCase();
-          sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${endereco}', '${unidadeOp}', '${grupoEmp}', '${unidadeOp}');`);
+        // Normalização das chaves de negócio principais
+        const normalTenant = rTenantId.trim().toUpperCase().replace(/'/g, "''");
+        const normalFilial = rFilial.trim().toUpperCase().replace(/'/g, "''");
+
+        // Localidade automática se houver endereço
+        if (cleanEndereco && cleanEndereco !== '') {
+          const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
+          sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${cleanEndereco}', '${normalFilial}', '${normalTenant}', '${normalFilial}');`);
         }
 
-        // GBR v25: Captura de Altitude e Cálculo de Andar Estático (Zero CPU boot cost)
-        const lat = Number(findVal(['LATITUDE', 'LAT', '_LAT']) || 0);
-        const lng = Number(findVal(['LONGITUDE', 'LNG', '_LNG']) || 0);
-        const altitude = Number(findVal(['ALTITUDE', 'ALT', '_ALTITUDE_METROS']) || 0);
-        const idAndar = altitude > 0 ? Math.floor(altitude / 3) : 0; // 3 metros por andar
+        // Estática simulada de Altitude/Andar
+        const idAndar = 0;
 
-        // Inserção na tabela de ativos (espelhamento contábil)
-        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${parsedSn1}, ${parsedSn3}, '${id}', '${codigoAtivo}', '${contaContabil}', 200, 0);`);
+        // Inserção na tabela de ativos secundária (protheus_sync)
+        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${rSn1Recno}, ${rSn3Recno}, '${cleanId}', '${cleanEtiqueta}', '${cleanContacontabil}', 200, 0);`);
         
-        // Inserção na tabela mestre (inventário)
+        // Inserção soberana na tabela mestre dos ativos de inventário
         sqlStatements.push(`INSERT OR REPLACE INTO ativos (
           id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
           UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
           QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
           latitude, longitude, _altitude_metros, _id_andar, currentCampaignId,
-          _tenantid, _unitid, tenantId, filial
+          _tenantid, _unitid, tenantId, filial, SERIAL, CNPJ, NOMEFORNECEDOR, NOTAFISCAL, SUBREG, PRIMARYKEY, DATABAIXA, TAG_INVENTARIO
         ) VALUES (
-          '${id}', '${codigoAtivo}', '${registro}', '${descricao}', '${contaContabil}', 
-          '${unidadeOp}', '${centroCusto}', ${vlrAquisic}, '${dataAquisic}', 
-          '${qt}', '${grupoEmp}', '${endereco}', 'EXPERT_LOAD',
-          ${lat || 'NULL'}, ${lng || 'NULL'}, ${altitude || 'NULL'}, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
-          '${grupoEmp}', '${unidadeOp}', '${tenantId}', '${unidadeOp}'
+          '${cleanId}', '${cleanEtiqueta}', '${cleanRegistro}', '${cleanDesc}', '${cleanContacontabil}', 
+          '${normalFilial}', '${cleanCentrodecusto}', ${rVlrAquisic}, '${cleanDataaqusic}', 
+          '${cleanQt}', '${normalTenant}', '${cleanEndereco}', 'EXPERT_LOAD',
+          NULL, NULL, NULL, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
+          '${normalTenant}', '${normalFilial}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}',
+          '${cleanSerial}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanSubreg}', '${cleanPrimarykey}', '${cleanDatabaixa}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}'
         );`);
       }
+
+      // GBR v26: Confirma transação ao final de cada bloco de forma atômica
+      sqlStatements.push("COMMIT;");
 
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
@@ -295,6 +375,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     // 4. Inserção final e sincronização de estado
     addLog("Conciliando índices e persistindo banco físico...");
     await sqliteService.flush();
+    // GBR v26: Flush imperativo final para garantir gravação física estável do .db no filesystem nativo
+    await sqliteService.saveDatabase();
     
     addLog("Carga concluída com sucesso!");
     if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
@@ -322,11 +404,24 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           addLog("Parsing binário via XLSX...");
           const workbook = read(data, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
-          const rows: Record<string, unknown>[] = utils.sheet_to_json(workbook.Sheets[sheetName]);
+          
+          // Leitura posicional via header: 1
+          const rawRows: unknown[][] = utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
 
-          if (rows.length === 0) throw new Error("Planilha vazia.");
+          if (rawRows.length === 0) throw new Error("Planilha vazia.");
 
-          await processRowsToDatabaseBatch(rows);
+          let finalRows = rawRows;
+          const firstRow = rawRows[0];
+          if (Array.isArray(firstRow) && firstRow.length > 0) {
+            const val = String(firstRow[0]).toLowerCase().trim();
+            // Se contiver palavras chaves típicas de cabeçalho, fatiamos a primeira linha
+            if (val === 'tenantid' || val === 'tenant_id' || val === 'empresa' || val.includes('tenant') || val === 'grupo') {
+              addLog("Cabeçalho detectado e descartado com sucesso.");
+              finalRows = rawRows.slice(1);
+            }
+          }
+
+          await processRowsToDatabaseBatch(finalRows);
 
         } catch (innerError: unknown) {
           const ie = innerError as Error;

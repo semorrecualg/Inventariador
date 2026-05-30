@@ -306,6 +306,8 @@ const FULL_SCHEMA = `
     _origemTransacao TEXT,
     STATUS TEXT,
     DATABAIXA TEXT,
+    SUBREG TEXT,
+    PRIMARYKEY TEXT,
     timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_mestre_etiqueta ON ativos (ETIQUETA);
@@ -939,6 +941,12 @@ class SqliteService {
       } catch { /* ignorado se a coluna já existe */ }
       try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN DATABAIXA TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN SUBREG TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN PRIMARYKEY TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
 
       // 5. Salvaguarda de Inicialização (Evita falha de tabela vazia no primeiro SELECT do App.tsx)
