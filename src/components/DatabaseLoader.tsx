@@ -205,7 +205,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
       // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros - sem comandos manuais)
-      const sqlStatements: string[] = [];
+      // Iniciamos a transação utilizando BEGIN TRANSACTION para velocidade extrema de escrita do SQLite
+      const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
 
       for (const row of chunk) {
         let rTenantId = 'CICOPAL';
@@ -231,13 +232,28 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         let rSn3Recno = 0;
 
         if (Array.isArray(row)) {
-          // Extração posicional com a exata ordem do layout enviado (Carga Expert v2.6)
+          const etq = cleanValue(row[3]);
+          const pkey = cleanValue(row[16]);
+          const desc = cleanValue(row[5]);
+
+          // Filtro de resiliência: Ignora se a linha for muito curta ou se não tiver identificador de ativo real ou descrição
+          if (row.length < 4 || (!etq && !pkey && !desc)) {
+            continue; 
+          }
+
+          // Filtro para ignorar repetições acidentais de cabeçalhos no meio ou fim do arquivo
+          if (etq.toLowerCase() === 'etiqueta' || etq.toLowerCase() === 'plaqueta' || etq.toLowerCase() === 'tag' || desc.toLowerCase() === 'descricaodoativo' || desc.toLowerCase() === 'descricao') {
+            continue;
+          }
+
+          // Extração posicional absolutamente estrita com a exata ordem do layout enviado (Carga Expert v2.6)
+          // Índice 0 é SEMPRE e APENAS tenantId e Índice 1 é SEMPRE e APENAS filial
           rTenantId = cleanValue(row[0]) || 'CICOPAL';
           rFilial = cleanValue(row[1]) || 'MATRIZ';
           rStatus = cleanValue(row[2]) || 'PENDENTE';
-          rEtiqueta = cleanValue(row[3]);
+          rEtiqueta = etq;
           rQt = cleanValue(row[4]) || '1';
-          rDescricaodoativo = cleanValue(row[5]) || 'Importado via Expert';
+          rDescricaodoativo = desc || 'Importado via Expert';
           rSerial = cleanValue(row[6]);
           rDataaqusic = cleanValue(row[7]);
           rCnpj = cleanValue(row[8]);
@@ -248,7 +264,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           rSubreg = cleanValue(row[13]);
           rDatabaixa = cleanValue(row[14]);
           rContacontabil = cleanValue(row[15]);
-          rPrimarykey = cleanValue(row[16]);
+          rPrimarykey = pkey;
           rCentrodecusto = cleanValue(row[17]);
           rVlrAquisic = Number(row[18]) || 0;
           rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
@@ -257,17 +273,28 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           // Fallback robusto por nome de coluna se vier como objeto
           const rObj = row as Record<string, unknown>;
           const rowKeys = Object.keys(rObj);
+          if (rowKeys.length === 0) continue;
+
           const findVal = (priorities: string[]) => {
             const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_').replace(/_/g, '')));
             return key ? rObj[key] : null;
           };
 
+          const etq = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
+          const pkey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
+          const desc = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
+
+          // Se for uma linha vazia no objeto (sem identificador útil), desconte e ignore
+          if (!etq && !pkey && !desc) {
+            continue;
+          }
+
           rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
           rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
           rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
-          rEtiqueta = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
+          rEtiqueta = etq;
           rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
-          rDescricaodoativo = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
+          rDescricaodoativo = desc;
           rSerial = cleanValue(findVal(['SERIAL', 'NUMERO_SERIE', 'SERIE']));
           rDataaqusic = cleanValue(findVal(['DATAAQUISIC', 'DATA_AQUISICAO', 'DATA_AQUISIC', 'DATAAQUSIC']));
           rCnpj = cleanValue(findVal(['CNPJ', 'CNPJ_FORNECEDOR']));
@@ -278,7 +305,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           rSubreg = cleanValue(findVal(['SUBREG', 'SUB_REGISTRO', 'SUBREGISTRO']));
           rDatabaixa = cleanValue(findVal(['DATABAIXA', 'DATA_BAIXA']));
           rContacontabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA']));
-          rPrimarykey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
+          rPrimarykey = pkey;
           rCentrodecusto = cleanValue(findVal(['CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC', 'CCUSTO']));
           rVlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR_AQUISICAO', 'VALOR', 'PRECO']) || 0) || 0;
           rSn1Recno = parseInt(String(findVal(['SN1_RECNO', 'SN1_REC_NO']) || '0'), 10) || 0;
@@ -336,6 +363,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         );`);
       }
 
+      // Finaliza a transação atômica do lote atual com COMMIT
+      sqlStatements.push('COMMIT;');
+
       try {
         await sqliteService.executeStatementsBatch(sqlStatements);
         const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
@@ -353,8 +383,9 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     // 4. Inserção final e sincronização de estado
     addLog("Conciliando índices e persistindo banco físico...");
-    await sqliteService.flush();
-    // GBR v26: Flush imperativo final para garantir gravação física estável do .db no filesystem nativo
+    // GBR v26: Reseta o mutationCounter para evitar salva dupla de arquivo físico lento nativo
+    sqliteService.mutationCounter = 0;
+    // GBR v26: Executa saveDatabase() uma ÚNICA vez no final de todo o carregamento conforme diretriz imperativa
     await sqliteService.saveDatabase();
     
     addLog("Carga concluída com sucesso!");
