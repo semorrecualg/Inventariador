@@ -728,12 +728,19 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       if (isInitializing && !initError) {
-        console.warn(">>> [App] Inicialização demorou demais (>15s). Mostrando erro de timeout.");
-        setInitError("Tempo de carregamento do banco de dados local excedido. Por favor, verifique se seu navegador bloqueou o carregamento de arquivos WASM ou tente recarregar.");
+        console.warn(">>> [App] Inicialização demorou demais (>35s). Forçando Fallback em Memória de Contingência...");
+        try {
+          await sqliteService.forceMemoryFallback();
+        } catch (e) {
+          console.error(">>> [App] Erro crítico ao forçar fallback:", e);
+        }
+        setDbInitialized(true);
+        setSqliteStatus('ACTIVE');
+        setIsInitializing(false);
       }
-    }, 15000);
+    }, 35000);
     return () => clearTimeout(timeout);
   }, [isInitializing, initError]);
 
@@ -762,7 +769,7 @@ const App: React.FC = () => {
             console.log(`>>> [App] Tentando inicializar SQLite/Jeep-SQLite (Tentativa ${attempts}/${maxAttempts})...`);
             success = await Promise.race([
               sqliteService.init(attempts > 1), // Se for a 2ª ou 3ª tentativa, força reset e reconexão limpa no registro
-              new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 12000)) // 12s de tempo limite por tentativa
+              new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 30000)) // 30s de tempo limite por tentativa
             ]);
           } catch (dbErr) {
             console.warn(`>>> [App - Warning] Falha na tentativa ${attempts} de bootstrap do SQLite:`, dbErr);
@@ -771,6 +778,7 @@ const App: React.FC = () => {
               await new Promise(resolve => setTimeout(resolve, 1500));
             } else {
               console.error(">>> [App - Failsafe] Todas as tentativas falharam ou esgotaram o limite de tempo. Entrando em modo degradado / contingência de memória.", dbErr);
+              await sqliteService.forceMemoryFallback();
               success = true; // Avança o fluxo lógico com a contingência em memória ativa
             }
           }
@@ -1150,6 +1158,9 @@ const App: React.FC = () => {
   useEffect(() => {
     let active = true;
     const fetchActiveCount = async () => {
+      if (!dbInitialized || sqliteStatus.loading) {
+        return;
+      }
       if (databaseMode !== DatabaseMode.INTERNAL) {
         if (active) {
           setActiveUnitAssetCount(filteredAssetsByUnit.length);
@@ -1220,6 +1231,10 @@ const App: React.FC = () => {
   useEffect(() => {
     let active = true;
     const fetchUnitAssets = async () => {
+      if (!dbInitialized || sqliteStatus.loading) {
+        console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
+        return;
+      }
       if (!currentUnit) {
         if (active) setSqliteUnitAssets([]);
         return;
@@ -1407,6 +1422,10 @@ const App: React.FC = () => {
 
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
+    if (!dbInitialized || sqliteStatus.loading) {
+      console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
+      return;
+    }
     let tenantId = currentTenantId;
     const unitId = currentUnitId;
     
@@ -1482,6 +1501,9 @@ const App: React.FC = () => {
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
+    if (!dbInitialized || sqliteStatus.loading) {
+      return;
+    }
     if (user?.tenantid) {
        fetchUnitConfigs(user.tenantid).then(configs => {
          setUnitConfigs(configs);

@@ -776,105 +776,113 @@ class SqliteService {
 
       const isNative = Capacitor.isNativePlatform();
 
-      // 1. Isolamento do motor Web Assembly/jeep-sqlite (Apenas para ambiente de Dev/Web)
-      if (!isNative) {
-        console.log(">>> [Database] Inicializando ambiente WEB (jeep-sqlite)...");
-        try {
-          const loader = await import('jeep-sqlite/loader');
-          if (loader && loader.defineCustomElements) {
-            await loader.defineCustomElements(window);
-          }
-          
-          // Garantir que a tag <jeep-sqlite> exista no DOM para o plugin Web funcionar
-          if (!document.querySelector('jeep-sqlite')) {
-            const jeepEl = document.createElement('jeep-sqlite');
-            document.body.appendChild(jeepEl);
-          }
-
-          await this.sqliteConnection.initWebStore();
-        } catch (webLoaderErr) {
-          console.warn(">>> [Database] Erro ao carregar ou registrar jeep-sqlite WEB. Forçando Motor de Memória...", webLoaderErr);
-          throw new Error("WASM_LOAD_FAILED");
-        }
-      } else {
-        await this.sqliteConnection.checkConnectionsConsistency();
-      }
-
-      // 2. Gerenciamento de Conexão Nativa Embutida
-      const dbName = this.storageKeys.nativeFileName;
-
-      // Se force for verdadeiro ou se houver conexão aberta inconsistente, tentamos limpá-la do registro primeiro para remover locks
-      if (force) {
-        try {
-          const isConnBefore = await this.sqliteConnection.isConnection(dbName, false);
-          if (isConnBefore.result) {
-            console.log(">>> [Database] Removendo conexão inconsistente anterior do registro para prevenir locks...");
-            try {
-              const prevConn = await this.sqliteConnection.retrieveConnection(dbName, false);
-              const isOpen = await prevConn.isDBOpen();
-              if (isOpen.result) {
-                await prevConn.close();
-              }
-            } catch (closeErr) {
-              console.warn(">>> [Database] Erro ao fechar conexão órfã:", closeErr);
+      const physicalSetup = async () => {
+        // 1. Isolamento do motor Web Assembly/jeep-sqlite (Apenas para ambiente de Dev/Web)
+        if (!isNative) {
+          console.log(">>> [Database] Inicializando ambiente WEB (jeep-sqlite)...");
+          try {
+            const loader = await import('jeep-sqlite/loader');
+            if (loader && loader.defineCustomElements) {
+              await loader.defineCustomElements(window);
             }
-            await this.sqliteConnection.closeConnection(dbName, false);
+            
+            // Garantir que a tag <jeep-sqlite> exista no DOM para o plugin Web funcionar
+            if (!document.querySelector('jeep-sqlite')) {
+              const jeepEl = document.createElement('jeep-sqlite');
+              document.body.appendChild(jeepEl);
+            }
+
+            await this.sqliteConnection.initWebStore();
+          } catch (webLoaderErr) {
+            console.warn(">>> [Database] Erro ao carregar ou registrar jeep-sqlite WEB. Forçando Motor de Memória...", webLoaderErr);
+            throw new Error("WASM_LOAD_FAILED");
           }
-        } catch (cleanConnErr) {
-          console.warn(">>> [Database] Erro de rotina de limpeza de conexão órfã:", cleanConnErr);
-        }
-      }
-      
-      const isConn = await this.sqliteConnection.isConnection(dbName, false);
-      
-      if (isConn.result) {
-        this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
-      } else {
-        this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
-      }
-
-      // 3. Abertura Física do Arquivo .db de forma segura (previne double-open lock)
-      try {
-        const isOpen = await this.nativeDb.isDBOpen();
-        if (!isOpen.result) {
-          await this.nativeDb.open();
-          console.log(">>> [Database] Arquivo de persistência aberto com sucesso.");
         } else {
-          console.log(">>> [Database] Conexão física com o banco de dados já estava ativa e aberta.");
+          await this.sqliteConnection.checkConnectionsConsistency();
         }
-      } catch (openErr) {
-        console.warn(">>> [Database - Warning] Falha ao verificar ou abrir a conexão. Tentando re-vincular e reiniciar no registro do SQLite...", openErr);
-        try {
-          await this.sqliteConnection.closeConnection(dbName, false);
+
+        // 2. Gerenciamento de Conexão Nativa Embutida
+        const dbName = this.storageKeys.nativeFileName;
+
+        // Se force for verdadeiro ou se houver conexão aberta inconsistente, tentamos limpá-la do registro primeiro para remover locks
+        if (force) {
+          try {
+            const isConnBefore = await this.sqliteConnection.isConnection(dbName, false);
+            if (isConnBefore.result) {
+              console.log(">>> [Database] Removendo conexão inconsistente anterior do registro para prevenir locks...");
+              try {
+                const prevConn = await this.sqliteConnection.retrieveConnection(dbName, false);
+                const isOpen = await prevConn.isDBOpen();
+                if (isOpen.result) {
+                  await prevConn.close();
+                }
+              } catch (closeErr) {
+                console.warn(">>> [Database] Erro ao fechar conexão órfã:", closeErr);
+              }
+              await this.sqliteConnection.closeConnection(dbName, false);
+            }
+          } catch (cleanConnErr) {
+            console.warn(">>> [Database] Erro de rotina de limpeza de conexão órfã:", cleanConnErr);
+          }
+        }
+        
+        const isConn = await this.sqliteConnection.isConnection(dbName, false);
+        
+        if (isConn.result) {
+          this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
+        } else {
           this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
-          await this.nativeDb.open();
-          console.log(">>> [Database] Conexão recuperada e aberta pós lock com sucesso.");
-        } catch (recoveryErr) {
-          console.error(">>> [Database - Critical] Falha definitiva no bootstrap de abertura do arquivo:", recoveryErr);
-          throw recoveryErr;
         }
-      }
-      console.log(">>> [Database] Arquivo de persistência aberto. Iniciando checagem de integridade...");
 
-      // 4. Injeção Atômica Obrigatória do Schema
-      await this.applySchemaDDL();
+        // 3. Abertura Física do Arquivo .db de forma segura (previne double-open lock)
+        try {
+          const isOpen = await this.nativeDb.isDBOpen();
+          if (!isOpen.result) {
+            await this.nativeDb.open();
+            console.log(">>> [Database] Arquivo de persistência aberto com sucesso.");
+          } else {
+            console.log(">>> [Database] Conexão física com o banco de dados já estava ativa e aberta.");
+          }
+        } catch (openErr) {
+          console.warn(">>> [Database - Warning] Falha ao verificar ou abrir a conexão. Tentando re-vincular e reiniciar no registro do SQLite...", openErr);
+          try {
+            await this.sqliteConnection.closeConnection(dbName, false);
+            this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
+            await this.nativeDb.open();
+            console.log(">>> [Database] Conexão recuperada e aberta pós lock com sucesso.");
+          } catch (recoveryErr) {
+            console.error(">>> [Database - Critical] Falha definitiva no bootstrap de abertura do arquivo:", recoveryErr);
+            throw recoveryErr;
+          }
+        }
+        console.log(">>> [Database] Arquivo de persistência aberto. Iniciando checagem de integridade...");
 
-      // Sincronização Web fallback se necessário
-      if (!isNative) {
-        await this.sqliteConnection.saveToStore(dbName);
-        this.storageSource = 'PHYSICAL';
-      } else {
-        this.nativePath = await this.getStoragePath();
-        this.storageSource = 'PHYSICAL';
-      }
+        // 4. Injeção Atômica Obrigatória do Schema
+        await this.applySchemaDDL();
 
-      this.isInitialized = true;
-      await this.ensureRequiredColumns();
-      await this.createPostMigrationIndices();
-      await this.seedAdminUser();
-      
-      window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
-      return true;
+        // Sincronização Web fallback se necessário
+        if (!isNative) {
+          await this.sqliteConnection.saveToStore(dbName);
+          this.storageSource = 'PHYSICAL';
+        } else {
+          this.nativePath = await this.getStoragePath();
+          this.storageSource = 'PHYSICAL';
+        }
+
+        this.isInitialized = true;
+        await this.ensureRequiredColumns();
+        await this.createPostMigrationIndices();
+        await this.seedAdminUser();
+        
+        window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
+        return true;
+      };
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("SQLITE_BOOTSTRAP_TIMEOUT")), 30000)
+      );
+
+      return await Promise.race([physicalSetup(), timeoutPromise]);
     } catch (error: unknown) {
       console.warn(">>> [Database Bootstrap] Falha crítica de conexão com banco físico SQLite. Ativando Motor de Memória Fallback Resiliente.", error);
       
@@ -896,6 +904,22 @@ class SqliteService {
     } finally {
       this.isInitializingDb = false;
     }
+  }
+
+  async forceMemoryFallback() {
+    console.warn(">>> [Database] Forçando ativação explícita do Fallback em Memória por solicitação do sistema...");
+    this.nativeDb = new MemoryDatabaseConnection() as unknown as SQLiteDBConnection;
+    this.storageSource = 'MEMORY_FALLBACK';
+    this.isInitialized = true;
+    try {
+      await this.applySchemaDDL();
+      await this.ensureRequiredColumns();
+      await this.seedAdminUser();
+    } catch (applyErr) {
+      console.warn(">>> [Database] Erro de injeção pós fallback forçado:", applyErr);
+    }
+    window.dispatchEvent(new CustomEvent('gbr_db_init_success'));
+    return true;
   }
 
   private async applySchemaDDL() {
@@ -1606,52 +1630,52 @@ class SqliteService {
   async getOperationalUnits(): Promise<string[]> {
     const res = await this.query(`
       SELECT 
-        COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome
+        filial AS name
       FROM ativos 
       WHERE _is_deleted = 0 
         AND (conta_contabil IS NULL OR conta_contabil != '131105001')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(_tenantid)) FROM ativos WHERE _tenantid IS NOT NULL AND TRIM(_tenantid) != '')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(tenantId)) FROM ativos WHERE tenantId IS NOT NULL AND TRIM(tenantId) != '')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(GRUPO_EMPRESARIAL)) FROM ativos WHERE GRUPO_EMPRESARIAL IS NOT NULL AND TRIM(GRUPO_EMPRESARIAL) != '')
-      GROUP BY UNIDADE_OPERACIONAL
-      ORDER BY unidade_nome ASC
+        AND filial IS NOT NULL 
+        AND TRIM(filial) != ''
+        AND TRIM(UPPER(filial)) != 'CICOPAL'
+      GROUP BY filial
+      ORDER BY filial ASC
     `);
     return res.map(row => {
       const getVal = (target: string, fallback: unknown) => {
         const key = Object.keys(row).find(k => k.toLowerCase() === target.toLowerCase());
         return key ? row[key] : fallback;
       };
-      const nameVal = getVal('unidade_nome', getVal('unidade_operacional', 'Unidade Não Informada'));
-      return String(nameVal || 'Unidade Não Informada').trim().toUpperCase();
-    });
+      const nameVal = getVal('name', getVal('filial', ''));
+      return String(nameVal || '').trim().toUpperCase();
+    }).filter(val => val !== '');
   }
 
   async getOperationalUnitsWithStats(): Promise<{ name: string; count: number }[]> {
     const res = await this.query(`
       SELECT 
-        COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome, 
-        COUNT(*) AS total_ativos 
+        filial AS name, 
+        COUNT(id) AS total_ativos 
       FROM ativos 
       WHERE _is_deleted = 0 
         AND (conta_contabil IS NULL OR conta_contabil != '131105001')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(_tenantid)) FROM ativos WHERE _tenantid IS NOT NULL AND TRIM(_tenantid) != '')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(tenantId)) FROM ativos WHERE tenantId IS NOT NULL AND TRIM(tenantId) != '')
-        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(GRUPO_EMPRESARIAL)) FROM ativos WHERE GRUPO_EMPRESARIAL IS NOT NULL AND TRIM(GRUPO_EMPRESARIAL) != '')
-      GROUP BY UNIDADE_OPERACIONAL 
-      ORDER BY unidade_nome ASC
+        AND filial IS NOT NULL 
+        AND TRIM(filial) != ''
+        AND TRIM(UPPER(filial)) != 'CICOPAL'
+      GROUP BY filial 
+      ORDER BY name ASC
     `);
     return res.map(row => {
       const getVal = (target: string, fallback: unknown) => {
         const key = Object.keys(row).find(k => k.toLowerCase() === target.toLowerCase());
         return key ? row[key] : fallback;
       };
-      const rawName = getVal('unidade_nome', getVal('unidade_exibicao', getVal('unidade_operacional', 'Unidade Não Informada')));
+      const rawName = getVal('name', getVal('filial', ''));
       const countVal = getVal('total_ativos', getVal('total', 0));
       return {
-        name: String(rawName || 'Unidade Não Informada').trim().toUpperCase(),
+        name: String(rawName || '').trim().toUpperCase(),
         count: Number(countVal)
       };
-    });
+    }).filter(u => u.name !== '');
   }
 
   /**
