@@ -588,6 +588,12 @@ const App: React.FC = () => {
 
   // Monitor de Sincronização Offline
   useEffect(() => {
+    // 🚀 CORREÇÃO DE ENGENHARIA CONTRA RACE CONDITION:
+    // Bloqueia a execução se o SQLite local não estiver fisicamente pronto na memória
+    if (!dbInitialized || sqliteStatus.loading) {
+      return;
+    }
+
     if (databaseMode === DatabaseMode.INTERNAL) {
       setSyncQueueLength(0);
       setPendingPhotosCount(0);
@@ -630,7 +636,7 @@ const App: React.FC = () => {
        clearInterval(interval);
        window.removeEventListener('gbr_photo_synced', handleSynced);
      };
-  }, [isSyncLocked, databaseMode]);
+  }, [isSyncLocked, databaseMode, dbInitialized, sqliteStatus.loading]);
 
   // Agendador Automático Oculto (Background Sync Timer)
   useEffect(() => {
@@ -1534,7 +1540,9 @@ const App: React.FC = () => {
       AppScreen.REGISTER,
       AppScreen.ONBOARDING,
       AppScreen.LOAD_DATABASE,
-      AppScreen.UNIT_SELECTION
+      AppScreen.UNIT_SELECTION,
+      AppScreen.UNIT_CONFIGURATOR,
+      AppScreen.CAMPAIGN_MANAGEMENT
     ];
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
@@ -2983,7 +2991,10 @@ const App: React.FC = () => {
             AppScreen.LOAD_DATABASE, 
             AppScreen.REGISTER, 
             AppScreen.CHANGE_PASSWORD,
-            AppScreen.DATABASE_MANAGER
+            AppScreen.DATABASE_MANAGER,
+            AppScreen.UNIT_SELECTION,
+            AppScreen.UNIT_CONFIGURATOR,
+            AppScreen.CAMPAIGN_MANAGEMENT
           ];
           
           if (!exemptScreens.includes(screen)) {

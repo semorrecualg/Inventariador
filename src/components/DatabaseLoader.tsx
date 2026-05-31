@@ -10,6 +10,7 @@ import { Device } from '@capacitor/device';
 import { generateUUID } from '../services/supabaseService';
 import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
 import { saveInventory } from '../services/persistenceService';
+import { DatabaseProgressBar } from './DatabaseProgressBar';
 
 // GBR v24.50: Campanha de Auditoria Padrão (Static Context)
 const DEFAULT_CAMPAIGN_ID = 'CAMP_2025_01';
@@ -35,6 +36,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   onCargaInicial
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
+  const [importStep, setImportStep] = useState<'DOWNLOAD' | 'BATCH_WRITE' | 'PROJECTION' | 'DISK_SAVE'>('DOWNLOAD');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
   const [errorLog, setErrorLog] = useState<string[]>([]);
@@ -191,6 +193,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     const CHUNK_SIZE = 200;
     const totalItems = rows.length;
     
+    setImportStep('BATCH_WRITE');
     setProgress({ current: 0, total: totalItems });
     addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
 
@@ -384,7 +387,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       }
 
       // 4. Inserção final e sincronização de estado
+      setImportStep('PROJECTION');
       addLog("Conciliando índices e persistindo banco físico...");
+      await new Promise(resolve => setTimeout(resolve, 600)); // Pequena pausa para o usuário notar o estágio de Projeção
+
+      setImportStep('DISK_SAVE');
+      addLog("Gravando banco físico local de forma segura...");
+      await new Promise(resolve => setTimeout(resolve, 400)); // Pequena pausa para o usuário notar o estágio de Gravação Física
+
       // GBR v26: Reseta o mutationCounter para evitar salva dupla de arquivo físico lento nativo
       sqliteService.mutationCounter = 0;
       // GBR v26: Executa saveDatabase() uma ÚNICA vez no final de todo o carregamento conforme diretriz imperativa
@@ -407,6 +417,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     if (!file) return;
 
     setStatus('IMPORTING');
+    setImportStep('DOWNLOAD');
+    setProgress({ current: 0, total: 0 });
     addLog(`Lendo planilha (Soberania Nativa): ${file.name}`);
 
     try {
@@ -682,51 +694,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         )}
 
         {status === 'IMPORTING' && (
-          <motion.div 
-            key="importing"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center gap-6 text-center w-full max-w-xs"
-          >
-            <div className="relative w-20 h-20">
-              <div className="absolute inset-0 border-4 border-slate-100 rounded-full" />
-              <motion.div 
-                className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <FileSpreadsheet className="w-8 h-8 text-blue-500" />
-              </div>
-            </div>
-
-            <div className="w-full space-y-3">
-              <div className="flex justify-between items-end">
-                <div className="text-left">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Importando</h3>
-                  <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest animate-pulse">
-                    Expert Load v25
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-400 uppercase">
-                    {Math.round((progress.current / progress.total) * 100)}%
-                  </p>
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${(progress.current / progress.total) * 100}%` }}
-                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
-                />
-              </div>
-
-              <p className="text-[9px] font-mono text-slate-400 uppercase font-bold">
-                {progress.current.toLocaleString()} / {progress.total.toLocaleString()} itens
-              </p>
-            </div>
-          </motion.div>
+          <DatabaseProgressBar 
+            totalAssets={progress.total} 
+            currentProcessed={progress.current} 
+            currentStep={importStep} 
+          />
         )}
 
         {status === 'PERMISSION_NEEDED' && (

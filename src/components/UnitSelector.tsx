@@ -14,7 +14,8 @@ import {
   Navigation as NavigationIcon,
   Database,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
@@ -102,43 +103,42 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header Fixo */}
-      <div className="p-5 pt-14 bg-white border-b border-border shadow-sm">
-        <div className="mb-6">
+      <div className="pt-[constant(safe-area-inset-top)] pt-[env(safe-area-inset-top)] pt-4 pb-3 px-4 bg-white border-b border-gray-100 flex flex-col gap-3 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
           <BackButton onClick={onBack} label="Voltar" subLabel={isAdmin ? "Módulos" : "Sair"} />
-        </div>
-        
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-bold text-ink uppercase tracking-tight leading-none">Unidade Operacional</h2>
-            <p className="text-accent text-[9px] font-bold uppercase tracking-[0.2em] mt-2">Selecione o Foco do Inventário</p>
+          
+          <div className="flex-1 text-center">
+            <h2 className="text-sm font-black text-ink uppercase tracking-tight leading-none">Unidade Operacional</h2>
+            <p className="text-accent text-[8px] font-bold uppercase tracking-wider mt-1">Selecione o Foco do Inventário</p>
           </div>
-          <div className="flex items-center space-x-2">
+
+          <div className="flex items-center space-x-1.5 flex-shrink-0">
             {onSync && databaseMode !== DatabaseMode.INTERNAL && (
               <button 
                 onClick={onSync}
                 disabled={isSyncing}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md ${isSyncing ? 'bg-blue-50 text-blue-500' : 'bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft'}`}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-sm ${isSyncing ? 'bg-blue-50 text-blue-500' : 'bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft'}`}
                 title="Sincronizar com a Nuvem"
               >
                 <div className={isSyncing ? 'animate-spin' : ''}>
-                  {isSyncing ? <RefreshCw size={20} /> : <Cloud size={20} />}
+                  {isSyncing ? <RefreshCw size={16} /> : <Cloud size={16} />}
                 </div>
               </button>
             )}
-            <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center text-white shadow-lg shadow-accent/20">
-              <LayoutGrid size={24} />
+            <div className="w-9 h-9 bg-accent rounded-xl flex items-center justify-center text-white shadow-md">
+              <LayoutGrid size={16} />
             </div>
           </div>
         </div>
 
         <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={16} />
           <input 
             type="text"
             placeholder="PESQUISAR UNIDADE..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-            className="w-full pl-12 pr-6 py-3.5 bg-bg-main rounded-xl text-[11px] font-bold uppercase border border-border focus:border-accent outline-none transition-all shadow-inner placeholder:text-ink-muted/30"
+            className="w-full pl-11 pr-5 py-2.5 bg-bg-main rounded-xl text-[10px] font-bold uppercase border border-border focus:border-accent outline-none transition-all shadow-inner placeholder:text-ink-muted/30"
           />
         </div>
       </div>
@@ -148,6 +148,9 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
           <Virtuoso
             style={{ height: '100%' }}
             data={filteredUnits}
+            components={{
+              Footer: () => <div className="h-28 w-full flex-shrink-0" />
+            }}
             itemContent={(index, unit) => {
               // Garanta o uso rigoroso do campo oficial do projeto
               if (!unit || !unit.UNIDADE_OPERACIONAL || unit.UNIDADE_OPERACIONAL.trim() === '') {
@@ -157,6 +160,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
               const displayName = unit.UNIDADE_OPERACIONAL.trim().toUpperCase();
               const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
               const isDownloading = downloadingUnit === unit.UNIDADE_OPERACIONAL;
+              const hasAssetsLoaded = typeof unit.assetCount === 'number' && unit.assetCount > 0;
+
               return (
                 <div className="px-5 py-1.5">
                   <div
@@ -196,7 +201,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                                className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0"
                                onClick={(e) => {
                                  e.stopPropagation();
-                                 if (isAdmin && onConfigGPS) onConfigGPS(unit.UNIDADE_OPERACIONAL);
+                                 if (isAdmin && onConfigGPS) { e.preventDefault(); try { Promise.resolve(onConfigGPS(unit.UNIDADE_OPERACIONAL)).catch(err => console.error("[GPS MODAL CRASH PREVENTED]", err)); } catch (err) { console.error("[GPS MODAL CRASH PREVENTED]", err); } }
                                }}
                              >
                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
@@ -212,17 +217,17 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                            {/* Ícone de Campanha */}
                            <button 
                              type="button"
-                             className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans"
+                             className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans ${(!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) ? 'opacity-40 cursor-not-allowed' : 'active:scale-90 cursor-pointer'}`}
                              onClick={(e) => {
                                e.stopPropagation();
-                               if (onCampaigns) onCampaigns(unit.UNIDADE_OPERACIONAL);
+                               if (!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) { e.preventDefault(); e.stopPropagation(); return; } if (onCampaigns) onCampaigns(unit.UNIDADE_OPERACIONAL);
                              }}
                            >
                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
                                unit.hasCampaign 
                                  ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' 
                                  : 'bg-gray-50 text-gray-300 border-gray-100'
-                             } hover:scale-110 hover:bg-amber-100`}>
+                             } ${(!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) ? '' : 'hover:scale-110 hover:bg-amber-100'}`}>
                                <Calendar size={16} />
                              </div>
                              <span className={`text-[7px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>Campanha</span>
@@ -232,23 +237,32 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                     </div>
                     
                     <div className="flex items-center space-x-2 relative z-10">
-                      {unit.hasData && onDownload && databaseMode !== DatabaseMode.INTERNAL && (
-                        <button
-                          onClick={(e) => handleDownload(e, unit.UNIDADE_OPERACIONAL)}
-                          disabled={isDownloading || unit.isDownloaded}
-                          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                            unit.isDownloaded 
-                              ? 'text-emerald-500 bg-emerald-50' 
-                              : 'text-ink-muted hover:bg-bg-main active:scale-90'
-                          }`}
-                          title="Baixar para uso Offline"
-                        >
-                          {isDownloading ? (
-                            <RefreshCw size={18} className="animate-spin" />
-                          ) : (
-                            <Download size={18} className={unit.isDownloaded ? 'text-emerald-500 opacity-50' : ''} />
-                          )}
-                        </button>
+                      {onDownload && (
+                        hasAssetsLoaded ? (
+                          <div 
+                            className="w-10 h-10 rounded-full flex items-center justify-center bg-green-50 text-green-500 cursor-default"
+                            title="Unidade Populada"
+                          >
+                            <ShieldCheck className="text-green-500 w-5 h-5" />
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => handleDownload(e, unit.UNIDADE_OPERACIONAL)}
+                            disabled={isDownloading || unit.isDownloaded}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                              isDownloading 
+                                ? 'bg-blue-50 text-blue-500 animate-spin' 
+                                : 'text-blue-500 hover:bg-blue-50 active:scale-90'
+                            }`}
+                            title="Baixar para uso Offline"
+                          >
+                            {isDownloading ? (
+                              <RefreshCw size={18} />
+                            ) : (
+                              <Download size={18} className="text-blue-500" />
+                            )}
+                          </button>
+                        )
                       )}
                       <div className="w-8 h-8 flex items-center justify-center text-ink-muted/20 group-hover:text-accent/40 transition-colors">
                         <ChevronRight size={20} />
