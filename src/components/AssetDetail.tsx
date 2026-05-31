@@ -173,8 +173,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     setIsOCRProcessing(true);
     setOcrResults([]);
     try {
-      // Usar português e inglês para melhor reconhecimento de caracteres
-      const worker = await createWorker('por+eng');
+      // Usar português e inglês com CDN fixada/estável de produção para evitar erros 400/404 em sandboxes
+      const worker = await createWorker('por+eng', 1, {
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract-worker.min.js',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-wasm.js',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      });
       const { data: { text } } = await worker.recognize(file);
       await worker.terminate();
 

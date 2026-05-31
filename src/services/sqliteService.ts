@@ -1650,30 +1650,41 @@ class SqliteService {
     }).filter(val => val !== '');
   }
 
-  async getOperationalUnitsWithStats(): Promise<{ name: string; count: number }[]> {
+  async getOperationalUnitsWithStats(tenantId: string = 'CICOPAL'): Promise<{ id: string; name: string; UNIDADE_OPERACIONAL: string; total_ativos: number; count: number; total_conferidos: number }[]> {
     const res = await this.query(`
       SELECT 
-        filial AS name, 
-        COUNT(id) AS total_ativos 
-      FROM ativos 
-      WHERE _is_deleted = 0 
-        AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+        filial AS id,
+        filial AS name,
+        filial AS UNIDADE_OPERACIONAL,
+        COUNT(id) AS total_ativos,
+        SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS total_conferidos
+      FROM ativos
+      WHERE (tenantId = ? OR _tenantid = ?)
         AND filial IS NOT NULL 
         AND TRIM(filial) != ''
-        AND TRIM(UPPER(filial)) != 'CICOPAL'
-      GROUP BY filial 
-      ORDER BY name ASC
-    `);
+        AND UPPER(TRIM(filial)) != 'CICOPAL'
+      GROUP BY filial
+      ORDER BY filial ASC
+    `, [tenantId, tenantId]);
+
     return res.map(row => {
       const getVal = (target: string, fallback: unknown) => {
         const key = Object.keys(row).find(k => k.toLowerCase() === target.toLowerCase());
         return key ? row[key] : fallback;
       };
+      const rawId = getVal('id', getVal('filial', ''));
       const rawName = getVal('name', getVal('filial', ''));
-      const countVal = getVal('total_ativos', getVal('total', 0));
+      const rawUnit = getVal('unidade_operacional', getVal('filial', ''));
+      const totalAtivos = Number(getVal('total_ativos', getVal('total', 0)));
+      const totalConferidos = Number(getVal('total_conferidos', 0));
+
       return {
+        id: String(rawId || '').trim().toUpperCase(),
         name: String(rawName || '').trim().toUpperCase(),
-        count: Number(countVal)
+        UNIDADE_OPERACIONAL: String(rawUnit || '').trim().toUpperCase(),
+        total_ativos: totalAtivos,
+        count: totalAtivos,
+        total_conferidos: totalConferidos
       };
     }).filter(u => u.name !== '');
   }
