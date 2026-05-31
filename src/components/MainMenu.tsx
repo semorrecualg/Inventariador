@@ -1398,7 +1398,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
-                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">v24.50 KARDEK</p>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR v2.6</p>
               </div>
             </div>
           </div>
@@ -1407,14 +1407,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
               <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
                 <ReactMarkdown>
-                  {`# Documentação Técnica e Operacional - v24.50 KARDEK
+                  {`# Documentação Técnica e Operacional - Inventariador GBR v2.6
 
 Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado.
 
 ---
 
 ## 1. Visão Geral do Sistema
-O **v24.50 KARDEK** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
+O **Inventariador GBR v2.6** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
 
 ### 1.1. Pilares do Sistema
 - **Protocolo de Auditoria**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).

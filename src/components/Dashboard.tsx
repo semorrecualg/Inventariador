@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Asset, TagInventario, AuditLogEntry } from '../types';
+import { Asset, TagInventario, AuditLogEntry, AppScreen } from '../types';
 import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';
 import BackButton from './BackButton';
@@ -64,9 +64,10 @@ interface DashboardProps {
     is_admin?: boolean;
     isAdmin?: boolean;
   } | null;
+  onNavigate?: (screen: AppScreen) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit, sqlStats }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit, sqlStats, onNavigate }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
@@ -471,6 +472,101 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
               </div>
             </div>
             
+            {/* Painel de Conformidade e Atalhos de Conectividade (Kardek v2.6) */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-[2rem] p-6 shadow-xl border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/30 flex items-center justify-center text-accent">
+                    <Activity size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-[#94A3B8]">Conectividade e Governança</h3>
+                    <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mt-0.5">Laudos CPC & Malha de Auditoria</p>
+                  </div>
+                </div>
+                <div className="px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-[7px] font-black uppercase text-emerald-400 tracking-widest">
+                  Ativo Geral
+                </div>
+              </div>
+
+              {/* Seção CPC 27 / CPC 01 */}
+              <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2 mb-1.5 align-middle">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">CPC 01 / CPC 27 (Impairment & Depreciação)</span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 leading-relaxed font-medium">
+                    {stats.divergencia > 0 
+                      ? `Conformidade Física: ${stats.divergencia} ativos apresentam divergências de plaqueta ou localidade e precisam de saneamento contábil.` 
+                      : 'Nenhuma divergência crítica pendente verificada de forma atômica nesta planta física.'}
+                  </p>
+                </div>
+                {onNavigate && (
+                  <button 
+                    onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
+                    className="w-full md:w-auto px-4 py-2.5 bg-accent hover:bg-accent-soft text-white hover:text-accent rounded-xl text-[8px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all text-center cursor-pointer"
+                    id="dashboard-btn-reconciliacao"
+                  >
+                    Sanar Divergências
+                  </button>
+                )}
+              </div>
+
+              {/* Seção Sincronização Delta e Logs de Auditoria */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {onNavigate && (
+                  <button 
+                    onClick={() => onNavigate(AppScreen.SYNC_MANAGER)}
+                    className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between text-left active:scale-[0.98] transition-all hover:border-slate-700 cursor-pointer"
+                    id="dashboard-btn-sync"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20">
+                        <Activity size={14} />
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-200 uppercase tracking-widest block">Sincronização Delta</span>
+                        <span className="text-[7px] text-slate-500 uppercase font-bold mt-0.5">Fila de nuvem (Supabase)</span>
+                      </div>
+                    </div>
+                    <ArrowUpRight size={14} className="text-slate-500" />
+                  </button>
+                )}
+
+                {onNavigate && (
+                  <button 
+                    onClick={() => onNavigate(AppScreen.AUDIT_LOGS)}
+                    className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between text-left active:scale-[0.98] transition-all hover:border-slate-700 cursor-pointer"
+                    id="dashboard-btn-logs"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
+                        <History size={14} />
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-200 uppercase tracking-widest block">Trilha de Auditoria</span>
+                        <span className="text-[7px] text-slate-500 uppercase font-bold mt-0.5">Logs atômicos de mudanças</span>
+                      </div>
+                    </div>
+                    <ArrowUpRight size={14} className="text-slate-500" />
+                  </button>
+                )}
+              </div>
+
+              {/* Ajuste de Perímetro GPS */}
+              {onNavigate && (
+                <button 
+                  onClick={() => onNavigate(AppScreen.UNIT_CONFIGURATOR)}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                  id="dashboard-btn-gps"
+                >
+                  <MapPin size={12} className="text-slate-500" />
+                  Ajustar Perímetro Virtual (GPS Geofencing)
+                </button>
+              )}
+            </div>
+
             {/* Main KPI Card */}
             <div className="bg-white border border-border rounded-[2rem] p-6 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between mb-6">

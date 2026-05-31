@@ -5111,7 +5111,7 @@ const App: React.FC = () => {
           <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-50" size={24} />
         </div>
         <div className="flex flex-col items-center space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">GBR KARDEK v24.50</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v2.6</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
             Iniciando Banco de Dados Seguro (Jeep-SQLite)...
           </p>
@@ -5315,7 +5315,7 @@ const App: React.FC = () => {
           setBootError={setInitError} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">GBR KARDEK • MOBILE SOBERANO</p>
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
         </footer>
       </div>
     );
@@ -6000,6 +6000,7 @@ const App: React.FC = () => {
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
               sqlStats={databaseMode === DatabaseMode.INTERNAL ? sqlDashboardStats : null}
+              onNavigate={pushScreen}
             />
           )}
           {screen === AppScreen.ASSET_MAP && (

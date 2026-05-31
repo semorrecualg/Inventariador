@@ -1593,7 +1593,11 @@ class SqliteService {
       SELECT 
         COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome
       FROM ativos 
-      WHERE _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+      WHERE _is_deleted = 0 
+        AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(_tenantid)) FROM ativos WHERE _tenantid IS NOT NULL AND TRIM(_tenantid) != '')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(tenantId)) FROM ativos WHERE tenantId IS NOT NULL AND TRIM(tenantId) != '')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(GRUPO_EMPRESARIAL)) FROM ativos WHERE GRUPO_EMPRESARIAL IS NOT NULL AND TRIM(GRUPO_EMPRESARIAL) != '')
       GROUP BY UNIDADE_OPERACIONAL
       ORDER BY unidade_nome ASC
     `);
@@ -1613,7 +1617,11 @@ class SqliteService {
         COALESCE(NULLIF(TRIM(UNIDADE_OPERACIONAL), ''), 'Unidade Não Informada') AS unidade_nome, 
         COUNT(*) AS total_ativos 
       FROM ativos 
-      WHERE _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+      WHERE _is_deleted = 0 
+        AND (conta_contabil IS NULL OR conta_contabil != '131105001')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(_tenantid)) FROM ativos WHERE _tenantid IS NOT NULL AND TRIM(_tenantid) != '')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(tenantId)) FROM ativos WHERE tenantId IS NOT NULL AND TRIM(tenantId) != '')
+        AND TRIM(UPPER(UNIDADE_OPERACIONAL)) NOT IN (SELECT DISTINCT TRIM(UPPER(GRUPO_EMPRESARIAL)) FROM ativos WHERE GRUPO_EMPRESARIAL IS NOT NULL AND TRIM(GRUPO_EMPRESARIAL) != '')
       GROUP BY UNIDADE_OPERACIONAL 
       ORDER BY unidade_nome ASC
     `);

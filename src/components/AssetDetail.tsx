@@ -119,6 +119,36 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     valorEmUso: workingAsset._valor_em_uso || 0
   });
 
+  // Carrega rascunho de memória volátil (Pilar 2 de Conectividade)
+  useEffect(() => {
+    if (workingAsset && workingAsset.id) {
+      try {
+        const key = `kardek_draft_asset_${workingAsset.id}`;
+        const savedDraft = sessionStorage.getItem(key);
+        if (savedDraft) {
+          const parsedDraft = JSON.parse(savedDraft);
+          // Auto-restaurar rascunho temporário
+          setWorkingAsset(parsedDraft);
+          console.log(`>>> [AssetDetail] Rascunho restaurado dinamicamente para ativo: ${workingAsset.id}`);
+        }
+      } catch (err) {
+        console.error('Erro ao ler rascunho do Ativo:', err);
+      }
+    }
+  }, [assets[0].id]);
+
+  // Salva rascunho de memória volátil quando o estado for alterado
+  useEffect(() => {
+    if (workingAsset && workingAsset.id) {
+      try {
+        const key = `kardek_draft_asset_${workingAsset.id}`;
+        sessionStorage.setItem(key, JSON.stringify(workingAsset));
+      } catch (err) {
+        console.error('Erro ao guardar rascunho do Ativo:', err);
+      }
+    }
+  }, [workingAsset]);
+
   useEffect(() => {
     if (unitizeMethod === 'PERCENT') {
       const currentLen = unitizePercentages.length;
@@ -435,6 +465,14 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     } else {
       onUpdate({ ...finalAsset, _conferido: true });
     }
+
+    // Limpa rascunho de memória volátil (Pilar 2 de Conectividade)
+    try {
+      sessionStorage.removeItem(`kardek_draft_asset_${workingAsset.id}`);
+    } catch (e) {
+      console.warn(e);
+    }
+
     onBack();
   };
 
@@ -594,7 +632,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             <div className="bg-white/10 px-5 py-2.5 rounded-xl border border-white/20 backdrop-blur-md flex items-center space-x-2">
               {readOnly && <Lock size={14} className="text-white/70" />}
               <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">
-                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'KARDEK v24.50')}
+                {readOnly ? 'MODO CONSULTA' : (isBatch ? 'LOTE' : 'Inventariador GBR v2.6')}
               </span>
             </div>
           </div>
@@ -1076,7 +1114,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <span className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.3em]">AUDIT AUTHORITY</span>
-              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">v24.50 KARDEK</span>
+              <span className="text-[9px] font-bold text-ink uppercase tracking-[0.1em] mt-0.5">Inventariador GBR v2.6</span>
             </div>
             <div className="flex items-center space-x-2">
               {!isBatch && onUnitize && (

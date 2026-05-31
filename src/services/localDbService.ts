@@ -107,10 +107,7 @@ export const localDb = {
     getMapData: async (campaignId: string): Promise<Asset[]> => {
       const tenant = getCurrentTenantId();
       const sql = `
-        SELECT 
-          id, latitude, longitude, _altitude_metros, _id_andar, VLRAQUISIC, 
-          ETIQUETA, DESCRICAODOATIVO, _conferido, AUDITOR_STATUS_CONFERENCIA,
-          _localMaster, ENDERECO, _origemTransacao, currentCampaignId, conta_contabil
+        SELECT *
         FROM ativos 
         WHERE currentCampaignId = ? 
           AND _is_deleted = 0
