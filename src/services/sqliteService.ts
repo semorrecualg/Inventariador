@@ -394,6 +394,17 @@ class SqliteService {
   private mutationCounter = 0;
   private readonly MUTATION_THRESHOLD = 5;
   
+  public isImportingBatch = false;
+
+  public setImportingMode(mode: boolean) {
+    this.isImportingBatch = mode;
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__isImportingBatch = mode;
+    }
+    console.log(`>>> [SQL] Modo Importação Lote definido para: ${mode}`);
+  }
+  
   // GBR v24.50 KARDEK: Buffer Atômico - "Regra dos 5 Registros"
   private assetFieldBuffer: { sql: string; params: (string | number | boolean | null)[] }[] = [];
   private fieldChangesCount = 0;
@@ -1088,6 +1099,10 @@ class SqliteService {
    * Registra uma alteração no log de auditoria (GBR v24 Delta Protocol)
    */
   async logAuditEvent(userId: string, action: string, table: string, recordId: string, details: string, delta?: string) {
+    if (this.isImportingBatch) {
+      // Ignora silenciosamente durante a carga em lote
+      return;
+    }
     const id = `LOG_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const sql = `INSERT INTO AUDIT_LOG (id, usuario, acao, tabela, registro_id, details, delta, _status_sinc) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, 0)`;

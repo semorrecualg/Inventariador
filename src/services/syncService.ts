@@ -21,6 +21,10 @@ export const photoSyncManager = {
    * Varre a fila do IndexedDB, faz upload para o Supabase Storage e limpa a memória local
    */
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number }> => {
+    if (sqliteService.isImportingBatch) {
+      console.log('[Sync Photo] Sincronização suspensa: Importação em lote ativa.');
+      return { success: false, uploadCount: 0 };
+    }
     if (!navigator.onLine) return { success: false, uploadCount: 0 };
 
     // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
@@ -109,6 +113,9 @@ export const syncService = {
    * Processa o lote de ativos modificados offline e sincroniza com o Supabase
    */
   processDataSyncQueue: async (): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+    if (sqliteService.isImportingBatch) {
+      return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote ativa." };
+    }
     if (isDataSyncRunning) {
       return { success: false, processedCount: 0, error: "Sync already in progress" };
     }

@@ -176,7 +176,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     try {
       const batteryInfo = await Device.getBatteryInfo();
       if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
-        throw new Error("Carga bloqueada: Bateria abaixo de 5% sem fonte de carregamento ativa.");
+        throw new Error("Carga bloqueada: Bateria abaixo de 5% sem fonte de carregamento activa.");
       }
     } catch (err: unknown) {
       const error = err as Error;
@@ -202,198 +202,204 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       return s;
     };
 
-    for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros - sem comandos manuais)
-      // Iniciamos a transação utilizando BEGIN TRANSACTION para velocidade extrema de escrita do SQLite
-      const sqlStatements: string[] = ['BEGIN TRANSACTION;'];
+    // ATIVE A TRAVA DE ISOLAMENTO DE SISTEMA (Bypass de Sync / Auditoria)
+    sqliteService.setImportingMode(true);
 
-      for (const row of chunk) {
-        let rTenantId = 'CICOPAL';
-        let rFilial = 'MATRIZ';
-        let rStatus = 'PENDENTE';
-        let rEtiqueta = '';
-        let rQt = '1';
-        let rDescricaodoativo = 'Importado via Expert';
-        let rSerial = '';
-        let rDataaqusic = '';
-        let rCnpj = '';
-        let rNomefornecedor = '';
-        let rNotafiscal = '';
-        let rEndereco = '';
-        let rRegistro = '';
-        let rSubreg = '';
-        let rDatabaixa = '';
-        let rContacontabil = '';
-        let rPrimarykey = '';
-        let rCentrodecusto = '';
-        let rVlrAquisic = 0;
-        let rSn1Recno = 0;
-        let rSn3Recno = 0;
+    try {
+      for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE);
+        // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros - sem comandos manuais)
+        // Removido o BEGIN TRANSACTION explícito do array para evitar colisão com o gerenciamento nativo do driver
+        const sqlStatements: string[] = [];
 
-        if (Array.isArray(row)) {
-          const etq = cleanValue(row[3]);
-          const pkey = cleanValue(row[16]);
-          const desc = cleanValue(row[5]);
+        for (const row of chunk) {
+          let rTenantId = 'CICOPAL';
+          let rFilial = 'MATRIZ';
+          let rStatus = 'PENDENTE';
+          let rEtiqueta = '';
+          let rQt = '1';
+          let rDescricaodoativo = 'Importado via Expert';
+          let rSerial = '';
+          let rDataaqusic = '';
+          let rCnpj = '';
+          let rNomefornecedor = '';
+          let rNotafiscal = '';
+          let rEndereco = '';
+          let rRegistro = '';
+          let rSubreg = '';
+          let rDatabaixa = '';
+          let rContacontabil = '';
+          let rPrimarykey = '';
+          let rCentrodecusto = '';
+          let rVlrAquisic = 0;
+          let rSn1Recno = 0;
+          let rSn3Recno = 0;
 
-          // Filtro de resiliência: Ignora se a linha for muito curta ou se não tiver identificador de ativo real ou descrição
-          if (row.length < 4 || (!etq && !pkey && !desc)) {
-            continue; 
+          if (Array.isArray(row)) {
+            const etq = cleanValue(row[3]);
+            const pkey = cleanValue(row[16]);
+            const desc = cleanValue(row[5]);
+
+            // Filtro de resiliência: Ignora se a linha for muito curta ou se não tiver identificador de ativo real ou descrição
+            if (row.length < 4 || (!etq && !pkey && !desc)) {
+              continue; 
+            }
+
+            // Filtro para ignorar repetições acidentais de cabeçalhos no meio ou fim do arquivo
+            if (etq.toLowerCase() === 'etiqueta' || etq.toLowerCase() === 'plaqueta' || etq.toLowerCase() === 'tag' || desc.toLowerCase() === 'descricaodoativo' || desc.toLowerCase() === 'descricao') {
+              continue;
+            }
+
+            // Extração posicional absolutamente estrita com a exata ordem do layout enviado (Carga Expert v2.6)
+            // Índice 0 é SEMPRE e APENAS tenantId e Índice 1 é SEMPRE e APENAS filial
+            rTenantId = cleanValue(row[0]) || 'CICOPAL';
+            rFilial = cleanValue(row[1]) || 'MATRIZ';
+            rStatus = cleanValue(row[2]) || 'PENDENTE';
+            rEtiqueta = etq;
+            rQt = cleanValue(row[4]) || '1';
+            rDescricaodoativo = desc || 'Importado via Expert';
+            rSerial = cleanValue(row[6]);
+            rDataaqusic = cleanValue(row[7]);
+            rCnpj = cleanValue(row[8]);
+            rNomefornecedor = cleanValue(row[9]);
+            rNotafiscal = cleanValue(row[10]);
+            rEndereco = cleanValue(row[11]);
+            rRegistro = cleanValue(row[12]) || rEtiqueta;
+            rSubreg = cleanValue(row[13]);
+            rDatabaixa = cleanValue(row[14]);
+            rContacontabil = cleanValue(row[15]);
+            rPrimarykey = pkey;
+            rCentrodecusto = cleanValue(row[17]);
+            rVlrAquisic = Number(row[18]) || 0;
+            rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
+            rSn3Recno = parseInt(String(row[20] || '0'), 10) || 0;
+          } else if (row && typeof row === 'object') {
+            // Fallback robusto por nome de coluna se vier como objeto
+            const rObj = row as Record<string, unknown>;
+            const rowKeys = Object.keys(rObj);
+            if (rowKeys.length === 0) continue;
+
+            const findVal = (priorities: string[]) => {
+              const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_').replace(/_/g, '')));
+              return key ? rObj[key] : null;
+            };
+
+            const etq = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
+            const pkey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
+            const desc = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
+
+            // Se for uma linha vazia no objeto (sem identificador útil), desconte e ignore
+            if (!etq && !pkey && !desc) {
+              continue;
+            }
+
+            rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
+            rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
+            rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
+            rEtiqueta = etq;
+            rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
+            rDescricaodoativo = desc;
+            rSerial = cleanValue(findVal(['SERIAL', 'NUMERO_SERIE', 'SERIE']));
+            rDataaqusic = cleanValue(findVal(['DATAAQUISIC', 'DATA_AQUISICAO', 'DATA_AQUISIC', 'DATAAQUSIC']));
+            rCnpj = cleanValue(findVal(['CNPJ', 'CNPJ_FORNECEDOR']));
+            rNomefornecedor = cleanValue(findVal(['NOMEFORNECEDOR', 'FORNECEDOR', 'NOME_FORNECEDOR']));
+            rNotafiscal = cleanValue(findVal(['NOTAFISCAL', 'NF', 'NOTA_FISCAL']));
+            rEndereco = cleanValue(findVal(['ENDERECO', 'LOCALIZACAO', 'LOCAL']));
+            rRegistro = cleanValue(findVal(['REGISTRO', 'PATRIMONIO'])) || rEtiqueta;
+            rSubreg = cleanValue(findVal(['SUBREG', 'SUB_REGISTRO', 'SUBREGISTRO']));
+            rDatabaixa = cleanValue(findVal(['DATABAIXA', 'DATA_BAIXA']));
+            rContacontabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA']));
+            rPrimarykey = pkey;
+            rCentrodecusto = cleanValue(findVal(['CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC', 'CCUSTO']));
+            rVlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR_AQUISICAO', 'VALOR', 'PRECO']) || 0) || 0;
+            rSn1Recno = parseInt(String(findVal(['SN1_RECNO', 'SN1_REC_NO']) || '0'), 10) || 0;
+            rSn3Recno = parseInt(String(findVal(['SN3_RECNO', 'SN3_REC_NO']) || '0'), 10) || 0;
           }
 
-          // Filtro para ignorar repetições acidentais de cabeçalhos no meio ou fim do arquivo
-          if (etq.toLowerCase() === 'etiqueta' || etq.toLowerCase() === 'plaqueta' || etq.toLowerCase() === 'tag' || desc.toLowerCase() === 'descricaodoativo' || desc.toLowerCase() === 'descricao') {
-            continue;
+          const id = rPrimarykey || rEtiqueta || generateUUID();
+          const cleanId = String(id).replace(/'/g, "''");
+          const cleanEtiqueta = String(rEtiqueta).replace(/'/g, "''");
+          const cleanRegistro = String(rRegistro || rEtiqueta).replace(/'/g, "''");
+          const cleanDesc = String(rDescricaodoativo).replace(/'/g, "''");
+          const cleanContacontabil = String(rContacontabil).replace(/'/g, "''");
+          const cleanCentrodecusto = String(rCentrodecusto).replace(/'/g, "''");
+          const cleanEndereco = String(rEndereco).replace(/'/g, "''");
+          const cleanSerial = String(rSerial).replace(/'/g, "''");
+          const cleanCnpj = String(rCnpj).replace(/'/g, "''");
+          const cleanNomefornecedor = String(rNomefornecedor).replace(/'/g, "''");
+          const cleanNotafiscal = String(rNotafiscal).replace(/'/g, "''");
+          const cleanSubreg = String(rSubreg).replace(/'/g, "''");
+          const cleanPrimarykey = String(rPrimarykey).replace(/'/g, "''");
+          const cleanDatabaixa = String(rDatabaixa).replace(/'/g, "''");
+          const cleanDataaqusic = String(rDataaqusic).replace(/'/g, "''");
+          const cleanQt = String(rQt).replace(/'/g, "''");
+
+          // Normalização das chaves de negócio principais
+          const normalTenant = rTenantId.trim().toUpperCase().replace(/'/g, "''");
+          const normalFilial = rFilial.trim().toUpperCase().replace(/'/g, "''");
+
+          // Localidade automática se houver endereço
+          if (cleanEndereco && cleanEndereco !== '') {
+            const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
+            sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${cleanEndereco}', '${normalFilial}', '${normalTenant}', '${normalFilial}');`);
           }
 
-          // Extração posicional absolutamente estrita com a exata ordem do layout enviado (Carga Expert v2.6)
-          // Índice 0 é SEMPRE e APENAS tenantId e Índice 1 é SEMPRE e APENAS filial
-          rTenantId = cleanValue(row[0]) || 'CICOPAL';
-          rFilial = cleanValue(row[1]) || 'MATRIZ';
-          rStatus = cleanValue(row[2]) || 'PENDENTE';
-          rEtiqueta = etq;
-          rQt = cleanValue(row[4]) || '1';
-          rDescricaodoativo = desc || 'Importado via Expert';
-          rSerial = cleanValue(row[6]);
-          rDataaqusic = cleanValue(row[7]);
-          rCnpj = cleanValue(row[8]);
-          rNomefornecedor = cleanValue(row[9]);
-          rNotafiscal = cleanValue(row[10]);
-          rEndereco = cleanValue(row[11]);
-          rRegistro = cleanValue(row[12]) || rEtiqueta;
-          rSubreg = cleanValue(row[13]);
-          rDatabaixa = cleanValue(row[14]);
-          rContacontabil = cleanValue(row[15]);
-          rPrimarykey = pkey;
-          rCentrodecusto = cleanValue(row[17]);
-          rVlrAquisic = Number(row[18]) || 0;
-          rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
-          rSn3Recno = parseInt(String(row[20] || '0'), 10) || 0;
-        } else if (row && typeof row === 'object') {
-          // Fallback robusto por nome de coluna se vier como objeto
-          const rObj = row as Record<string, unknown>;
-          const rowKeys = Object.keys(rObj);
-          if (rowKeys.length === 0) continue;
+          // Estática simulada de Altitude/Andar
+          const idAndar = 0;
 
-          const findVal = (priorities: string[]) => {
-            const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_').replace(/_/g, '')));
-            return key ? rObj[key] : null;
-          };
-
-          const etq = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
-          const pkey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
-          const desc = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
-
-          // Se for uma linha vazia no objeto (sem identificador útil), desconte e ignore
-          if (!etq && !pkey && !desc) {
-            continue;
-          }
-
-          rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
-          rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
-          rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
-          rEtiqueta = etq;
-          rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
-          rDescricaodoativo = desc;
-          rSerial = cleanValue(findVal(['SERIAL', 'NUMERO_SERIE', 'SERIE']));
-          rDataaqusic = cleanValue(findVal(['DATAAQUISIC', 'DATA_AQUISICAO', 'DATA_AQUISIC', 'DATAAQUSIC']));
-          rCnpj = cleanValue(findVal(['CNPJ', 'CNPJ_FORNECEDOR']));
-          rNomefornecedor = cleanValue(findVal(['NOMEFORNECEDOR', 'FORNECEDOR', 'NOME_FORNECEDOR']));
-          rNotafiscal = cleanValue(findVal(['NOTAFISCAL', 'NF', 'NOTA_FISCAL']));
-          rEndereco = cleanValue(findVal(['ENDERECO', 'LOCALIZACAO', 'LOCAL']));
-          rRegistro = cleanValue(findVal(['REGISTRO', 'PATRIMONIO'])) || rEtiqueta;
-          rSubreg = cleanValue(findVal(['SUBREG', 'SUB_REGISTRO', 'SUBREGISTRO']));
-          rDatabaixa = cleanValue(findVal(['DATABAIXA', 'DATA_BAIXA']));
-          rContacontabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA']));
-          rPrimarykey = pkey;
-          rCentrodecusto = cleanValue(findVal(['CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC', 'CCUSTO']));
-          rVlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR_AQUISICAO', 'VALOR', 'PRECO']) || 0) || 0;
-          rSn1Recno = parseInt(String(findVal(['SN1_RECNO', 'SN1_REC_NO']) || '0'), 10) || 0;
-          rSn3Recno = parseInt(String(findVal(['SN3_RECNO', 'SN3_REC_NO']) || '0'), 10) || 0;
+          // Inserção na tabela de ativos secundária (protheus_sync)
+          sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${rSn1Recno}, ${rSn3Recno}, '${cleanId}', '${cleanEtiqueta}', '${cleanContacontabil}', 200, 0);`);
+          
+          // Inserção soberana na tabela mestre dos ativos de inventário
+          sqlStatements.push(`INSERT OR REPLACE INTO ativos (
+            id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
+            UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
+            QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
+            latitude, longitude, _altitude_metros, _id_andar, currentCampaignId,
+            _tenantid, _unitid, tenantId, filial, SERIAL, CNPJ, NOMEFORNECEDOR, NOTAFISCAL, SUBREG, PRIMARYKEY, DATABAIXA, TAG_INVENTARIO
+          ) VALUES (
+            '${cleanId}', '${cleanEtiqueta}', '${cleanRegistro}', '${cleanDesc}', '${cleanContacontabil}', 
+            '${normalFilial}', '${cleanCentrodecusto}', ${rVlrAquisic}, '${cleanDataaqusic}', 
+            '${cleanQt}', '${normalTenant}', '${cleanEndereco}', 'EXPERT_LOAD',
+            NULL, NULL, NULL, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
+            '${normalTenant}', '${normalFilial}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}',
+            '${cleanSerial}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanSubreg}', '${cleanPrimarykey}', '${cleanDatabaixa}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}'
+          );`);
         }
 
-        const id = rPrimarykey || rEtiqueta || generateUUID();
-        const cleanId = String(id).replace(/'/g, "''");
-        const cleanEtiqueta = String(rEtiqueta).replace(/'/g, "''");
-        const cleanRegistro = String(rRegistro || rEtiqueta).replace(/'/g, "''");
-        const cleanDesc = String(rDescricaodoativo).replace(/'/g, "''");
-        const cleanContacontabil = String(rContacontabil).replace(/'/g, "''");
-        const cleanCentrodecusto = String(rCentrodecusto).replace(/'/g, "''");
-        const cleanEndereco = String(rEndereco).replace(/'/g, "''");
-        const cleanSerial = String(rSerial).replace(/'/g, "''");
-        const cleanCnpj = String(rCnpj).replace(/'/g, "''");
-        const cleanNomefornecedor = String(rNomefornecedor).replace(/'/g, "''");
-        const cleanNotafiscal = String(rNotafiscal).replace(/'/g, "''");
-        const cleanSubreg = String(rSubreg).replace(/'/g, "''");
-        const cleanPrimarykey = String(rPrimarykey).replace(/'/g, "''");
-        const cleanDatabaixa = String(rDatabaixa).replace(/'/g, "''");
-        const cleanDataaqusic = String(rDataaqusic).replace(/'/g, "''");
-        const cleanQt = String(rQt).replace(/'/g, "''");
-
-        // Normalização das chaves de negócio principais
-        const normalTenant = rTenantId.trim().toUpperCase().replace(/'/g, "''");
-        const normalFilial = rFilial.trim().toUpperCase().replace(/'/g, "''");
-
-        // Localidade automática se houver endereço
-        if (cleanEndereco && cleanEndereco !== '') {
-          const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
-          sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${cleanEndereco}', '${normalFilial}', '${normalTenant}', '${normalFilial}');`);
+        try {
+          // O driver nativo do Capacitor SQLite já aglutina e executa o lote no sqlite do aparelho de forma atômica
+          await sqliteService.executeStatementsBatch(sqlStatements);
+          const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
+          setProgress({ current: currentProgress, total: totalItems });
+          addLog(`Carregando: ${currentProgress.toLocaleString()} / ${totalItems.toLocaleString()} ativos`);
+          
+          // Respiro para a Thread do JS atualizar o DOM
+          await new Promise(resolve => setTimeout(resolve, 0));
+        } catch (chunkError: unknown) {
+          const err = chunkError as Error;
+          addLog(`Erro no lote ${i}: ${err.message}`);
+          throw err;
         }
-
-        // Estática simulada de Altitude/Andar
-        const idAndar = 0;
-
-        // Inserção na tabela de ativos secundária (protheus_sync)
-        sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${rSn1Recno}, ${rSn3Recno}, '${cleanId}', '${cleanEtiqueta}', '${cleanContacontabil}', 200, 0);`);
-        
-        // Inserção soberana na tabela mestre dos ativos de inventário
-        sqlStatements.push(`INSERT OR REPLACE INTO ativos (
-          id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
-          UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
-          QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
-          latitude, longitude, _altitude_metros, _id_andar, currentCampaignId,
-          _tenantid, _unitid, tenantId, filial, SERIAL, CNPJ, NOMEFORNECEDOR, NOTAFISCAL, SUBREG, PRIMARYKEY, DATABAIXA, TAG_INVENTARIO
-        ) VALUES (
-          '${cleanId}', '${cleanEtiqueta}', '${cleanRegistro}', '${cleanDesc}', '${cleanContacontabil}', 
-          '${normalFilial}', '${cleanCentrodecusto}', ${rVlrAquisic}, '${cleanDataaqusic}', 
-          '${cleanQt}', '${normalTenant}', '${cleanEndereco}', 'EXPERT_LOAD',
-          NULL, NULL, NULL, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
-          '${normalTenant}', '${normalFilial}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}',
-          '${cleanSerial}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanSubreg}', '${cleanPrimarykey}', '${cleanDatabaixa}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}'
-        );`);
       }
 
-      // Finaliza a transação atômica do lote atual com COMMIT
-      sqlStatements.push('COMMIT;');
-
-      try {
-        await sqliteService.executeStatementsBatch(sqlStatements);
-        const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
-        setProgress({ current: currentProgress, total: totalItems });
-        addLog(`Carregando: ${currentProgress.toLocaleString()} / ${totalItems.toLocaleString()} ativos`);
-        
-        // Respiro para a Thread do JS atualizar o DOM
-        await new Promise(resolve => setTimeout(resolve, 0));
-      } catch (chunkError: unknown) {
-        const err = chunkError as Error;
-        addLog(`Erro no lote ${i}: ${err.message}`);
-        throw err;
-      }
+      // 4. Inserção final e sincronização de estado
+      addLog("Conciliando índices e persistindo banco físico...");
+      // GBR v26: Reseta o mutationCounter para evitar salva dupla de arquivo físico lento nativo
+      sqliteService.mutationCounter = 0;
+      // GBR v26: Executa saveDatabase() uma ÚNICA vez no final de todo o carregamento conforme diretriz imperativa
+      await sqliteService.saveDatabase();
+      
+      addLog("Carga concluída com sucesso!");
+      if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } finally {
+      // DESATIVE A TRAVA APÓS O FECHAMENTO DO BANCO LOCAL
+      sqliteService.setImportingMode(false);
     }
-
-    // 4. Inserção final e sincronização de estado
-    addLog("Conciliando índices e persistindo banco físico...");
-    // GBR v26: Reseta o mutationCounter para evitar salva dupla de arquivo físico lento nativo
-    sqliteService.mutationCounter = 0;
-    // GBR v26: Executa saveDatabase() uma ÚNICA vez no final de todo o carregamento conforme diretriz imperativa
-    await sqliteService.saveDatabase();
-    
-    addLog("Carga concluída com sucesso!");
-    if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
-    
-    setTimeout(() => {
-      window.location.reload();
-    }, 1500);
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {

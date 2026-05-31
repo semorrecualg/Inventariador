@@ -1,6 +1,6 @@
 
-// v24.50.2 - Force Update to MPULMON Project
-console.log(">>> [System] Versão GBR v24.50.2 - Iniciando com novo projeto Supabase...");
+// Inventariador GBR v2.6 - Force Update to MPULMON Project
+console.log(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
@@ -5369,7 +5369,7 @@ const App: React.FC = () => {
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
-                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">v24.50.2</span>
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v2.6</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}

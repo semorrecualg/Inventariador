@@ -121,6 +121,11 @@ export const logAuditEvent = async (entry: {
   tenant_id?: string;
   origin?: string;
 }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== 'undefined' && (window as any).__isImportingBatch) {
+    // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
+    return;
+  }
   const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
 
   // Se for modo interno, salva no Dexie
@@ -184,6 +189,11 @@ export const logAssetChange = async (entry: {
   new_data?: unknown;
   _tenantid?: string;
 }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== 'undefined' && (window as any).__isImportingBatch) {
+    // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
+    return;
+  }
   const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Se for modo interno, salva no Dexie
