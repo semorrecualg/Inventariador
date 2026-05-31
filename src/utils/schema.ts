@@ -57,7 +57,10 @@ export const matchUnitKeys = (keyA: string, keyB: string): boolean => {
   }
   
   // Suporte a correspondência por contenção (LIKE) para acomodação de strings mais longas
-  if (normA.includes(normB) || normB.includes(normA)) {
+  // Excluindo 'CICOPAL' de forma estrita de proximidades para evitar colapso incorreto de dados do grupo/tenant
+  if ((normA.includes(normB) || normB.includes(normA)) && 
+      normA !== 'CICOPAL' && normB !== 'CICOPAL' && 
+      !normA.includes('CICOPAL') && !normB.includes('CICOPAL')) {
     const minLen = Math.min(normA.length, normB.length);
     if (minLen >= 4) return true;
   }

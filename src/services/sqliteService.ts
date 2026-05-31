@@ -1663,9 +1663,10 @@ class SqliteService {
         AND filial IS NOT NULL 
         AND TRIM(filial) != ''
         AND UPPER(TRIM(filial)) != 'CICOPAL'
+        AND UPPER(TRIM(filial)) != UPPER(TRIM(?))
       GROUP BY filial
       ORDER BY filial ASC
-    `, [tenantId, tenantId]);
+    `, [tenantId, tenantId, tenantId]);
 
     return res.map(row => {
       const getVal = (target: string, fallback: unknown) => {

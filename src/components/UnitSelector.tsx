@@ -191,40 +191,42 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                            </div>
 
                              {/* Ícone de GPS */}
-                             <div 
-                               className="flex flex-col items-center gap-1 group/icon"
+                             <button 
+                               type="button"
+                               className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0"
                                onClick={(e) => {
                                  e.stopPropagation();
                                  if (isAdmin && onConfigGPS) onConfigGPS(unit.UNIDADE_OPERACIONAL);
                                }}
                              >
-                               <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
+                               <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
                                  unit.hasGps 
                                    ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
                                    : 'bg-rose-50 text-rose-500 border-rose-100'
-                               } ${isAdmin ? 'cursor-pointer hover:scale-110 active:scale-95 hover:bg-emerald-100' : ''}`}>
-                                 <NavigationIcon size={14} />
+                               } ${isAdmin ? 'hover:scale-110 hover:bg-emerald-100' : ''}`}>
+                                 <NavigationIcon size={16} />
                                </div>
-                               <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>GPS</span>
-                             </div>
+                               <span className={`text-[7px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>GPS</span>
+                             </button>
  
                            {/* Ícone de Campanha */}
-                           <div 
-                             className="flex flex-col items-center gap-1 group/icon"
+                           <button 
+                             type="button"
+                             className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans"
                              onClick={(e) => {
                                e.stopPropagation();
                                if (onCampaigns) onCampaigns(unit.UNIDADE_OPERACIONAL);
                              }}
                            >
-                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border transition-all ${
+                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
                                unit.hasCampaign 
                                  ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' 
                                  : 'bg-gray-50 text-gray-300 border-gray-100'
-                             } cursor-pointer hover:scale-110 active:scale-95 hover:bg-amber-100`}>
-                               <Calendar size={14} />
+                             } hover:scale-110 hover:bg-amber-100`}>
+                               <Calendar size={16} />
                              </div>
-                             <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>Campanha</span>
-                           </div>
+                             <span className={`text-[7px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>Campanha</span>
+                           </button>
                         </div>
                       </div>
                     </div>

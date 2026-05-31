@@ -1478,7 +1478,7 @@ const App: React.FC = () => {
 
       // v24.50: Busca Unidades Operacionais via SQL para performance
       if (databaseMode === DatabaseMode.INTERNAL) {
-        const sqlUnits = await sqliteService.getOperationalUnitsWithStats();
+        const sqlUnits = await sqliteService.getOperationalUnitsWithStats(tenantId);
         setSqliteOperationalUnits(sqlUnits);
         console.log(`>>> [Governance] ${sqlUnits.length} Unidades carregadas via SQL.`);
 
@@ -3781,8 +3781,16 @@ const App: React.FC = () => {
         const metrics = await telemetryService.getDeviceMetrics();
         console.log(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
         
+        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+        
         let loc = { lat: 0, lng: 0, altitude: 0 };
-        if (metrics.battery > 5) {
+        if (isAdmin || isGpsBypassed) {
+          console.log('>>> [GPS] Perfis administrativos/bypass detectado de forma síncrona: bypass imediato da malha de captura física.');
+          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+            loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+          }
+        } else if (metrics.battery > 5) {
           // REGRA DE RIGOR: Aguarda até 3 segundos pela posição GPS antes de salvar
           // Se falhar ou timeout, usa fallback da unidade
           loc = await Promise.race([
@@ -3796,7 +3804,7 @@ const App: React.FC = () => {
             return { lat: 0, lng: 0, altitude: 0 };
           });
         } else {
-          console.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de ${metrics.battery}% em ou abaixo de 5%!');
+          console.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
             loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
@@ -4786,7 +4794,9 @@ const App: React.FC = () => {
     // v24.50: Se temos unidades via SQL (Modo Interno), usamos elas como base prioritária
     if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
       sqliteOperationalUnits.forEach(u => {
-        companyStatsMap.set(u.name.toUpperCase().replace(/_/g, ' '), {
+        const companyName = u.name.toUpperCase().replace(/_/g, ' ');
+        if (companyName === 'CICOPAL' || normalizeKey(companyName) === 'CICOPAL') return;
+        companyStatsMap.set(companyName, {
           hasData: true,
           hasActiveAssets: u.count > 0,
           unitIds: new Set(),
@@ -4799,7 +4809,7 @@ const App: React.FC = () => {
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
-      if (!company) continue;
+      if (!company || company === 'CICOPAL' || normalizeKey(company) === 'CICOPAL') continue;
       
       let stats = companyStatsMap.get(company);
       if (!stats) {
@@ -4881,10 +4891,10 @@ const App: React.FC = () => {
 
     baseCompanies.forEach(company => {
       const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
-      if (!rawName) return;
+      if (!rawName || rawName === 'CICOPAL') return;
       
       const norm = normalizeKey(rawName);
-      if (!norm) return;
+      if (!norm || norm === 'CICOPAL') return;
 
       // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
       const isAllowed = !isAuditor || 
@@ -4978,7 +4988,7 @@ const App: React.FC = () => {
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
         const company = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
-        if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
+        if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0' && company !== 'CICOPAL' && normalizeKey(company) !== 'CICOPAL') {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
       }
@@ -6017,7 +6027,7 @@ const App: React.FC = () => {
                 setSelectedUnit(null);
                 pushScreen(AppScreen.UNIT_SELECTION);
               }}
-              onOpenInventory={() => pushScreen(AppScreen.UNIT_SELECTION)}
+              onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.INVENTORY) : pushScreen(AppScreen.UNIT_SELECTION)}
               onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
