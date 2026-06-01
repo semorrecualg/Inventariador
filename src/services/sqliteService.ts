@@ -1283,8 +1283,13 @@ class SqliteService {
   }
 
   async deleteCampaignSql(id: string) {
-    await this.execute("DELETE FROM campaigns WHERE id = ?", [id]);
-    await this.execute("UPDATE ativos SET currentCampaignId = NULL WHERE currentCampaignId = ?", [id]);
+    console.log(`>>> [sqliteService] deleteCampaignSql (atomic batch): ID=${id}`);
+    const cleanId = String(id).replace(/'/g, "''");
+    const statements = [
+      `DELETE FROM campaigns WHERE id = '${cleanId}';`,
+      `UPDATE ativos SET currentCampaignId = NULL WHERE currentCampaignId = '${cleanId}';`
+    ];
+    await this.executeStatementsBatch(statements);
     await this.saveDatabase();
   }
 
@@ -1313,20 +1318,16 @@ class SqliteService {
   // --- ENGINE DE CONFIGURAÇÃO DE SESSÃO TÉCNICA (APP_CONFIG) ---
   async salvarCampanhaAtiva(unitId: string, campaignId: string): Promise<void> {
     try {
-      console.log(`>>> [sqliteService] salvarCampanhaAtiva: Unidade=${unitId}, Campanha=${campaignId}`);
-      await this.execute("BEGIN TRANSACTION;");
+      console.log(`>>> [sqliteService] salvarCampanhaAtiva (atomic batch): Unidade=${unitId}, Campanha=${campaignId}`);
+      const cleanUnit = String(unitId).replace(/'/g, "''");
+      const cleanCampaign = String(campaignId).replace(/'/g, "''");
       
-      await this.execute(
-        "INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('selected_unit', ?, CURRENT_TIMESTAMP);",
-        [unitId]
-      );
+      const statements = [
+        `INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('selected_unit', '${cleanUnit}', CURRENT_TIMESTAMP);`,
+        `INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('active_campaign', '${cleanCampaign}', CURRENT_TIMESTAMP);`
+      ];
       
-      await this.execute(
-        "INSERT OR REPLACE INTO APP_CONFIG (chave, valor, updated_at) VALUES ('active_campaign', ?, CURRENT_TIMESTAMP);",
-        [campaignId]
-      );
-      
-      await this.execute("COMMIT;");
+      await this.executeStatementsBatch(statements);
       
       // Espelha no localStorage para evitar delays de renderização sob o cache reativo duplo
       const normUnit = unitId.toUpperCase()
@@ -1341,11 +1342,6 @@ class SqliteService {
       
       await this.saveDatabase();
     } catch (error) {
-      try {
-        await this.execute("ROLLBACK;");
-      } catch (rollbackError) {
-        console.warn("Rollback ao salvar campanha ativa falhou:", rollbackError);
-      }
       console.error("Erro em salvarCampanhaAtiva:", error);
       throw error;
     }

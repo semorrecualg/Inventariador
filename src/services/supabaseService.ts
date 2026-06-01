@@ -93,8 +93,17 @@ export const signOut = async () => {
   localStorage.removeItem('app_selected_unit');
   localStorage.removeItem('app_screen_history');
   
-  // Recarrega para limpar o estado do React
+// Recarrega para limpar o estado do React
   window.location.href = '/';
+};
+
+// Delegate pattern to resolve circular reference with syncService
+let campaignSyncQueueDelegate: ((campaignId: string, action: 'DELETE' | 'UPDATE_STATUS', status?: unknown, closedBy?: string) => Promise<string>) | null = null;
+
+export const registerCampaignSyncQueueDelegate = (
+  delegate: (campaignId: string, action: 'DELETE' | 'UPDATE_STATUS', status?: unknown, closedBy?: string) => Promise<string>
+) => {
+  campaignSyncQueueDelegate = delegate;
 };
 
 // Função para gerar UUID v4 simples para uso local/offline
@@ -1650,23 +1659,39 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
-  if (isInternal) {
-    console.log('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
-    try {
-      await sqliteService.deleteCampaignSql(campaignId);
-      return true;
-    } catch (err) {
-      console.error(">>> [SQLite] Falha ao excluir campanha:", err);
-      return false;
-    }
+  // Always perform local SQLite deletion first (Soberania Offline-First)
+  console.log('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
+  try {
+    await sqliteService.deleteCampaignSql(campaignId);
+  } catch (err) {
+    console.error(">>> [SQLite] Falha ao excluir campanha localmente:", err);
+    return false;
   }
 
-  if (!supabase) return false;
+  if (isInternal) {
+    return true;
+  }
+
+  if (!supabase) {
+    if (campaignSyncQueueDelegate) {
+      await campaignSyncQueueDelegate(campaignId, 'DELETE').catch(console.error);
+    }
+    return true;
+  }
   
-  const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
-  if (error) {
-    console.error('>>> [Supabase] Erro ao excluir campanha:', error);
-    return false;
+  try {
+    const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+    if (error) {
+      console.warn('>>> [Supabase] Erro ao excluir campanha na nuvem. Empilhando na fila delta:', error);
+      if (campaignSyncQueueDelegate) {
+        await campaignSyncQueueDelegate(campaignId, 'DELETE').catch(console.error);
+      }
+    }
+  } catch (err) {
+    console.warn('>>> [Supabase] Falha de conexão ao excluir campanha. Empilhando na fila delta:', err);
+    if (campaignSyncQueueDelegate) {
+      await campaignSyncQueueDelegate(campaignId, 'DELETE').catch(console.error);
+    }
   }
   
   return true;
@@ -1833,48 +1858,53 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
 };
 
 /**
- * Atualiza o status de uma campanha
+ * Outlines/Atualiza o status de uma campanha com suporte offline-first hibrido
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
-  if (isInternal) {
-    console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
-    try {
-      const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]);
-      
-      if (allRows && allRows.length > 0) {
-        // O sqliteService.getCampaigns já aplica normalizeCampaign, 
-        // mas aqui estamos pegando o row diretamente, então vamos normalizar manualmente ou via saveCampaign
-        const row = allRows[0];
-        const currentCampaign: InventoryCampaign = {
-          ...row,
-          tenant_id: row.tenant_id || row._tenantid,
-          unit_id: row.unit_id || row._unitid,
-          _tenantid: row.tenant_id || row._tenantid,
-          _unitid: row.unit_id || row._unitid
-        };
+  // Always perform local SQLite update first (Soberania Offline-First)
+  console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
+  let localFound = false;
+  try {
+    const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]);
+    
+    if (allRows && allRows.length > 0) {
+      const row = allRows[0];
+      const currentCampaign: InventoryCampaign = {
+        ...row,
+        tenant_id: row.tenant_id || row._tenantid,
+        unit_id: row.unit_id || row._unitid,
+        _tenantid: row.tenant_id || row._tenantid,
+        _unitid: row.unit_id || row._unitid
+      };
 
-        const updated: InventoryCampaign = { 
-          ...currentCampaign, 
-          status, 
-          end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || null)
-        };
-        
-        // saveCampaign já faz persist() se necessário, mas chamamos explicitamente para soberania
-        await sqliteService.saveCampaign(updated);
-        await sqliteService.persist();
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error(">>> [SQLite] Erro ao atualizar status:", err);
-      return false;
+      const updated: InventoryCampaign = { 
+        ...currentCampaign, 
+        status, 
+        end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || null)
+      };
+      
+      await sqliteService.saveCampaign(updated);
+      await sqliteService.persist();
+      localFound = true;
     }
+  } catch (err) {
+    console.error(">>> [SQLite] Erro ao atualizar status localmente:", err);
+    return false;
   }
 
-  if (!supabase) return false;
+  if (isInternal) {
+    return localFound;
+  }
+
+  if (!supabase) {
+    if (campaignSyncQueueDelegate) {
+      await campaignSyncQueueDelegate(campaignId, 'UPDATE_STATUS', status, closedBy).catch(console.error);
+    }
+    return true;
+  }
 
   try {
     const updateData: Partial<InventoryCampaign> = { 
@@ -1896,21 +1926,25 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       .eq('id', campaignId);
     
     if (error) {
-      console.error('Erro ao atualizar status da campanha:', error);
-      return false;
+      console.warn('>>> [Supabase] Erro ao atualizar status da campanha na nuvem. Empilhando na fila delta:', error);
+      if (campaignSyncQueueDelegate) {
+        await campaignSyncQueueDelegate(campaignId, 'UPDATE_STATUS', status, closedBy).catch(console.error);
+      }
+    } else {
+      // Se estiver fechando, dispara o snapshot histórico (CPC 27)
+      if (status === CampaignStatus.CLOSED) {
+          console.log(`>>> [Audit] Iniciando processamento de Snapshot para Campanha: ${campaignId}`);
+          createCampaignSnapshot(campaignId, closedBy || 'admin').catch(console.error);
+      }
     }
-
-    // Se estiver fechando, dispara o snapshot histórico (CPC 27)
-    if (status === CampaignStatus.CLOSED) {
-        console.log(`>>> [Audit] Iniciando processamento de Snapshot para Campanha: ${campaignId}`);
-        createCampaignSnapshot(campaignId, closedBy || 'admin').catch(console.error);
-    }
-
-    return true;
   } catch (err) {
-    console.error('Erro ao atualizar status:', err);
-    return false;
+    console.warn('>>> [Supabase] Falha de conexão ao atualizar status da campanha. Empilhando na fila delta:', err);
+    if (campaignSyncQueueDelegate) {
+      await campaignSyncQueueDelegate(campaignId, 'UPDATE_STATUS', status, closedBy).catch(console.error);
+    }
   }
+
+  return true;
 };
 
 /**

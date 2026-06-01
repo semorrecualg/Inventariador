@@ -2,17 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { read, utils } from 'xlsx';
 import { sqliteService } from '../services/sqliteService';
 import { localDb } from '../services/localDbService';
-import { Database, Loader2, Link2, RefreshCw, AlertCircle, FileSpreadsheet, ChevronLeft, DownloadCloud } from 'lucide-react';
+import { 
+  Database, Loader2, Link2, RefreshCw, AlertCircle, 
+  FileSpreadsheet, ChevronLeft, Activity 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/errorUtils';
+import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 
 import { generateUUID } from '../services/supabaseService';
-import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus } from '../types';
+import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus, InventoryState } from '../types';
 import { saveInventory } from '../services/persistenceService';
-import { DatabaseProgressBar } from './DatabaseProgressBar';
 
-// GBR v24.50: Campanha de Auditoria Padrão (Static Context)
+// GBR v26.0: Campanha de Auditoria Padrão (Static Context)
 const DEFAULT_CAMPAIGN_ID = 'CAMP_2025_01';
 
 interface DatabaseLoaderProps {
@@ -24,7 +27,82 @@ interface DatabaseLoaderProps {
   isSyncing?: boolean;
   syncProgress?: { processed: number; total: number; percentage: number } | null;
   onCargaInicial?: () => void;
+  onOpenHelp?: () => void;
+  excludedAccounts?: string[];
+  campaigns?: unknown[];
+  onRestore?: (state: unknown) => void;
+  onClearDatabase?: () => void;
 }
+
+interface UnifiedLoaderProps {
+  totalAssets: number;
+  currentProcessed: number;
+  logs: string[];
+}
+
+export const UnifiedDatabaseLoader: React.FC<UnifiedLoaderProps> = ({
+  totalAssets,
+  currentProcessed,
+  logs
+}) => {
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const progressPercent = totalAssets > 0 ? Math.min(Math.round((currentProcessed / totalAssets) * 100), 100) : 0;
+
+  // Auto-scroll automático do terminal de logs para dar sensação de movimento contínuo
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  return (
+    <div className="fixed inset-0 bg-gray-900 flex flex-col justify-between p-6 z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      
+      {/* SEÇÃO SUPERIOR: Barra Gráfica Unificada */}
+      <div className="bg-gray-800/50 backdrop-blur-md rounded-2xl p-4 border border-gray-700/50 w-full max-w-xl mx-auto shadow-xl">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 bg-blue-500/10 text-blue-400 rounded-xl flex items-center justify-center animate-spin">
+            <Loader2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider">Injetando Carga Expert</h3>
+            <p className="text-[10px] text-gray-400">Gravando {currentProcessed.toLocaleString()} de {totalAssets.toLocaleString()} ativos locais</p>
+          </div>
+        </div>
+
+        {/* Linha de progresso fluida */}
+        <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        <div className="flex justify-between items-center mt-1">
+          <span className="text-[9px] text-gray-500 font-bold uppercase">Motor SQLite Nativo C++</span>
+          <span className="text-xs font-black text-blue-400 tabular-nums">{progressPercent}%</span>
+        </div>
+      </div>
+
+      {/* SEÇÃO CENTRAL: Terminal de Logs Dinâmico com Auto-Scroll */}
+      <div className="flex-1 w-full max-w-xl mx-auto my-4 bg-black/40 border border-gray-800 rounded-2xl p-4 overflow-y-auto font-mono text-[10px] text-green-400/90 shadow-inner space-y-1 scrollbar-none">
+        {logs.map((log, idx) => (
+          <div key={idx} className="leading-relaxed tracking-tight break-all">
+            <span className="text-gray-600 mr-1.5">&gt;&gt;&gt;</span>{log}
+          </div>
+        ))}
+        <div ref={logEndRef} />
+      </div>
+
+      {/* SEÇÃO INFERIOR: Selo de Governança Estático */}
+      <div className="w-full max-w-xl mx-auto flex items-center justify-between text-gray-500 border-t border-gray-800/60 pt-3 text-[10px]">
+        <div className="flex items-center gap-1">
+          <Activity className="w-3.5 h-3.5 text-blue-500 animate-pulse" />
+          <span className="font-semibold tracking-wider uppercase">Inventariador GBR v2.6</span>
+        </div>
+        <span className="tabular-nums opacity-60">Fatiamento: Lotes Rígidos de 200 itens</span>
+      </div>
+
+    </div>
+  );
+};
 
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
   onDataLoaded,
@@ -35,13 +113,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   syncProgress = null,
   onCargaInicial
 }) => {
-  const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE' | 'SUMMARY'>('IDLE');
-  const [importStep, setImportStep] = useState<'DOWNLOAD' | 'BATCH_WRITE' | 'PROJECTION' | 'DISK_SAVE'>('DOWNLOAD');
+  const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE'>('IDLE');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileInfo, setFileInfo] = useState<{ fileName: string | null; status: string } | null>(null);
   const [errorLog, setErrorLog] = useState<string[]>([]);
-  const [summary, setSummary] = useState<{ assets: number; units: number; companies: string[] } | null>(null);
-  const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
   const [showCargaPrompt, setShowCargaPrompt] = useState(false);
   
@@ -62,9 +137,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     if (msg.includes('Erro') || msg.includes('Falha') || msg.includes('TIMEOUT')) {
       console.error(`[DatabaseLoader] ${msg}`);
     }
-    setLoadingMessage(msg);
-    setErrorLog(prev => [...prev.slice(-10), msg]);
+    setErrorLog(prev => [...prev, msg].slice(-200)); // Maintain high limit for terminal fluidity
   };
+
+  // Monitor cloud synchronization updates and map them directly into terminal logs
+  useEffect(() => {
+    if (isSyncing && syncProgress) {
+      addLog(`Sincronizando: ${syncProgress.processed.toLocaleString()} / ${syncProgress.total.toLocaleString()} ativos locais (${syncProgress.percentage}%)`);
+    }
+  }, [isSyncing, syncProgress]);
 
   const loadDataFlow = async (forceCache = false) => {
     if (status === 'LOADING' && !forceCache) return;
@@ -72,13 +153,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     addLog(forceCache ? "Forçando carga via Cache..." : "Iniciando fluxo de carga...");
     setStatus('LOADING');
     
-    // Failsafe: se ficar preso em LOADING por 15s, libera
     const timeoutId = setTimeout(() => {
       if (status === 'LOADING') {
         addLog("TIMEOUT: Carga demorou demais. Liberando interface.");
         setStatus('IDLE');
       }
-    }, 15000);
+    }, 25000); // Expanded timeout to handle physical C++ database mounts smoothly
     
     try {
       // 1. Checa status do arquivo
@@ -103,7 +183,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         addLog(`Inicializado via ${source}`);
         if (nativePath) addLog(`Caminho Real: ${nativePath}`);
         
-        // OTIMIZAÇÃO: Busca apenas o count em vez de todos os objetos para o resumo
+        // Count assets
         const assetCount = await sqliteService.getAssetCount();
         addLog(`Contagem de ativos realizada: ${assetCount}`);
         
@@ -125,25 +205,42 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const companies = await sqliteService.getOperationalUnits();
         addLog(`Extração de unidades concluída: ${companies.length} encontradas.`);
 
-        if (assetCount > 0 && companies.length === 0) {
-          addLog("AVISO: Ativos carregados mas nenhuma unidade identificada.");
-          // ... (mantém lógica de modal se necessário)
-        }
-
-        addLog(`Fluxo de carga finalizado com sucesso. Ativos: ${assetCount}.`);
+        addLog("Iniciando auto-ativação segura e automatizada...");
         
-        if (assetCount > 0) {
-          setSummary({ assets: assetCount, units: companies.length, companies });
+        try {
+          addLog("Ativando sistema...");
+          await new Promise(resolve => setTimeout(resolve, 50));
+          
+          const campaignId = DEFAULT_CAMPAIGN_ID; 
+          const assets = await localDb.assets.getMapData(campaignId);
+          
+          addLog(`>>> [Projection] ${assets.length} ativos carregados via shader pipeline.`);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          
+          // Sincroniza o cache do IndexedDB com o novo banco SQL carregado
+          const newState: InventoryState = {
+            assets,
+            companies: companies,
+            databaseMode: DatabaseMode.INTERNAL,
+            status: DatabaseStatus.LOADED,
+            lastUpdated: new Date().toISOString()
+          };
+          
+          addLog("Sincronizando cache de segurança...");
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await saveInventory(newState, undefined, false, true);
+
+          sessionStorage.setItem('app_just_finished_load', 'true');
+          addLog("Ativação executada com sucesso! Liberando operador.");
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
           clearTimeout(timeoutId);
-          // Pequeno delay para percepção visual do status concluído
-          setTimeout(() => {
-            addLog("Transacionando para TELA DE RESUMO.");
-            setStatus('SUMMARY');
-          }, 500);
-        } else {
+          onDataLoaded(assets, companies);
+        } catch (activationErr) {
+          const innerError = activationErr as Error;
+          addLog(`Erro na ativação: ${innerError.message}`);
           clearTimeout(timeoutId);
-          onDataLoaded([], companies);
-          setStatus('IDLE');
+          setStatus('ERROR');
         }
       } else {
         clearTimeout(timeoutId);
@@ -166,7 +263,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   }, []);
 
   const handleReconnect = async () => {
-    addLog("Re-vincuando arquivo solicitado...");
+    addLog("Re-operando vínculos sob permissões nítidas...");
     const handle = await sqliteService.linkFile();
     if (handle) {
       loadDataFlow();
@@ -174,7 +271,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const processRowsToDatabaseBatch = async (rows: unknown[]) => {
-    // 1. Validação preventiva de Bateria Crítica (Soberania de Energia v26)
+    // Validação preventiva de Bateria Crítica (Soberania de Energia v26)
     try {
       const batteryInfo = await Device.getBatteryInfo();
       if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
@@ -193,7 +290,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     const CHUNK_SIZE = 200;
     const totalItems = rows.length;
     
-    setImportStep('BATCH_WRITE');
+    setStatus('IMPORTING');
     setProgress({ current: 0, total: totalItems });
     addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
 
@@ -205,14 +302,12 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       return s;
     };
 
-    // ATIVE A TRAVA DE ISOLAMENTO DE SISTEMA (Bypass de Sync / Auditoria)
+    // ATIVE A TRAVA DE ISOLAMENTO DE SISTEMA
     sqliteService.setImportingMode(true);
 
     try {
       for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);
-        // GBR v26: Define transação atômica única por lote (Bypass do Buffer de 5 registros - sem comandos manuais)
-        // Removido o BEGIN TRANSACTION explícito do array para evitar colisão com o gerenciamento nativo do driver
         const sqlStatements: string[] = [];
 
         for (const row of chunk) {
@@ -243,18 +338,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             const pkey = cleanValue(row[16]);
             const desc = cleanValue(row[5]);
 
-            // Filtro de resiliência: Ignora se a linha for muito curta ou se não tiver identificador de ativo real ou descrição
             if (row.length < 4 || (!etq && !pkey && !desc)) {
               continue; 
             }
 
-            // Filtro para ignorar repetições acidentais de cabeçalhos no meio ou fim do arquivo
             if (etq.toLowerCase() === 'etiqueta' || etq.toLowerCase() === 'plaqueta' || etq.toLowerCase() === 'tag' || desc.toLowerCase() === 'descricaodoativo' || desc.toLowerCase() === 'descricao') {
               continue;
             }
 
-            // Extração posicional absolutamente estrita com a exata ordem do layout enviado (Carga Expert v2.6)
-            // Índice 0 é SEMPRE e APENAS tenantId e Índice 1 é SEMPRE e APENAS filial
             rTenantId = cleanValue(row[0]) || 'CICOPAL';
             rFilial = cleanValue(row[1]) || 'MATRIZ';
             rStatus = cleanValue(row[2]) || 'PENDENTE';
@@ -277,7 +368,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
             rSn3Recno = parseInt(String(row[20] || '0'), 10) || 0;
           } else if (row && typeof row === 'object') {
-            // Fallback robusto por nome de coluna se vier como objeto
             const rObj = row as Record<string, unknown>;
             const rowKeys = Object.keys(rObj);
             if (rowKeys.length === 0) continue;
@@ -291,7 +381,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             const pkey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
             const desc = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
 
-            // Se for uma linha vazia no objeto (sem identificador útil), desconte e ignore
             if (!etq && !pkey && !desc) {
               continue;
             }
@@ -337,23 +426,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           const cleanDataaqusic = String(rDataaqusic).replace(/'/g, "''");
           const cleanQt = String(rQt).replace(/'/g, "''");
 
-          // Normalização das chaves de negócio principais
           const normalTenant = rTenantId.trim().toUpperCase().replace(/'/g, "''");
           const normalFilial = rFilial.trim().toUpperCase().replace(/'/g, "''");
 
-          // Localidade automática se houver endereço
           if (cleanEndereco && cleanEndereco !== '') {
             const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
             sqlStatements.push(`INSERT OR IGNORE INTO localidades (id, DESCRICAO, CODIGO, _tenantid, _unitid) VALUES ('${locId}', '${cleanEndereco}', '${normalFilial}', '${normalTenant}', '${normalFilial}');`);
           }
 
-          // Estática simulada de Altitude/Andar
-          const idAndar = 0;
-
-          // Inserção na tabela de ativos secundária (protheus_sync)
           sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${rSn1Recno}, ${rSn3Recno}, '${cleanId}', '${cleanEtiqueta}', '${cleanContacontabil}', 200, 0);`);
           
-          // Inserção soberana na tabela mestre dos ativos de inventário
           sqlStatements.push(`INSERT OR REPLACE INTO ativos (
             id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
             UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
@@ -364,20 +446,19 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             '${cleanId}', '${cleanEtiqueta}', '${cleanRegistro}', '${cleanDesc}', '${cleanContacontabil}', 
             '${normalFilial}', '${cleanCentrodecusto}', ${rVlrAquisic}, '${cleanDataaqusic}', 
             '${cleanQt}', '${normalTenant}', '${cleanEndereco}', 'EXPERT_LOAD',
-            NULL, NULL, NULL, ${idAndar}, '${DEFAULT_CAMPAIGN_ID}',
+            NULL, NULL, NULL, 0, '${DEFAULT_CAMPAIGN_ID}',
             '${normalTenant}', '${normalFilial}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}',
             '${cleanSerial}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanSubreg}', '${cleanPrimarykey}', '${cleanDatabaixa}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}'
           );`);
         }
 
         try {
-          // O driver nativo do Capacitor SQLite já aglutina e executa o lote no sqlite do aparelho de forma atômica
           await sqliteService.executeStatementsBatch(sqlStatements);
           const currentProgress = Math.min(i + CHUNK_SIZE, totalItems);
           setProgress({ current: currentProgress, total: totalItems });
-          addLog(`Carregando: ${currentProgress.toLocaleString()} / ${totalItems.toLocaleString()} ativos`);
+          addLog(`Injetando: ${currentProgress.toLocaleString()} / ${totalItems.toLocaleString()} ativos`);
           
-          // Respiro para a Thread do JS atualizar o DOM
+          // Yield CPU to prevent interface freezes on heavier batch pipelines
           await new Promise(resolve => setTimeout(resolve, 0));
         } catch (chunkError: unknown) {
           const err = chunkError as Error;
@@ -386,29 +467,56 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         }
       }
 
-      // 4. Inserção final e sincronização de estado
-      setImportStep('PROJECTION');
-      addLog("Conciliando índices e persistindo banco físico...");
-      await new Promise(resolve => setTimeout(resolve, 600)); // Pequena pausa para o usuário notar o estágio de Projeção
+      addLog("Conciliando índices e gerando projeções...");
+      await new Promise(resolve => setTimeout(resolve, 300));
 
-      setImportStep('DISK_SAVE');
       addLog("Gravando banco físico local de forma segura...");
-      await new Promise(resolve => setTimeout(resolve, 400)); // Pequena pausa para o usuário notar o estágio de Gravação Física
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // GBR v26: Reseta o mutationCounter para evitar salva dupla de arquivo físico lento nativo
       sqliteService.mutationCounter = 0;
-      // GBR v26: Executa saveDatabase() uma ÚNICA vez no final de todo o carregamento conforme diretriz imperativa
       await sqliteService.saveDatabase();
       
-      addLog("Carga concluída com sucesso!");
-      if (showModal) showModal('Sucesso', 'Carga realizada com sucesso em Modo Soberano!', 'success');
+      addLog("Carga expert concluída!");
+      addLog("Iniciando auto-ativação do sistema...");
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Trigger automatic activation right after ingestion!
+      const campaignId = DEFAULT_CAMPAIGN_ID; 
+      const finalCompanies = await sqliteService.getOperationalUnits();
+      const assets = await localDb.assets.getMapData(campaignId);
       
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      addLog(`>>> [Projection] ${assets.length} ativos carregados no shader pipeline.`);
+      
+      const newState: InventoryState = {
+        assets,
+        companies: finalCompanies,
+        databaseMode: DatabaseMode.INTERNAL,
+        status: DatabaseStatus.LOADED,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      addLog("Sincronizando cache local...");
+      await saveInventory(newState, undefined, false, true);
+
+      sessionStorage.setItem('app_just_finished_load', 'true');
+      addLog("Inicialização concluída! Redirecionando...");
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      onDataLoaded(assets, finalCompanies);
+      setStatus('IDLE');
+    } catch (innerError: unknown) {
+      const ie = innerError as Error;
+      addLog(`Erro interno no pipeline: ${ie.message}`);
+      setStatus('ERROR');
     } finally {
-      // DESATIVE A TRAVA APÓS O FECHAMENTO DO BANCO LOCAL
       sqliteService.setImportingMode(false);
+      sqliteService.isImportingBatch = false;
+      if (typeof window !== 'undefined') {
+        ((window as unknown) as { __isImportingBatch: boolean }).__isImportingBatch = false;
+      }
+      if (Capacitor.isNativePlatform()) {
+        await sqliteService.saveDatabase();
+      }
     }
   };
 
@@ -417,7 +525,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     if (!file) return;
 
     setStatus('IMPORTING');
-    setImportStep('DOWNLOAD');
     setProgress({ current: 0, total: 0 });
     addLog(`Lendo planilha (Soberania Nativa): ${file.name}`);
 
@@ -433,7 +540,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           const workbook = read(data, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
           
-          // Leitura posicional via header: 1
           const rawRows: unknown[][] = utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
 
           if (rawRows.length === 0) throw new Error("Planilha vazia.");
@@ -442,7 +548,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           const firstRow = rawRows[0];
           if (Array.isArray(firstRow) && firstRow.length > 0) {
             const val = String(firstRow[0]).toLowerCase().trim();
-            // Se contiver palavras chaves típicas de cabeçalho, fatiamos a primeira linha
             if (val === 'tenantid' || val === 'tenant_id' || val === 'empresa' || val.includes('tenant') || val === 'grupo') {
               addLog("Cabeçalho detectado e descartado com sucesso.");
               finalRows = rawRows.slice(1);
@@ -454,7 +559,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         } catch (innerError: unknown) {
           const ie = innerError as Error;
           addLog(`Erro interno: ${ie.message}`);
-          if (showModal) showModal('Erro de Processamento', ie.message, 'error');
           setStatus('ERROR');
         }
       };
@@ -463,12 +567,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     } catch (error: unknown) {
       const e = error as Error;
-      console.error("Erro fatal ao carregar planilha:", e);
       addLog(`Falha na carga: ${e.message}`);
       setStatus('ERROR');
     }
   };
-
 
   const handleExpertLoadClick = async () => {
     if (localStorage.getItem('is_system_locked') === 'true') {
@@ -478,8 +580,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           "Esta operação foi bloqueada. A soberania e integridade da base física foram validadas pelo Administrador, congelando o arquivo 'gbr_kardek.db' contra sobregravação.",
           "warning"
         );
-      } else {
-        alert("Esta operação foi bloqueada. A base física está blindada.");
       }
       return;
     }
@@ -501,8 +601,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           "O expurgo ou reset foi desativado. O sistema está congelado no modo 'Pronto para Campo' para proteger os inventários locais dos auditores contra apagões acidentais.",
           "warning"
         );
-      } else {
-        alert("O reset foi bloqueado. A base física está blindada.");
       }
       return;
     }
@@ -516,22 +614,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     addLog('Executando limpeza de governança e expurgo físico...');
 
     try {
-      // 1. Executa o reset lógico/físico do banco de dados local
       await sqliteService.resetDatabaseLogico();
-      
-      // 2. Garante que estados de navegação NÃO sejam setados aqui (sem reload ou redirecionamento)
       localStorage.removeItem('app_excluded_accounts');
-      
-      // 3. Apenas resete os estados locais para refletir o banco limpo
       setFileInfo(null);
-      setSummary(null);
       setErrorLog([]);
 
-      alert("Banco de dados limpo com sucesso! Aguardando Carga Expert (Excel).");
+      addLog("Banco de dados limpo com sucesso! Aguardando Carga Expert (Excel).");
       setStatus('EMPTY_STATE');
     } catch (err: unknown) {
       const e = err as Error;
-      console.error("Falha ao limpar banco:", e);
       addLog(`Falha ao executar Limpeza: ${e.message}`);
       setStatus('ERROR');
     }
@@ -542,95 +633,35 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     onDataLoaded([], []);
   };
 
+  // Setup props computed for the Unified graphic UI
+  const totalAssetsVal = isSyncing && syncProgress ? syncProgress.total : progress.total;
+  const currentProcessedVal = isSyncing && syncProgress ? syncProgress.processed : progress.current;
+
+  // Determine which screen is loaded
+  const isUnifiedView = status === 'LOADING' || status === 'IMPORTING' || isSyncing;
+
   return (
-    <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[300px] safe-area-p">
+    <div className="w-full h-full min-h-[300px]">
       <AnimatePresence mode="wait">
-        {isSyncing && syncProgress ? (
-          <motion.div 
-            key="sync_progress"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center gap-6 text-center w-full max-w-xs animate-fadeIn"
-          >
-            <div className="relative w-20 h-20">
-              <div className="absolute inset-0 border-4 border-slate-100 rounded-full" />
-              <motion.div 
-                className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <DownloadCloud className="w-8 h-8 text-emerald-500 animate-pulse" />
-              </div>
-            </div>
-
-            <div className="w-full space-y-3">
-              <div className="flex justify-between items-end">
-                <div className="text-left font-black text-slate-800 text-[10px] uppercase tracking-widest">
-                  Sincronizando
-                  <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest animate-pulse mt-0.5">
-                    Banco SQLite
-                  </p>
-                </div>
-                <div className="text-right font-black text-emerald-600 text-xs">
-                  {syncProgress.percentage}%
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${syncProgress.percentage}%` }}
-                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
-                />
-              </div>
-
-              <p className="text-[9px] font-mono text-slate-400 uppercase font-bold tracking-widest">
-                {syncProgress.processed.toLocaleString()} / {syncProgress.total.toLocaleString()} ativos
-              </p>
-            </div>
-          </motion.div>
-        ) : status === 'LOADING' && (
-          <motion.div 
-            key="loading"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center gap-4 text-center"
-          >
-            <div className="relative">
-              <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-              <Database className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 text-blue-600" />
-            </div>
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Processando</h3>
-            <p className="text-[10px] text-blue-600 font-bold uppercase animate-pulse">{loadingMessage}</p>
-            
-            <button
-              onClick={() => setStatus('SUMMARY')}
-              className="mt-4 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-300 font-black text-[10px] uppercase tracking-widest rounded-2xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              Cancelar e Voltar
-            </button>
-          </motion.div>
-        )}
-
-        {status === 'EMPTY_STATE' && (
-          <motion.div 
-            key="empty"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex flex-col items-center gap-6 text-center max-w-sm"
-          >
-            <div className="bg-blue-100 p-5 rounded-[2rem] shadow-inner text-blue-600">
+        {isUnifiedView ? (
+          <UnifiedDatabaseLoader 
+            key="unified_view"
+            totalAssets={totalAssetsVal}
+            currentProcessed={currentProcessedVal}
+            logs={errorLog}
+          />
+        ) : status === 'EMPTY_STATE' ? (
+          <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[400px] w-full max-w-xl mx-auto safe-area-p animate-fadeIn">
+            <div className="bg-blue-100 p-5 rounded-[2rem] shadow-inner text-blue-600 mb-6">
               <Database size={40} strokeWidth={2.5} />
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2 text-center mb-6">
               <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Base Vazia Detectada</h3>
               <p className="text-[11px] text-slate-500 font-bold uppercase tracking-tight">O sistema está pronto para receber dados.</p>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 w-full mt-4">
+            <div className="grid grid-cols-1 gap-3 w-full max-w-sm mt-4">
               {databaseMode === DatabaseMode.INTERNAL && onCargaInicial && (
                 <button
                   type="button"
@@ -667,7 +698,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
               <button
                 onClick={handleCreateEmpty}
-                className="text-[10px] font-black text-slate-400 uppercase tracking-widest py-2 hover:text-accent transition-colors"
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest py-2 hover:text-accent transition-colors text-center"
               >
                 Pular Carga (Modo Demo)
               </button>
@@ -676,7 +707,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             {onBack && (
               <button 
                 onClick={onBack}
-                className="mt-6 flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-all"
+                className="mt-6 flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-all"
               >
                 <ChevronLeft size={14} />
                 Voltar
@@ -690,146 +721,43 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               className="hidden"
               onChange={handleImportExcel}
             />
-          </motion.div>
-        )}
-
-        {status === 'IMPORTING' && (
-          <DatabaseProgressBar 
-            totalAssets={progress.total} 
-            currentProcessed={progress.current} 
-            currentStep={importStep} 
-          />
-        )}
-
-        {status === 'PERMISSION_NEEDED' && (
-          <motion.div 
-            key="permission"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center gap-6 text-center max-w-xs"
-          >
-            <div className="bg-amber-100 p-4 rounded-full">
+          </div>
+        ) : status === 'PERMISSION_NEEDED' ? (
+          <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[400px] w-full max-w-xl mx-auto safe-area-p animate-fadeIn">
+            <div className="bg-amber-100 p-4 rounded-full mb-6">
               <Link2 className="w-10 h-10 text-amber-600" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 text-center mb-6">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Vínculo Expirado</h3>
-              <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+              <p className="text-[11px] text-slate-600 font-medium leading-relaxed max-w-xs mx-auto">
                 Por segurança, o navegador exige que você re-aponte o arquivo <span className="font-bold text-slate-900">&quot;{fileInfo?.fileName}&quot;</span> para esta sessão.
               </p>
             </div>
             
-            <div className="flex flex-col gap-3 w-full">
-              <button
-                onClick={handleReconnect}
-                className="group flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-200 transition-all active:scale-95"
-              >
-                <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-                Re-vincular Arquivo
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {status === 'SUMMARY' && summary && (
-          <motion.div 
-            key="summary"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center gap-6 text-center max-w-sm"
-          >
-            <div className="bg-emerald-100 p-5 rounded-[2rem] shadow-inner text-emerald-600">
-              <RefreshCw size={40} strokeWidth={2.5} className="animate-pulse" />
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Carga Concluída</h3>
-              <p className="text-[11px] text-slate-500 font-bold uppercase tracking-tight">O sistema identificou os seguintes dados:</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 w-full">
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ativos</p>
-                <p className="text-xl font-black text-slate-800 tracking-tight">{summary.assets.toLocaleString()}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Unidades</p>
-                <p className="text-xl font-black text-slate-800 tracking-tight">{summary.units}</p>
-              </div>
-            </div>
-
             <button
-               onClick={async () => {
-                if (summary) {
-                  try {
-                    setStatus('LOADING');
-                    addLog("Ativando sistema...");
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                    
-                    // GBR v25: Projeção Magra (Mapping Exclusive)
-                    // Pega o ID da primeira campanha ativa ou gera um ID genérico
-                    const campaignId = DEFAULT_CAMPAIGN_ID; 
-                    const assets = await localDb.assets.getMapData(campaignId);
-                    
-                    addLog(`>>> [Projection] ${assets.length} ativos carregados via shader pipeline.`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                    
-                    // Sincroniza o cache do IndexedDB com o novo banco SQL carregado
-                    const newState: InventoryState = {
-                      assets,
-                      companies: summary.companies,
-                      databaseMode: DatabaseMode.INTERNAL,
-                      status: DatabaseStatus.LOADED,
-                      lastUpdated: new Date().toISOString()
-                    };
-                    
-                    addLog("Sincronizando cache de segurança...");
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    // skipSqlAssetsInsert = true, pois a carga física já foi inserida no SQLite via chunks.
-                    await saveInventory(newState, undefined, false, true);
-
-                    sessionStorage.setItem('app_just_finished_load', 'true');
-                    onDataLoaded(assets, summary.companies);
-                    setStatus('IDLE');
-                  } catch (err: unknown) {
-            const innerError = err as Error;
-            addLog(`Erro na ativação: ${innerError.message}`);
-            setStatus('SUMMARY');
-          }
-                }
-              }}
-              className="w-full bg-emerald-600 text-white p-5 rounded-3xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"
+              onClick={handleReconnect}
+              className="group flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-200 transition-all active:scale-95 w-full max-w-xs"
             >
-              <RefreshCw size={18} />
-              Ativar Sistema
+              <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+              Re-vincular Arquivo
             </button>
-            
+          </div>
+        ) : status === 'ERROR' ? (
+          <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[400px] w-full max-w-xl mx-auto safe-area-p animate-fadeIn">
+            <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+            <h3 className="text-sm font-black text-red-800 uppercase tracking-widest mb-2">Falha na Sincronização</h3>
+            <p className="text-[10px] text-slate-500 max-w-xs text-center mb-6">{errorLog[errorLog.length - 1] || "Ocorreu um erro desconhecido."}</p>
             <button
-                onClick={handleHardResetLocal}
-                className="text-[9px] font-black text-red-400 uppercase tracking-widest hover:text-red-600 py-2"
-              >
-                Limpar dados e carregar novo arquivo
-            </button>
-          </motion.div>
-        )}
-
-        {status === 'ERROR' && (
-          <motion.div 
-            key="error"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center gap-4 text-center"
-          >
-            <AlertCircle className="w-12 h-12 text-red-500" />
-            <h3 className="text-sm font-black text-red-800 uppercase tracking-widest">Falha na Sincronização</h3>
-            <p className="text-[10px] text-slate-500 max-w-xs">{loadingMessage}</p>
-            <button
-              onClick={() => loadDataFlow()}
-              className="text-[10px] font-black text-blue-600 uppercase hover:underline p-4"
+              onClick={() => {
+                setErrorLog([]);
+                loadDataFlow();
+              }}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-3xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all w-full max-w-xs text-center"
             >
               Tentar Novamente
             </button>
-          </motion.div>
-        )}
+          </div>
+        ) : null}
       </AnimatePresence>
 
       {/* Local Confirmation Modal for Reset */}
@@ -908,16 +836,6 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           </div>
         )}
       </AnimatePresence>
-
-      <div className="mt-8 border-t border-slate-200 pt-4 w-full">
-        <div className="flex flex-col gap-1">
-          {errorLog.slice(-5).map((log, i) => (
-            <p key={i} className="text-[8px] font-mono text-slate-400 truncate text-center">
-              {log}
-            </p>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

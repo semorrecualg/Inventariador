@@ -75,9 +75,11 @@ const isSixDigitNumeric = (val: string | number | null | undefined): boolean => 
 interface AssetCardProps {
   asset: Asset;
   onToggle: (a: Asset) => void;
+  isSelected?: boolean;
+  onSelect?: (id: string) => void;
 }
 
-const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
+const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
   const isSixDigit = isSixDigitNumeric(asset.ETIQUETA);
   const isLabeling = String(asset.ETIQUETA || '').toUpperCase().trim() === 'ETIQUETAR';
@@ -155,77 +157,94 @@ const AssetCard = React.memo(({ asset, onToggle }: AssetCardProps) => {
   ].join('; ');
 
   return (
-    <div 
-      className={`mb-2 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card shadow-sm ${isLocked ? 'opacity-60 grayscale-[0.5] cursor-not-allowed bg-slate-50 border-slate-200' : `active:scale-[0.99] cursor-pointer ${colors.bg} ${colors.border}`}`} 
-      style={{ borderLeftColor: isLocked ? '#94a3b8' : colors.hex }}
-      onClick={() => !isLocked && onToggle(asset)}
-    >
-      <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${isLocked ? 'bg-slate-400 text-white' : colors.badge}`}>
-        {isLocked ? <AlertTriangle size={10} strokeWidth={3} /> : (colors.icon && <colors.icon size={10} strokeWidth={3} />)}
-        <span className="tracking-widest">
-          {isLocked ? `BLOQUEADO | ${isSixDigit ? 'REGRA DE OURO' : 'ETIQUETAGEM'}` : `${asset.REGISTRO || '---'} | ${visualStatus}`}
-        </span>
-      </div>
-      
-      <div className="pt-4 pr-8 flex flex-col space-y-1.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
-            <span className={`text-lg font-bold font-mono tracking-tight ${isLocked ? 'text-slate-500' : colors.text}`}>
-              {formatEtiqueta(asset.ETIQUETA)}
-            </span>
-          </div>
-          {isLocked ? (
-            <div className="px-2 py-1 bg-slate-200 rounded-lg flex items-center space-x-1">
-              <AlertTriangle size={10} className="text-slate-500" />
-              <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">
-                {isSixDigit ? 'USAR TELA INVENTÁRIO' : 'USAR TELA ETIQUETAR'}
-              </span>
-            </div>
-          ) : asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
-            <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
-              <Zap size={10} className="text-white fill-white" />
-              <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
-            </div>
-          )}
-        </div>
-
-        <p className="text-[11px] font-medium text-slate-600 uppercase leading-tight tracking-tight line-clamp-2">
-          {fullDescription}
-        </p>
-
-        <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 mt-1">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">C. Custo:</span>
-          <span className="text-[10px] font-bold text-slate-700 uppercase truncate tracking-tight">
-            {asset.CENTRODECUSTO || '---'}
+    <div className="flex items-center space-x-3 w-full">
+      {!isLocked && onSelect && (
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(String(asset.id));
+          }}
+          className={`shrink-0 w-6 h-6 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+            isSelected 
+              ? 'bg-accent border-accent text-white shadow-md shadow-accent/20' 
+              : 'bg-white border-slate-300 text-transparent hover:border-accent'
+          }`}
+        >
+          <Check size={14} strokeWidth={3} className={isSelected ? 'block' : 'hidden'} />
+        </button>
+      )}
+      <div 
+        className={`flex-1 p-3 border-l-4 rounded-xl relative overflow-hidden transition-all modern-card shadow-sm ${isLocked ? 'opacity-60 grayscale-[0.5] cursor-not-allowed bg-slate-50 border-slate-200' : `active:scale-[0.99] cursor-pointer ${colors.bg} ${colors.border}`}`} 
+        style={{ borderLeftColor: isLocked ? '#94a3b8' : colors.hex }}
+        onClick={() => !isLocked && onToggle(asset)}
+      >
+        <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${isLocked ? 'bg-slate-400 text-white' : colors.badge}`}>
+          {isLocked ? <AlertTriangle size={10} strokeWidth={3} /> : (colors.icon && <colors.icon size={10} strokeWidth={3} />)}
+          <span className="tracking-widest">
+            {isLocked ? `BLOQUEADO | ${isSixDigit ? 'REGRA DE OURO' : 'ETIQUETAGEM'}` : `${asset.REGISTRO || '---'} | ${visualStatus}`}
           </span>
         </div>
-
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {asset._dataLeitura && (
-            <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-accent text-white border border-accent/20 flex items-center divide-x divide-white/20">
-              <div className="flex items-center space-x-1 pr-2">
-                <Calendar size={10} className="text-white/80" />
-                <span>{formatReadingTime(asset._dataLeitura)}</span>
-              </div>
-              {asset._auditor && (
-                <div className="flex items-center space-x-1 pl-2">
-                  <User size={10} className="text-white/80" />
-                  <span className="text-white/90">{asset._auditor}</span>
-                </div>
-              )}
+        
+        <div className="pt-4 pr-8 flex flex-col space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
+              <span className={`text-lg font-bold font-mono tracking-tight ${isLocked ? 'text-slate-500' : colors.text}`}>
+                {formatEtiqueta(asset.ETIQUETA)}
+              </span>
             </div>
-          )}
-          {isBaixado && (
-            <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-400 text-white border border-red-500/20">
-              BAIXADO
-            </span>
-          )}
-        </div>
-      </div>
+            {isLocked ? (
+              <div className="px-2 py-1 bg-slate-200 rounded-lg flex items-center space-x-1">
+                <AlertTriangle size={10} className="text-slate-500" />
+                <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest">
+                  {isSixDigit ? 'USAR TELA INVENTÁRIO' : 'USAR TELA ETIQUETAR'}
+                </span>
+              </div>
+            ) : asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
+              <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
+                <Zap size={10} className="text-white fill-white" />
+                <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
+              </div>
+            )}
+          </div>
 
-      <div className={`absolute bottom-3 right-3 w-8 h-8 ${isConferido ? (isBaixado ? 'bg-red-400' : 'bg-accent') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
-        {isConferido ? <Check size={16} strokeWidth={3} className="text-white" /> : <Circle size={16} />}
+          <p className="text-[11px] font-medium text-slate-600 uppercase leading-tight tracking-tight line-clamp-2">
+            {fullDescription}
+          </p>
+
+          <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 mt-1">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">C. Custo:</span>
+            <span className="text-[10px] font-bold text-slate-700 uppercase truncate tracking-tight">
+              {asset.CENTRODECUSTO || '---'}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {asset._dataLeitura && (
+              <div className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest shadow-sm bg-accent text-white border border-accent/20 flex items-center divide-x divide-white/20">
+                <div className="flex items-center space-x-1 pr-2">
+                  <Calendar size={10} className="text-white/80" />
+                  <span>{formatReadingTime(asset._dataLeitura)}</span>
+                </div>
+                {asset._auditor && (
+                  <div className="flex items-center space-x-1 pl-2">
+                    <User size={10} className="text-white/80" />
+                    <span className="text-white/90">{asset._auditor}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {isBaixado && (
+              <span className="px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-widest shadow-sm bg-red-400 text-white border border-red-500/20">
+                BAIXADO
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isConferido ? (isBaixado ? 'bg-red-400' : 'bg-accent') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
+          {isConferido ? <Check size={16} strokeWidth={3} className="text-white" /> : <Circle size={16} />}
+        </div>
       </div>
     </div>
   );
@@ -250,10 +269,33 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [assetSearchTerm, setAssetSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
 
-  if (onBulkUpdateAssets) {
-    // Referenced to solve unused vars check
-  }
+  useEffect(() => {
+    setSelectedAssetIds(new Set());
+  }, [selectedAccount, activeFilter]);
+
+  const handleSelectAsset = useCallback((assetId: string) => {
+    setSelectedAssetIds(prev => {
+      const next = new Set(prev);
+      if (next.has(assetId)) {
+        next.delete(assetId);
+      } else {
+        next.add(assetId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleBulkReconcile = useCallback(() => {
+    if (selectedAssetIds.size === 0) return;
+    onBulkUpdateAssets(Array.from(selectedAssetIds), {
+      _conferido: true,
+      TAG_INVENTARIO: TagInventario.CONFERIDO,
+      _dataLeitura: new Date().toISOString()
+    });
+    setSelectedAssetIds(new Set());
+  }, [selectedAssetIds, onBulkUpdateAssets]);
 
   // Get unique accounts and their stats
   const accountStats = useMemo(() => {
@@ -387,17 +429,89 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
             </div>
             <div className="flex bg-slate-100/50 p-1 rounded-xl">
               <button 
-                onClick={() => setActiveFilter('pending')}
+                onClick={() => {
+                  setActiveFilter('pending');
+                  setSelectedAssetIds(new Set());
+                }}
                 className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeFilter === 'pending' ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
               >
                 Pendente
               </button>
               <button 
-                onClick={() => setActiveFilter('checked')}
+                onClick={() => {
+                  setActiveFilter('checked');
+                  setSelectedAssetIds(new Set());
+                }}
                 className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeFilter === 'checked' ? 'bg-white text-accent shadow-sm' : 'text-slate-400'}`}
               >
                 Concluido
               </button>
+            </div>
+
+            {/* Ação em Massa: Selecionar Todos e Conciliar Seleção */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between px-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelectableIds = filteredAssets
+                      .filter(a => {
+                        const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+                        return !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
+                      })
+                      .map(a => String(a.id));
+                    
+                    setSelectedAssetIds(prev => {
+                      const next = new Set(prev);
+                      const allSelected = allSelectableIds.every(id => next.has(id));
+                      if (allSelected) {
+                        allSelectableIds.forEach(id => next.delete(id));
+                      } else {
+                        allSelectableIds.forEach(id => next.add(id));
+                      }
+                      return next;
+                    });
+                  }}
+                  className="text-[9px] font-black text-accent hover:text-accent-soft uppercase tracking-wider cursor-pointer"
+                >
+                  {filteredAssets.length > 0 && filteredAssets
+                    .filter(a => {
+                      const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+                      return !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
+                    })
+                    .every(a => selectedAssetIds.has(String(a.id))) 
+                      ? "Desmarcar Todos" 
+                      : "Selecionar Todos os Pendentes"
+                  }
+                </button>
+                {selectedAssetIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAssetIds(new Set())}
+                    className="text-[9px] font-black text-rose-500 hover:text-rose-600 uppercase tracking-wider cursor-pointer"
+                  >
+                    Limpar Seleção ({selectedAssetIds.size})
+                  </button>
+                )}
+              </div>
+
+              {selectedAssetIds.size > 0 && (
+                <div className="flex items-center justify-between bg-accent/10 border border-accent/20 p-3 rounded-xl animate-fadeIn">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+                    <span className="text-[10px] font-black text-accent uppercase tracking-wider">
+                      {selectedAssetIds.size} {selectedAssetIds.size === 1 ? 'item' : 'itens'} para conciliar
+                    </span>
+                  </div>
+                  <button 
+                    onClick={handleBulkReconcile}
+                    className="px-4 py-2.5 bg-accent hover:bg-accent-soft text-white rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <CheckCircle2 size={12} strokeWidth={3} />
+                    <span>Conciliar Lote Selecionado</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -413,6 +527,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                     key={asset.id} 
                     asset={asset} 
                     onToggle={handleToggleReconcile} 
+                    isSelected={selectedAssetIds.has(String(asset.id))}
+                    onSelect={handleSelectAsset}
                   />
                 </div>
               )}

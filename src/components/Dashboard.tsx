@@ -65,12 +65,21 @@ interface DashboardProps {
     isAdmin?: boolean;
   } | null;
   onNavigate?: (screen: AppScreen) => void;
+  selectedUnit?: string | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit, sqlStats, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCampaignId, onOpenInventory, onOpenLabeling, onChangeUnit, sqlStats, onNavigate, selectedUnit }) => {
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
+
+  const handleNavigate = useCallback((screen: AppScreen) => {
+    const currentUnit = selectedUnit || user?.unitid || '';
+    sessionStorage.setItem('selectedUnit', JSON.stringify(currentUnit));
+    if (onNavigate) {
+      onNavigate(screen);
+    }
+  }, [onNavigate, selectedUnit, user]);
 
   const stats = useMemo(() => {
     const s = {
@@ -493,7 +502,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
               <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-1.5 align-middle">
-                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
                     <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">CPC 01 / CPC 27 (Impairment & Depreciação)</span>
                   </div>
                   <p className="text-[10px] text-slate-300 leading-relaxed font-medium">
@@ -502,22 +511,33 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
                       : 'Nenhuma divergência crítica pendente verificada de forma atômica nesta planta física.'}
                   </p>
                 </div>
-                {onNavigate && (
-                  <button 
-                    onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
-                    className="w-full md:w-auto px-4 py-2.5 bg-accent hover:bg-accent-soft text-white hover:text-accent rounded-xl text-[8px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all text-center cursor-pointer"
-                    id="dashboard-btn-reconciliacao"
-                  >
-                    Sanar Divergências
-                  </button>
-                )}
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                  {onNavigate && (
+                    <button 
+                      onClick={() => handleNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
+                      className="w-full md:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-white rounded-xl text-[8px] font-black uppercase tracking-widest active:scale-95 transition-all text-center cursor-pointer border border-slate-700"
+                      id="dashboard-btn-reconciliacao"
+                    >
+                      CONCILIAÇÃO POR CONTAS
+                    </button>
+                  )}
+                  {onNavigate && (
+                    <button 
+                      onClick={() => handleNavigate(AppScreen.IMPAIRMENT_REPORT)}
+                      className="w-full md:w-auto px-4 py-2.5 bg-accent hover:bg-accent-soft text-white hover:text-accent rounded-xl text-[8px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all text-center cursor-pointer"
+                      id="dashboard-btn-impairment"
+                    >
+                      RECONCILIAÇÃO CONTÁBIL (CPC 01 / CPC 27)
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Seção Sincronização Delta e Logs de Auditoria */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {onNavigate && (
                   <button 
-                    onClick={() => onNavigate(AppScreen.SYNC_MANAGER)}
+                    onClick={() => handleNavigate(AppScreen.SYNC_MANAGER)}
                     className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between text-left active:scale-[0.98] transition-all hover:border-slate-700 cursor-pointer"
                     id="dashboard-btn-sync"
                   >
@@ -536,7 +556,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
                 {onNavigate && (
                   <button 
-                    onClick={() => onNavigate(AppScreen.AUDIT_LOGS)}
+                    onClick={() => handleNavigate(AppScreen.AUDIT_LOGS)}
                     className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between text-left active:scale-[0.98] transition-all hover:border-slate-700 cursor-pointer"
                     id="dashboard-btn-logs"
                   >
@@ -557,7 +577,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
               {/* Ajuste de Perímetro GPS */}
               {onNavigate && (
                 <button 
-                  onClick={() => onNavigate(AppScreen.UNIT_CONFIGURATOR)}
+                  onClick={() => handleNavigate(AppScreen.UNIT_CONFIGURATOR)}
                   className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
                   id="dashboard-btn-gps"
                 >

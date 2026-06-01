@@ -185,7 +185,24 @@ const App: React.FC = () => {
     return getInitialInventoryState(mode);
   });
 
-  const [selectedUnit, setSelectedUnit] = useState<string | null>("CARREGANDO...");
+  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
+    try {
+      const s = sessionStorage.getItem('selectedUnit');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (parsed) return parsed;
+      }
+    } catch (err) {
+      console.warn(">>> [Boot] Falha ao recuperar selectedUnit do sessionStorage:", err);
+    }
+    try {
+      const local = localStorage.getItem('app_selected_unit');
+      if (local) return local;
+    } catch (err) {
+      console.warn(">>> [Boot] Falha ao recuperar app_selected_unit do localStorage:", err);
+    }
+    return "CARREGANDO...";
+  });
 
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -613,12 +630,7 @@ const App: React.FC = () => {
         const totalPending = len + unsyncedCount;
         if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
           setIsSyncLocked(true);
-          setModalConfig({
-            isOpen: true,
-            title: 'Bloqueio de Segurança: Fila de Sincronização',
-            message: `O limite de ${MAX_SYNC_QUEUE_SIZE} itens pendentes na fila de sincronização foi atingido. Sincronize antes de continuar.`,
-            type: 'error'
-          });
+          console.warn(`>>> [Bootstrap Guard] Sincronização travada: fila de sincronização excedeu o limite de segurança (${MAX_SYNC_QUEUE_SIZE} itens).`);
         } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
           setIsSyncLocked(false);
         }
@@ -5840,7 +5852,7 @@ const App: React.FC = () => {
           {screen === AppScreen.IMPAIRMENT_REPORT && (
             <ImpairmentReport 
               assets={inventory.assets}
-              onBack={popScreen}
+              onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])}
               onSelectAsset={(asset) => {
                 setSelectedAssets([asset]);
                 pushScreen(AppScreen.ASSET_DETAIL);
@@ -6033,7 +6045,7 @@ const App: React.FC = () => {
               assets={filteredAssetsByUnit} 
               allAssets={inventory.assets}
               currentCampaignId={inventory.currentCampaignId}
-              onBack={popScreen} 
+              onBack={() => setHistory([AppScreen.MAIN_MENU])} 
               onChangeUnit={() => {
                 setSelectedUnit(null);
                 pushScreen(AppScreen.UNIT_SELECTION);
@@ -6044,6 +6056,7 @@ const App: React.FC = () => {
               user={user}
               sqlStats={databaseMode === DatabaseMode.INTERNAL ? sqlDashboardStats : null}
               onNavigate={pushScreen}
+              selectedUnit={selectedUnit}
             />
           )}
           {screen === AppScreen.ASSET_MAP && (
@@ -6118,7 +6131,7 @@ const App: React.FC = () => {
           {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={popScreen} databaseMode={databaseMode} />}
+          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} databaseMode={databaseMode} />}
           {screen === AppScreen.CAMPAIGN_MANAGEMENT && (
             <CampaignManager 
               user={user} 
@@ -6155,8 +6168,8 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
             />
           )}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={popScreen} />}
-          {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} />}
+          {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
               onBack={popScreen} 

@@ -1,10 +1,11 @@
 import localforage from 'localforage';
 import { SyncQueueItem, Asset } from '../types';
-import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError, supabase } from './supabaseService';
+import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { deleteLocalPhoto } from './photoService';
 import { sqliteService } from './sqliteService';
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
+const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
 
 // Configura o store local
 const queueStore = localforage.createInstance({
@@ -12,7 +13,112 @@ const queueStore = localforage.createInstance({
   storeName: PHOTO_QUEUE_STORE
 });
 
+const campaignQueueStore = localforage.createInstance({
+  name: 'GBR_Audit_v24',
+  storeName: CAMPAIGN_QUEUE_STORE
+});
+
 const photoQueueStore = queueStore;
+
+export interface CampaignSyncItem {
+  id: string;
+  campaignId: string;
+  action: 'DELETE' | 'UPDATE_STATUS';
+  status?: unknown;
+  closedBy?: string;
+  timestamp: number;
+}
+
+export const addCampaignToSyncQueue = async (
+  campaignId: string, 
+  action: 'DELETE' | 'UPDATE_STATUS', 
+  status?: unknown, 
+  closedBy?: string
+): Promise<string> => {
+  const id = crypto.randomUUID();
+  const item: CampaignSyncItem = {
+    id,
+    campaignId,
+    action,
+    status,
+    closedBy,
+    timestamp: Date.now()
+  };
+  await campaignQueueStore.setItem(id, item);
+  console.log(`>>> [Sync Campaign] Campanha ${campaignId} empilhada na fila delta (${action}).`);
+  
+  if (navigator.onLine) {
+    processCampaignSyncQueue().catch(console.error);
+  }
+  return id;
+};
+
+// Registra de forma limpa na carga do modulo de sincronização
+registerCampaignSyncQueueDelegate(addCampaignToSyncQueue);
+
+export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]> => {
+  const items: CampaignSyncItem[] = [];
+  await campaignQueueStore.iterate((value: CampaignSyncItem) => {
+    items.push(value);
+  });
+  return items.sort((a, b) => a.timestamp - b.timestamp);
+};
+
+export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
+  const currentMode = localStorage.getItem('app_database_mode');
+  if (currentMode?.startsWith('INTERNAL')) {
+    return { success: false, processedCount: 0 };
+  }
+  if (!navigator.onLine) return { success: false, processedCount: 0 };
+
+  try {
+    const items = await getPendingCampaignSyncItems();
+    if (items.length === 0) return { success: true, processedCount: 0 };
+
+    console.log(`>>> [Sync Campaign] Processando ${items.length} campanhas pendentes...`);
+    let processedCount = 0;
+
+    for (const item of items) {
+      try {
+        if (!supabase) continue;
+        
+        if (item.action === 'DELETE') {
+          const { error } = await supabase.from('campaigns').delete().eq('id', item.campaignId);
+          if (error) throw error;
+        } else if (item.action === 'UPDATE_STATUS') {
+          const updateData: Record<string, unknown> = { 
+            status: item.status, 
+            end_date: item.status === 'CLOSED' ? new Date().toISOString() : undefined 
+          };
+          if (item.status === 'CLOSED' && item.closedBy) {
+            updateData.closure_details = {
+              closed_by: item.closedBy,
+              closed_at: new Date().toISOString(),
+              snapshot_status: 'PENDING'
+            };
+          }
+          const { error } = await supabase
+            .from('campaigns')
+            .update(updateData)
+            .eq('id', item.campaignId);
+          if (error) throw error;
+        }
+        
+        await campaignQueueStore.removeItem(item.id);
+        processedCount++;
+        console.log(`>>> [Sync Campaign Success] Campanha ${item.campaignId} sincronizada com nuvem.`);
+      } catch (err) {
+        console.error(`>>> [Sync Campaign Fail] Erro ao sincronizar campanha ${item.campaignId}:`, err);
+        if (!navigator.onLine) break;
+      }
+    }
+
+    return { success: true, processedCount };
+  } catch (err) {
+    console.error(">>> [Sync Campaign Fatal] Falha ao varrer fila de campanhas:", err);
+    return { success: false, processedCount: 0 };
+  }
+};
 
 let isDataSyncRunning = false;
 
@@ -395,13 +501,15 @@ if (typeof window !== 'undefined') {
     processSyncQueue().catch(console.error);
     processPhotoSyncQueue().catch(console.error);
     processDataSyncQueue().catch(console.error);
+    processCampaignSyncQueue().catch(console.error);
   });
 
-  // Intervalo de segurança para sincronização de dados (registros e fotos)
+  // Intervalo de segurança para sincronização de dados (registros, fotos e campanhas)
   // Roda de forma coordenada a cada 30 segundos
   setInterval(() => {
     processDataSyncQueue().catch(console.error);
     processPhotoSyncQueue().catch(console.error);
+    processCampaignSyncQueue().catch(console.error);
   }, 30000);
 }
 
