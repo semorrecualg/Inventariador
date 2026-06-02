@@ -879,7 +879,7 @@ class SqliteService {
       };
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("SQLITE_BOOTSTRAP_TIMEOUT")), 30000)
+        setTimeout(() => reject(new Error("SQLITE_BOOTSTRAP_TIMEOUT")), 180000)
       );
 
       return await Promise.race([physicalSetup(), timeoutPromise]);
@@ -1037,9 +1037,27 @@ class SqliteService {
     }
   }
 
+  private async ensureDatabaseOpen(): Promise<boolean> {
+    if (!this.nativeDb) return false;
+    if (this.storageSource === 'MEMORY_FALLBACK') return true;
+    try {
+      const isOpen = await this.nativeDb.isDBOpen();
+      if (!isOpen?.result) {
+        console.warn(">>> [Database] gbr_inventario_expert is not open! Attempting to open now...");
+        await this.nativeDb.open();
+        console.log(">>> [Database] gbr_inventario_expert successfully opened on-demand.");
+      }
+      return true;
+    } catch (err) {
+      console.error(">>> [Database] Failed to ensure database is open:", err);
+      return false;
+    }
+  }
+
   async query(sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, string | number | boolean | null>[]> {
     if (!this.isInitialized) await this.init();
     if (!this.nativeDb) return [];
+    await this.ensureDatabaseOpen();
 
     try {
       const res = await this.nativeDb.query(sql, params);
@@ -1067,6 +1085,7 @@ class SqliteService {
   async execute(sql: string, params: (string | number | boolean | null)[] = []) {
     if (!this.isInitialized) await this.init();
     if (!this.nativeDb) return;
+    await this.ensureDatabaseOpen();
 
     if (!(await this.checkBatterySafe())) {
       throw new Error("Escrita bloqueada: Bateria abaixo de 5%");
@@ -1141,6 +1160,7 @@ class SqliteService {
     if (!this.nativeDb) {
       throw new Error(">>> [SQL] Banco nativo gbr_inventario_expert não inicializado.");
     }
+    await this.ensureDatabaseOpen();
     try {
       // Junta todas as queries SQL em uma única execução atômica transacional
       const batchSql = statements.join('\n');
@@ -1987,6 +2007,7 @@ class SqliteService {
   async executeBatch(queries: {sql: string, params: (string | number | boolean | null)[]}[]) {
     if (!this.isInitialized) await this.init();
     if (!this.nativeDb) return;
+    await this.ensureDatabaseOpen();
 
     try {
       const set = queries.map(q => ({

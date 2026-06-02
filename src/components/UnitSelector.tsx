@@ -10,12 +10,10 @@ import {
   Building, 
   RefreshCw, 
   Cloud, 
-  Download, 
   Navigation as NavigationIcon,
   Database,
   Calendar,
-  ChevronRight,
-  ShieldCheck
+  ChevronRight
 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import BackButton from './BackButton';
@@ -23,6 +21,7 @@ import { DatabaseMode } from '../types';
 
 interface UnitSelectorProps {
   units: Array<{ 
+    filial?: string; // Unified GBR v2.6
     UNIDADE_OPERACIONAL: string; 
     hasData: boolean; 
     isDownloaded?: boolean; 
@@ -33,7 +32,6 @@ interface UnitSelectorProps {
   onSelect: (unit: string) => void;
   onBack: () => void;
   onSync?: () => void;
-  onDownload?: (unit: string) => void;
   onConfigGPS?: (unit: string) => void;
   onCampaigns?: (unit: string) => void;
   onLoadDatabase?: () => void;
@@ -43,17 +41,18 @@ interface UnitSelectorProps {
   databaseMode?: DatabaseMode;
 }
 
-const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onDownload, onConfigGPS, onCampaigns, onLoadDatabase, isSyncing, isAdmin, databaseMode }) => {
+const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, onSync, onConfigGPS, onCampaigns, onLoadDatabase, isSyncing, isAdmin, databaseMode }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [downloadingUnit, setDownloadingUnit] = useState<string | null>(null);
 
-  const purifiedUnits = units.filter(u => 
-    u && u.UNIDADE_OPERACIONAL && u.UNIDADE_OPERACIONAL.trim() !== ''
-  );
+  const purifiedUnits = units.filter(u => {
+    const unitName = u && (u.filial || u.UNIDADE_OPERACIONAL);
+    return unitName && unitName.trim() !== '';
+  });
 
-  const filteredUnits = purifiedUnits.filter(u => 
-    u.UNIDADE_OPERACIONAL.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUnits = purifiedUnits.filter(u => {
+    const unitName = u.filial || u.UNIDADE_OPERACIONAL || '';
+    return unitName.toLowerCase().includes(searchTerm.toLowerCase());
+  });
 
   // Log para depuração de unidades
   if (purifiedUnits.length === 0) {
@@ -61,17 +60,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
   } else {
     console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${purifiedUnits.length} unidades purificadas.`);
   }
-
-  const handleDownload = async (e: React.MouseEvent, unitName: string) => {
-    e.stopPropagation();
-    if (!onDownload || downloadingUnit) return;
-    setDownloadingUnit(unitName);
-    try {
-      await onDownload(unitName);
-    } finally {
-      setDownloadingUnit(null);
-    }
-  };
 
   // Helper para gerar ícone e cor consistente baseada no nome
   const getUnitIdentity = (name: string, hasData: boolean) => {
@@ -152,15 +140,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
               Footer: () => <div className="h-28 w-full flex-shrink-0" />
             }}
             itemContent={(index, unit) => {
+              const rawName = unit ? (unit.filial || unit.UNIDADE_OPERACIONAL) : '';
               // Garanta o uso rigoroso do campo oficial do projeto
-              if (!unit || !unit.UNIDADE_OPERACIONAL || unit.UNIDADE_OPERACIONAL.trim() === '') {
+              if (!unit || !rawName || rawName.trim() === '') {
                 return null;
               }
 
-              const displayName = unit.UNIDADE_OPERACIONAL.trim().toUpperCase();
+              const displayName = rawName.trim().toUpperCase();
               const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
-              const isDownloading = downloadingUnit === unit.UNIDADE_OPERACIONAL;
-              const hasAssetsLoaded = typeof unit.assetCount === 'number' && unit.assetCount > 0;
 
               return (
                 <div className="px-5 py-1.5">
@@ -179,7 +166,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                       </div>
                       <div className="text-left">
                         <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight flex items-baseline flex-wrap gap-x-2 ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
-                          <span>{unit.UNIDADE_OPERACIONAL.trim().toUpperCase()}</span>
+                          <span>{displayName}</span>
                           {typeof unit.assetCount === 'number' && (
                             <span className="text-slate-400 font-semibold text-xs normal-case">
                               - {unit.assetCount.toLocaleString('pt-BR')} ativos
@@ -201,7 +188,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                                className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0"
                                onClick={(e) => {
                                  e.stopPropagation();
-                                 if (isAdmin && onConfigGPS) { e.preventDefault(); try { Promise.resolve(onConfigGPS(unit.UNIDADE_OPERACIONAL)).catch(err => console.error("[GPS MODAL CRASH PREVENTED]", err)); } catch (err) { console.error("[GPS MODAL CRASH PREVENTED]", err); } }
+                                 if (isAdmin && onConfigGPS) { e.preventDefault(); try { Promise.resolve(onConfigGPS(displayName)).catch(err => console.error("[GPS MODAL CRASH PREVENTED]", err)); } catch (err) { console.error("[GPS MODAL CRASH PREVENTED]", err); } }
                                }}
                              >
                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
@@ -210,8 +197,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                                    : 'bg-rose-50 text-rose-500 border-rose-100'
                                } ${isAdmin ? 'hover:scale-110 hover:bg-emerald-100' : ''}`}>
                                  <NavigationIcon size={16} />
-                               </div>
-                               <span className={`text-[7px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>GPS</span>
+                                </div>
+                                <span className={`text-[7px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>GPS</span>
                              </button>
  
                            {/* Ícone de Campanha */}
@@ -220,7 +207,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                              className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans ${(!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) ? 'opacity-40 cursor-not-allowed' : 'active:scale-90 cursor-pointer'}`}
                              onClick={(e) => {
                                e.stopPropagation();
-                               if (!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) { e.preventDefault(); e.stopPropagation(); return; } if (onCampaigns) onCampaigns(unit.UNIDADE_OPERACIONAL);
+                               if (!unit.hasGps && !((() => { try { const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; } catch { return isAdmin; } })())) { e.preventDefault(); e.stopPropagation(); return; } if (onCampaigns) onCampaigns(displayName);
                              }}
                            >
                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
@@ -237,33 +224,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({ units, onSelect, onBack, on
                     </div>
                     
                     <div className="flex items-center space-x-2 relative z-10">
-                      {onDownload && (
-                        hasAssetsLoaded ? (
-                          <div 
-                            className="w-10 h-10 rounded-full flex items-center justify-center bg-green-50 text-green-500 cursor-default"
-                            title="Unidade Populada"
-                          >
-                            <ShieldCheck className="text-green-500 w-5 h-5" />
-                          </div>
-                        ) : (
-                          <button
-                            onClick={(e) => handleDownload(e, unit.UNIDADE_OPERACIONAL)}
-                            disabled={isDownloading || unit.isDownloaded}
-                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                              isDownloading 
-                                ? 'bg-blue-50 text-blue-500 animate-spin' 
-                                : 'text-blue-500 hover:bg-blue-50 active:scale-90'
-                            }`}
-                            title="Baixar para uso Offline"
-                          >
-                            {isDownloading ? (
-                              <RefreshCw size={18} />
-                            ) : (
-                              <Download size={18} className="text-blue-500" />
-                            )}
-                          </button>
-                        )
-                      )}
                       <div className="w-8 h-8 flex items-center justify-center text-ink-muted/20 group-hover:text-accent/40 transition-colors">
                         <ChevronRight size={20} />
                       </div>

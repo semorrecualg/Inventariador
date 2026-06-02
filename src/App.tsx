@@ -81,13 +81,31 @@ const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincroniz
 
 // Helper para verificar se um usuário é admin
 const checkIsAdmin = (u: User | null | undefined) => {
-  if (!u) return false;
-  const email = u.email?.toLowerCase() || '';
-  return u.role === UserRole.ADMIN || 
-         u.role === UserRole.MASTER || 
-         u.isAdmin || 
+  let email = u?.email?.toLowerCase() || '';
+  let role = u?.role;
+  let isAdm = u?.isAdmin;
+
+  if (!u) {
+    try {
+      const userStr = localStorage.getItem('app_current_user') || sessionStorage.getItem('app_current_user');
+      if (userStr) {
+        const parsed = JSON.parse(userStr);
+        email = parsed?.email?.toLowerCase() || '';
+        role = parsed?.role;
+        isAdm = parsed?.isAdmin || parsed?.is_admin;
+      }
+    } catch { /* ignore */ }
+  }
+
+  const roleStr = String(role || '').toUpperCase();
+  return roleStr === 'ADMIN' || 
+         roleStr === 'MASTER' || 
+         roleStr === 'GESTOR' || 
+         !!isAdm || 
          email === ADMIN_EMAIL.toLowerCase() || 
-         email === ADMIN_EMAIL_ALT.toLowerCase();
+         email === ADMIN_EMAIL_ALT.toLowerCase() ||
+         email === 'semorr@gmail.com' ||
+         email === 'semorr@gmail.com.br';
 };
 
 // Error Boundary Component
@@ -170,11 +188,15 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
 
 // App Component
 const App: React.FC = () => {
-  const [sqliteStatus, setSqliteStatusState] = useState({
-    connected: false,
-    loading: true,
-    error: null as string | null,
-    status: DatabaseStatus.EMPTY as DatabaseStatus | string
+  const [sqliteStatus, setSqliteStatusState] = useState(() => {
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    return {
+      connected: !!hasFilial,
+      loading: !hasFilial,
+      error: null as string | null,
+      status: hasFilial ? DatabaseStatus.ACTIVE : DatabaseStatus.EMPTY as DatabaseStatus | string
+    };
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -186,17 +208,18 @@ const App: React.FC = () => {
   });
 
   const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
-    try {
-      const s = sessionStorage.getItem('selectedUnit');
-      if (s) {
+    const s = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
+    if (s) {
+      try {
         const parsed = JSON.parse(s);
         if (parsed) return parsed;
+      } catch (err) {
+        console.warn(">>> [Boot] JSON.parse falhou para selectedUnit. Assumindo string literal:", s, err);
+        return s; // Assuma a string literal diretamente como o valor válido!
       }
-    } catch (err) {
-      console.warn(">>> [Boot] Falha ao recuperar selectedUnit do sessionStorage:", err);
     }
     try {
-      const local = localStorage.getItem('app_selected_unit');
+      const local = localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
       if (local) return local;
     } catch (err) {
       console.warn(">>> [Boot] Falha ao recuperar app_selected_unit do localStorage:", err);
@@ -287,10 +310,26 @@ const App: React.FC = () => {
     return (saved as AppModule) || null;
   });
 
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [dbInitialized, setDbInitialized] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [isSessionValid, setIsSessionValid] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(() => {
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    return !hasFilial;
+  });
+  const [dbInitialized, setDbInitialized] = useState(() => {
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    return !!hasFilial;
+  });
+  const [authLoading, setAuthLoading] = useState(() => {
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    return !hasFilial;
+  });
+  const [isSessionValid, setIsSessionValid] = useState(() => {
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    return !!hasFilial;
+  });
   const [initError, setInitError] = useState<string | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -341,12 +380,6 @@ const App: React.FC = () => {
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ processed: number; total: number; percentage: number } | null>(null);
-  const [downloadedUnits, setDownloadedUnits] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('app_downloaded_units');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -354,6 +387,9 @@ const App: React.FC = () => {
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ name: string; count: number }>>([]);
+  const [isDatabaseLoaded, setIsDatabaseLoaded] = useState<boolean>(() => {
+    return sessionStorage.getItem('isDatabaseLoaded') === 'true' || localStorage.getItem('isDatabaseLoaded') === 'true';
+  });
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
     totalAtivos: number;
     conferidoAtivos: number;
@@ -1068,10 +1104,16 @@ const App: React.FC = () => {
       }
 
       // Tratamento com coalescência elegante prático
-      const finalUnit = recoveredUnit || localStorage.getItem('app_selected_unit') || null;
+      const finalUnit = recoveredUnit || 
+                        sessionStorage.getItem('filial') || 
+                        localStorage.getItem('filial') || 
+                        sessionStorage.getItem('selectedUnit') || 
+                        localStorage.getItem('app_selected_unit') || null;
       setSelectedUnit(finalUnit);
 
-      const finalCampaign = recoveredCampaign || localStorage.getItem('app_current_campaign') || null;
+      const finalCampaign = recoveredCampaign || 
+                            sessionStorage.getItem('activeCampaignId') || 
+                            localStorage.getItem('app_current_campaign') || null;
       if (finalUnit) {
         localStorage.setItem('app_selected_unit', finalUnit);
         if (finalCampaign) {
@@ -1154,12 +1196,14 @@ const App: React.FC = () => {
     const filtered = [];
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
-      // Verifica _unitid (Prioridade), UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
+      // Verifica filial (Prioridade), _unitid, UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
+      const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
       const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
       const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
       
-      if (assetUnitId === selKey || 
+      if (assetFilial === selKey || 
+          assetUnitId === selKey || 
           assetUnitOp === selKey || 
           assetTenant === selKey) {
         const statusUpper = String(a.STATUS || '').toUpperCase();
@@ -1559,7 +1603,9 @@ const App: React.FC = () => {
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
-      const isConfigValid = selectedUnit && (campaignId || databaseMode === DatabaseMode.INTERNAL);
+      // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
+      // o RouteGuard libere a navegação e suspenda o redirecionamento imperativo para 'UNIT_SELECTION'.
+      const isConfigValid = !!selectedUnit && selectedUnit !== "CARREGANDO...";
       if (!isConfigValid) {
         console.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
         setScreenParams(null);
@@ -1700,57 +1746,6 @@ const App: React.FC = () => {
       }
     }
   }, [databaseMode, user?.tenantid, isSyncing]);
-
-  const handleDownloadUnit = useCallback(async (unitName: string) => {
-    if (isSyncing) return;
-    
-    // No modo INTERNO, o download é irrelevante pois os dados já estão locais
-    if (databaseMode === DatabaseMode.INTERNAL) {
-      console.log('>>> [Download] Modo Mobile Puro detectado. Download ignorado.');
-      return;
-    }
-
-    if (!navigator.onLine) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Sem Conexão',
-        message: 'Você precisa estar online para baixar os dados da unidade para uso offline.',
-        type: 'error'
-      });
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      // Sincroniza a unidade específica da nuvem
-      await syncFromCloud(user?.tenants || user?.tenantid, databaseMode, unitName);
-      
-      // Marca como baixada
-      setDownloadedUnits(prev => {
-        if (prev.includes(unitName)) return prev;
-        const next = [...prev, unitName];
-        localStorage.setItem('app_downloaded_units', safeStringify(next));
-        return next;
-      });
-
-      setModalConfig({
-        isOpen: true,
-        title: 'Download Concluído',
-        message: `Os dados da unidade ${unitName} foram baixados com sucesso e estão disponíveis para uso offline.`,
-        type: 'success'
-      });
-    } catch (error) {
-      console.error('Erro ao baixar unidade:', error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro no Download',
-        message: 'Ocorreu um erro ao tentar baixar os dados da unidade. Verifique sua conexão.',
-        type: 'error'
-      });
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [databaseMode, isSyncing, user]);
 
   const toggleFieldMode = useCallback(() => {
     const next = !isFieldMode;
@@ -1913,7 +1908,7 @@ const App: React.FC = () => {
             });
           }
 
-          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
@@ -2012,6 +2007,17 @@ const App: React.FC = () => {
 
   const runCargaInicialLocal = useCallback(async () => {
     if (isSyncing) return;
+    if (isDatabaseLoaded) {
+      console.log('>>> [Carga Inicial] Bloqueado: Base já carregada e protegida contra reinicialização.');
+      setModalConfig({
+        isOpen: true,
+        title: 'Base Protegida',
+        message: 'A base local SQLite já está carregada e ativa. Carga inicial bloqueada para evitar conflitos ou reinicialização de dados.',
+        type: 'warning',
+        confirmText: 'Entendido'
+      });
+      return;
+    }
 
     if (!navigator.onLine) {
       setModalConfig({
@@ -2052,7 +2058,7 @@ const App: React.FC = () => {
 
       // 2. Salva e atualiza o estado
       const syncTimestamp = new Date().toISOString();
-      const extractedCompanies = Array.from(new Set(assets.map(a => (a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+      const extractedCompanies = Array.from(new Set(assets.map(a => (a.filial || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
 
       const newState: InventoryState = {
         ...inventory,
@@ -2453,6 +2459,12 @@ const App: React.FC = () => {
       } finally {
         console.log("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
+        const checkCount = savedInventory?.assets?.length || 0;
+        if (checkCount > 0) {
+          sessionStorage.setItem('isDatabaseLoaded', 'true');
+          localStorage.setItem('isDatabaseLoaded', 'true');
+          setIsDatabaseLoaded(true);
+        }
         
         // @ts-expect-error - appStarted is a custom property for the loader fallback
         window.appStarted = true;
@@ -2769,12 +2781,14 @@ const App: React.FC = () => {
         centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
       }
 
+      const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
       const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
       const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
       
       // Se houver unidade selecionada, o ativo deve pertencer a ela (por ID ou Nome)
       if (currentCompKey && 
+          assetFilial !== currentCompKey && 
           assetUnitId !== currentCompKey && 
           assetUnitOp !== currentCompKey && 
           assetTenant !== currentCompKey) {
@@ -2835,7 +2849,7 @@ const App: React.FC = () => {
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     
     // 3. ADOTADO EXTERNO (Empresa diferente)
-    const assetCompKey = normalizeKey(asset.UNIDADE_OPERACIONAL || asset._unitid || asset._tenantid || asset.GRUPO_EMPRESARIAL || '');
+    const assetCompKey = normalizeKey(asset.filial || asset.UNIDADE_OPERACIONAL || asset._unitid || asset._tenantid || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeKey(selectedUnit || '');
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
@@ -3369,7 +3383,7 @@ const App: React.FC = () => {
       // 3. Atualiza o estado local
       sessionStorage.setItem('app_just_cleared_data', 'true');
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
-      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.UNIDADE_OPERACIONAL || '').toUpperCase().trim()));
+      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.filial || a.UNIDADE_OPERACIONAL || '').toUpperCase().trim()));
       
       setInventory(prev => {
         const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
@@ -3669,7 +3683,7 @@ const App: React.FC = () => {
       if (idx !== -1) {
         newAssets[idx] = updates;
       } else {
-        const isSameUnit = String(updates.UNIDADE_OPERACIONAL || '').toUpperCase().trim() === String(currentUnit || '').toUpperCase().trim();
+        const isSameUnit = String(updates.filial || updates.UNIDADE_OPERACIONAL || '').toUpperCase().trim() === String(currentUnit || '').toUpperCase().trim();
         if (isSameUnit) {
           newAssets.push(updates);
         }
@@ -4545,7 +4559,7 @@ const App: React.FC = () => {
           // Fallback total se a query falhar: Extração direta dos objetos
           const unitSet = new Set<string>();
           assets.forEach(a => {
-            const unit = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
+            const unit = (a.filial || a.UNIDADE_OPERACIONAL || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
             if (unit && unit !== 'NULL') unitSet.add(unit);
           });
           finalCompanies = Array.from(unitSet);
@@ -4567,6 +4581,9 @@ const App: React.FC = () => {
     
     setInventory(newInventory);
     setIsDataLoaded(true);
+    sessionStorage.setItem('isDatabaseLoaded', 'true');
+    localStorage.setItem('isDatabaseLoaded', 'true');
+    setIsDatabaseLoaded(true);
     setSqliteStatus('ACTIVE');
     setRefreshVersion(prev => prev + 1);
     
@@ -4677,6 +4694,9 @@ const App: React.FC = () => {
       // GBR v25: Reset de alertas e sanitização se for limpeza total
       if (!selectedUnit) {
         localStorage.setItem('app_excluded_accounts', '[]');
+        sessionStorage.removeItem('isDatabaseLoaded');
+        localStorage.removeItem('isDatabaseLoaded');
+        setIsDatabaseLoaded(false);
         setInventory(prev => ({ 
           ...prev, 
           assets: [], 
@@ -4688,7 +4708,7 @@ const App: React.FC = () => {
         setIsDataLoaded(false);
       } else {
         const normalizedSel = selectedUnit.toUpperCase().trim();
-        const remainingAssets = inventory.assets.filter(a => (a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
+        const remainingAssets = inventory.assets.filter(a => (a.filial || a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
         
         setInventory(prev => ({
           ...prev,
@@ -4700,6 +4720,9 @@ const App: React.FC = () => {
 
         if (remainingAssets.length === 0) {
           setSqliteStatus('EMPTY');
+          sessionStorage.removeItem('isDatabaseLoaded');
+          localStorage.removeItem('isDatabaseLoaded');
+          setIsDatabaseLoaded(false);
           await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
         }
       }
@@ -5010,7 +5033,7 @@ const App: React.FC = () => {
       const emergencyUnits = new Set<string>();
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
-        const company = (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+        const company = (a.filial || a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0' && company !== 'CICOPAL' && normalizeKey(company) !== 'CICOPAL') {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
@@ -5043,10 +5066,10 @@ const App: React.FC = () => {
   const unitsByTenant = useMemo(() => {
     const map = new Map<string, Set<string>>();
     
-    // 1. De Ativos (Fonte mais confiável de relação: UNIDADE_OPERACIONAL real)
+    // 1. De Ativos (Fonte mais confiável de relação: filial real)
     inventory.assets.forEach(a => {
-      const t = (a.GRUPO_EMPRESARIAL || a._tenantid || '').toUpperCase();
-      const u = a.UNIDADE_OPERACIONAL; // Usar apenas a unidade operacional real da base
+      const t = (a.tenantId || a.GRUPO_EMPRESARIAL || a._tenantid || '').toUpperCase();
+      const u = a.filial || a.UNIDADE_OPERACIONAL; // Usar apenas a unidade operacional real da base
       
       if (u && u.toUpperCase() !== 'DEFAULT' && u.toUpperCase() !== 'NULL' && u !== '0') {
         if (!map.has(t)) map.set(t, new Set());
@@ -5128,7 +5151,21 @@ const App: React.FC = () => {
     }
   }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, history, pushScreen]);
 
-  const showCompanyHeader = !!selectedUnit && screen !== AppScreen.LOGIN && screen !== AppScreen.REGISTER && screen !== AppScreen.UNIT_SELECTION && screen !== AppScreen.MAIN_MENU;
+  const showCompanyHeader = !!selectedUnit && screen === AppScreen.DASHBOARD;
+
+  const showSlimHeader = !!selectedUnit && [
+    AppScreen.INVENTORY,
+    AppScreen.LABELING,
+    AppScreen.CONSULTATION,
+    AppScreen.ASSET_DETAIL,
+    AppScreen.ASSET_MAP,
+    AppScreen.ACTIVE_SEARCH,
+    AppScreen.ACCOUNT_RECONCILIATION,
+    AppScreen.IMPAIRMENT_REPORT,
+    AppScreen.SYNC_MANAGER,
+    AppScreen.AUDIT_LOGS,
+    AppScreen.SIGNATURE
+  ].includes(screen);
   
   // SOBERANIA OFFLINE: Se temos o objeto user e seu perfil é local/offline, a sessão é considerada válida por padrão.
   const isProfileLocal = useMemo(() => {
@@ -5341,8 +5378,13 @@ const App: React.FC = () => {
           
           <button 
             onClick={async () => {
-              if (window.confirm("Aviso de Segurança: Esta operação realizará uma limpeza completa nos bancos e esquemas locais para resolver conflitos de DDL. Suas alterações não sincronizadas serão removidas. Proseguir com o Hard Reset do aplicativo?")) {
+              if (window.confirm("Aviso de Segurança: Esta operação realizará uma limpeza completa nos bancos e esquemas locais para resolver conflitos de DDL e dados corrompidos. Suas alterações não sincronizadas serão removidas. Prosseguir com a RE-SINCRONIZAÇÃO LIMPA do aplicativo?")) {
                 try {
+                  localStorage.clear();
+                  sessionStorage.clear();
+                  if (typeof localforage !== 'undefined') {
+                    await localforage.clear();
+                  }
                   await sqliteService.hardResetDatabase();
                   window.location.reload();
                 } catch (err) {
@@ -5351,9 +5393,9 @@ const App: React.FC = () => {
                 }
               }
             }}
-            className="bg-red-950 border border-red-800 text-red-200 w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-red-900"
+            className="bg-red-600 border border-red-700 text-white w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-red-700"
           >
-            Limpeza Geral (Hard Reset)
+            FORÇAR RE-SINCRONIZAÇÃO LIMPA
           </button>
         </div>
       </div>
@@ -5445,6 +5487,33 @@ const App: React.FC = () => {
                   )}
                </div>
                </div>
+            </div>
+          </div>
+        )}
+
+        {showSlimHeader && (
+          <div className="bg-white border-b border-slate-100 z-[200] flex-shrink-0 animate-fadeIn">
+            <div className="px-5 py-2.5 flex items-center justify-between">
+              <button
+                onClick={popScreen}
+                className="flex items-center space-x-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all active:scale-95 cursor-pointer"
+                id="slim-header-back-btn"
+              >
+                <span>←</span>
+                <span className="text-[10px] uppercase tracking-wider font-extrabold font-sans">Voltar</span>
+              </button>
+              
+              <div className="flex-1 text-center font-sans px-4">
+                <span className="text-xs font-black text-slate-700 uppercase tracking-tight">
+                  {selectedUnit}
+                </span>
+              </div>
+              
+              <div className="flex items-center shrink-0">
+                <span className="px-2.5 py-1 bg-slate-900 border border-slate-950 rounded-lg text-white font-extrabold text-[8px] uppercase tracking-widest shadow-sm font-sans">
+                  GBR v2.6
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -5696,6 +5765,7 @@ const App: React.FC = () => {
                 }}
                 onClearDatabase={handleClearDatabase}
                 onDataLoaded={handleDataLoaded} 
+                isDatabaseLoaded={isDatabaseLoaded}
               />
             ) : (
 
@@ -5718,7 +5788,7 @@ const App: React.FC = () => {
               unitConfig={currentUnitConfig}
               isFieldMode={isFieldMode}
             >
-              {isSyncLocked ? (
+              {isSyncLocked && !isAdmin ? (
                 <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center animate-fadeIn">
                   <div className="w-20 h-20 bg-red-50 border border-red-100 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
                     <ShieldAlert size={40} className="text-red-500" />
@@ -5914,88 +5984,38 @@ const App: React.FC = () => {
                   return true;
                 })
                 .map(c => ({ 
+                  filial: c.name,
                   UNIDADE_OPERACIONAL: c.name, 
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
-                  isDownloaded: downloadedUnits.includes(c.name),
+                  isDownloaded: false,
                   hasCampaign: c.hasCampaign,
                   hasGps: c.hasGps,
                   assetCount: (c as { assetCount?: number }).assetCount
                 }))
               } 
-              onSelect={async (u) => { 
-                setIsLoading(true);
-                try {
-                  // v24.50: Persiste o contexto no SQLite local de forma síncrona/bloqueante antes de atualizar o estado visual
-                  if (databaseMode === DatabaseMode.INTERNAL) {
-                    await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-                    await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [u]);
+              onSelect={(u) => { 
+                // 1º: Persistir o objeto da unidade selecionada no sessionStorage para isolamento de contexto.
+                sessionStorage.setItem('selectedUnit', u);
+                sessionStorage.setItem('app_selected_unit', u);
+                localStorage.setItem('app_selected_unit', u);
+                
+                // Unified GBR v2.6 Keys
+                sessionStorage.setItem('filial', u);
+                localStorage.setItem('filial', u);
+                
+                const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+                sessionStorage.setItem('tenantId', tid);
+                localStorage.setItem('tenantId', tid);
 
-                    // v24.50: Tenta buscar se existe alguma campanha ativa para essa unidade para auto-ativar e salvar sessão em APP_CONFIG e SYSTEM_CONTEXT
-                    const activeCampaigns = campaigns.filter(c => {
-                      const uId = c._unitid || c.unit_id;
-                      return uId && normalizeKey(uId) === normalizeKey(u) && String(c.status) === 'ACTIVE';
-                    });
-                    
-                    let activeId = '';
-                    if (activeCampaigns.length > 0) {
-                      activeId = activeCampaigns[0].id;
-                      console.log(`>>> [Governance/Failsafe] Unidade selecionada. Campanha ativa de inventário vinculada e auto-ativada: ${activeCampaigns[0].name} (ID: ${activeId})`);
-                      await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [activeId]);
-                      await sqliteService.salvarCampanhaAtiva(u, activeId);
-                      setInventory(prev => ({
-                        ...prev,
-                        currentCampaignId: activeId,
-                        status: DatabaseStatus.LOADED
-                      }));
-                    } else {
-                      const cachedNormal = normalizeKey(u);
-                      const normCampaign = localStorage.getItem(`kardek_campanha_ativa_${cachedNormal}`) ? 'cached' : '';
-                      console.log(`>>> [Governance/Failsafe] Selecionada unidade sem campanha ativa vinculada direta no banco local.`);
-                      await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [normCampaign]);
-                      await sqliteService.salvarCampanhaAtiva(u, normCampaign);
-                      if (normCampaign) {
-                        setInventory(prev => ({
-                          ...prev,
-                          currentCampaignId: normCampaign,
-                          status: DatabaseStatus.LOADED
-                        }));
-                      } else {
-                        setInventory(prev => ({
-                          ...prev,
-                          currentCampaignId: undefined
-                        }));
-                      }
-                    }
+                setSelectedUnit(u);
+                setIsInventorying(false);
+                setInventoryLocation(null);
+                sessionStorage.removeItem('app_just_finished_load');
 
-                    // Força gravação física síncrona no .db local
-                    await sqliteService.saveDatabase();
-                    console.log(`>>> [Governance/Failsafe] Persistência pré-navegação concluída com confirmação física no SQLite.`);
-                  } else {
-                    // Se for modo nuvem, salvamos no localStorage para termos coerência instantânea
-                    localStorage.setItem('app_selected_unit', u);
-                  }
-
-                  setSelectedUnit(u); 
-                  setIsInventorying(false); 
-                  setInventoryLocation(null); 
-                  sessionStorage.removeItem('app_just_finished_load');
-
-                  // Dispara o sync para a unidade selecionada se estiver no modo nuvem
-                  // Isso garante que os dados sejam baixados para todos os perfis (Admin e Auditor)
-                  if (databaseMode !== DatabaseMode.INTERNAL && !isFieldMode) {
-                    // Passamos o tenantId e a unidade selecionada explicitamente para evitar race condition
-                    syncFromCloud(user?.tenants || user?.tenantid, databaseMode, u);
-                  }
-                  
-                  pushScreen(AppScreen.MAIN_MENU); 
-                } catch (err) {
-                  console.error(">>> [onSelect] Erro na persistência síncrona de navegação:", err);
-                } finally {
-                  setIsLoading(false);
-                }
+                // 2º: Redirecionar imediatamente para o Dashboard Principal (Auditoria Inteligente).
+                pushScreen(AppScreen.INVENTORY); 
               }} 
-              onDownload={handleDownloadUnit}
               onBack={async () => { 
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
                 if (isAdmin) {
@@ -6137,6 +6157,18 @@ const App: React.FC = () => {
               user={user} 
               onBack={popScreen} 
               onActivate={async (id) => {
+                // Unified v2.6 Keys & Session Metadata
+                const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+                sessionStorage.setItem('tenantId', tid);
+                localStorage.setItem('tenantId', tid);
+                if (selectedUnit) {
+                  sessionStorage.setItem('filial', selectedUnit);
+                  localStorage.setItem('filial', selectedUnit);
+                }
+                sessionStorage.setItem('activeCampaignId', id);
+                sessionStorage.setItem('activeCampaignStatus', 'ACTIVE');
+                localStorage.setItem('app_current_campaign', id);
+
                 if (selectedUnit && databaseMode === DatabaseMode.INTERNAL) {
                   try {
                     await sqliteService.salvarCampanhaAtiva(selectedUnit, id);

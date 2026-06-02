@@ -379,7 +379,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans w-full">
         {/* Module 1: INVENTÁRIO */}
         <button
-          onClick={() => selectedUnit ? onNavigate(AppScreen.INVENTORY) : onNavigate(AppScreen.UNIT_SELECTION)}
+          onClick={() => {
+            if (selectedUnit) {
+              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+              sessionStorage.setItem('tenantId', tid);
+              localStorage.setItem('tenantId', tid);
+              sessionStorage.setItem('filial', selectedUnit);
+              localStorage.setItem('filial', selectedUnit);
+              onNavigate(AppScreen.INVENTORY);
+            } else {
+              onNavigate(AppScreen.UNIT_SELECTION);
+            }
+          }}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
         >
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
@@ -394,7 +405,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
         {/* Module 2: FICHA DO ATIVO */}
         <button
-          onClick={() => onNavigate(AppScreen.CONSULTATION)}
+          onClick={() => {
+            if (selectedUnit) {
+              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+              sessionStorage.setItem('tenantId', tid);
+              localStorage.setItem('tenantId', tid);
+              sessionStorage.setItem('filial', selectedUnit);
+              localStorage.setItem('filial', selectedUnit);
+            }
+            onNavigate(AppScreen.CONSULTATION);
+          }}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:50ms]"
         >
           <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-purple-600 group-hover:text-white transition-colors">
@@ -409,10 +429,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
         {/* Module 3: ETIQUETAR */}
         <button
-          onClick={() => onNavigate(AppScreen.LABELING)}
+          onClick={() => {
+            if (selectedUnit) {
+              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+              sessionStorage.setItem('tenantId', tid);
+              localStorage.setItem('tenantId', tid);
+              sessionStorage.setItem('filial', selectedUnit);
+              localStorage.setItem('filial', selectedUnit);
+            }
+            onNavigate(AppScreen.LABELING);
+          }}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:100ms]"
         >
-          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
+          <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex-items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
             <Tag size={24} />
           </div>
           <div className="flex-1 text-left">

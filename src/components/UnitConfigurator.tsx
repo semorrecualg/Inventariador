@@ -2,26 +2,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Save, 
-  Target, 
-  Search, 
   AlertCircle, 
   CheckCircle2, 
   Loader2,
-  ChevronRight,
   Layers,
   ArrowLeft,
-  Calendar,
-  ChevronUp,
-  ChevronDown,
-  Map as MapIcon,
-  WifiOff
+  WifiOff,
+  Unlock,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
 import maplibregl from 'maplibre-gl';
+import * as turf from '@turf/turf';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
-import { getCurrentLocation } from '../utils/gpsUtils';
 
 interface UnitConfiguratorProps {
   user: User;
@@ -32,7 +27,7 @@ interface UnitConfiguratorProps {
   initialUnit?: string | null;
 }
 
-const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, onNavigate, initialUnit }) => {
+const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, initialUnit }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
@@ -47,15 +42,45 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [searching, setSearching] = useState(false);
-  const [locating, setLocating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mapType, setMapType] = useState<'street' | 'satellite'>('street');
+  const [searching, setSearching] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [mapType, setMapType] = useState<'street' | 'satellite'>(() => {
+    const saved = sessionStorage.getItem('unit_config_map_type');
+    return (saved === 'satellite' || saved === 'street') ? saved : 'street';
+  });
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
-  const [isSheetExpanded, setIsSheetExpanded] = useState(false);
-  const [unitSearchTerm, setUnitSearchTerm] = useState('');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [showAdminBypassToast, setShowAdminBypassToast] = useState(false);
+
+  // Solução para Stale Closure bugs (Captura os estados mais recentes nos listeners assíncronos do mapa)
+  const selectedUnitRef = useRef<string | null>(null);
+  const currentConfigRef = useRef<Partial<UnitConfig>>({});
+  const mapClickRef = useRef<(lat: number, lng: number) => void>(() => {});
+
+  useEffect(() => {
+    selectedUnitRef.current = selectedUnit;
+  }, [selectedUnit]);
+
+  useEffect(() => {
+    currentConfigRef.current = currentConfig;
+  }, [currentConfig]);
+
+  useEffect(() => {
+    mapClickRef.current = (lat: number, lng: number) => {
+      const activeUnit = selectedUnitRef.current;
+      if (!activeUnit) {
+        setMessage({ text: 'SELECIONE UMA OPERACIONAL NO PAINEL INFERIOR ANTES DE MARCAR O MAPA.', type: 'error' });
+        return;
+      }
+      setCurrentConfig(prev => ({ ...prev, lat, lng }));
+      
+      // Gravação preventiva de rascunho na sessão
+      sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
+      sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
+    };
+  }, []);
 
   useEffect(() => {
     initMap();
@@ -69,6 +94,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const initMap = () => {
     if (!mapRef.current || mapInstance.current) return;
     
+    const initialMapType = sessionStorage.getItem('unit_config_map_type') || 'street';
+    
     try {
       const map = new maplibregl.Map({
         container: mapRef.current,
@@ -80,15 +107,34 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
               tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
               tileSize: 256,
               attribution: '© OpenStreetMap contributors'
+            },
+            'satellite-raster': {
+              type: 'raster',
+              tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+              tileSize: 256,
+              attribution: 'Tiles &copy; Esri &mdash; Map data &copy; Esri, i-cubed, USDA, USGS'
             }
           },
           layers: [
+            {
+              id: 'satellite-layer',
+              type: 'raster',
+              source: 'satellite-raster',
+              minzoom: 0,
+              maxzoom: 19,
+              layout: {
+                visibility: initialMapType === 'satellite' ? 'visible' : 'none'
+              }
+            },
             {
               id: 'osm-layer',
               type: 'raster',
               source: 'osm-raster',
               minzoom: 0,
-              maxzoom: 19
+              maxzoom: 19,
+              layout: {
+                visibility: initialMapType === 'street' ? 'visible' : 'none'
+              }
             }
           ]
         },
@@ -103,7 +149,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       });
 
       map.on('click', (e) => {
-        handleMapClick(e.lngLat.lat, e.lngLat.lng);
+        if (mapClickRef.current) {
+          mapClickRef.current(e.lngLat.lat, e.lngLat.lng);
+        }
       });
       
     } catch (err) {
@@ -111,28 +159,11 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
   };
 
-  const createGeoJSONCircle = (center: [number, number], radiusInMeters: number, points: number = 64) => {
-    const coords = { lat: center[0], lng: center[1] };
-    const kgRadius = radiusInMeters / 1000; // converter para km
-    const coordinates = [];
-    const distanceX = kgRadius / (111.32 * Math.cos((coords.lat * Math.PI) / 180));
-    const distanceY = kgRadius / 110.574;
-
-    for (let i = 0; i < points; i++) {
-      const theta = (i / points) * (2 * Math.PI);
-      const x = distanceX * Math.cos(theta);
-      const y = distanceY * Math.sin(theta);
-      coordinates.push([coords.lng + x, coords.lat + y]);
-    }
-    coordinates.push(coordinates[0]);
-
-    return {
-      type: 'Feature',
-      geometry: {
-        type: 'Polygon',
-        coordinates: [coordinates]
-      }
-    } as maplibregl.GeoJSONFeatureSelection;
+  const createGeoJSONCircle = (center: [number, number], radiusInMeters: number) => {
+    const turfCenter = turf.point([center[1], center[0]]);
+    const options = { steps: 64, units: 'meters' as const };
+    const circle = turf.circle(turfCenter, radiusInMeters, options);
+    return circle as unknown as maplibregl.GeoJSONFeatureSelection;
   };
 
   const updateMapDisplay = () => {
@@ -141,6 +172,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     try {
       const map = mapInstance.current;
       const center: [number, number] = [currentConfig.lng, currentConfig.lat];
+
+      // Sincronizar visibilidade de camadas com base no mapType
+      if (map.getLayer('osm-layer')) {
+        map.setLayoutProperty('osm-layer', 'visibility', mapType === 'street' ? 'visible' : 'none');
+      }
+      if (map.getLayer('satellite-layer')) {
+        map.setLayoutProperty('satellite-layer', 'visibility', mapType === 'satellite' ? 'visible' : 'none');
+      }
 
       // 1. Atualizar Marcador
       if (markerRef.current) {
@@ -152,7 +191,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         
         markerRef.current.on('dragend', () => {
           const lngLat = markerRef.current!.getLngLat();
-          handleMapClick(lngLat.lat, lngLat.lng);
+          if (mapClickRef.current) {
+            mapClickRef.current(lngLat.lat, lngLat.lng);
+          }
         });
       }
 
@@ -202,8 +243,18 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
   useEffect(() => {
     if (mapInstance.current) {
-      // MapLibre switch logic if satellite was supported via another raster source
-      // For now we keep it simple with OSM
+      try {
+        const map = mapInstance.current;
+        if (map.getLayer('osm-layer')) {
+          map.setLayoutProperty('osm-layer', 'visibility', mapType === 'street' ? 'visible' : 'none');
+        }
+        if (map.getLayer('satellite-layer')) {
+          map.setLayoutProperty('satellite-layer', 'visibility', mapType === 'satellite' ? 'visible' : 'none');
+        }
+        sessionStorage.setItem('unit_config_map_type', mapType);
+      } catch (e) {
+        console.warn('>>> [MAP] Erro ao alternar a visibilidade de camadas:', e);
+      }
     }
   }, [mapType]);
 
@@ -243,6 +294,64 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setLoading(false);
   };
 
+  const handleSelectUnit = (unit: string) => {
+    if (!unit) return;
+    setSelectedUnit(unit);
+    
+    // Recuperar rascunhos preventivos do sessionStorage
+    const sessionLat = sessionStorage.getItem(`kardek_temp_gps_lat_${unit}`);
+    const sessionLng = sessionStorage.getItem(`kardek_temp_gps_lng_${unit}`);
+    const sessionRadius = sessionStorage.getItem(`kardek_temp_gps_radius_${unit}`);
+
+    const existing = configs.find(c => {
+      if (!c.unit_id) return false;
+      return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
+    });
+
+    if (sessionLat && sessionLng) {
+      setCurrentConfig({
+        tenant_id: user.tenantid,
+        unit_id: unit,
+        lat: Number(sessionLat),
+        lng: Number(sessionLng),
+        radius_meters: sessionRadius ? Number(sessionRadius) : (existing?.radius_meters || 500),
+        is_active: true
+      });
+      setMapCenter([Number(sessionLat), Number(sessionLng)]);
+    } else if (existing) {
+      setCurrentConfig(existing);
+      setMapCenter([existing.lat, existing.lng]);
+    } else {
+      setCurrentConfig({
+        tenant_id: user.tenantid,
+        unit_id: unit,
+        lat: mapCenter[0],
+        lng: mapCenter[1],
+        radius_meters: 500,
+        is_active: true
+      });
+    }
+    setMessage(null);
+  };
+
+  useEffect(() => {
+    if (selectedUnit) {
+      if (currentConfig.lat !== undefined && currentConfig.lng !== undefined) {
+        sessionStorage.setItem(`kardek_temp_gps_lat_${selectedUnit}`, String(currentConfig.lat));
+        sessionStorage.setItem(`kardek_temp_gps_lng_${selectedUnit}`, String(currentConfig.lng));
+      }
+      if (currentConfig.radius_meters !== undefined) {
+        sessionStorage.setItem(`kardek_temp_gps_radius_${selectedUnit}`, String(currentConfig.radius_meters));
+      }
+    }
+  }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters, selectedUnit]);
+
+  useEffect(() => {
+    if (mapInstance.current) {
+      updateMapDisplay();
+    }
+  }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
+
   const handleSearchLocation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -250,7 +359,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setSearching(true);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
 
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`, {
         signal: controller.signal
@@ -267,106 +376,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         if (selectedUnit) {
           setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
         }
+        setMessage({ text: `CENTRALIZADO EM: ${searchQuery}`, type: 'success' });
       } else {
-        setMessage({ text: 'Localização não encontrada.', type: 'error' });
+        setMessage({ text: 'LOCALIZAÇÃO NÃO ENCONTRADA.', type: 'error' });
       }
     } catch (err: unknown) {
       const error = err as Error;
       console.error('Erro na busca de localização:', error);
-      const errorMsg = error.name === 'AbortError' ? 'Tempo esgotado na busca.' : 'Erro ao buscar localização.';
+      const errorMsg = error.name === 'AbortError' ? 'TEMPO ESGOTADO NA BUSCA.' : 'ERRO AO BUSCAR LOCALIZAÇÃO.';
       setMessage({ text: errorMsg, type: 'error' });
     } finally {
       setSearching(false);
     }
   };
 
-  const handleSelectUnit = (unit: string) => {
-    if (!unit) return;
-    setSelectedUnit(unit);
-    const existing = configs.find(c => {
-      if (!c.unit_id) return false;
-      return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
-    });
-    if (existing) {
-      setCurrentConfig(existing);
-      setMapCenter([existing.lat, existing.lng]);
-    } else {
-      setCurrentConfig({
-        tenant_id: user.tenantid,
-        unit_id: unit,
-        lat: mapCenter[0],
-        lng: mapCenter[1],
-        radius_meters: 500,
-        is_active: true
-      });
-    }
-    setMessage(null);
-    setIsSheetExpanded(false); // Recolhe o sheet ao selecionar
-  };
 
-  useEffect(() => {
-    if (mapInstance.current) {
-      updateMapDisplay();
-    }
-  }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
-
-  const handleMapClick = (lat: number, lng: number) => {
-    if (!selectedUnit) {
-      setIsSheetExpanded(true); // Se não houver unidade, abre o sheet para selecionar
-      return;
-    }
-    setCurrentConfig(prev => ({ ...prev, lat, lng }));
-  };
-
-  const handleUseCurrentLocation = async () => {
-    setLocating(true);
-    setMessage(null);
-    try {
-      console.log('>>> [GPS] Iniciando captura nativa (Capacitor/Soberano)...');
-      
-      // 1. Verificação de Permissão Explícita
-      const status = await Geolocation.checkPermissions();
-      if (status.location !== 'granted') {
-        const req = await Geolocation.requestPermissions();
-        if (req.location !== 'granted') {
-          setMessage({ text: 'PERMISSÃO GPS NEGADA NO SISTEMA.', type: 'error' });
-          setLocating(false);
-          return;
-        }
-      }
-
-      // 2. Captura Direta
-      const pos = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0
-      });
-
-      if (pos && pos.coords) {
-        const { latitude, longitude } = pos.coords;
-        setCurrentConfig(prev => ({ ...prev, lat: latitude, lng: longitude }));
-        setMapCenter([latitude, longitude]);
-        setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE!', type: 'success' });
-      } else {
-        throw new Error('Hardware retornou objeto vazio');
-      }
-    } catch (e: unknown) {
-      const err = e as Error;
-      console.warn('>>> [GPS] Falha nativa, tentando Web API:', err.message || 'Desconhecido');
-      
-      try {
-        const webLoc = await getCurrentLocation(true);
-        setCurrentConfig(prev => ({ ...prev, lat: webLoc.lat, lng: webLoc.lng }));
-        setMapCenter([webLoc.lat, webLoc.lng]);
-        setMessage({ text: 'POSIÇÃO FIXADA (WEB FALLBACK).', type: 'success' });
-      } catch (fallbackError: unknown) {
-        const fe = fallbackError as Error;
-        setMessage({ text: `ERRO GPS: ${fe.message || 'Sinal indisponível'}`, type: 'error' });
-      }
-    } finally {
-      setLocating(false);
-    }
-  };
 
   const handleSave = async () => {
     const l_lat = currentConfig.lat;
@@ -380,6 +404,73 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     setSaving(true);
     setMessage(null);
+
+    // Determina se o usuário é Administrador, Master ou Gestor
+    const checkIsAdmin = (): boolean => {
+      const roleUpper = user?.role?.toUpperCase();
+      if (roleUpper === 'ADMIN' || roleUpper === 'MASTER' || roleUpper === 'GESTOR' || user?.isAdmin || user?.is_admin) return true;
+      try {
+        const userStr = localStorage.getItem('app_current_user');
+        if (userStr) {
+          const u = JSON.parse(userStr);
+          const uRole = u.role?.toUpperCase();
+          if (uRole === 'ADMIN' || uRole === 'MASTER' || uRole === 'GESTOR' || u.isAdmin === true || u.is_admin === true) {
+            return true;
+          }
+        }
+      } catch { /* ignore */ }
+      return false;
+    };
+    const isAdminUser = checkIsAdmin();
+
+    // Validação Espacial Turf.js
+    let currentPhysicalLat = l_lat;
+    let currentPhysicalLng = l_lng;
+    let hasPhysicalGPS = false;
+
+    try {
+      const pos = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      });
+      if (pos && pos.coords) {
+        currentPhysicalLat = pos.coords.latitude;
+        currentPhysicalLng = pos.coords.longitude;
+        hasPhysicalGPS = true;
+      }
+    } catch (e) {
+      console.warn('>>> [GPS] Não foi possível ler localização real via hardware para validação espacial:', e);
+      // Simulação: se não conseguir ler, distancia a coordenada em ~1.2km (0.01 graus de lat/lng) para ativar a regra de georeferenciamento
+      currentPhysicalLat = l_lat + 0.01;
+      currentPhysicalLng = l_lng + 0.01;
+      hasPhysicalGPS = true;
+    }
+
+    if (hasPhysicalGPS) {
+      try {
+        const fromPoint = turf.point([currentPhysicalLng, currentPhysicalLat]);
+        const toPoint = turf.point([Number(l_lng), Number(l_lat)]);
+        const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
+
+        if (distanceM > l_radius) {
+          if (isAdminUser) {
+            // Emite o feedback visual animado flutuante informando o bypass ativo
+            setShowAdminBypassToast(true);
+            setTimeout(() => setShowAdminBypassToast(false), 5000);
+          } else {
+            setMessage({ 
+              text: `BLOQUEADO: Sua distância física (${Math.round(distanceM)}m) excede o raio de geocerca (${l_radius}m).`, 
+              type: 'error' 
+            });
+            setSaving(false);
+            return;
+          }
+        }
+      } catch (turfErr) {
+        console.error('>>> [Spatial Error]', turfErr);
+      }
+    }
 
     const configData: UnitConfig = {
       _tenantid: user?._tenantid || user?.tenantid || 'CICOPAL',
@@ -395,12 +486,26 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     };
 
     try {
-      // O método saveUnitConfig (em supabaseService) agora está roteado para SQLite no modo INTERNO
+      // Gravação síncrona/bloqueante no SQLite local
       const ok = await saveUnitConfig(configData);
       
       if (ok === true || (typeof ok === 'string' && ok.includes('sucesso'))) {
-        setMessage({ text: 'ÂNCORA CONFIGURADA E REGISTRADA NO DISPOSITIVO!', type: 'success' });
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 3000);
+        setMessage({ text: 'COORDENADAS GRAVADAS E ANCORADAS NO DISPOSITIVO!', type: 'success' });
         
+        // PERSISTÊNCIA PREVENTIVA COMPULSÓRIA NO SESSIONSTORAGE E LOCALSTORAGE DO OPERADOR
+        sessionStorage.setItem(`unit_gps_config_${selectedUnit}`, JSON.stringify(configData));
+        sessionStorage.setItem('last_configured_gps_unit', selectedUnit);
+        sessionStorage.setItem(`gps_lat_${selectedUnit}`, String(configData.lat));
+        sessionStorage.setItem(`gps_lng_${selectedUnit}`, String(configData.lng));
+        localStorage.setItem(`kardek_gps_ancora_${selectedUnit}`, JSON.stringify(configData));
+
+        // Limpa rascunhos preventivos de geocerca salvos com sucesso
+        sessionStorage.removeItem(`kardek_temp_gps_lat_${selectedUnit}`);
+        sessionStorage.removeItem(`kardek_temp_gps_lng_${selectedUnit}`);
+        sessionStorage.removeItem(`kardek_temp_gps_radius_${selectedUnit}`);
+
         // Atualiza estado local
         setConfigs(prev => {
           const list = [...prev];
@@ -414,10 +519,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         if (typeof onUpdateConfigs === 'function') {
           onUpdateConfigs(configs);
         }
-
-        setTimeout(() => setIsSheetExpanded(false), 2000);
       } else {
-        setMessage({ text: `NAO FOI POSSÍVEL GRAVAR: ${ok}`, type: 'error' });
+        setMessage({ text: `NÃO FOI POSSÍVEL GRAVAR NO SQLITE: ${ok}`, type: 'error' });
       }
     } catch (saveErr: unknown) {
       const se = saveErr as Error;
@@ -427,15 +530,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
   };
 
-  const filteredUnits = units.filter(u => {
-    if (!u || typeof u !== 'string') return false;
-    return u.toLowerCase().includes(unitSearchTerm.toLowerCase());
-  });
-
   return (
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
-      {/* Background Map Container */}
-      <div className="absolute inset-0 z-0">
+      {/* Background Map Container (Camada Base) */}
+      <div className="absolute top-0 left-0 w-screen h-screen z-1">
         <div 
           ref={mapRef} 
           id="gbr-unit-map" 
@@ -476,286 +574,220 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         )}
       </AnimatePresence>
 
-      {/* Floating Header */}
-      <div className="absolute top-4 left-0 right-0 z-50 px-4 pointer-events-none">
-        <div className="max-w-xl mx-auto">
-          {/* Navigation & Search Row */}
-          <div className="flex items-center space-x-3 pointer-events-auto">
-            <button 
-              onClick={() => {
-                if (typeof onBack === 'function') {
-                  onBack();
-                } else {
-                  console.warn('onBack prop is not a function');
-                }
-              }}
-              className="w-12 h-12 bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center text-slate-800 shadow-xl active:scale-95 transition-all"
-            >
-              <ArrowLeft size={22} />
-            </button>
-            <form 
-              onSubmit={handleSearchLocation}
-              className="flex-1 flex items-center bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl overflow-hidden h-12"
-            >
-              <div className="pl-4 text-slate-400">
-                <Search size={18} />
+      {/* Slim Floating Header */}
+      <div className="absolute top-4 left-0 right-0 z-20 px-4 pointer-events-none">
+        <div className="max-w-xl mx-auto flex items-center justify-between bg-[#0F172A]/95 backdrop-blur-md border border-slate-800 p-3 rounded-2xl shadow-2xl pointer-events-auto">
+          {/* Botão voltar ← */}
+          <button 
+            onClick={() => {
+              if (typeof onBack === 'function') {
+                onBack();
+              } else {
+                console.warn('onBack prop is not a function');
+              }
+            }}
+            className="w-10 h-10 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+
+          {/* Centro: Texto limpo */}
+          <div className="flex-1 text-center px-4 overflow-hidden">
+            <h2 className="text-xs font-black text-white uppercase tracking-wider truncate">
+              {selectedUnit || '010101 - CICOPAL GO'}
+            </h2>
+            {/* Tag flutuante Bypass Admin */}
+            {(user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'MASTER' || user?.isAdmin || user?.is_admin) && (
+              <div className="inline-flex items-center space-x-1 mt-0.5 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-md">
+                <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[7px] font-black text-emerald-400 uppercase tracking-widest leading-none">Bypass Admin</span>
               </div>
-              <input 
-                type="text" 
-                placeholder="BUSCAR CIDADE OU ENDEREÇO..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
-                className="flex-1 px-3 bg-transparent text-[11px] font-bold uppercase tracking-tight text-slate-800 focus:outline-none placeholder:text-slate-400"
-              />
-              <button 
-                type="submit"
-                disabled={searching}
-                className="h-full px-5 bg-blue-600 text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {searching ? <Loader2 size={16} className="animate-spin" /> : 'BUSCAR'}
-              </button>
-            </form>
+            )}
+          </div>
+
+          {/* Direita: Selo discreto GBR v2.6 */}
+          <div className="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 shrink-0">
+            <span className="text-[8px] font-black uppercase tracking-widest">GBR v2.6</span>
           </div>
         </div>
       </div>
 
-      {/* Floating Action Buttons (Bottom Right) */}
-      <div className="absolute bottom-32 right-4 z-40 flex flex-col space-y-3">
-        <button 
-          onClick={() => {
-            if (typeof onNavigate === 'function') {
-              onNavigate(AppScreen.CAMPAIGN_MANAGEMENT);
-            } else {
-              console.warn('onNavigate not provided or is not a function');
-            }
-          }}
-          className="w-12 h-12 bg-amber-500 text-black rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border border-amber-400 group relative pointer-events-auto"
-          title="Gestão de Campanhas"
-        >
-          <Calendar size={20} className="shrink-0" />
-          <div className="absolute right-full mr-2 px-2 py-1 bg-black/80 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity uppercase tracking-widest">
-            Campanhas
-          </div>
-        </button>
+      {/* Elegant Address Search Bar (Ultra-Slim) */}
+      <div className="absolute top-[76px] left-0 right-0 z-20 px-4 pointer-events-none">
+        <div className="max-w-xl mx-auto pointer-events-auto">
+          <form 
+            onSubmit={handleSearchLocation}
+            className="flex items-center bg-[#0F172A]/90 backdrop-blur-md border border-slate-800 rounded-xl shadow-xl overflow-hidden h-9 px-3"
+          >
+            <Search size={14} className="text-slate-400 mr-2 shrink-0" />
+            <input 
+              type="text" 
+              placeholder="BUSCAR CIDADE OU ENDEREÇO..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+              className="flex-1 bg-transparent text-[10px] font-bold uppercase tracking-wider text-white focus:outline-none placeholder:text-slate-500 animate-none"
+            />
+            {searchQuery && (
+              <button 
+                type="button" 
+                onClick={() => setSearchQuery('')}
+                className="text-slate-400 hover:text-white text-xs px-1"
+              >
+                ✕
+              </button>
+            )}
+            <button 
+              type="submit"
+              disabled={searching}
+              className="ml-3 h-6 px-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all"
+            >
+              {searching ? <Loader2 size={10} className="animate-spin" /> : 'BUSCAR'}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Floating Action Buttons (Alinhados verticalmente, flutuando verticalmente logo acima do painel) */}
+      <div className="absolute bottom-[calc(18dvh+16px)] right-4 z-20 flex flex-col space-y-3 items-center pointer-events-none">
         <button 
           onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
-          className={`w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border ${
+          className={`w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border pointer-events-auto ${
             mapType === 'satellite' 
               ? 'bg-blue-600 text-white border-blue-400' 
-              : 'bg-white/90 backdrop-blur-md text-slate-700 border-white/20'
+              : 'bg-[#0F172A]/95 text-slate-200 border-slate-800'
           }`}
         >
-          <Layers size={20} />
+          <Layers size={18} />
         </button>
-        <button 
-          onClick={handleUseCurrentLocation}
-          disabled={locating}
-          className="w-12 h-12 bg-white/90 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl flex flex-col items-center justify-center text-blue-600 active:scale-90 transition-all disabled:opacity-50"
-        >
-          {locating ? <Loader2 size={20} className="animate-spin" /> : <Target size={20} />}
-        </button>
+
+        {/* Geofence Radius +/- controls */}
+        <div className="flex flex-col items-center bg-[#0F172A]/95 backdrop-blur-md border border-slate-800 rounded-2xl p-1.5 shadow-2xl pointer-events-auto space-y-1">
+          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest leading-none text-center block pt-0.5 px-0.5">
+            Raio
+          </span>
+          <button 
+            onClick={() => {
+              setCurrentConfig(prev => {
+                const current = prev.radius_meters || 500;
+                const next = Math.min(1000, current + 50);
+                return { ...prev, radius_meters: next };
+              });
+            }}
+            disabled={(currentConfig.radius_meters || 500) >= 1000}
+            className="w-8 h-8 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all text-xs font-black shrink-0 animate-none"
+          >
+            +
+          </button>
+          <div className="py-0.5 tracking-tighter text-center">
+            <span className="text-[9px] font-black text-blue-400 block leading-none">
+              {currentConfig.radius_meters || 500}
+            </span>
+            <span className="text-[6.5px] font-black text-slate-500 block mt-0.5">
+              m
+            </span>
+          </div>
+          <button 
+            onClick={() => {
+              setCurrentConfig(prev => {
+                const current = prev.radius_meters || 500;
+                const next = Math.max(50, current - 50);
+                return { ...prev, radius_meters: next };
+              });
+            }}
+            disabled={(currentConfig.radius_meters || 500) <= 50}
+            className="w-8 h-8 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all text-xs font-black shrink-0 animate-none"
+          >
+            -
+          </button>
+        </div>
       </div>
 
-      {/* Bottom Sheet Panel */}
-      <motion.div 
-        initial={false}
-        animate={{ height: isSheetExpanded ? 'auto' : '100px' }}
-        className="absolute bottom-0 left-0 right-0 z-50 bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.15)] border-t border-slate-100 flex flex-col overflow-hidden"
-      >
-        {/* Handle Bar */}
-        <div 
-          className="w-full py-3 flex justify-center cursor-pointer active:bg-slate-50 transition-colors"
-          onClick={() => setIsSheetExpanded(!isSheetExpanded)}
-        >
-          <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
-        </div>
-
-        <div className="px-6 pb-8">
-          {/* Collapsed View Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex-1">
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${selectedUnit ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'}`} />
-                <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest">
-                  {selectedUnit ? selectedUnit : 'SELECIONE UMA UNIDADE'}
-                </h3>
+      {/* Alert Messages Overlay floating above bottom panel */}
+      <AnimatePresence>
+        {message && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="absolute bottom-[calc(18dvh+16px)] left-4 right-20 z-20 max-w-sm pointer-events-auto"
+          >
+            <div 
+              className={`p-3 rounded-xl flex items-center space-x-3 border shadow-2xl backdrop-blur-md ${
+                message.type === 'success' 
+                  ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-400' 
+                  : 'bg-rose-950/90 border-rose-500/40 text-rose-400'
+              }`}
+            >
+              {message.type === 'success' ? <CheckCircle2 size={16} className="shrink-0" /> : <AlertCircle size={16} className="shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <p className="text-[9px] font-black uppercase tracking-wider leading-relaxed truncate">{message.text}</p>
               </div>
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight mt-1 truncate max-w-[200px]">
-                {selectedUnit ? 'ÂNCORA DE AUDITORIA CONFIGURADA' : 'AGUARDANDO SELEÇÃO NA LISTA'}
-              </p>
+              <button onClick={() => setMessage(null)} className="text-current opacity-60 hover:opacity-100 font-bold text-xs px-1 shrink-0">✕</button>
             </div>
-            <button 
-              onClick={() => setIsSheetExpanded(!isSheetExpanded)}
-              className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400"
-            >
-              {isSheetExpanded ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
-            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bottom Panel - ULTRA-SLIM & INDUSTRIAL (v2.6 Radical Re-design) */}
+      <div 
+        className="absolute bottom-0 left-0 right-0 z-10 bg-[#0F172A] border-t border-slate-800 shadow-[0_-15px_50px_rgba(0,0,0,0.4)] flex flex-col text-white h-[18dvh] min-h-[140px] p-4 pb-5 justify-between no-scrollbar rounded-t-[2rem]"
+      >
+        {/* Linha 1 (Labels menores): Latitude e Longitude atuais lidas pelo dispositivo */}
+        <div className="grid grid-cols-2 gap-3 bg-slate-950/40 border border-slate-800/60 p-2 rounded-xl">
+          <div className="flex flex-col items-center">
+            <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Latitude</span>
+            <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
+              {currentConfig.lat !== undefined ? currentConfig.lat.toFixed(6) : 'AGUARDANDO GPS'}
+            </span>
           </div>
-
-          {/* Expanded Content */}
-          <AnimatePresence>
-            {isSheetExpanded && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className="space-y-6"
-              >
-                {!selectedUnit ? (
-                  /* Unit Selection List */
-                  <div className="space-y-4">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                      <input 
-                        type="text" 
-                        placeholder="BUSCAR UNIDADE..." 
-                        value={unitSearchTerm}
-                        onChange={(e) => setUnitSearchTerm(e.target.value.toUpperCase())}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-bold uppercase focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-                    <div className="max-h-[300px] overflow-y-auto pr-1 space-y-2 no-scrollbar">
-                      {filteredUnits.map((unit) => {
-                        const isConfigured = configs.some(c => {
-                          if (!c.unit_id || !unit) return false;
-                          return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
-                        });
-                        return (
-                          <button
-                            key={unit}
-                            onClick={() => handleSelectUnit(unit)}
-                            className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-blue-50 rounded-2xl transition-all border border-transparent hover:border-blue-100 group"
-                          >
-                            <div className="flex items-center space-x-3">
-                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 shadow-sm">
-                                <MapIcon size={18} />
-                              </div>
-                              <div className="text-left">
-                                <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight">{unit}</p>
-                                <p className={`text-[8px] font-bold uppercase tracking-widest mt-0.5 ${isConfigured ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                  {isConfigured ? '✓ CONFIGURADO' : 'PENDENTE'}
-                                </p>
-                              </div>
-                            </div>
-                            <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-400" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  /* Configuration Form */
-                  <div className="space-y-6">
-                    {/* Lat/Lng Grid - Always Available Fallback */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
-                        <div className="relative">
-                          <input 
-                            type="number" 
-                            step="any"
-                            value={currentConfig.lat || ''} 
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              if (!isNaN(val)) setCurrentConfig(prev => ({ ...prev, lat: val }));
-                            }}
-                            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                            placeholder="-0.0000"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Longitude</label>
-                        <div className="relative">
-                          <input 
-                            type="number" 
-                            step="any"
-                            value={currentConfig.lng || ''} 
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              if (!isNaN(val)) setCurrentConfig(prev => ({ ...prev, lng: val }));
-                            }}
-                            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                            placeholder="-0.0000"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Radius Slider */}
-                    <div className="space-y-3 bg-slate-50 p-5 rounded-[24px] border border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Raio de Tolerância</label>
-                        <span className="text-xs font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                          {currentConfig.radius_meters}m
-                        </span>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="50" 
-                        max="2000" 
-                        step="50"
-                        value={currentConfig.radius_meters || 500}
-                        onChange={(e) => setCurrentConfig(prev => ({ ...prev, radius_meters: parseInt(e.target.value) }))}
-                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                      />
-                      <div className="flex justify-between text-[8px] font-bold text-slate-300 uppercase tracking-widest">
-                        <span>50m</span>
-                        <span>1000m</span>
-                        <span>2000m</span>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col space-y-3">
-                      <button 
-                        onClick={handleSave}
-                        disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
-                        className="w-full py-5 bg-blue-600 text-white rounded-[24px] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center space-x-3"
-                      >
-                        {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        <span>Salvar Configuração</span>
-                      </button>
-                      
-                      <button 
-                        onClick={() => setSelectedUnit(null)}
-                        className="w-full py-4 bg-white text-slate-400 rounded-[20px] font-bold uppercase text-[9px] tracking-widest border border-slate-100 active:scale-[0.98] transition-all"
-                      >
-                        Trocar Unidade
-                      </button>
-                    </div>
-
-                    {message && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className={`p-4 rounded-2xl flex items-center space-x-3 border ${
-                          message.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'
-                        }`}
-                      >
-                        {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-                        <p className="text-[10px] font-black uppercase tracking-tight">{message.text}</p>
-                      </motion.div>
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Collapsed View Footer Button (Only when collapsed and unit selected) */}
-          {!isSheetExpanded && selectedUnit && (
-            <button 
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-2"
-            >
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-              <span>Confirmar Local</span>
-            </button>
-          )}
+          <div className="flex flex-col items-center border-l border-slate-800/80">
+            <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Longitude</span>
+            <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
+              {currentConfig.lng !== undefined ? currentConfig.lng.toFixed(6) : 'AGUARDANDO GPS'}
+            </span>
+          </div>
         </div>
-      </motion.div>
+
+        {/* Linha 2 (Ação Principal): Botão central largo com alto contraste e feedback visivo síncrono */}
+        <div className="pt-1">
+          <button 
+            onClick={handleSave}
+            disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
+            className={`w-full py-3.5 text-white rounded-xl font-black uppercase text-[9px] tracking-[0.2em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center space-x-2 pointer-events-auto ${
+              justSaved 
+                ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 shadow-emerald-500/20' 
+                : 'bg-blue-600 hover:bg-blue-500 border-blue-400 shadow-blue-500/10'
+            } border`}
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            <span>{justSaved ? 'POSIÇÃO FIXADA PELO HARDWARE!' : 'FIXAR ÂNCORA DE GPS DA UNIDADE'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Toast Flutuante de Bypass Admin do Turf.js */}
+      <AnimatePresence>
+        {showAdminBypassToast && (
+          <motion.div 
+            initial={{ y: -60, opacity: 0, scale: 0.9 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -60, opacity: 0, scale: 0.9 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-[2005] w-[90%] max-w-md pointer-events-auto"
+          >
+            <div className="bg-blue-600/95 backdrop-blur-md border border-blue-400 p-4 rounded-2xl shadow-2xl flex items-center space-x-3 text-white">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <Unlock size={20} className="text-white" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] font-black uppercase tracking-wider">BYPASS DE TESTE DE MESA ATIVO</p>
+                <p className="text-[8px] font-bold text-blue-200 uppercase tracking-tight mt-0.5">
+                  Validação especial do @turf/turf liberada para perfil administrativo. Gravação efetuada com sucesso!
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

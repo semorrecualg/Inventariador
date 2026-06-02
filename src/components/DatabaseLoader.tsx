@@ -32,6 +32,7 @@ interface DatabaseLoaderProps {
   campaigns?: unknown[];
   onRestore?: (state: unknown) => void;
   onClearDatabase?: () => void;
+  isDatabaseLoaded?: boolean;
 }
 
 interface UnifiedLoaderProps {
@@ -111,7 +112,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   databaseMode,
   isSyncing = false,
   syncProgress = null,
-  onCargaInicial
+  onCargaInicial,
+  isDatabaseLoaded = false
 }) => {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PERMISSION_NEEDED' | 'ERROR' | 'IMPORTING' | 'EMPTY_STATE'>('IDLE');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -256,11 +258,16 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   useEffect(() => {
+    if (isDatabaseLoaded) {
+      addLog("BLOQUEIO IMPERATIVO: Base local SQLite de Soberania Nativa já carregada. Nenhuma carga adicional ou reinicialização é permitida.");
+      setStatus('IDLE');
+      return;
+    }
     if (!loadingAttempted.current) {
       loadingAttempted.current = true;
       loadDataFlow();
     }
-  }, []);
+  }, [isDatabaseLoaded]);
 
   const handleReconnect = async () => {
     addLog("Re-operando vínculos sob permissões nítidas...");
@@ -639,6 +646,29 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
   // Determine which screen is loaded
   const isUnifiedView = status === 'LOADING' || status === 'IMPORTING' || isSyncing;
+
+  if (isDatabaseLoaded) {
+    return (
+      <div className="fixed inset-0 bg-gray-950 flex flex-col items-center justify-center p-8 text-center z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <div className="w-16 h-16 bg-blue-500/10 flex items-center justify-center rounded-2xl text-blue-400 mb-6 border border-blue-500/20">
+          <Database size={32} />
+        </div>
+        <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4">Base Física Ativa &amp; Soberana</h3>
+        <p className="text-[10px] text-slate-400 leading-relaxed font-bold uppercase mb-8 max-w-xs">
+          A base local SQLite está carregada e ativa para operação em campo. Novas cargas do Supabase ou planilhas Excel estão bloqueadas de forma preventiva para proteger os dados.
+        </p>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white transition-all bg-gray-900 border border-gray-800 px-6 py-3 rounded-2xl cursor-pointer"
+          >
+            <ChevronLeft size={14} />
+            Voltar
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full min-h-[300px]">

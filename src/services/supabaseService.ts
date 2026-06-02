@@ -63,8 +63,207 @@ if (rawSupabaseUrl && rawSupabaseAnonKey) {
 
 // O cliente Supabase é inicializado com persistência desativada se estivermos em modo interno no momento do load
 // No entanto, as funções individuais fazem a blindagem em tempo real
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+interface InterceptResult {
+  valid: boolean;
+  reason?: string;
+  data?: any;
+}
+
+const infrastructureTables = ['tenants', 'filial', 'camposAlterados', 'inventory_config', 'unit_gps_data', 'unit_configs'];
+
+const mapColumnName = (col: string): string => {
+  const lower = col.toLowerCase().trim();
+  if (lower === '_tenantid' || lower === 'tenant_id' || lower === 'tenantid') {
+    return 'tenantId';
+  }
+  if (lower === '_unitid' || lower === 'unit_id' || lower === 'unitid') {
+    return 'filial';
+  }
+  if (lower === '_camposalterados' || lower === 'camposalterados') {
+    return 'camposAlterados';
+  }
+  return col;
+};
+
+const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptResult => {
+  if (payload === undefined || payload === null) {
+    return { valid: true, data: payload };
+  }
+
+  const isArray = Array.isArray(payload);
+  const items = isArray ? [...payload] : [payload];
+
+  for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue;
+    
+    for (const key of Object.keys(item)) {
+      const val = item[key];
+      // IF infrastructure table, ANY null or undefined is blocked
+      if (val === undefined || val === null) {
+        if (infrastructureTables.includes(tableName)) {
+          return {
+            valid: false,
+            reason: `Campo '${key}' contém valor inválido (null ou undefined) para envio à nuvem na tabela de infraestrutura '${tableName}'`
+          };
+        }
+      }
+    }
+  }
+
+  const mapped = items.map(item => {
+    if (typeof item !== 'object' || item === null) return item;
+    const copy = { ...item };
+    
+    // Map tenant keys to tenantId
+    const tenantKeys = ['_tenantid', 'tenant_id', 'tenantid'];
+    for (const k of tenantKeys) {
+      if (k in copy) {
+        if (copy.tenantId === undefined) {
+          copy.tenantId = copy[k];
+        }
+        delete copy[k];
+      }
+    }
+
+    // Map unit/filial keys to filial
+    const unitKeys = ['_unitid', 'unit_id', 'unitid'];
+    for (const k of unitKeys) {
+      if (k in copy) {
+        if (copy.filial === undefined) {
+          copy.filial = copy[k];
+        }
+        delete copy[k];
+      }
+    }
+
+    // Map camposAlterados
+    const caKeys = ['_camposAlterados', 'campos_alterados', 'camposalterados'];
+    for (const k of caKeys) {
+      if (k in copy) {
+        if (copy.camposAlterados === undefined) {
+          copy.camposAlterados = copy[k];
+        }
+        delete copy[k];
+      }
+    }
+
+    // Remove any undefined fields for any table
+    for (const key of Object.keys(copy)) {
+      if (copy[key] === undefined) {
+        delete copy[key];
+      }
+    }
+
+    return copy;
+  });
+
+  return {
+    valid: true,
+    data: isArray ? mapped : mapped[0]
+  };
+};
+
+function createSupabaseInterceptor(originalClient: any) {
+  if (!originalClient) return originalClient;
+
+  const createBuilderProxy = (builderPromise: any, tableName: string): any => {
+    return new Proxy(builderPromise, {
+      get(target, prop, receiver) {
+        const val = Reflect.get(target, prop, receiver);
+
+        if (typeof val === 'function') {
+          return function (...args: any[]) {
+            // 1. Intercept Mutation Methods
+            if (prop === 'insert' || prop === 'update' || prop === 'upsert') {
+              const payload = args[0];
+              const check = mapPayloadKeysAndValidate(payload, tableName);
+              
+              if (!check.valid) {
+                console.error(`>>> [Supabase Interceptor] Bloqueado preventivamente na tabela '${tableName}':`, check.reason);
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    message: `Requisição abortada preventivamente: ${check.reason}`,
+                    code: 'PREVENTED_ABORT_400',
+                    details: 'Blindagem do v2.6 impediu o envio de campos nulos ou indefinidos de infraestrutura.'
+                  }
+                });
+              }
+              // Replace payload with sanitized/mapped payload
+              args[0] = check.data;
+            }
+
+            // 2. Intercept Filter Methods
+            if (prop === 'eq' || prop === 'neq' || prop === 'like' || prop === 'ilike' || prop === 'gt' || prop === 'lt' || prop === 'gte' || prop === 'lte') {
+              if (args[0] && typeof args[0] === 'string') {
+                args[0] = mapColumnName(args[0]);
+              }
+              if (args[1] === undefined || args[1] === null) {
+                console.error(`>>> [Supabase Interceptor] Bloqueado filtro eq/in com nulo para a coluna '${args[0]}' na tabela '${tableName}'.`);
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    message: `Filtro inválido para coluna '${args[0]}': valor é nulo ou indefinido`,
+                    code: 'INVALID_FILTER_400',
+                    details: 'O filtro de busca não pode conter valores nulos ou indefinidos.'
+                  }
+                });
+              }
+            }
+
+            if (prop === 'in' || prop === 'containedBy') {
+              if (args[0] && typeof args[0] === 'string') {
+                args[0] = mapColumnName(args[0]);
+              }
+              if (!args[1] || !Array.isArray(args[1]) || args[1].some(v => v === undefined || v === null)) {
+                console.error(`>>> [Supabase Interceptor] Bloqueado filtro 'in' inválido para a coluna '${args[0]}' na tabela '${tableName}'.`);
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    message: `Filtro IN inválido para coluna '${args[0]}'`,
+                    code: 'INVALID_FILTER_400',
+                    details: 'O array de filtro de busca está vazio ou contém valores nulos/indefinidos.'
+                  }
+                });
+              }
+            }
+
+            const result = val.apply(target, args);
+            if (result && typeof result === 'object' && (typeof result.then === 'function' || result.from)) {
+              return createBuilderProxy(result, tableName);
+            }
+            return result;
+          };
+        }
+        return val;
+      }
+    });
+  };
+
+  const interceptor = new Proxy(originalClient, {
+    get(target, prop, receiver) {
+      if (prop === 'from') {
+        return function (tableName: string) {
+          let targetTable = tableName;
+          if (tableName === 'unit_gps_data') {
+            targetTable = 'inventory_config';
+          }
+          const originalBuilder = originalClient.from(targetTable);
+          return createBuilderProxy(originalBuilder, targetTable);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+
+  return interceptor;
+}
+
 // Blindagem de Instância (Failsafe Guard): Nunca exportamos nulo para evitar Cannot read properties of null (reading 'auth')
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+const rawSupabase = createClient(supabaseUrl, supabaseAnonKey, {
   db: {
     schema: supabaseSchema
   },
@@ -74,6 +273,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: getDatabaseMode() !== 'INTERNAL'
   }
 });
+
+export const supabase = createSupabaseInterceptor(rawSupabase);
+
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Realiza o logout completo do sistema, limpando sessões locais e da nuvem

@@ -4,7 +4,6 @@ import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
-import { APP_LOGO } from '../constants';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
@@ -683,25 +682,28 @@ const Login: React.FC<LoginProps> = ({
             onMouseDown={startPressLogo}
             onMouseUp={endPressLogo}
             onMouseLeave={endPressLogo}
-            className={`w-24 h-24 bg-white border rounded-full flex items-center justify-center mb-3 shadow-xl overflow-hidden p-0.5 ring-4 ring-bg-main cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
+            className={`w-20 h-20 bg-white border border-slate-100 rounded-full flex items-center justify-center mb-2.5 shadow-md ring-4 ring-bg-main cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
             title="Mantenha pressionado por 3 segundos para contra-medida Carga Expert"
           >
-            <img 
-              src={APP_LOGO} 
-              alt="GBR Auditoria Logo" 
-              className="w-full h-full object-cover rounded-full pointer-events-none"
-              referrerPolicy="no-referrer"
-            />
+            <div className="flex flex-col items-center justify-center">
+              <ShieldCheck size={28} className="text-accent animate-pulse-slow" />
+              <span className="text-[11px] font-black tracking-wider text-ink -mt-0.5">GBR</span>
+            </div>
           </div>
           
-          <h1 
+          <div 
             id="login-title"
             onClick={handleTitleClick}
-            className="text-lg font-black text-ink tracking-tighter uppercase italic leading-none active:scale-95 transition-all cursor-pointer select-none"
+            className="flex flex-col items-center select-none cursor-pointer active:scale-95 transition-all"
           >
-            SISTEMA <span className="text-accent">AUDITORIA</span>
-          </h1>
-          <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-1 opacity-70">
+            <h1 className="text-lg font-black text-ink tracking-[0.2em] uppercase leading-none ml-[0.2em]">
+              GBR
+            </h1>
+            <p className="text-[9px] font-light text-ink-muted uppercase tracking-[0.3em] mt-1 leading-none ml-[0.3em]">
+              AUDITORIA
+            </p>
+          </div>
+          <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-2.5 opacity-70">
             INVENTÁRIO DE ATIVO IMOBILIZADO
           </p>
         </div>
@@ -709,9 +711,9 @@ const Login: React.FC<LoginProps> = ({
 
       {/* Se o teclado estiver visível, mostramos uma versão compacta do título */}
       {isKeyboardVisible && (
-        <div className="mb-4 text-center animate-slideUp">
-           <h1 className="text-sm font-black text-ink tracking-tighter uppercase italic">
-            SISTEMA <span className="text-accent text-xs">AUDITORIA</span>
+        <div className="mb-3 text-center animate-slideUp">
+           <h1 className="text-sm font-black text-ink tracking-[0.15em] uppercase">
+            GBR <span className="text-accent font-extrabold text-xs">AUDITORIA</span>
           </h1>
         </div>
       )}
@@ -787,7 +789,7 @@ const Login: React.FC<LoginProps> = ({
         <button 
           type="submit"
           disabled={isLoading}
-          className="w-full bg-accent text-white font-black py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-[0.98] hover:bg-accent-dark transition-all mt-6 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
+          className="w-full bg-accent text-white font-extrabold py-4 rounded-2xl shadow-md hover:shadow-lg hover:brightness-105 active:scale-[0.98] transition-all mt-6 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70 cursor-pointer"
         >
           {isLoading ? (
             <>
@@ -803,7 +805,7 @@ const Login: React.FC<LoginProps> = ({
           <button 
             type="button"
             onClick={handleBiometricLogin}
-            className="w-full bg-white border-2 border-accent text-accent font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2"
+            className="w-full bg-white border-2 border-accent text-accent font-bold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] transition-all mt-2.5 uppercase tracking-[0.1em] text-xs flex items-center justify-center space-x-2 cursor-pointer"
           >
             <Fingerprint size={18} />
             <span>Entrar com Biometria</span>
@@ -814,9 +816,9 @@ const Login: React.FC<LoginProps> = ({
           <button 
             type="button"
             onClick={handleDemoLogin}
-            className="w-full bg-slate-900 hover:bg-slate-850 text-emerald-400 font-extrabold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] border border-emerald-500/20 transition-all mt-2 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2"
+            className="w-full bg-transparent border border-slate-300 hover:border-accent hover:bg-slate-50 text-slate-700 hover:text-accent font-bold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] transition-all mt-2.5 uppercase tracking-[0.12em] text-[11px] flex items-center justify-center space-x-2 group cursor-pointer"
           >
-            <Sparkles size={16} className="text-emerald-400 animate-pulse" />
+            <Sparkles size={14} className="text-slate-400 group-hover:text-accent transition-colors animate-pulse" />
             <span>Experimentar Grátis (Modo Demo)</span>
           </button>
         )}
@@ -825,58 +827,53 @@ const Login: React.FC<LoginProps> = ({
           <button 
             type="button"
             onClick={handleCargaExpertInstantBypass}
-            className="w-full bg-amber-950/20 hover:bg-amber-900/30 text-amber-500 font-black py-4 rounded-2xl border border-amber-500/30 active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/5 hover:border-amber-400"
+            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-all mt-2 px-4 uppercase tracking-[0.12em] text-[11px] flex items-center justify-center space-x-2 shadow-sm border border-slate-200/50 cursor-pointer"
           >
-            <Database size={16} className="text-amber-500 animate-pulse" />
+            <Database size={14} className="text-slate-500 animate-pulse" />
             <span>⚡ CARGA EXPERT (FORÇAR CONTINGÊNCIA)</span>
           </button>
         )}
       </form>
 
-      <div className="mt-6 text-center space-y-3">
-        <div>
-          {databaseMode === DatabaseMode.INTERNAL ? (
-            <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
-              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
-                <span className="text-accent">Auditores:</span> Solicitem suas credenciais ao Administrador.
-              </p>
-            </div>
-          ) : (
-            <div className="bg-accent-soft p-2.5 rounded-xl border border-accent/10">
-              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
-                Acesso restrito a auditores autorizados. <br/>
-                <span className="text-accent">Consulte seu Administrador.</span>
-              </p>
-            </div>
-          )}
+      <div className="mt-8 text-center space-y-4 max-w-sm mx-auto w-full border-t border-slate-100 pt-5">
+        {databaseMode === DatabaseMode.INTERNAL ? (
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+            <span className="text-accent font-extrabold">Auditores:</span> Solicitem suas credenciais ao Administrador.
+          </p>
+        ) : (
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+            Acesso restrito. <span className="text-accent font-extrabold">Consulte seu Administrador.</span>
+          </p>
+        )}
 
-          {/* Botão de Emergência - Movido para local discreto e com lógica seletiva */}
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          <button 
+            onClick={onOpenPrivacyCenter}
+            className="hover:text-accent transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            <ShieldCheck size={13} />
+            <span>Privacidade & Segurança</span>
+          </button>
+          
+          <span className="text-slate-300">•</span>
+
           <button
             type="button"
             onClick={handleClearSession}
-            className="text-[8px] font-black text-red-500 hover:text-red-700 uppercase tracking-widest flex items-center justify-center gap-2 transition-colors opacity-80 hover:opacity-100 mt-4 mx-auto"
+            className="text-red-500 hover:text-red-600 transition-colors flex items-center gap-1 cursor-pointer"
             title="Use se o login estiver travado ou se mudou de projeto"
           >
-            <ShieldAlert className="w-3 h-3" />
-            Redefinir Acesso Local
+            <ShieldAlert size={13} />
+            <span>Redefinir Acesso</span>
           </button>
         </div>
-        
-        <div className="pt-4 border-t border-accent/10">
-          <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.4em]">
+
+        <div className="pt-2">
+          <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.3em]">
             AUDITORIA INTELIGENTE
           </p>
-          <div className="flex flex-col items-center space-y-3 mt-4">
-            <button 
-              onClick={onOpenPrivacyCenter}
-              className="text-[9px] font-black text-slate-500 uppercase tracking-widest hover:text-accent transition-colors flex items-center justify-center space-x-1.5"
-            >
-              <ShieldCheck size={12} />
-              <span>Privacidade e Segurança</span>
-            </button>
-          </div>
-          <p className="text-[7px] font-black text-slate-400 mt-4 uppercase tracking-[0.2em]">
-            Versão 2.6 - GBR Native Ready
+          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-semibold">
+            VERSÃO 2.6 - GBR NATIVE READY
           </p>
         </div>
       </div>

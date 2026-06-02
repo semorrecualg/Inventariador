@@ -99,8 +99,195 @@ export function getAssetValueByPriority(asset: Asset | Record<string, unknown>, 
  * Helper para extrair a unidade operacional de um ativo de forma soberana
  */
 export function getAssetUnit(asset: Asset | Record<string, unknown>): string {
+  if (asset && (asset as Record<string, unknown>).filial) {
+    return String((asset as Record<string, unknown>).filial).trim().toUpperCase();
+  }
   const val = getAssetValueByPriority(asset, SCHEMA_PRIORITY.UNIT);
   return (val || '').toString().trim().toUpperCase() || 'UNIT_UNDEFINED';
+}
+
+/**
+ * Normaliza um objeto ativo para o contrato unificado de campos GBR v2.6.
+ * Mapeamentos prioritários:
+ * - GRUPO_EMPRESARIAL, tenant_id, group_id -> tenantId
+ * - UNIDADE_OPERACIONAL, _unitid, unit_id, filial_id -> filial
+ */
+export function normalizeAssetContract(asset: Asset | Record<string, unknown> | null | undefined): Asset {
+  if (!asset) return asset as unknown as Asset;
+  
+  const originalAsset = asset as Record<string, unknown>;
+  
+  // UNIFIED SIGNATURE ASSIGNMENTS:
+  const tenantId = (
+    originalAsset.tenantId ||
+    originalAsset._tenantid ||
+    originalAsset.GRUPO_EMPRESARIAL ||
+    originalAsset.tenant_id ||
+    originalAsset.group_id ||
+    'CICOPAL'
+  ).toString().trim();
+  
+  const filial = (
+    originalAsset.filial ||
+    originalAsset.UNIDADE_OPERACIONAL ||
+    originalAsset._unitid ||
+    originalAsset.unit_id ||
+    originalAsset.filial_id ||
+    'MATRIZ'
+  ).toString().trim();
+
+  const status = (
+    originalAsset.status ||
+    originalAsset.STATUS ||
+    originalAsset.TAG_INVENTARIO ||
+    'PENDENTE'
+  ).toString().trim();
+
+  const etiqueta = (
+    asset.etiqueta ||
+    asset.ETIQUETA ||
+    ''
+  ).toString().trim();
+
+  const qt = asset.qt !== undefined ? asset.qt : (asset.QT !== undefined ? asset.QT : 1);
+
+  const descricaodoativo = (
+    asset.descricaodoativo ||
+    asset.DESCRICAODOATIVO ||
+    asset.descricao ||
+    asset.DESCRICAODOBEM ||
+    ''
+  ).toString().trim();
+
+  const serial = (
+    asset.serial ||
+    asset.SERIAL ||
+    ''
+  ).toString().trim();
+
+  const dataaqusic = (
+    asset.dataaqusic ||
+    asset.DATAAQUISIC ||
+    asset.DATAAQUSIC ||
+    ''
+  ).toString().trim();
+
+  const cnpj = (
+    asset.cnpj ||
+    asset.CNPJ ||
+    ''
+  ).toString().trim();
+
+  const nomefornecedor = (
+    asset.nomefornecedor ||
+    asset.NOMEFORNECEDOR ||
+    ''
+  ).toString().trim();
+
+  const notafiscal = (
+    asset.notafiscal ||
+    asset.NOTAFISCAL ||
+    ''
+  ).toString().trim();
+
+  const endereco = (
+    asset.endereco ||
+    asset.ENDERECO ||
+    ''
+  ).toString().trim();
+
+  const registro = (
+    asset.registro ||
+    asset.REGISTRO ||
+    ''
+  ).toString().trim();
+
+  const subreg = (
+    asset.subreg ||
+    asset.SUBREG ||
+    ''
+  ).toString().trim();
+
+  const databaixa = (
+    asset.databaixa ||
+    asset.DATABAIXA ||
+    ''
+  ).toString().trim();
+
+  const contacontabil = (
+    asset.contacontabil ||
+    asset.conta_contabil ||
+    asset.CONTACONTABIL ||
+    asset.CONTA_CONTABIL ||
+    ''
+  ).toString().trim();
+
+  const primarykey = (
+    asset.primarykey ||
+    asset.PRIMARYKEY ||
+    ''
+  ).toString().trim();
+
+  const centrodecusto = (
+    asset.centrodecusto ||
+    asset.CENTRODECUSTO ||
+    ''
+  ).toString().trim();
+
+  const vlraquisic = asset.vlraquisic !== undefined ? asset.vlraquisic : (asset.VLRAQUISIC !== undefined ? asset.VLRAQUISIC : 0);
+
+  const sn1_recno = asset.sn1_recno !== undefined ? Number(asset.sn1_recno) : (asset.Sn1_recno !== undefined ? Number(asset.Sn1_recno) : null);
+  const sn3_recno = asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null);
+
+  // Extend asset object with target property mappings (mutates)
+  asset.tenantId = tenantId;
+  asset.filial = filial;
+  asset.status = status;
+  asset.etiqueta = etiqueta;
+  asset.qt = qt;
+  asset.descricaodoativo = descricaodoativo;
+  asset.serial = serial;
+  asset.dataaqusic = dataaqusic;
+  asset.cnpj = cnpj;
+  asset.nomefornecedor = nomefornecedor;
+  asset.notafiscal = notafiscal;
+  asset.endereco = endereco;
+  asset.registro = registro;
+  asset.subreg = subreg;
+  asset.databaixa = databaixa;
+  asset.contacontabil = contacontabil;
+  asset.primarykey = primarykey;
+  asset.centrodecusto = centrodecusto;
+  asset.vlraquisic = vlraquisic;
+  asset.sn1_recno = sn1_recno;
+  asset.sn3_recno = sn3_recno;
+
+  // Sync fallbacks for existing code
+  asset._tenantid = tenantId;
+  asset._unitid = filial;
+  asset.GRUPO_EMPRESARIAL = tenantId;
+  asset.UNIDADE_OPERACIONAL = filial;
+  asset.STATUS = status;
+  asset.ETIQUETA = etiqueta;
+  asset.QT = qt;
+  asset.DESCRICAODOATIVO = descricaodoativo;
+  asset.SERIAL = serial;
+  asset.DATAAQUISIC = dataaqusic;
+  asset.CNPJ = cnpj;
+  asset.NOMEFORNECEDOR = nomefornecedor;
+  asset.NOTAFISCAL = notafiscal;
+  asset.ENDERECO = endereco;
+  asset.REGISTRO = registro;
+  asset.SUBREG = subreg;
+  asset.DATABAIXA = databaixa;
+  asset.conta_contabil = contacontabil;
+  asset.PRIMARYKEY = primarykey;
+  asset.CENTRODECUSTO = centrodecusto;
+  asset.VLRAQUISIC = vlraquisic;
+  asset.Sn1_recno = sn1_recno;
+  asset.Sn3_recno = sn3_recno;
+
+  return asset as Asset;
 }
 
 /**

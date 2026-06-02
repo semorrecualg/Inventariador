@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { Asset, TagInventario, AuditLogEntry, AppScreen } from '../types';
 import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';

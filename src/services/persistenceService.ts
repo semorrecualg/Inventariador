@@ -5,6 +5,7 @@ import { encryption } from './securityService';
 import { localDb } from './localDbService';
 import { sqliteService } from './sqliteService';
 import { generateChecksum } from './utils';
+import { normalizeAssetContract } from '../utils/schema';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -313,6 +314,18 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         console.log('>>> [Persistence] Configuração carregada do cache IndexedDB.');
       } catch (err) {
         console.warn('>>> [Persistence] Falha ao decriptografar config do cache:', err);
+        console.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de config. Limpando cache e forçando re-sync...');
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+          await localforage.clear();
+        } catch (clearErr) {
+          console.error('Erro ao limpar localforage/storages:', clearErr);
+        }
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+        return null;
       }
     }
 
@@ -326,35 +339,47 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
       } catch (err) {
         console.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
+        console.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de ativos. Limpando cache e forçando re-sync...');
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+          await localforage.clear();
+        } catch (clearErr) {
+          console.error('Erro ao limpar localforage/storages:', clearErr);
+        }
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+        return null;
       }
     }
 
+    // Normaliza os ativos de acordo com o contrato global unificado v2.6 (tenantId e filial)
+    const normalizedAssets = finalAssets.map(a => normalizeAssetContract(a));
+
     // 1.2 Validação de Integridade (Checksum) - Apenas para base carregada do cache
-    if (finalAssets.length > 0 && (config as Record<string, unknown>)._integrity_hash) {
+    if (normalizedAssets.length > 0 && (config as Record<string, unknown>)._integrity_hash) {
       const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
-      const currentHash = await generateChecksum(finalAssets);
+      const currentHash = await generateChecksum(normalizedAssets);
       if (storedHash !== currentHash) {
         console.warn('>>> [Integrity] Checksum divergente (Normal se houve alterações incrementais fora do saveFull).');
       }
     }
 
     // SEGURANÇA: Garante que a lista de empresas está populada se houver ativos mas a lista no cache estiver vazia
-    if (finalAssets.length > 0) {
+    if (normalizedAssets.length > 0) {
       const currentConfig = config as Record<string, unknown>;
       const currentCompanies = currentConfig.companies as string[] || [];
       if (currentCompanies.length === 0) {
-        console.log('>>> [Persistence] Auto-populando lista de empresas a partir dos ativos SQL...');
-        const extracted = [...new Set(finalAssets.map(a => {
-          const val = (a.UNIDADE_OPERACIONAL || a.UNIDADE || '').toString().trim().toUpperCase();
-          return val;
-        }))].filter(Boolean);
+        console.log('>>> [Persistence] Auto-populando lista de empresas a partir dos ativos normalizados...');
+        const extracted = [...new Set(normalizedAssets.map(a => a.filial))].filter(Boolean);
         currentConfig.companies = extracted;
       }
     }
 
     return {
       ...(config as Record<string, unknown> || {}),
-      assets: finalAssets,
+      assets: normalizedAssets,
       databaseMode: mode
     } as InventoryState;
   } catch (error) {

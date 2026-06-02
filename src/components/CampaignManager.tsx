@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -15,10 +14,13 @@ import {
   X,
   ArrowLeft,
   Trash2,
-  ShieldCheck
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
+import { sqliteService } from '../services/sqliteService';
+import { Device } from '@capacitor/device';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -43,9 +45,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   campaigns = [],
   onRefresh,
   initialUnit,
-  tenantId: propsTenantId,
-  unitId: propsUnitId,
-  databaseMode
+  tenantId: propsTenantId
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -60,16 +60,78 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setNewCampaignUnit(initialUnit);
     }
   }, [initialUnit]);
+
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
-  const [isDebugExpanded, setIsDebugExpanded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [isBatteryAlertOpen, setIsBatteryAlertOpen] = useState(false);
+
+  const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
 
   // Sincronização Local para Resposta Instantânea v25.50
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
+
+  // CORREÇÃO DA LEITURA LOCAL E RENDERIZAÇÃO CENTRAL:
+  // Carrega as campanhas ativas diretamente da tabela local via SQLite nativo
+  // com a tranca de isolamento multidomínio (tenant_id / unit_id)
+  const fetchLocalCampaignsOnScreen = async () => {
+    setIsRefreshing(true);
+    try {
+      const currentTenant = (propsTenantId || user?._tenantid || user?.tenantid || 'CICOPAL').trim();
+      const currentFilial = (initialUnit || '').trim();
+      
+      console.log(`>>> [SQLite Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
+      
+      let queryStr = `SELECT * FROM campaigns WHERE 1=1`;
+      const queryParams: (string | number | boolean | null)[] = [];
+      
+      if (currentTenant) {
+        queryStr += ` AND (tenant_id = ? OR _tenantid = ?)`;
+        queryParams.push(currentTenant, currentTenant);
+      }
+      if (currentFilial) {
+        queryStr += ` AND (unit_id = ? OR _unitid = ? OR unit_id = '' OR _unitid = '' OR unit_id IS NULL)`;
+        queryParams.push(currentFilial, currentFilial);
+      }
+      
+      const rows = await sqliteService.query(queryStr, queryParams);
+      console.log(`>>> [SQLite Native] Campanhas lidas do banco local:`, rows);
+      
+      const parsedCampaigns: InventoryCampaign[] = (rows || []).map(row => {
+        return {
+          id: String(row.id),
+          name: String(row.name || ''),
+          description: String(row.description || ''),
+          status: (row.status || 'CREATED') as CampaignStatus,
+          start_date: String(row.start_date || new Date().toISOString()),
+          end_date: row.end_date ? String(row.end_date) : null,
+          _tenantid: String(row._tenantid || row.tenant_id || currentTenant),
+          _unitid: String(row._unitid || row.unit_id || currentFilial),
+          tenant_id: String(row.tenant_id || row._tenantid || currentTenant),
+          unit_id: String(row.unit_id || row._unitid || currentFilial)
+        } as InventoryCampaign;
+      });
+      
+      setLocalCampaigns(parsedCampaigns);
+      return parsedCampaigns;
+    } catch (err) {
+      console.error(`>>> [SQLite Native] Erro na leitura automática:`, err);
+      if (campaigns && campaigns.length > 0) {
+        setLocalCampaigns(campaigns);
+      }
+      return campaigns;
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchLocalCampaignsOnScreen();
+  }, [initialUnit, propsTenantId]);
 
   React.useEffect(() => {
     if (campaigns && !isRefreshing && !isSaving) {
@@ -77,13 +139,17 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
   }, [campaigns, isRefreshing, isSaving]);
 
-  // Use props if provided, otherwise fallback to user info
+  // OPERACIONALIZAÇÃO DO BOTÃO REFRESH:
+  // Dispara nova consulta direta ao SQLite local, atualiza o estado e força a renderização
   const handleRefresh = async () => {
-
-    if (!onRefresh) return;
     setIsRefreshing(true);
     try {
-      await onRefresh();
+      if (onRefresh) {
+        await onRefresh();
+      }
+      await fetchLocalCampaignsOnScreen();
+    } catch (err) {
+      console.error(">>> [Refresh] Erro ao atualizar dados:", err);
     } finally {
       setIsRefreshing(false);
     }
@@ -91,6 +157,33 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName) return;
+    
+    // SISTEMA DE PREVENÇÃO DE CORRUPÇÃO (v2.6 Core): Validação de Bateria do Ecossistema
+    interface BatteryManager {
+      level: number;
+      charging: boolean;
+    }
+    interface NavigatorWithBattery {
+      getBattery?: () => Promise<BatteryManager>;
+    }
+
+    let batteryLevel = 1.0;
+    let isCharging = true;
+    try {
+      const nav = typeof navigator !== 'undefined' ? (navigator as NavigatorWithBattery) : null;
+      if (nav && typeof nav.getBattery === 'function') {
+        const battery = await nav.getBattery();
+        batteryLevel = battery.level ?? 1.0;
+        isCharging = battery.charging ?? true;
+      }
+    } catch (err) {
+      console.warn('>>> [Battery Safety] Erro na leitura de bateria:', err);
+    }
+
+    if (batteryLevel < 0.05 && !isCharging) {
+      setIsBatteryAlertOpen(true);
+      return;
+    }
     
     const isAdmin = !!(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
     let tenantId = (propsTenantId || user?._tenantid || user?.tenantid || '').trim();
@@ -121,7 +214,6 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       const result = await createCampaign(newCampaign);
       if (result) {
-        // Atualização Otimista: garante que a UI reflita a criação ANTES do refresh terminar
         setLocalCampaigns(prev => [result, ...prev]);
         
         if (onRefresh) await onRefresh();
@@ -131,6 +223,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setNewCampaignUnit(''); 
         setSuccessMessage('Campanha criada com sucesso');
         setTimeout(() => setSuccessMessage(null), 3000);
+        await fetchLocalCampaignsOnScreen();
       } else {
         setErrorMessage('Erro ao criar campanha');
         setTimeout(() => setErrorMessage(null), 3000);
@@ -144,24 +237,82 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
   };
 
-  const handleDeleteCampaign = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta campanha? Esta ação não pode ser desfeita.')) return;
-    
-    setIsSaving(true);
+  // ATIVAÇÃO OPERACIONAL E SEGURA DO BOTÃO "EXCLUIR CAMPANHA" (Hardware check e SQL)
+  const executeDeleteCampaign = async (campaignId: string) => {
+    // 4. RESTRANCA DE HARDWARE DE DISCO (Core v2.6):
+    let isLowBattery = false;
     try {
-      const success = await deleteCampaign(id);
-      if (success) {
-        setSuccessMessage('Campanha excluída');
-        setTimeout(() => setSuccessMessage(null), 3000);
-        setSelectedCampaign(null);
-        if (onRefresh) await onRefresh();
-      } else {
-        setErrorMessage('Erro ao excluir campanha');
-        setTimeout(() => setErrorMessage(null), 3000);
+      const batteryInfo = await Device.getBatteryInfo();
+      const level = batteryInfo.batteryLevel ?? (batteryInfo as { batteryLevel?: number; level?: number }).level ?? 1.0;
+      const isPlugged = batteryInfo.isCharging ?? (batteryInfo as { isCharging?: boolean; isPlugged?: boolean }).isPlugged ?? true;
+      if (level < 0.05 && !isPlugged) {
+        isLowBattery = true;
       }
     } catch (err) {
-      console.error('Erro ao excluir:', err);
-      setErrorMessage('Erro técnico ao excluir');
+      console.warn(">>> [Hardware Check] Erro na requisição Device.getBatteryInfo():", err);
+      try {
+        const nav = typeof navigator !== 'undefined' ? (navigator as unknown as { getBattery?: () => Promise<{ level?: number; charging?: boolean }> }) : null;
+        if (nav && typeof nav.getBattery === 'function') {
+          const battery = await nav.getBattery();
+          const level = battery.level ?? 1.0;
+          const isPlugged = battery.charging ?? true;
+          if (level < 0.05 && !isPlugged) {
+            isLowBattery = true;
+          }
+        }
+      } catch (e2) {
+        console.warn(">>> [Hardware Check] Erro de fallback navigator:", e2);
+      }
+    }
+
+    if (isLowBattery) {
+      setIsConfirmDeleteOpen(false);
+      setDeletingCampaignId(null);
+      setIsBatteryAlertOpen(true);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const tenantId = (propsTenantId || user?._tenantid || user?.tenantid || 'CICOPAL').trim();
+      const filial = (initialUnit || '').trim();
+
+      console.log(`>>> [SQLite] Executando comando SQL DELETE estrito para ID=${campaignId}, Tenant=${tenantId}, Filial=${filial}`);
+      
+      const sqlDelete = `DELETE FROM campaigns WHERE id = ? AND (tenant_id = ? OR _tenantid = ?) AND (unit_id = ? OR _unitid = ? OR unit_id = '' OR _unitid = '' OR unit_id IS NULL)`;
+      await sqliteService.execute(sqlDelete, [campaignId, tenantId, tenantId, filial, filial]);
+      
+      // Limpeza de ativos relacionados vinculados a essa campanha
+      await sqliteService.execute(`UPDATE ativos SET currentCampaignId = NULL WHERE currentCampaignId = ?`, [campaignId]);
+      
+      // Invoque a função de sincronismo em disco físico (saveDatabase()) para consolidar o dump
+      await sqliteService.saveDatabase();
+      
+      // Também deleta no Supabase em background/clor para continuar funcionando sincronizado se online
+      try {
+        await deleteCampaign(campaignId);
+      } catch (sbErr) {
+        console.warn(">>> [Supabase Sync] Deletar campanha remoto indisponível:", sbErr);
+      }
+
+      setSuccessMessage('Campanha excluída com sucesso');
+      setTimeout(() => setSuccessMessage(null), 3000);
+
+      // Pós-deleção, limpa states e fecha modais/fichas
+      setIsConfirmDeleteOpen(false);
+      setDeletingCampaignId(null);
+      setSelectedCampaign(null);
+
+      // Re-fetch automático para limpar a tela ou usar navegação se zerar
+      const remaining = await fetchLocalCampaignsOnScreen();
+      if (remaining.length === 0) {
+        console.log(">>> [Governance] Lista de campanhas zerou. Voltando.");
+        onBack();
+      }
+      
+    } catch (err) {
+      console.error('>>> [SQLite] Erro ao excluir campanha:', err);
+      setErrorMessage('Erro técnico ao persistir exclusão no SQLite');
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {
       setIsSaving(false);
@@ -173,7 +324,6 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     setUpdatingStatusId(id);
     
     try {
-      // Regra: Se estiver fechando, cria o SNAPSHOT antes de mudar o status (Governança GBR)
       if (status === CampaignStatus.CLOSED) {
         const snapSuccess = await createCampaignSnapshot(id, user?.email || 'admin');
         if (!snapSuccess) {
@@ -183,14 +333,13 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       const success = await updateCampaignStatus(id, status, user?.email || 'admin');
       if (success) {
-        // REFRESH OBRIGATÓRIO: Buscamos a verdade do banco antes de qualquer mudança visual
         if (onRefresh) await onRefresh();
+        await fetchLocalCampaignsOnScreen();
         
         console.log('>>> [Database] Operação confirmada. Atualizando interface...');
         setSuccessMessage('Operação confirmada no banco');
         setTimeout(() => setSuccessMessage(null), 3000);
         
-        // Atualizamos o selecionado apenas após o refresh para garantir consistência
         if (selectedCampaign?.id === id) {
           setSelectedCampaign({ ...selectedCampaign, status });
         }
@@ -235,68 +384,43 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0F172A] text-slate-200 font-sans overflow-hidden safe-area-p">
-      {/* Header Compacto */}
-      <header className="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-[#0F172A]/80 backdrop-blur-md sticky top-0 z-20">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={selectedCampaign ? () => setSelectedCampaign(null) : onBack}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-slate-400"
-          >
-            <ArrowLeft size={18} strokeWidth={1.5} />
-          </button>
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">
-              {selectedCampaign ? 'Detalhes' : 'Eventos de Inventário v2.5'}
-            </h1>
-            {!selectedCampaign && (
-              <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">Gestão de Campanhas (Soberania de Dados Móvel)</p>
-            )}
-          </div>
+    <div className="flex flex-col h-full bg-[#0F172A] text-slate-200 font-sans overflow-hidden safe-area-p relative">
+      {/* Slim Header GBR v2.6 */}
+      <header className="px-4 py-3 flex items-center justify-between border-b border-slate-800/60 bg-[#0F172A]/90 backdrop-blur-md sticky top-0 z-20">
+        <button 
+          onClick={selectedCampaign ? () => setSelectedCampaign(null) : onBack}
+          className="w-10 h-10 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-800 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all"
+        >
+          <ArrowLeft size={18} />
+        </button>
+        
+        <div className="flex-1 text-center px-4 overflow-hidden">
+          <h2 className="text-xs font-black text-white uppercase tracking-wider truncate">
+            {initialUnit || '010101 - CICOPAL GO'}
+          </h2>
+          {(user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'MASTER' || user?.isAdmin) && (
+            <div className="inline-flex items-center space-x-1 mt-0.5 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded-md">
+              <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[7px] font-black text-emerald-400 uppercase tracking-widest leading-none">Bypass Admin</span>
+            </div>
+          )}
         </div>
+
         <button 
           onClick={handleRefresh}
-          className={`p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 transition-all text-emerald-400`}
+          title="Atualizar"
+          className="mr-2 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-800"
         >
-          <RefreshCw className={isRefreshing ? 'animate-spin' : ''} size={18} strokeWidth={1.5} />
+          <RefreshCw className={isRefreshing ? 'animate-spin' : ''} size={14} />
         </button>
+
+        <div className="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 shrink-0">
+          <span className="text-[8px] font-black uppercase tracking-widest">GBR v2.6</span>
+        </div>
       </header>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-        {/* Debug Minimalista */}
-        {(user?.isAdmin || user?.role === 'ADMIN') && (
-          <div className="rounded-2xl border border-white/5 bg-white/5 overflow-hidden">
-            <button 
-              onClick={() => setIsDebugExpanded(!isDebugExpanded)}
-              className="w-full px-4 py-3 flex items-center justify-between text-slate-500 hover:text-slate-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Activity size={14} strokeWidth={1.5} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Debug</span>
-              </div>
-              <ChevronDown size={14} className={`transition-transform ${isDebugExpanded ? 'rotate-180' : ''}`} />
-            </button>
-            <AnimatePresence>
-              {isDebugExpanded && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="px-4 pb-4 font-mono text-[9px] text-emerald-500/80 space-y-1"
-                >
-                  <p>MODE: {databaseMode || 'INTERNAL'}</p>
-                  <p>TENANT: {propsTenantId || user?._tenantid || user?.tenantid || 'N/A'}</p>
-                  <p>COUNT: {localCampaigns.length}</p>
-                  <p>UNIT: {propsUnitId || user?._unitid || user?.unitid || 'N/A'}</p>
-                  
-                  {errorMessage && <p className="text-rose-400 mt-2">ALERTA: {errorMessage}</p>}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-
+      <div className="flex-1 overflow-y-auto px-6 py-6 pb-28 space-y-6">
         {/* Lista ou Detalhes */}
         {selectedCampaign ? (
           <motion.div 
@@ -435,9 +559,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   </button>
                 </div>
 
-                {(user?.isAdmin || user?.role === 'ADMIN' || user?.email?.toLowerCase() === 'semorr@gmail.com') && (
+                {(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com') && (
                   <button 
-                    onClick={() => handleDeleteCampaign(selectedCampaign.id)}
+                    onClick={() => {
+                      setDeletingCampaignId(selectedCampaign.id);
+                      setIsConfirmDeleteOpen(true);
+                    }}
                     disabled={isSaving}
                     className="w-full py-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 font-bold text-xs hover:bg-rose-500/20 transition-all flex items-center justify-center gap-2"
                   >
@@ -450,6 +577,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
           </motion.div>
         ) : (
           <div className="space-y-4">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.16em] pb-2 border-b border-slate-800/60 mb-4 flex items-center justify-between">
+              <span>CAMPANHAS DE AUDITORIA ATIVAS</span>
+              {localCampaigns.length > 0 && (
+                <span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-full border border-blue-500/10">
+                  {localCampaigns.length} EVENTO{localCampaigns.length !== 1 ? 'S' : ''}
+                </span>
+              )}
+            </h2>
             {localCampaigns.length === 0 ? (
               <div className="py-20 flex flex-col items-center text-center space-y-6">
                 <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-slate-700">
@@ -469,27 +604,82 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     key={campaign.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    onClick={() => handleSelectCampaign(campaign)}
-                    className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-5 flex items-center justify-between hover:bg-white/10 transition-all cursor-pointer group shadow-sm"
+                    className="bg-slate-900/50 backdrop-blur-md border border-slate-800/80 rounded-2xl p-5 hover:border-slate-700/80 transition-all overflow-hidden relative"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
-                        campaign.status === CampaignStatus.ACTIVE ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-white/5 border-white/10 text-slate-500'
-                      }`}>
-                        <Calendar size={20} strokeWidth={1.5} />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors">{campaign.name}</h3>
-                        <div className="flex items-center gap-3">
-                          {getStatusBadge(campaign.status)}
-                          <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium uppercase tracking-tight">
-                            <Clock size={12} strokeWidth={1.5} />
-                            {new Date(campaign.start_date).toLocaleDateString('pt-BR')}
+                    {/* Linha Principal de Dados */}
+                    <div 
+                      onClick={() => handleSelectCampaign(campaign)}
+                      className="flex items-start justify-between cursor-pointer group"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shrink-0 ${
+                          campaign.id === currentCampaignId 
+                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' 
+                            : 'bg-slate-800 border-slate-700 text-slate-400'
+                        }`}>
+                          <Calendar size={20} strokeWidth={2} />
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors leading-tight">
+                            {campaign.name}
+                          </h3>
+                          <p className="text-xs text-slate-400 leading-normal line-clamp-2 max-w-[240px]">
+                            {campaign.description || 'Sem descrição.'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            {getStatusBadge(campaign.status)}
+                            <span className="text-[9px] bg-slate-800 text-slate-400 font-mono px-1.5 py-0.5 rounded border border-slate-700/50">
+                              {campaign._unitid || campaign.unit_id || 'TODAS'}
+                            </span>
+                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-bold uppercase tracking-wide">
+                              <Clock size={10} />
+                              <span>{new Date(campaign.start_date).toLocaleDateString('pt-BR')}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
+                      
+                      {/* Chevron para ver detalhes */}
+                      <div className="text-slate-600 group-hover:text-blue-500 p-1 rounded-lg hover:bg-slate-800 transition-all">
+                        <ChevronRight size={18} />
+                      </div>
                     </div>
-                    <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-all" />
+
+                    {/* Botões de Ação na Base do Card */}
+                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                      {/* Ativar a Campanha */}
+                      {campaign.id === currentCampaignId ? (
+                        <div className="py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-center justify-center gap-1.5">
+                          <CheckCircle2 size={12} className="shrink-0" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">Campanha Ativa</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            if (campaign.status === CampaignStatus.CREATED) {
+                              await handleUpdateStatus(campaign.id, CampaignStatus.ACTIVE);
+                            }
+                            onActivate(campaign.id);
+                          }}
+                          className="py-2 px-3 bg-blue-600 hover:bg-blue-500 border border-blue-500/40 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-[0.98] flex items-center justify-center gap-1"
+                        >
+                          <Activity size={12} />
+                          <span>Ativar a Campanha</span>
+                        </button>
+                      )}
+
+                      {/* Excluir Campanha */}
+                      <button
+                        onClick={() => {
+                          setDeletingCampaignId(campaign.id);
+                          setIsConfirmDeleteOpen(true);
+                        }}
+                        className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1"
+                      >
+                        <Trash2 size={12} />
+                        <span>Excluir</span>
+                      </button>
+                    </div>
                   </motion.div>
                 ))}
               </div>
@@ -498,15 +688,15 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         )}
       </div>
 
-      {/* Footer Action */}
+      {/* Footer Action - Sticky absolute base GBR v2.6 */}
       {!selectedCampaign && !isCreating && (
-        <div className="p-6 bg-[#0F172A]/80 backdrop-blur-md border-t border-white/5">
+        <div className="absolute bottom-4 left-4 right-4 z-10">
           <button 
             onClick={() => setIsCreating(true)}
-            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/40 text-white rounded-2xl font-black text-xs uppercase tracking-[0.18em] shadow-[0_8px_30px_rgba(16,185,129,0.35)] transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
-            <Plus size={18} strokeWidth={2.5} />
-            <span className="uppercase tracking-widest font-black">Iniciar Nova Auditoria</span>
+            <Plus size={16} strokeWidth={3} />
+            <span>Iniciar Nova Auditoria</span>
           </button>
         </div>
       )}
@@ -535,48 +725,154 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Nome</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nome da Campanha</label>
                   <input 
                     type="text"
                     value={newCampaignName}
                     onChange={(e) => setNewCampaignName(e.target.value)}
-                    placeholder="Ex: Inventário Geral 2024"
-                    className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600 appearance-none"
+                    placeholder="Ex: INVENTÁRIO GERAL 2026"
+                    className="w-full px-5 py-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all placeholder:text-slate-600 appearance-none uppercase"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Descrição</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Descrição / Objetivo</label>
                   <textarea 
                     value={newCampaignDesc}
                     onChange={(e) => setNewCampaignDesc(e.target.value)}
-                    placeholder="Objetivo da campanha..."
-                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 h-28 transition-all placeholder:text-slate-600 resize-none"
+                    placeholder="E.g., Auditoria de ativos com etiquetas NFC/QRCode nas linhas..."
+                    className="w-full px-5 py-4 bg-slate-950/60 border border-slate-800 rounded-2xl text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 h-28 transition-all placeholder:text-slate-600 resize-none uppercase"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Unidade</label>
-                  <select 
-                    value={newCampaignUnit}
-                    onChange={(e) => setNewCampaignUnit(e.target.value)}
-                    className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-medium text-white focus:outline-none focus:border-blue-500/50 appearance-none transition-all"
-                  >
-                    <option value="">Todas as Unidades</option>
-                    {availableUnits.map(unit => (
-                      <option key={unit} value={unit}>{unit}</option>
-                    ))}
-                  </select>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Unidade Relacionada</label>
+                  <div className="relative">
+                    <select 
+                      value={newCampaignUnit}
+                      onChange={(e) => setNewCampaignUnit(e.target.value)}
+                      className="w-full px-5 py-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 appearance-none transition-all uppercase"
+                    >
+                      <option value="">Todas as Unidades</option>
+                      {availableUnits.map(unit => (
+                        <option key={unit} value={unit}>{unit}</option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-slate-500">
+                      <ChevronDown size={16} />
+                    </div>
+                  </div>
                 </div>
 
                 <button 
                   onClick={handleCreateCampaign}
-                  disabled={!newCampaignName || isSaving}
-                  className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all disabled:opacity-30 flex items-center justify-center gap-2"
+                  disabled={!(newCampaignName.trim() && newCampaignDesc.trim()) || isSaving}
+                  className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-[0.18em] transition-all flex items-center justify-center gap-2 ${
+                    (newCampaignName.trim() && newCampaignDesc.trim())
+                      ? 'bg-[#22C55E] text-white hover:bg-[#16A34A] border border-[#4ADE80]/40 shadow-[0_8px_25px_rgba(34,197,94,0.35)] active:scale-[0.98]'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
+                  }`}
                 >
-                  {isSaving ? <Loader2 className="animate-spin" size={18} /> : <span className="uppercase tracking-widest font-black">Gravar Campanha (Disco Físico)</span>}
+                  {isSaving ? (
+                    <Loader2 className="animate-spin" size={16} />
+                  ) : (
+                    <span className="text-white font-black">Gravar Campanha (Disco Físico)</span>
+                  )}
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Confirmação Crítica para Exclusão de Campanha (Soberania de Ação GBR) */}
+      <AnimatePresence>
+        {isConfirmDeleteOpen && deletingCampaignId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[101] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="w-full max-w-sm bg-slate-900 border border-rose-500/30 rounded-3xl p-6 shadow-2xl text-center space-y-6 animate-in fade-in zoom-in-95 duration-150"
+            >
+              <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                <Trash2 size={32} />
+              </div>
+              
+              <div className="space-y-3">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider text-rose-500">ALERTA CRÍTICO</h3>
+                <p className="text-xs text-slate-300 font-bold leading-normal">
+                  Atenção: Deseja realmente excluir esta campanha? Todos os dados coletados localmente serão apagados permanentemente!
+                </p>
+                <p className="text-[9px] text-slate-500 italic">
+                  Esta ação executará uma instrução SQL DELETE atômica no armazenamento físico SQLite (.db) do dispositivo e não poderá ser desfeita.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => {
+                    setIsConfirmDeleteOpen(false);
+                    setDeletingCampaignId(null);
+                  }}
+                  className="py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black text-xs uppercase tracking-widest rounded-xl border border-slate-700 transition-all active:scale-95"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => executeDeleteCampaign(deletingCampaignId)}
+                  disabled={isSaving}
+                  className="py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-xl border border-rose-500/40 shadow-[0_4px_15px_rgba(239,68,68,0.25)] transition-all active:scale-95 flex items-center justify-center gap-1"
+                >
+                  {isSaving ? <Loader2 size={12} className="animate-spin" /> : null}
+                  <span>Confirmar Exclusão</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Alerta de Proteção de Bateria Crítica */}
+      <AnimatePresence>
+        {isBatteryAlertOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="w-full max-w-sm bg-slate-900 border border-red-500/40 rounded-3xl p-6 shadow-2xl text-center space-y-6"
+            >
+              <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-500 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                <AlertCircle size={32} />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">Gravação Retida por Segurança</h3>
+                <p className="text-xs text-slate-400 font-medium leading-relaxed">
+                  A carga de bateria do dispositivo está abaixo de <span className="text-red-400 font-bold">5%</span> sem carregador conectado.
+                </p>
+                <p className="text-[9px] text-red-400 font-mono bg-red-950/40 border border-red-900/40 p-3 rounded-xl leading-normal text-left">
+                  SISTEMA DE PREVENÇÃO DE CORRUPÇÃO (v2.6 Core): A operação de escrita de dados no SQLite local (.db) foi bloqueada preventivamente para salvaguardar a integridade de seus dados de inventário físico. Por favor, carregue o dispositivo.
+                </p>
+              </div>
+
+              <button 
+                onClick={() => setIsBatteryAlertOpen(false)}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-black text-xs uppercase tracking-[0.2em] rounded-xl border border-slate-700 active:scale-95 transition-all"
+              >
+                Ciente e Fechar
+              </button>
             </motion.div>
           </motion.div>
         )}
