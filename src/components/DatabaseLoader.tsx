@@ -258,6 +258,50 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   useEffect(() => {
+    const checkExpertPending = async () => {
+      if (sessionStorage.getItem('gbr_pending_expert_load') === 'true') {
+        sessionStorage.removeItem('gbr_pending_expert_load'); // Consumir para evitar loop
+        console.warn("[GBR v2.6] Forçando contingência local via Carga Expert (Bypass de Bloqueio Imperativo).");
+        
+        setStatus('LOADING');
+        addLog("Conexão para Carga Expert Ativa. Limpando estados prévios de sessão comum...");
+        
+        // Bloquear concorrências de escrita ativando o modo de importação
+        sqliteService.setImportingMode(true);
+        sqliteService.isImportingBatch = true;
+        if (typeof window !== 'undefined') {
+          ((window as unknown) as { __isImportingBatch: boolean }).__isImportingBatch = true;
+        }
+
+        try {
+          await sqliteService.resetDatabaseLogico();
+          localStorage.removeItem('app_excluded_accounts');
+          setFileInfo(null);
+          setErrorLog([]);
+          
+          addLog("Banco de dados limpo com sucesso! Aguardando Carga Expert (Excel).");
+          setStatus('EMPTY_STATE');
+        } catch (err: unknown) {
+          const e = err as Error;
+          addLog(`Falha na limpeza preparatória: ${e.message}`);
+          setStatus('ERROR');
+        } finally {
+          sqliteService.setImportingMode(false);
+          sqliteService.isImportingBatch = false;
+          if (typeof window !== 'undefined') {
+            ((window as unknown) as { __isImportingBatch: boolean }).__isImportingBatch = false;
+          }
+        }
+      }
+    };
+    checkExpertPending();
+  }, []);
+
+  useEffect(() => {
+    const isExpertPending = sessionStorage.getItem('gbr_pending_expert_load') === 'true';
+    if (isExpertPending) {
+      return; // Será gerenciado pelo effect do checkExpertPending acima
+    }
     if (isDatabaseLoaded) {
       addLog("BLOQUEIO IMPERATIVO: Base local SQLite de Soberania Nativa já carregada. Nenhuma carga adicional ou reinicialização é permitida.");
       setStatus('IDLE');
@@ -311,6 +355,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
     // ATIVE A TRAVA DE ISOLAMENTO DE SISTEMA
     sqliteService.setImportingMode(true);
+    sqliteService.isImportingBatch = true;
+    if (typeof window !== 'undefined') {
+      ((window as unknown) as { __isImportingBatch: boolean }).__isImportingBatch = true;
+    }
 
     try {
       for (let i = 0; i < totalItems; i += CHUNK_SIZE) {

@@ -42,6 +42,7 @@ import AssetMap from './components/AssetMap';
 import ActiveSearch from './components/ActiveSearch';
 import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
+import { processarRoteamentoPosLoginSaas, SupabaseUserProfile } from './utils/routingUtils';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
 import CampaignManager from './components/CampaignManager';
@@ -5279,19 +5280,6 @@ const App: React.FC = () => {
               setUser(u); 
               localStorage.setItem('app_current_user', safeStringify(u));
               
-              if (u.role === ('DEMO' as unknown as UserRole)) {
-                setInventory(prev => ({
-                  ...prev,
-                  currentCampaignId: 'DEMO_CAMPAIGN',
-                  status: DatabaseStatus.LOADED
-                }));
-                setSelectedUnit('MATRIZ');
-                localStorage.setItem('app_selected_unit', 'MATRIZ');
-                localStorage.setItem('app_current_unit', 'MATRIZ');
-                setHistory([AppScreen.MAIN_MENU]);
-                return;
-              }
-              
               if (databaseMode !== DatabaseMode.INTERNAL) {
                 setDatabaseMode(DatabaseMode.SUPABASE);
                 localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
@@ -5310,20 +5298,65 @@ const App: React.FC = () => {
                 syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit);
               }
 
-              const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
-              if (isMasterAdminWithEmptyDb) {
-                console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
-                sessionStorage.removeItem('carga_inicial_prompted');
-                pushScreen(AppScreen.LOAD_DATABASE);
-              } else if (u.mustChangePassword) { 
-                pushScreen(AppScreen.CHANGE_PASSWORD); 
-              } else { 
-                const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
-                if (isAdmin) {
-                  pushScreen(AppScreen.MODULE_SELECTION); 
-                } else {
+              // Prepara objeto SupabaseUserProfile
+              const activeTenant = u.tenantId || u.tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
+              const profile: SupabaseUserProfile = {
+                userId: u.id || '',
+                email: u.email,
+                role: u.role,
+                tenantId: activeTenant
+              };
+
+              // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
+              const customNavigate = (path: string) => {
+                console.log('[App] customNavigate interceptou rota:', path);
+                
+                const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
+                if (isMasterAdminWithEmptyDb) {
+                  console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
+                  sessionStorage.removeItem('carga_inicial_prompted');
+                  pushScreen(AppScreen.LOAD_DATABASE);
+                } else if (u.mustChangePassword) { 
+                  pushScreen(AppScreen.CHANGE_PASSWORD); 
+                } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
+                  pushScreen(AppScreen.MODULE_SELECTION);
+                } else if (path === '/auditor/selecionar-filial') {
                   pushScreen(AppScreen.UNIT_SELECTION);
+                } else if (path === '/dashboard-demo') {
+                  setInventory(prev => ({
+                    ...prev,
+                    currentCampaignId: 'DEMO_CAMPAIGN',
+                    status: DatabaseStatus.LOADED
+                  }));
+                  setSelectedUnit('MATRIZ');
+                  localStorage.setItem('app_selected_unit', 'MATRIZ');
+                  localStorage.setItem('app_current_unit', 'MATRIZ');
+                  setHistory([AppScreen.MAIN_MENU]);
+                } else {
+                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
+                  if (isAdmin) {
+                    pushScreen(AppScreen.MODULE_SELECTION);
+                  } else {
+                    pushScreen(AppScreen.UNIT_SELECTION);
+                  }
                 }
+              };
+
+              try {
+                await processarRoteamentoPosLoginSaas(profile, customNavigate);
+              } catch (routeErr: unknown) {
+                console.error('[Routing] Roteamento falhou:', routeErr);
+                setModalConfig({
+                  isOpen: true,
+                  title: 'Erro de Consistência',
+                  message: routeErr instanceof Error ? routeErr.message : String(routeErr),
+                  type: 'error',
+                  onConfirm: () => {}
+                });
+                setUser(null);
+                localStorage.removeItem('app_current_user');
+                setHistory([AppScreen.LOGIN]);
+                return;
               }
 
               const bioSupported = await isBiometricSupported();
@@ -5617,19 +5650,6 @@ const App: React.FC = () => {
                 setUser(u); 
                 localStorage.setItem('app_current_user', safeStringify(u));
 
-                if (u.role === ('DEMO' as unknown as UserRole)) {
-                  setInventory(prev => ({
-                    ...prev,
-                    currentCampaignId: 'DEMO_CAMPAIGN',
-                    status: DatabaseStatus.LOADED
-                  }));
-                  setSelectedUnit('MATRIZ');
-                  localStorage.setItem('app_selected_unit', 'MATRIZ');
-                  localStorage.setItem('app_current_unit', 'MATRIZ');
-                  setHistory([AppScreen.MAIN_MENU]);
-                  return;
-                }
-                
                 // Se logou via Supabase, garante que o modo está correto
                 if (databaseMode !== DatabaseMode.INTERNAL) {
                   setDatabaseMode(DatabaseMode.SUPABASE);
@@ -5652,11 +5672,60 @@ const App: React.FC = () => {
                   });
                 }
 
-                if (u.mustChangePassword) { 
-                  pushScreen(AppScreen.CHANGE_PASSWORD); 
-                } else { 
-                  // SOBERANIA OFFLINE: Direciona obrigatoriamente para o MAIN_MENU pós login para acesso imediato.
-                  pushScreen(AppScreen.MAIN_MENU);
+                // Prepara objeto SupabaseUserProfile
+                const activeTenant = u.tenantId || u.tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
+                const profile: SupabaseUserProfile = {
+                  userId: u.id || '',
+                  email: u.email,
+                  role: u.role,
+                  tenantId: activeTenant
+                };
+
+                // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
+                const customNavigate = (path: string) => {
+                  console.log('[App] customNavigate interceptou rota:', path);
+                  
+                  if (u.mustChangePassword) { 
+                    pushScreen(AppScreen.CHANGE_PASSWORD); 
+                  } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
+                    pushScreen(AppScreen.MODULE_SELECTION);
+                  } else if (path === '/auditor/selecionar-filial') {
+                    pushScreen(AppScreen.UNIT_SELECTION);
+                  } else if (path === '/dashboard-demo') {
+                    setInventory(prev => ({
+                      ...prev,
+                      currentCampaignId: 'DEMO_CAMPAIGN',
+                      status: DatabaseStatus.LOADED
+                    }));
+                    setSelectedUnit('MATRIZ');
+                    localStorage.setItem('app_selected_unit', 'MATRIZ');
+                    localStorage.setItem('app_current_unit', 'MATRIZ');
+                    setHistory([AppScreen.MAIN_MENU]);
+                  } else {
+                    const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
+                    if (isAdmin) {
+                      pushScreen(AppScreen.MODULE_SELECTION);
+                    } else {
+                      pushScreen(AppScreen.UNIT_SELECTION);
+                    }
+                  }
+                };
+
+                try {
+                  await processarRoteamentoPosLoginSaas(profile, customNavigate);
+                } catch (routeErr: unknown) {
+                  console.error('[Routing] Roteamento falhou:', routeErr);
+                  setModalConfig({
+                    isOpen: true,
+                    title: 'Erro de Consistência',
+                    message: routeErr instanceof Error ? routeErr.message : String(routeErr),
+                    type: 'error',
+                    onConfirm: () => {}
+                  });
+                  setUser(null);
+                  localStorage.removeItem('app_current_user');
+                  setHistory([AppScreen.LOGIN]);
+                  return;
                 }
 
                 // Oferecer registro de biometria se suportado e ainda não registrado

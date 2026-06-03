@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles, Database } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -156,58 +156,40 @@ const Login: React.FC<LoginProps> = ({
     });
   };
 
-  const handleCargaExpertInstantBypass = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      console.log('>>> [Carga Expert] Iniciando limpeza bruta e injeção forçada de contingência...');
-      
-      // 1. Purga física do arquivo e execução de VACUUM
-      await localDb.purgeDatabase();
-      
-      // 2. Injeção atômica dos 50+ ativos em lote com tenantId: "DEMO_DEFAULT"
-      await localDb.forceInjectDemoSeed();
-      
-      // Altera modo para usar SQLite localmente como fonte da verdade
-      onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
-      const demoUser = demoService.getDemoUser();
-      
-      // FORÇA NAVEGAÇÃO IMEDIATAMENTE (Bypass de Rota para o Menu Principal)
-      onLogin(demoUser);
-      
-      onShowModal({
-        title: '⚡ CARGA EXPERT ATIVA',
-        message: 'Banco físico limpo com sucesso e contingência implantada com 50+ ativos. Redirecionando agora...',
-        type: 'success',
-        onConfirm: () => {}
-      });
-    } catch (err) {
-      console.error('[Carga Expert] Falha crítica:', err);
-      
-      // Tentativa de cura em Memória se houver falha persistente
-      try {
-        console.warn('[Carga Expert Fallback] Aplicando motor em Memória após falha do banco físico...');
-        const success = await demoService.initDemoSession();
-        if (success) {
-          onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
-          const demoUser = demoService.getDemoUser();
-          onLogin(demoUser);
-          return;
-        }
-      } catch (innerErr) {
-        console.error('[Carga Expert Drop] Fallback em memória também falhou:', innerErr);
-      }
-      
-      setError(`Falha crítica na injeção da Carga Expert: ${err instanceof Error ? err.message : String(err)}.`);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleCargaExpertNavigation = (): void => {
+    console.warn("[GBR v2.6] Forçando contingência local via Carga Expert");
+    
+    // Prepara a retenção volátil limpando estados prévios de sessão comum
+    sessionStorage.removeItem('gbr_session_mode');
+    sessionStorage.setItem('gbr_pending_expert_load', 'true');
+    
+    // Altera modo para usar SQLite localmente como fonte da verdade
+    onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
+
+    // Cria usuário especializado local para que o sistema entre no contexto de administrador autorizado
+    const expertUser: User = {
+      id: 'carga_expert_contingency',
+      email: 'semorr@gmail.com', // Reconhecido como administrador pelo helper checkIsAdmin
+      username: 'carga_expert',
+      role: 'ADMIN' as unknown as UserRole,
+      isAdmin: true,
+      tenants: 'CICOPAL',
+      tenantid: 'CICOPAL',
+      _tenantid: 'CICOPAL',
+      unitid: 'MATRIZ',
+      _unitid: 'MATRIZ',
+      mustChangePassword: false
+    };
+
+    // Redireciona estritamente para a tela/modal do DatabaseLoader
+    onLogin(expertUser);
+    onUpdateScreen(AppScreen.LOAD_DATABASE);
   };
 
   const startPressLogo = () => {
     setIsPressingLogo(true);
     const timer = setTimeout(() => {
-       handleCargaExpertInstantBypass();
+       handleCargaExpertNavigation();
     }, 3000); // 3 segundos
     setLongPressTimer(timer);
   };
@@ -218,6 +200,12 @@ const Login: React.FC<LoginProps> = ({
       clearTimeout(longPressTimer);
       setLongPressTimer(null);
     }
+  };
+
+  const handleDemoMode = (): void => {
+    console.log("[GBR v2.6] Inicializando Modo Demo");
+    sessionStorage.setItem('gbr_session_mode', 'DEMO');
+    handleDemoLogin();
   };
 
   const handleDemoLogin = async () => {
@@ -815,22 +803,11 @@ const Login: React.FC<LoginProps> = ({
         {!isLoading && (
           <button 
             type="button"
-            onClick={handleDemoLogin}
+            onClick={handleDemoMode}
             className="w-full bg-transparent border border-slate-300 hover:border-accent hover:bg-slate-50 text-slate-700 hover:text-accent font-bold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] transition-all mt-2.5 uppercase tracking-[0.12em] text-[11px] flex items-center justify-center space-x-2 group cursor-pointer"
           >
             <Sparkles size={14} className="text-slate-400 group-hover:text-accent transition-colors animate-pulse" />
             <span>Experimentar Grátis (Modo Demo)</span>
-          </button>
-        )}
-
-        {!isLoading && (
-          <button 
-            type="button"
-            onClick={handleCargaExpertInstantBypass}
-            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-all mt-2 px-4 uppercase tracking-[0.12em] text-[11px] flex items-center justify-center space-x-2 shadow-sm border border-slate-200/50 cursor-pointer"
-          >
-            <Database size={14} className="text-slate-500 animate-pulse" />
-            <span>⚡ CARGA EXPERT (FORÇAR CONTINGÊNCIA)</span>
           </button>
         )}
       </form>
