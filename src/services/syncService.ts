@@ -293,7 +293,7 @@ export const syncService = {
       // 3. Executa o Upsert em lote na tabela remota do Supabase resolvendo conflitos pelo ID
       // Higienização de Payload (v2.6): Expurga propriedades locais para evitar erro PGRST204
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const payloadSanitizada = sanitizedAssets.map(({ _version, _unitid, ...resto }) => resto);
+      const payloadSanitizada = (sanitizedAssets as Record<string, unknown>[]).map(({ _version, _unitid, latitude, longitude, is_deleted, _is_deleted, ...resto }) => resto);
 
       const { error: supabaseError } = await supabase
         .from('assets')
