@@ -843,11 +843,15 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     const MAX_RETRIES = 2;
     let success = false;
 
+    // Higienização de Payload (v2.6): Expurga _version e _unitid locais para evitar erro PGRST204 no Supabase
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const sanitizedAssetsPayload = assetsWithTenant.map(({ _version, _unitid, ...resto }) => resto);
+
     while (retryCount <= MAX_RETRIES && !success) {
       try {
         const { error } = await supabase
           .from('assets')
-          .upsert(assetsWithTenant, { onConflict: 'id' });
+          .upsert(sanitizedAssetsPayload, { onConflict: 'id' });
 
         if (error) {
           throw error;
