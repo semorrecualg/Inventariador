@@ -400,6 +400,7 @@ const App: React.FC = () => {
   } | null>(null);
 
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [isImportingBatchState, setIsImportingBatchState] = useState(false);
 
   const [currentUnit, setCurrentUnit] = useState<string | null>(() => {
     return localStorage.getItem('app_current_unit') || localStorage.getItem('app_selected_unit') || null;
@@ -1588,6 +1589,48 @@ const App: React.FC = () => {
       refreshCampaigns();
     }
   }, [screen, refreshCampaigns]);
+
+  // Monitoramento síncrono da transição de isolamento ao fim da carga em lote (Vantagem Capacitor SQLite)
+  useEffect(() => {
+    let lastImportingState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+    setIsImportingBatchState(!!lastImportingState);
+
+    const interval = setInterval(async () => {
+      const currentState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+      setIsImportingBatchState(!!currentState);
+
+      if (lastImportingState && !currentState) {
+        console.log(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
+        const tenantId = user?.tenantid || user?._tenantid || 'CICOPAL';
+        
+        // Se for Mobile Nativo, força salvar para flush total
+        const { Capacitor } = await import('@capacitor/core');
+        if (Capacitor.isNativePlatform()) {
+          try {
+            await sqliteService.saveDatabase();
+            console.log(">>> [Re-calibração Mobile] Banco de dados salvo com sucesso.");
+          } catch (e) {
+            console.error(">>> [Re-calibração Mobile] Erro ao salvar banco:", e);
+          }
+        }
+        
+        // Sincroniza os contadores
+        try {
+          const sqlUnits = await sqliteService.getOperationalUnitsWithStats(tenantId);
+          setSqliteOperationalUnits(sqlUnits);
+          console.log(`>>> [Re-calibração Mobile] Contadores atualizados via SQL do disco: ${sqlUnits.length} filiais encontradas.`);
+        } catch (e) {
+          console.error(">>> [Re-calibração Mobile] Erro ao refrescar unidades de contagem:", e);
+        }
+        
+        setRefreshVersion(prev => prev + 1);
+        await refreshCampaigns();
+      }
+      lastImportingState = !!currentState;
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [user, refreshCampaigns]);
 
   // GBR v24.50 KARDEK: Route Guard de Inicialização Técnica
   useEffect(() => {
@@ -4816,6 +4859,11 @@ const App: React.FC = () => {
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
   
   const fullCompaniesWithStatus = useMemo(() => {
+    if (sqliteService.isImportingBatch || isImportingBatchState) {
+      console.log('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
+      return [];
+    }
+
     const userTenant = user?.tenantid || '';
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
     const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
@@ -5059,7 +5107,7 @@ const App: React.FC = () => {
 
     console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
     return result;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion, isImportingBatchState]);
 
   const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
@@ -6048,6 +6096,7 @@ const App: React.FC = () => {
                 setSelectedUnit(u);
                 pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
               }}
+              isImportingBatch={isImportingBatchState}
             />
           )}
           {screen === AppScreen.UNIT_CONFIGURATOR && user && (

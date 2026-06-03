@@ -1675,14 +1675,14 @@ class SqliteService {
         COUNT(id) AS total_ativos,
         SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS total_conferidos
       FROM ativos
-      WHERE (tenantId = ? OR _tenantid = ?)
+      WHERE tenantId = ?
         AND filial IS NOT NULL 
         AND TRIM(filial) != ''
         AND UPPER(TRIM(filial)) != 'CICOPAL'
         AND UPPER(TRIM(filial)) != UPPER(TRIM(?))
       GROUP BY filial
       ORDER BY filial ASC
-    `, [tenantId, tenantId, tenantId]);
+    `, [tenantId, tenantId]);
 
     return res.map(row => {
       const getVal = (target: string, fallback: unknown) => {

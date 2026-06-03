@@ -783,14 +783,14 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   for (let i = 0; i < total; i += CHUNK_SIZE) {
     const chunk = assets.slice(i, i + CHUNK_SIZE);
     
-    // Preparação de dados (Sanitização)
+    // Preparação de dados (Sanitização rígida anti-PGRST204)
     const assetsWithTenant = chunk.map(a => {
       const cleanAsset = { ...a };
       if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
         delete cleanAsset._photoUrl;
       }
       
-      const assetGrupo = (cleanAsset.GRUPO_EMPRESARIAL || cleanAsset._tenantid || '').trim().toUpperCase();
+      const assetGrupo = (cleanAsset.tenantId || cleanAsset._tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
       let finalTenantId = '';
       if (tenantid) {
         if (Array.isArray(tenantid)) {
@@ -800,11 +800,34 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           finalTenantId = tenantid;
         }
       } else {
-        finalTenantId = assetGrupo || '';
+        finalTenantId = assetGrupo || 'CICOPAL';
       }
 
+      // Projeção estrita de colunas GBR v2.6 sem campos fantasmas
       return {
-        ...cleanAsset,
+        id: String(cleanAsset.id || ''),
+        tenantId: finalTenantId,
+        filial: (cleanAsset.filial || cleanAsset.UNIDADE_OPERACIONAL || 'MATRIZ').trim().toUpperCase(),
+        status: (cleanAsset.status || cleanAsset.STATUS || 'PENDENTE').trim().toUpperCase(),
+        etiqueta: (cleanAsset.etiqueta || cleanAsset.ETIQUETA || '').trim(),
+        qt: String(cleanAsset.qt !== undefined ? cleanAsset.qt : (cleanAsset.QT !== undefined ? cleanAsset.QT : '1')),
+        descricaodoativo: (cleanAsset.descricaodoativo || cleanAsset.DESCRICAODOATIVO || '').trim(),
+        serial: (cleanAsset.serial || cleanAsset.SERIAL || '').trim(),
+        dataaqusic: (cleanAsset.dataaqusic || cleanAsset.DATAAQUISIC || '').trim(),
+        cnpj: (cleanAsset.cnpj || cleanAsset.CNPJ || '').trim(),
+        nomefornecedor: (cleanAsset.nomefornecedor || cleanAsset.NOMEFORNECEDOR || '').trim(),
+        notafiscal: (cleanAsset.notafiscal || cleanAsset.NOTAFISCAL || '').trim(),
+        endereco: (cleanAsset.endereco || cleanAsset.ENDERECO || '').trim(),
+        registro: (cleanAsset.registro || cleanAsset.REGISTRO || '').trim(),
+        subreg: (cleanAsset.subreg || cleanAsset.SUBREG || '').trim(),
+        databaixa: (cleanAsset.databaixa || cleanAsset.DATABAIXA || '').trim(),
+        contacontabil: (cleanAsset.contacontabil || cleanAsset.conta_contabil || '').trim(),
+        primarykey: (cleanAsset.primarykey || cleanAsset.PRIMARYKEY || '').trim(),
+        centrodecusto: (cleanAsset.centrodecusto || cleanAsset.CENTRODECUSTO || '').trim(),
+        vlraquisic: typeof cleanAsset.vlraquisic === 'number' ? cleanAsset.vlraquisic : (typeof cleanAsset.VLRAQUISIC === 'number' ? cleanAsset.VLRAQUISIC : 0),
+        sn1_recno: cleanAsset.sn1_recno !== undefined ? Number(cleanAsset.sn1_recno) : (cleanAsset.Sn1_recno !== undefined ? Number(cleanAsset.Sn1_recno) : null),
+        sn3_recno: cleanAsset.sn3_recno !== undefined ? Number(cleanAsset.sn3_recno) : (cleanAsset.Sn3_recno !== undefined ? Number(cleanAsset.Sn3_recno) : null),
+
         latitude: typeof cleanAsset.latitude === 'number' ? cleanAsset.latitude : null,
         longitude: typeof cleanAsset.longitude === 'number' ? cleanAsset.longitude : null,
         _conferido: Boolean(cleanAsset._conferido),
@@ -864,6 +887,7 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
   if (!supabase || !navigator.onLine) return;
   
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
+  // IMPORTANTE: battery_saver é omitido para garantir compatibilidade estrita até que o backend processe a nova estrutura
   const allowedKeys = [
     'id', 
     'companies', 
@@ -872,12 +896,10 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'editable_fields', 
     'qr_code_fields', 
     'scanner_mode', 
-    'auto_confirm_on_scan', 
     'scan_feedback_mode', 
     'inventory_search_mode',
     'immersive_mode',
     'dark_mode',
-    'battery_saver',
     'protheus_integration_enabled',
     'protheus_api_url',
     'mandatory_photo_on_divergence',
@@ -886,12 +908,15 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     '_tenantid'
   ];
 
-  const configId = tenantid 
-    ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
-    : 'global_config';
+  const rawTenantid = tenantid 
+    ? (Array.isArray(tenantid) ? tenantid[0] : tenantid)
+    : '';
+  // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
+  const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
+  const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
   
   const payload: Record<string, unknown> = { id: configId };
-  if (tenantid) payload._tenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
+  if (tenantid) payload._tenantid = cleanTenant;
   
   // Mapeamento de camelCase para snake_case
   const mapping: Record<string, string> = {
@@ -899,12 +924,10 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'editableFields': 'editable_fields',
     'qrCodeFields': 'qr_code_fields',
     'scannerMode': 'scanner_mode',
-    'autoConfirmOnScan': 'auto_confirm_on_scan',
     'scanFeedbackMode': 'scan_feedback_mode',
     'inventorySearchMode': 'inventory_search_mode',
     'immersiveMode': 'immersive_mode',
     'darkMode': 'dark_mode',
-    'batterySaver': 'battery_saver',
     'protheusIntegrationEnabled': 'protheus_integration_enabled',
     'protheusApiUrl': 'protheus_api_url',
     'mandatoryPhotoOnDivergence': 'mandatory_photo_on_divergence',
@@ -914,6 +937,10 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
 
   Object.keys(config).forEach(key => {
     const dbKey = mapping[key] || key;
+    // Omitimos explicitamente o batterySaver ou battery_saver para garantir a blindagem do payload
+    if (key === 'batterySaver' || key === 'battery_saver' || dbKey === 'battery_saver') {
+      return;
+    }
     if (allowedKeys.includes(dbKey)) {
       payload[dbKey] = (config as Record<string, unknown>)[key];
     }
@@ -1386,9 +1413,12 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     console.log(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
     // 2. Busca a configuração
-    const configId = tenantid 
-      ? (Array.isArray(tenantid) ? `config_${tenantid[0]}` : `config_${tenantid}`)
-      : 'global_config';
+    const rawTenantid = tenantid 
+      ? (Array.isArray(tenantid) ? tenantid[0] : tenantid)
+      : '';
+    // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
+    const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
+    const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
     
     console.log(`>>> [Supabase] Buscando config para ID: ${configId}`);
     
@@ -1425,7 +1455,6 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       'editable_fields': 'editableFields',
       'qr_code_fields': 'qrCodeFields',
       'scanner_mode': 'scannerMode',
-      'auto_confirm_on_scan': 'autoConfirmOnScan',
       'scan_feedback_mode': 'scanFeedbackMode',
       'inventory_search_mode': 'inventorySearchMode',
       'immersive_mode': 'immersiveMode',
@@ -1608,7 +1637,9 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 
     // 2. Limpa a configuração (apenas se estiver limpando TUDO)
     if (!companyToClear) {
-      const configId = tenantid ? `config_${tenantid}` : 'global_config';
+      const rawTenantid = tenantid ? (Array.isArray(tenantid) ? tenantid[0] : tenantid) : '';
+      const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
+      const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
       
       // Para o delete, tentamos ser o mais simples possível.
       // Se falhar por causa do cache do schema, ignoramos o erro de configuração
@@ -2540,10 +2571,11 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     
     // 2. Tenta carregar da Nuvem (unit_gps_data) para atualizar o local
     try {
+      const cleanTenant = encodeURIComponent(String(tenantid || '').trim().replace(/[%_\s]+/g, ''));
       const { data, error } = await supabase
         .from('unit_gps_data')
         .select('*')
-        .like('unit_key', `${tenantid}_%`);
+        .like('unit_key', `${cleanTenant}_%`);
 
       if (data && !error) {
         data.forEach(item => {

@@ -252,27 +252,43 @@ export const syncService = {
         return { success: true, processedCount: 0 };
       }
 
-      // 2. Sanitiza o payload limpando buffers temporários de memória
-      const sanitizedAssets = rawAssets.map((asset) => ({
-        id: String(asset.id || ''),
-        latitude: asset.latitude ? Number(asset.latitude) : null,
-        longitude: asset.longitude ? Number(asset.longitude) : null,
-        _conferido: Boolean(asset._conferido),
-        _tenantid: String(asset._tenantid || ''),
-        _unitid: asset._unitid ? String(asset._unitid).trim() : null,
-        _version: Number(asset._version || 1),
-        _is_deleted: Boolean(asset._is_deleted),
-        UNIDADE_OPERACIONAL: asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : null,
-        GRUPO_EMPRESARIAL: asset.GRUPO_EMPRESARIAL ? String(asset.GRUPO_EMPRESARIAL) : null,
-        ETIQUETA: asset.ETIQUETA ? String(asset.ETIQUETA) : null,
-        conta_contabil: asset.conta_contabil ? String(asset.conta_contabil) : null,
-        DESCRICAODOATIVO: asset.DESCRICAODOATIVO ? String(asset.DESCRICAODOATIVO) : null,
-        Sn1_recno: asset.Sn1_recno ? Number(asset.Sn1_recno) : null,
-        Sn3_recno: asset.Sn3_recno ? Number(asset.Sn3_recno) : null,
-        currentCampaignId: asset.currentCampaignId ? String(asset.currentCampaignId) : null,
-        tenantId: asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL'),
-        filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ')
-      }));
+      // 2. Sanitiza o payload limpando buffers temporários de memória para blindagem PostgREST
+      const sanitizedAssets = rawAssets.map((asset) => {
+        // Mapeamentos unificados resilientes baseados no schema GBR v2.6
+        return {
+          id: String(asset.id || ''),
+          tenantId: asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL'),
+          filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ'),
+          status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
+          etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
+          qt: asset.qt ? String(asset.qt).trim() : (asset.QT ? String(asset.QT).trim() : '1'),
+          descricaodoativo: asset.descricaodoativo ? String(asset.descricaodoativo).trim() : (asset.DESCRICAODOATIVO ? String(asset.DESCRICAODOATIVO).trim() : ''),
+          serial: asset.serial ? String(asset.serial).trim() : (asset.SERIAL ? String(asset.SERIAL).trim() : ''),
+          dataaqusic: asset.dataaqusic ? String(asset.dataaqusic).trim() : (asset.DATAAQUISIC ? String(asset.DATAAQUISIC).trim() : ''),
+          cnpj: asset.cnpj ? String(asset.cnpj).trim() : (asset.CNPJ ? String(asset.CNPJ).trim() : ''),
+          nomefornecedor: asset.nomefornecedor ? String(asset.nomefornecedor).trim() : (asset.NOMEFORNECEDOR ? String(asset.NOMEFORNECEDOR).trim() : ''),
+          notafiscal: asset.notafiscal ? String(asset.notafiscal).trim() : (asset.NOTAFISCAL ? String(asset.NOTAFISCAL).trim() : ''),
+          endereco: asset.endereco ? String(asset.endereco).trim() : (asset.ENDERECO ? String(asset.ENDERECO).trim() : ''),
+          registro: asset.registro ? String(asset.registro).trim() : (asset.REGISTRO ? String(asset.REGISTRO).trim() : ''),
+          subreg: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
+          databaixa: asset.databaixa ? String(asset.databaixa).trim() : (asset.DATABAIXA ? String(asset.DATABAIXA).trim() : ''),
+          contacontabil: asset.contacontabil ? String(asset.contacontabil).trim() : (asset.conta_contabil ? String(asset.conta_contabil).trim() : ''),
+          primarykey: asset.primarykey ? String(asset.primarykey).trim() : (asset.PRIMARYKEY ? String(asset.PRIMARYKEY).trim() : ''),
+          centrodecusto: asset.centrodecusto ? String(asset.centrodecusto).trim() : (asset.CENTRODECUSTO ? String(asset.CENTRODECUSTO).trim() : ''),
+          vlraquisic: typeof asset.vlraquisic === 'number' ? asset.vlraquisic : (typeof asset.VLRAQUISIC === 'number' ? asset.VLRAQUISIC : 0),
+          sn1_recno: asset.sn1_recno !== undefined ? Number(asset.sn1_recno) : (asset.Sn1_recno !== undefined ? Number(asset.Sn1_recno) : null),
+          sn3_recno: asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null),
+          
+          // Metadados adicionais suportados pela tabela remota na nuvem
+          latitude: asset.latitude ? Number(asset.latitude) : null,
+          longitude: asset.longitude ? Number(asset.longitude) : null,
+          _conferido: Boolean(asset._conferido),
+          _tenantid: asset._tenantid ? String(asset._tenantid).trim() : (asset.tenantId ? String(asset.tenantId).trim() : 'CICOPAL'),
+          _unitid: asset._unitid ? String(asset._unitid).trim() : (asset.filial ? String(asset.filial).trim() : 'MATRIZ'),
+          _version: Number(asset._version || 1),
+          _is_deleted: Boolean(asset._is_deleted)
+        };
+      });
 
       // 3. Executa o Upsert em lote na tabela remota do Supabase resolvendo conflitos pelo ID
       const { error: supabaseError } = await supabase
