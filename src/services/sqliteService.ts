@@ -1054,16 +1054,27 @@ class SqliteService {
     }
   }
 
+  private normalizeQuery(sql: string): string {
+    if (!sql) return sql;
+    return sql
+      .replace(/\sFROM\s+assets\b/gi, ' FROM ativos')
+      .replace(/\sINTO\s+assets\b/gi, ' INTO ativos')
+      .replace(/\sUPDATE\s+assets\b/gi, ' UPDATE ativos')
+      .replace(/\sJOIN\s+assets\b/gi, ' JOIN ativos');
+  }
+
   async query(sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, string | number | boolean | null>[]> {
     if (!this.isInitialized) await this.init();
     if (!this.nativeDb) return [];
     await this.ensureDatabaseOpen();
 
+    const normalizedSql = this.normalizeQuery(sql);
+
     try {
-      const res = await this.nativeDb.query(sql, params);
+      const res = await this.nativeDb.query(normalizedSql, params);
       return (res.values || []) as Record<string, string | number | boolean | null>[];
     } catch (err) {
-      console.error("Query failed:", sql, err);
+      console.error("Query failed:", normalizedSql, err);
       return [];
     }
   }
@@ -1091,14 +1102,16 @@ class SqliteService {
       throw new Error("Escrita bloqueada: Bateria abaixo de 5%");
     }
 
+    const normalizedSql = this.normalizeQuery(sql);
+
     // GBR v25 - Blindagem de Escrita Segura (Soberania Nativa: Assumindo permissões de infraestrutura)
-    const isWrite = sql.toUpperCase().includes('INSERT') || sql.toUpperCase().includes('UPDATE') || sql.toUpperCase().includes('DELETE');
+    const isWrite = normalizedSql.toUpperCase().includes('INSERT') || normalizedSql.toUpperCase().includes('UPDATE') || normalizedSql.toUpperCase().includes('DELETE');
     if (isWrite && !this.permissionsGranted) {
        console.info(">>> [Governance] Gravação realizada com validação estática de instalação (Câmera/GPS assumidos).");
     }
 
     try {
-      await this.nativeDb.run(sql, params);
+      await this.nativeDb.run(normalizedSql, params);
       
       this.mutationCounter++;
       if (this.mutationCounter >= this.MUTATION_THRESHOLD) {
@@ -1107,7 +1120,7 @@ class SqliteService {
         this.mutationCounter = 0;
       }
     } catch (err) {
-      console.error("Execute failed:", sql, err);
+      console.error("Execute failed:", normalizedSql, err);
       throw err;
     }
   }
@@ -1162,8 +1175,9 @@ class SqliteService {
     }
     await this.ensureDatabaseOpen();
     try {
+      const normalizedStatements = statements.map(stmt => this.normalizeQuery(stmt));
       // Junta todas as queries SQL em uma única execução atômica transacional
-      const batchSql = statements.join('\n');
+      const batchSql = normalizedStatements.join('\n');
       return await this.nativeDb.execute(batchSql);
     } catch (error) {
       console.error(">>> [SQL] Falha crítica na transação em lote:", error);

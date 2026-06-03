@@ -218,50 +218,58 @@ export const syncService = {
   /**
    * Processa o lote de ativos modificados offline e sincroniza com o Supabase
    */
-  processDataSyncQueue: async (): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+  processDataSyncQueue: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
     if (sqliteService.isImportingBatch) {
       return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote ativa." };
     }
+    if (!navigator.onLine) {
+      return { success: false, processedCount: 0, error: "Dispositivo em modo Offline" };
+    }
+    const currentMode = localStorage.getItem('app_database_mode');
+    if (currentMode?.startsWith('INTERNAL')) {
+      return { success: false, processedCount: 0, error: "Modo OFFLINE/INTERNO ativo" };
+    }
+    return await syncService.syncHybridBatch(_tenantid);
+  },
+
+  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  syncHybridBatch: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
     if (isDataSyncRunning) {
-      return { success: false, processedCount: 0, error: "Sync already in progress" };
+      console.log(">>> [Sync] Sincronização híbrida já está em execução. Ignorando chamada concorrente.");
+      return { success: true, processedCount: 0 };
     }
 
+    isDataSyncRunning = true;
     try {
-      if (!navigator.onLine) {
-        return { success: false, processedCount: 0, error: "Dispositivo em modo Offline" };
+      console.log(">>> [Sync] Iniciando replicação híbrida de ativos locais para nuvem...");
+
+      if (!supabase) {
+        throw new Error("Supabase client não inicializado.");
       }
 
-      const currentMode = localStorage.getItem('app_database_mode');
-      if (currentMode?.startsWith('INTERNAL')) {
-        return { success: false, processedCount: 0, error: "Modo OFFLINE/INTERNO ativo" };
-      }
-
-      isDataSyncRunning = true;
-
-      // 1. Busca lote de até 200 registros modificados localmente (Soberania Offline)
+      // 1. Busca lote de até 200 registros modificados localmente (Soberania Offline - Teto de I/O)
       const queryLocal = `
-        SELECT * FROM ativos 
+        SELECT * FROM assets 
         WHERE _is_synced = 0 AND _is_deleted = 0 
         LIMIT 200
       `;
       const result = await sqliteService.query(queryLocal);
-      
-      const rawAssets = result;
+      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+      const rawAssets = result as Record<string, any>[];
       
       if (!rawAssets || rawAssets.length === 0) {
         return { success: true, processedCount: 0 };
       }
 
-      // 2. Sanitiza o payload limpando buffers temporários de memória para blindagem PostgREST
+      // 2. Sanitiza o payload limpando buffers temporários de memória baseados no schema GBR v2.6
       const sanitizedAssets = rawAssets.map((asset) => {
-        // Mapeamentos unificados resilientes baseados no schema GBR v2.6
         return {
           id: String(asset.id || ''),
           tenantId: asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL'),
           filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ'),
           status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
           etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
-          qt: asset.qt ? String(asset.qt).trim() : (asset.QT ? String(asset.QT).trim() : '1'),
+          qt: asset.qt ? Number(asset.qt) : (asset.QT ? Number(asset.QT) : 1),
           descricaodoativo: asset.descricaodoativo ? String(asset.descricaodoativo).trim() : (asset.DESCRICAODOATIVO ? String(asset.DESCRICAODOATIVO).trim() : ''),
           serial: asset.serial ? String(asset.serial).trim() : (asset.SERIAL ? String(asset.SERIAL).trim() : ''),
           dataaqusic: asset.dataaqusic ? String(asset.dataaqusic).trim() : (asset.DATAAQUISIC ? String(asset.DATAAQUISIC).trim() : ''),
@@ -273,27 +281,26 @@ export const syncService = {
           subreg: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
           databaixa: asset.databaixa ? String(asset.databaixa).trim() : (asset.DATABAIXA ? String(asset.DATABAIXA).trim() : ''),
           contacontabil: asset.contacontabil ? String(asset.contacontabil).trim() : (asset.conta_contabil ? String(asset.conta_contabil).trim() : ''),
-          primarykey: asset.primarykey ? String(asset.primarykey).trim() : (asset.PRIMARYKEY ? String(asset.PRIMARYKEY).trim() : ''),
+          primarykey: String(asset.primarykey !== undefined && asset.primarykey !== null ? asset.primarykey : (asset.PRIMARYKEY !== undefined && asset.PRIMARYKEY !== null ? asset.PRIMARYKEY : '')).trim(),
           centrodecusto: asset.centrodecusto ? String(asset.centrodecusto).trim() : (asset.CENTRODECUSTO ? String(asset.CENTRODECUSTO).trim() : ''),
           vlraquisic: typeof asset.vlraquisic === 'number' ? asset.vlraquisic : (typeof asset.VLRAQUISIC === 'number' ? asset.VLRAQUISIC : 0),
           sn1_recno: asset.sn1_recno !== undefined ? Number(asset.sn1_recno) : (asset.Sn1_recno !== undefined ? Number(asset.Sn1_recno) : null),
           sn3_recno: asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null),
           
-          // Metadados adicionais suportados pela tabela remota na nuvem
           latitude: asset.latitude ? Number(asset.latitude) : null,
           longitude: asset.longitude ? Number(asset.longitude) : null,
           _conferido: Boolean(asset._conferido),
           _tenantid: asset._tenantid ? String(asset._tenantid).trim() : (asset.tenantId ? String(asset.tenantId).trim() : 'CICOPAL'),
           _unitid: asset._unitid ? String(asset._unitid).trim() : (asset.filial ? String(asset.filial).trim() : 'MATRIZ'),
           _version: Number(asset._version || 1),
-          _is_deleted: Boolean(asset._is_deleted)
+          _is_synced: asset._is_synced !== undefined ? Number(asset._is_synced) : 0,
+          _is_deleted: asset._is_deleted !== undefined ? Number(asset._is_deleted) : 0
         };
       });
 
-      // 3. Executa o Upsert em lote na tabela remota do Supabase resolvendo conflitos pelo ID
-      // Higienização de Payload (v2.6): Expurga propriedades locais para evitar erro PGRST204
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const payloadSanitizada = (sanitizedAssets as Record<string, unknown>[]).map(({ _version, _unitid, latitude, longitude, is_deleted, _is_deleted, ...resto }) => resto);
+      // 3. Upsert na tabela remota do Supabase limpando propriedades locais (v2.6)
+      /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+      const payloadSanitizada = (sanitizedAssets as Record<string, unknown>[]).map(({ _version, _unitid, latitude, longitude, _is_synced, _is_deleted, _conferido, _tenantid, ...resto }) => resto);
 
       const { error: supabaseError } = await supabase
         .from('assets')
@@ -301,10 +308,10 @@ export const syncService = {
 
       if (supabaseError) throw supabaseError;
 
-      // 4. Atualiza o status local para sincronizado (_is_synced = 1) após a confirmação da nuvem
-      const idsProcessados = sanitizedAssets.map(a => `'${a.id}'`).join(',');
+      // 4. Atualiza o status local escapando caracteres especiais nos IDs alfanuméricos complexos
+      const idsProcessados = sanitizedAssets.map(a => `'${a.id.replace(/'/g, "''")}'`).join(',');
       const updateLocalQuery = `
-        UPDATE ativos 
+        UPDATE assets 
         SET _is_synced = 1 
         WHERE id IN (${idsProcessados})
       `;
@@ -353,6 +360,13 @@ export const syncService = {
  */
 export const processDataSyncQueue = async (): Promise<{ success: boolean; processedCount: number; error?: string }> => {
   return await syncService.processDataSyncQueue();
+};
+
+/**
+ * Executa a replicação híbrida de ativos locais para a nuvem
+ */
+export const syncHybridBatch = async (tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+  return await syncService.syncHybridBatch(tenantid);
 };
 
 /**

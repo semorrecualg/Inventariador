@@ -822,7 +822,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         subreg: (cleanAsset.subreg || cleanAsset.SUBREG || '').trim(),
         databaixa: (cleanAsset.databaixa || cleanAsset.DATABAIXA || '').trim(),
         contacontabil: (cleanAsset.contacontabil || cleanAsset.conta_contabil || '').trim(),
-        primarykey: (cleanAsset.primarykey || cleanAsset.PRIMARYKEY || '').trim(),
+        primarykey: String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : (cleanAsset.PRIMARYKEY !== undefined && cleanAsset.PRIMARYKEY !== null ? cleanAsset.PRIMARYKEY : '')).trim(),
         centrodecusto: (cleanAsset.centrodecusto || cleanAsset.CENTRODECUSTO || '').trim(),
         vlraquisic: typeof cleanAsset.vlraquisic === 'number' ? cleanAsset.vlraquisic : (typeof cleanAsset.VLRAQUISIC === 'number' ? cleanAsset.VLRAQUISIC : 0),
         sn1_recno: cleanAsset.sn1_recno !== undefined ? Number(cleanAsset.sn1_recno) : (cleanAsset.Sn1_recno !== undefined ? Number(cleanAsset.Sn1_recno) : null),
@@ -2472,12 +2472,12 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Apenas modo SUPABASE)
   const syncToCloud = async () => {
       try {
-        // Tentativa na tabela FINAL (unit_gps_data)
-        // Adicionamos _tenantid e _unitid como colunas de topo para satisfazer políticas de RLS
+        // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantId e filial)
         const { error } = await supabase
-          .from('unit_gps_data')
+          .from('inventory_config')
           .upsert({
-            unit_key: unitKey,
+            tenantId: tenantId,
+            filial: unitId,
             _tenantid: tenantId,
             _unitid: unitId,
             data: payload,
@@ -2485,18 +2485,18 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
           });
 
         if (error) {
-          console.warn(`>>> [Supabase] Sincronização de GPS falhou (Code: ${error.code}): ${error.message}`);
+          console.warn(`>>> [Supabase] Sincronização de config falhou (Code: ${error.code}): ${error.message}`);
           // Se for erro de RLS ou coluna, tentamos um fallback para log_audit para não perder o rastro
           if (error.code === '42501' || error.code === 'PGRST204') {
              await logAuditEvent({
                user_email: payload.updated_by,
                action: 'GPS_CONFIG_SYNC_FAIL',
-               details: `Falha ao sincronizar GPS da unidade ${unitId}. Erro: ${error.message}`,
+               details: `Falha ao sincronizar configuração de unidade ${unitId}. Erro: ${error.message}`,
                _tenantid: tenantId
              });
           }
         } else {
-          console.log('>>> [Supabase] GPS sincronizado com a nuvem com sucesso!');
+          console.log('>>> [Supabase] Configuração de unidade sincronizada com a nuvem com sucesso!');
         }
       } catch (err) {
         console.warn('>>> [Supabase] Erro silencioso na sincronização:', err);
@@ -2573,21 +2573,20 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
     if (!supabase) return Object.values(configs);
     
-    // 2. Tenta carregar da Nuvem (unit_gps_data) para atualizar o local
+    // 2. Tenta carregar da Nuvem (inventory_config) para atualizar o local
     try {
-      const cleanTenant = encodeURIComponent(String(tenantid || '').trim().replace(/[%_\s]+/g, ''));
       const { data, error } = await supabase
-        .from('unit_gps_data')
+        .from('inventory_config')
         .select('*')
-        .like('unit_key', `${cleanTenant}_%`);
+        .eq('tenantId', tenantid);
 
       if (data && !error) {
         data.forEach(item => {
-          const _tenantid = item.data._tenantid || item.data.tenant_id || tenantid;
-          const _unitid = item.data._unitid || item.data.unit_id;
+          const _tenantid = item.tenantId || item._tenantid || (item.data && (item.data._tenantid || item.data.tenant_id)) || tenantid;
+          const _unitid = item.filial || item._unitid || (item.data && (item.data._unitid || item.data.unit_id)) || 'MATRIZ';
           
           configs[_unitid] = {
-            ...item.data,
+            ...(item.data || {}),
             _tenantid,
             _unitid,
             tenant_id: _tenantid,
@@ -2599,12 +2598,13 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         const updatedLocal = { ...localData };
         data.forEach(item => { 
           const cloudTime = new Date(item.updated_at || 0).getTime();
-          const localItem = localData[item.unit_key];
+          const itemKey = item.filial || item.unit_key || `${item.tenantId || tenantid}_${item.filial || 'MATRIZ'}`;
+          const localItem = localData[itemKey];
           const localTime = localItem ? new Date(localItem.updated_at || 0).getTime() : 0;
           
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {
-            updatedLocal[item.unit_key] = item.data; 
+            updatedLocal[itemKey] = item.data || item; 
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
