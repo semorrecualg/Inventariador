@@ -3,6 +3,7 @@ import * as turf from '@turf/turf';
 import { ShieldAlert, Unlock, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UnitConfig } from '../types';
+import { getCurrentDeviceLocation } from '../utils/gpsUtils';
 
 interface GPSComplianceGuardProps {
   children: React.ReactNode;
@@ -67,17 +68,9 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
   useEffect(() => {
     let watchId: number | null = null;
+    let isActive = true;
 
-    if (isAdminUser) {
-      setStatus('bypassed');
-      // Mostra o toast informativo para o Admin por 5 segundos
-      setShowAdminToast(true);
-      const timer = setTimeout(() => setShowAdminToast(false), 5000);
-      onGpsStatusChange?.(true);
-      return () => clearTimeout(timer);
-    }
-
-    // Se estiver fora do modo de campo ou se não houver configuração de coordenada de âncora, assume liberação
+    // Se estiver fora do modo de campo ou se não houver configuração de coordenada de âncora, assume liberação rápida
     if (!isFieldMode || !unitConfig || !unitConfig.lat || !unitConfig.lng) {
       setStatus('granted');
       onGpsStatusChange?.(true);
@@ -100,53 +93,98 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           setStatus('granted');
           onGpsStatusChange?.(true);
         } else {
-          setStatus('out-of-range');
-          onGpsStatusChange?.(false);
+          if (isAdminUser) {
+            setStatus('bypassed');
+            onGpsStatusChange?.(true);
+            setShowAdminToast(true);
+          } else {
+            setStatus('out-of-range');
+            onGpsStatusChange?.(false);
+          }
         }
       } catch (err) {
         console.error('[Geofencing] Erro Turf.js ao calcular perímetro:', err);
         setStatus('granted'); // Failsafe para não travar em caso de erro matemático
+        onGpsStatusChange?.(true);
       }
     };
-
-    if (!navigator.geolocation) {
-      setStatus('denied');
-      onGpsStatusChange?.(false);
-      return;
-    }
 
     setStatus('checking');
 
-    // Primeira tentativa rápida
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        checkLocation(pos.coords.latitude, pos.coords.longitude);
-      },
-      (err) => {
-        console.warn('[Geofencing] Falha ao obter posição:', err);
-        setStatus('denied');
-        onGpsStatusChange?.(false);
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
-    );
+    const runLocationRetrieval = async () => {
+      try {
+        const roleStr = userRole || (isAdminUser ? 'ADMIN' : 'USER');
+        const anchorCoords = { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) };
+        
+        const geoResult = await getCurrentDeviceLocation(roleStr, anchorCoords);
+        
+        if (!isActive) return;
 
-    // Registro do monitor contínuo
-    watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        checkLocation(pos.coords.latitude, pos.coords.longitude);
-      },
-      (err) => {
-        console.warn('[Geofencing/Watch] Erro no monitoramento contínuo:', err);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
-    );
-
-    return () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
+        if (geoResult.isBypassed || geoResult.source === 'admin_bypass') {
+          console.warn("[GBR v2.6] Utilizando bypass administrativo em tela.");
+          setStatus('bypassed');
+          setUserLocation({ lat: geoResult.latitude, lng: geoResult.longitude });
+          setCurrentDistance(0);
+          setShowAdminToast(true);
+          onGpsStatusChange?.(true);
+          
+          // Oculta o toast após 5 segundos
+          const timer = setTimeout(() => {
+            if (isActive) setShowAdminToast(false);
+          }, 5000);
+          return () => clearTimeout(timer);
+        } else {
+          checkLocation(geoResult.latitude, geoResult.longitude);
+        }
+      } catch (err: unknown) {
+        if (!isActive) return;
+        console.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', err);
+        
+        if (isAdminUser) {
+          setStatus('bypassed');
+          setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
+          setCurrentDistance(0);
+          setShowAdminToast(true);
+          onGpsStatusChange?.(true);
+        } else {
+          setStatus('denied');
+          onGpsStatusChange?.(false);
+        }
       }
     };
-  }, [unitConfig, userRole, isFieldMode]);
+
+    runLocationRetrieval();
+
+    // Registro do monitor contínuo opcionalmente protegido
+    try {
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            if (isActive) {
+              checkLocation(pos.coords.latitude, pos.coords.longitude);
+            }
+          },
+          (err) => {
+            console.warn('[Geofencing/Watch] Erro no monitoramento contínuo (capturado e silenciado na guarda):', err.message);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+        );
+      }
+    } catch (watchErr) {
+      console.warn('[Geofencing/Watch] Falha síncrona ao registrar watchPosition (silenciada):', watchErr);
+    }
+
+    return () => {
+      isActive = false;
+      if (watchId !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch (e) {
+          console.warn('Erro ao limpar clearWatch:', e);
+        }
+      }
+    };
+  }, [unitConfig, userRole, isFieldMode, isAdminUser]);
 
   if (status === 'checking') {
     return (
@@ -245,6 +283,13 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {status === 'bypassed' && (
+        <div className="fixed bottom-4 right-4 z-[9998] pointer-events-auto bg-slate-900/95 backdrop-blur text-white px-3 py-1.5 rounded-full flex items-center gap-2 border border-emerald-500/30 shadow-lg text-[9px] font-bold uppercase tracking-wider animate-fadeIn">
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+          <span>Bypass GPS GBR Ativo ({unitConfig?.unit_id || 'Âncora'})</span>
+        </div>
+      )}
 
       {children}
     </div>

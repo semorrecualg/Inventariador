@@ -5,6 +5,71 @@ import { Geolocation } from '@capacitor/geolocation';
  * Utilitário para captura de geolocalização (GPS)
  */
 
+export interface GeoLocationResult {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  isBypassed: boolean;
+  source: 'native' | 'admin_bypass';
+}
+
+export async function getCurrentDeviceLocation(
+  userRole: string,
+  unitAnchorCoordinates?: { lat: number; lng: number }
+): Promise<GeoLocationResult> {
+  const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes((userRole || '').toUpperCase());
+
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    if (isAdmin && unitAnchorCoordinates) return getAdminFallback(unitAnchorCoordinates);
+    throw new Error("Geolocalização indisponível.");
+  }
+
+  try {
+    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      try {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0,
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      isBypassed: false,
+      source: 'native',
+    };
+  } catch (errorVal: unknown) {
+    const error = errorVal as { code?: string | number; message?: string; name?: string } | null;
+    const isPermissionViolation = 
+      (error && (error.code === 1 || String(error.code) === '1')) || 
+      (error && typeof error.message === 'string' && error.message.toLowerCase().includes('permissions policy')) ||
+      (error && typeof error.name === 'string' && error.name.toLowerCase().includes('securityerror'));
+
+    if (isPermissionViolation && isAdmin && unitAnchorCoordinates) {
+      console.warn("[GBR v2.6] Bloqueio de política de geolocalização detectado. Ativando bypass administrativo síncrono.");
+      return getAdminFallback(unitAnchorCoordinates);
+    }
+
+    throw new Error(`Falha de Geocerca: ${error && typeof error.message === 'string' ? error.message : 'Acesso negado à localização'}`);
+  }
+}
+
+function getAdminFallback(anchor: { lat: number; lng: number }): GeoLocationResult {
+  return {
+    latitude: anchor.lat,
+    longitude: anchor.lng,
+    accuracy: 1.0,
+    isBypassed: true,
+    source: 'admin_bypass',
+  };
+}
+
 export interface GpsLocation {
   lat: number;
   lng: number;
@@ -24,6 +89,11 @@ export const startAutonomousTracking = async () => {
 
   console.log('Iniciando Rastreamento Autônomo (Capacitor/Web)...');
   
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    console.warn('Autônomo: Geolocation desativado ou indisponível.');
+    return;
+  }
+
   try {
     watchId = await Geolocation.watchPosition(
       {
@@ -46,7 +116,10 @@ export const startAutonomousTracking = async () => {
           lastTimestamp = Date.now();
         }
       }
-    );
+    ).catch((e: unknown) => {
+      console.warn('Autônomo [Promise Catch]: erro ao registrar watchPosition (silenciado):', e);
+      return null;
+    });
   } catch (e) {
     console.error('Falha ao iniciar watchPosition:', e);
   }
