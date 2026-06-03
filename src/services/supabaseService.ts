@@ -2578,7 +2578,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       const { data, error } = await supabase
         .from('inventory_config')
         .select('*')
-        .eq('tenantId', tenantid);
+        .eq('tenantid', tenantid);
 
       if (data && !error) {
         data.forEach(item => {
