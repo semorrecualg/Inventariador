@@ -199,7 +199,18 @@ function createSupabaseInterceptor(originalClient: any) {
             // 2. Intercept Filter Methods
             if (prop === 'eq' || prop === 'neq' || prop === 'like' || prop === 'ilike' || prop === 'gt' || prop === 'lt' || prop === 'gte' || prop === 'lte') {
               if (args[0] && typeof args[0] === 'string') {
-                args[0] = mapColumnName(args[0]);
+                if (tableName === 'inventory_config' || tableName === 'unit_gps_data') {
+                  const lowerCol = args[0].toLowerCase().trim();
+                  if (lowerCol === '_tenantid' || lowerCol === 'tenant_id' || lowerCol === 'tenantid') {
+                    args[0] = 'tenantid';
+                  } else if (lowerCol === '_unitid' || lowerCol === 'unit_id' || lowerCol === 'unitid') {
+                    args[0] = 'filial';
+                  } else {
+                    args[0] = mapColumnName(args[0]);
+                  }
+                } else {
+                  args[0] = mapColumnName(args[0]);
+                }
               }
               if (args[1] === undefined || args[1] === null) {
                 console.error(`>>> [Supabase Interceptor] Bloqueado filtro eq/in com nulo para a coluna '${args[0]}' na tabela '${tableName}'.`);
@@ -216,7 +227,18 @@ function createSupabaseInterceptor(originalClient: any) {
 
             if (prop === 'in' || prop === 'containedBy') {
               if (args[0] && typeof args[0] === 'string') {
-                args[0] = mapColumnName(args[0]);
+                if (tableName === 'inventory_config' || tableName === 'unit_gps_data') {
+                  const lowerCol = args[0].toLowerCase().trim();
+                  if (lowerCol === '_tenantid' || lowerCol === 'tenant_id' || lowerCol === 'tenantid') {
+                    args[0] = 'tenantid';
+                  } else if (lowerCol === '_unitid' || lowerCol === 'unit_id' || lowerCol === 'unitid') {
+                    args[0] = 'filial';
+                  } else {
+                    args[0] = mapColumnName(args[0]);
+                  }
+                } else {
+                  args[0] = mapColumnName(args[0]);
+                }
               }
               if (!args[1] || !Array.isArray(args[1]) || args[1].some(v => v === undefined || v === null)) {
                 console.error(`>>> [Supabase Interceptor] Bloqueado filtro 'in' inválido para a coluna '${args[0]}' na tabela '${tableName}'.`);
