@@ -216,6 +216,7 @@ export const photoSyncManager = {
 
 let isSyncSuspendedDueToAuth = false;
 let syncSuspensionTimer: ReturnType<typeof setTimeout> | null = null;
+let nextAllowedDataSyncTime = 0;
 
 export const syncService = {
   /**
@@ -236,6 +237,12 @@ export const syncService = {
       console.warn(">>> [Sync] Sincronização de dados temporariamente suspensa por erro de autorização/RLS na nuvem. Mantendo dados retidos localmente.");
       return { success: false, processedCount: 0, error: "Sincronização suspensa por falha de permissão ativa." };
     }
+    
+    // Freio Atômico: Bloqueia execução redundante se a fila local estava vazia e o freio de 15 minutos foi ativado
+    if (Date.now() < nextAllowedDataSyncTime) {
+      return { success: true, processedCount: 0 };
+    }
+    
     return await syncService.syncHybridBatch(_tenantid);
   },
 
@@ -285,6 +292,8 @@ export const syncService = {
       const rawAssets = result as Record<string, any>[];
       
       if (!rawAssets || rawAssets.length === 0) {
+        console.log(">>> [Sync] Fila local limpa (zero linhas pendentes). Ativando freio atômico de 15 minutos.");
+        nextAllowedDataSyncTime = Date.now() + 15 * 60 * 1000; // Incrementa 15 minutos de folga para poupar bateria/CPU
         return { success: true, processedCount: 0 };
       }
 
@@ -611,6 +620,11 @@ if (typeof window !== 'undefined') {
     processPhotoSyncQueue().catch(console.error);
     processDataSyncQueue().catch(console.error);
     processCampaignSyncQueue().catch(console.error);
+  });
+
+  window.addEventListener('gbr_physical_write', () => {
+    console.log(">>> [Sync] Nova gravação física detectada no banco. Resetando freio temporal.");
+    nextAllowedDataSyncTime = 0;
   });
 
   // Intervalo de segurança para sincronização de dados (registros, fotos e campanhas)

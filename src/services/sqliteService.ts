@@ -721,7 +721,7 @@ class SqliteService {
 
   private async ensureRequiredColumns() {
     if (!this.nativeDb) return;
-    const tables = ['ativos', 'campaigns'];
+    const tables = ['ativos', 'assets', 'campaigns'];
     for (const table of tables) {
       const res = await this.query(`PRAGMA table_info(${table})`);
       if (res && res.length > 0) {
@@ -734,7 +734,7 @@ class SqliteService {
           if (!columns.includes('_unitid')) await this.execute("ALTER TABLE campaigns ADD COLUMN _unitid TEXT");
         }
         
-        if (table === 'ativos') {
+        if (table === 'ativos' || table === 'assets') {
           const required = [
             'DESCRICAODOATIVO', 'CENTRODECUSTO', 'conta_contabil', 'contacontabil', 'dataaqusic', 'QT',
             'currentCampaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
@@ -754,34 +754,34 @@ class SqliteService {
                 type = 'REAL';
               }
               try {
-                await this.execute(`ALTER TABLE ativos ADD COLUMN ${col} ${type}`);
+                await this.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
               } catch { /* Ignora se já existir */ }
               
               // Migração de Legado (Se existirem colunas antigas)
               if (col === 'DESCRICAODOATIVO' && columns.includes('DESCRICAODOBEM')) {
-                try { await this.execute("UPDATE ativos SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET DESCRICAODOATIVO = DESCRICAODOBEM WHERE DESCRICAODOATIVO IS NULL`); } catch (e) { console.warn(e); }
               }
               if (col === 'CENTRODECUSTO' && columns.includes('CC_CUSTO')) {
-                try { await this.execute("UPDATE ativos SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET CENTRODECUSTO = CC_CUSTO WHERE CENTRODECUSTO IS NULL`); } catch (e) { console.warn(e); }
               }
               if (col === 'conta_contabil' && columns.includes('CONTACONTABIL')) {
-                try { await this.execute("UPDATE ativos SET conta_contabil = CONTACONTABIL WHERE conta_contabil IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET conta_contabil = CONTACONTABIL WHERE conta_contabil IS NULL`); } catch (e) { console.warn(e); }
               }
               if (col === 'latitude' && columns.includes('_lat')) {
-                try { await this.execute("UPDATE ativos SET latitude = _lat WHERE latitude IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET latitude = _lat WHERE latitude IS NULL`); } catch (e) { console.warn(e); }
               }
               if (col === 'longitude' && columns.includes('_lng')) {
-                try { await this.execute("UPDATE ativos SET longitude = _lng WHERE longitude IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET longitude = _lng WHERE longitude IS NULL`); } catch (e) { console.warn(e); }
               }
               if (col === 'currentCampaignId' && columns.includes('_campaignId')) {
-                try { await this.execute("UPDATE ativos SET currentCampaignId = _campaignId WHERE currentCampaignId IS NULL"); } catch (e) { console.warn(e); }
+                try { await this.execute(`UPDATE ${table} SET currentCampaignId = _campaignId WHERE currentCampaignId IS NULL`); } catch (e) { console.warn(e); }
               }
             }
           }
           
           // Garantir valores padrão para colunas vitais
           if (columns.includes('_version')) {
-             try { await this.execute("UPDATE ativos SET _version = 1 WHERE _version IS NULL"); } catch (e) { console.warn(e); }
+             try { await this.execute(`UPDATE ${table} SET _version = 1 WHERE _version IS NULL`); } catch (e) { console.warn(e); }
           }
         }
       }
@@ -1050,13 +1050,25 @@ class SqliteService {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN STATUS TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
       try {
+        await this.nativeDb.run("ALTER TABLE assets ADD COLUMN STATUS TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN DATABAIXA TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE assets ADD COLUMN DATABAIXA TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
       try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN SUBREG TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
       try {
+        await this.nativeDb.run("ALTER TABLE assets ADD COLUMN SUBREG TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
         await this.nativeDb.run("ALTER TABLE ativos ADD COLUMN PRIMARYKEY TEXT;");
+      } catch { /* ignorado se a coluna já existe */ }
+      try {
+        await this.nativeDb.run("ALTER TABLE assets ADD COLUMN PRIMARYKEY TEXT;");
       } catch { /* ignorado se a coluna já existe */ }
 
       // 5. Salvaguarda de Inicialização (Evita falha de tabela vazia no primeiro SELECT do App.tsx)
@@ -1187,6 +1199,10 @@ class SqliteService {
 
     try {
       await this.nativeDb.run(normalizedSql, params);
+      
+      if (isWrite && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gbr_physical_write'));
+      }
       
       this.mutationCounter++;
       if (this.mutationCounter >= this.MUTATION_THRESHOLD) {
