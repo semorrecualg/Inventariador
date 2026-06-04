@@ -11,7 +11,7 @@ import { formatErrorMessage } from '../utils/errorUtils';
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 
-import { generateUUID } from '../services/supabaseService';
+import { generateUUID, supabase } from '../services/supabaseService';
 import { Asset, User, ModalConfig, DatabaseMode, DatabaseStatus, InventoryState } from '../types';
 import { saveInventory } from '../services/persistenceService';
 
@@ -492,18 +492,11 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           sqlStatements.push(`INSERT OR REPLACE INTO ativos_imobilizados (Sn1_recno, Sn3_recno, id, codigo_ativo, conta_contabil, _origemTransacao, _status_sinc) VALUES (${rSn1Recno}, ${rSn3Recno}, '${cleanId}', '${cleanEtiqueta}', '${cleanContacontabil}', 200, 0);`);
           
           sqlStatements.push(`INSERT OR REPLACE INTO ativos (
-            id, ETIQUETA, REGISTRO, DESCRICAODOATIVO, conta_contabil, 
-            UNIDADE_OPERACIONAL, CENTRODECUSTO, VLRAQUISIC, DATAAQUISIC, 
-            QT, GRUPO_EMPRESARIAL, ENDERECO, _origemTransacao,
-            latitude, longitude, _altitude_metros, _id_andar, currentCampaignId,
-            _tenantid, _unitid, tenantId, filial, SERIAL, CNPJ, NOMEFORNECEDOR, NOTAFISCAL, SUBREG, PRIMARYKEY, DATABAIXA, TAG_INVENTARIO
+            id, tenantId, filial, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno,
+            _origemTransacao, latitude, longitude, _altitude_metros, _id_andar, currentCampaignId, _tenantid, _unitid, TAG_INVENTARIO, conta_contabil, DESCRICAODOATIVO, VLRAQUISIC, DATAAQUISIC, QT, REGISTRO, CENTRODECUSTO
           ) VALUES (
-            '${cleanId}', '${cleanEtiqueta}', '${cleanRegistro}', '${cleanDesc}', '${cleanContacontabil}', 
-            '${normalFilial}', '${cleanCentrodecusto}', ${rVlrAquisic}, '${cleanDataaqusic}', 
-            '${cleanQt}', '${normalTenant}', '${cleanEndereco}', 'EXPERT_LOAD',
-            NULL, NULL, NULL, 0, '${DEFAULT_CAMPAIGN_ID}',
-            '${normalTenant}', '${normalFilial}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}',
-            '${cleanSerial}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanSubreg}', '${cleanPrimarykey}', '${cleanDatabaixa}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}'
+            '${cleanId}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanEtiqueta}', '${cleanQt}', '${cleanDesc}', '${cleanSerial}', '${cleanDataaqusic}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanEndereco}', '${cleanRegistro}', '${cleanSubreg}', '${cleanDatabaixa}', '${cleanContacontabil}', '${cleanPrimarykey}', '${cleanCentrodecusto}', ${rVlrAquisic}, ${rSn1Recno}, ${rSn3Recno},
+            'EXPERT_LOAD', NULL, NULL, NULL, 0, '${DEFAULT_CAMPAIGN_ID}', '${normalTenant}', '${normalFilial}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanContacontabil}', '${cleanDesc}', ${rVlrAquisic}, '${cleanDataaqusic}', '${cleanQt}', '${cleanRegistro}', '${cleanCentrodecusto}'
           );`);
         }
 
@@ -530,6 +523,139 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
       sqliteService.mutationCounter = 0;
       await sqliteService.saveDatabase();
+      
+      // Backup silencioso em background para o Supabase pós-carga
+      if (supabase && typeof window !== 'undefined') {
+        const rowsCopy = [...rows];
+        Promise.resolve().then(async () => {
+          try {
+            console.log("Iniciando backup silencioso para o Supabase...");
+            const cloudAssets = rowsCopy.map((row) => {
+              let rTenantId = 'CICOPAL';
+              let rFilial = 'MATRIZ';
+              let rStatus = 'PENDENTE';
+              let rEtiqueta = '';
+              let rQt = '1';
+              let rDescricaodoativo = 'Importado via Expert';
+              let rSerial = '';
+              let rDataaqusic = '';
+              let rCnpj = '';
+              let rNomefornecedor = '';
+              let rNotafiscal = '';
+              let rEndereco = '';
+              let rRegistro = '';
+              let rSubreg = '';
+              let rDatabaixa = '';
+              let rContacontabil = '';
+              let rPrimarykey = '';
+              let rCentrodecusto = '';
+              let rVlrAquisic = 0;
+              let rSn1Recno = 0;
+              let rSn3Recno = 0;
+
+              if (Array.isArray(row)) {
+                rTenantId = cleanValue(row[0]) || 'CICOPAL';
+                rFilial = cleanValue(row[1]) || 'MATRIZ';
+                rStatus = cleanValue(row[2]) || 'PENDENTE';
+                rEtiqueta = cleanValue(row[3]);
+                rQt = cleanValue(row[4]) || '1';
+                rDescricaodoativo = cleanValue(row[5]) || 'Importado via Expert';
+                rSerial = cleanValue(row[6]);
+                rDataaqusic = cleanValue(row[7]);
+                rCnpj = cleanValue(row[8]);
+                rNomefornecedor = cleanValue(row[9]);
+                rNotafiscal = cleanValue(row[10]);
+                rEndereco = cleanValue(row[11]);
+                rRegistro = cleanValue(row[12]) || rEtiqueta;
+                rSubreg = cleanValue(row[13]);
+                rDatabaixa = cleanValue(row[14]);
+                rContacontabil = cleanValue(row[15]);
+                rPrimarykey = cleanValue(row[16]);
+                rCentrodecusto = cleanValue(row[17]);
+                rVlrAquisic = Number(row[18]) || 0;
+                rSn1Recno = parseInt(String(row[19] || '0'), 10) || 0;
+                rSn3Recno = parseInt(String(row[20] || '0'), 10) || 0;
+              } else if (row && typeof row === 'object') {
+                const rObj = row as Record<string, unknown>;
+                const rowKeys = Object.keys(rObj);
+                const findVal = (priorities: string[]) => {
+                  const key = rowKeys.find(k => priorities.includes(k.toUpperCase().replace(/\s/g, '_').replace(/_/g, '')));
+                  return key ? rObj[key] : null;
+                };
+
+                rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
+                rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
+                rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
+                rEtiqueta = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
+                rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
+                rDescricaodoativo = cleanValue(findVal(['DESCRICAODOATIVO', 'DESCRICAO', 'BEM', 'NOME_BEM'])) || 'Importado via Expert';
+                rSerial = cleanValue(findVal(['SERIAL', 'NUMERO_SERIE', 'SERIE']));
+                rDataaqusic = cleanValue(findVal(['DATAAQUISIC', 'DATA_AQUISICAO', 'DATA_AQUISIC', 'DATAAQUSIC']));
+                rCnpj = cleanValue(findVal(['CNPJ', 'CNPJ_FORNECEDOR']));
+                rNomefornecedor = cleanValue(findVal(['NOMEFORNECEDOR', 'FORNECEDOR', 'NOME_FORNECEDOR']));
+                rNotafiscal = cleanValue(findVal(['NOTAFISCAL', 'NF', 'NOTA_FISCAL']));
+                rEndereco = cleanValue(findVal(['ENDERECO', 'LOCALIZACAO', 'LOCAL']));
+                rRegistro = cleanValue(findVal(['REGISTRO', 'PATRIMONIO'])) || rEtiqueta;
+                rSubreg = cleanValue(findVal(['SUBREG', 'SUB_REGISTRO', 'SUBREGISTRO']));
+                rDatabaixa = cleanValue(findVal(['DATABAIXA', 'DATA_BAIXA']));
+                rContacontabil = cleanValue(findVal(['CONTACONTABIL', 'CONTA_CONTABIL', 'CONTA']));
+                rPrimarykey = cleanValue(findVal(['PRIMARYKEY', 'PRIMARY_KEY', 'CHAVE_ERP', 'ID']));
+                rCentrodecusto = cleanValue(findVal(['CENTRODECUSTO', 'CENTRO_DE_CUSTO', 'CC', 'CCUSTO']));
+                rVlrAquisic = Number(findVal(['VLRAQUISIC', 'VALOR_AQUISICAO', 'VALOR', 'PRECO']) || 0) || 0;
+                rSn1Recno = parseInt(String(findVal(['SN1_RECNO', 'SN1_REC_NO']) || '0'), 10) || 0;
+                rSn3Recno = parseInt(String(findVal(['SN3_RECNO', 'SN3_REC_NO']) || '0'), 10) || 0;
+              }
+
+              const pkeyVal = rPrimarykey || rEtiqueta || generateUUID();
+              return {
+                id: String(pkeyVal),
+                '"tenantId"': rTenantId,
+                tenantId: rTenantId,
+                filial: rFilial,
+                status: rStatus.toUpperCase().trim() || 'PENDENTE',
+                etiqueta: rEtiqueta,
+                qt: Number(rQt) || 1,
+                descricaodoativo: rDescricaodoativo,
+                serial: rSerial,
+                dataaqusic: rDataaqusic,
+                cnpj: rCnpj,
+                nomefornecedor: rNomefornecedor,
+                notafiscal: rNotafiscal,
+                endereco: rEndereco,
+                registro: rRegistro || rEtiqueta,
+                subreg: rSubreg,
+                databaixa: rDatabaixa,
+                contacontabil: rContacontabil,
+                primarykey: rPrimarykey,
+                centrodecusto: rCentrodecusto,
+                vlraquisic: rVlrAquisic,
+                sn1_recno: rSn1Recno,
+                sn3_recno: rSn3Recno,
+                _tenantid: rTenantId,
+                _unitid: rFilial
+              };
+            });
+
+            const BATCH_SIZE = 200;
+            let successCloudCount = 0;
+            for (let chunkIdx = 0; chunkIdx < cloudAssets.length; chunkIdx += BATCH_SIZE) {
+              const chunk = cloudAssets.slice(chunkIdx, chunkIdx + BATCH_SIZE);
+              const { error: cloudErr } = await supabase
+                .from('assets')
+                .upsert(chunk, { onConflict: 'id' });
+
+              if (cloudErr) {
+                console.error(`>>> [Supabase Silent Backup Error] failed at chunk ${chunkIdx}:`, cloudErr);
+              } else {
+                successCloudCount += chunk.length;
+              }
+            }
+            console.log(`>>> [Supabase Silent Backup] finalizado: ${successCloudCount} ativos replicados.`);
+          } catch (supErr: unknown) {
+            console.error(">>> [Supabase Silent Backup Error] Falha geral no background:", supErr);
+          }
+        });
+      }
       
       addLog("Carga expert concluída!");
       addLog("Iniciando auto-ativação do sistema...");

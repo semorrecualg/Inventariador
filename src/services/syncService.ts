@@ -249,7 +249,7 @@ export const syncService = {
 
       // 1. Busca lote de até 200 registros modificados localmente (Soberania Offline - Teto de I/O)
       const queryLocal = `
-        SELECT * FROM assets 
+        SELECT * FROM ativos 
         WHERE _is_synced = 0 AND _is_deleted = 0 
         LIMIT 200
       `;
@@ -262,10 +262,13 @@ export const syncService = {
       }
 
       // 2. Sanitiza o payload limpando buffers temporários de memória baseados no schema GBR v2.6
+      // 3. Casamento de Chaves da Planilha Excel (21 propriedades higienizadas em lowercase/CamelCase)
       const sanitizedAssets = rawAssets.map((asset) => {
+        const tId = asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL');
         return {
           id: String(asset.id || ''),
-          tenantId: asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL'),
+          '"tenantId"': tId,
+          tenantId: tId,
           filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ'),
           status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
           etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
@@ -279,6 +282,7 @@ export const syncService = {
           endereco: asset.endereco ? String(asset.endereco).trim() : (asset.ENDERECO ? String(asset.ENDERECO).trim() : ''),
           registro: asset.registro ? String(asset.registro).trim() : (asset.REGISTRO ? String(asset.REGISTRO).trim() : ''),
           subreg: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
+          sub_registro: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
           databaixa: asset.databaixa ? String(asset.databaixa).trim() : (asset.DATABAIXA ? String(asset.DATABAIXA).trim() : ''),
           contacontabil: asset.contacontabil ? String(asset.contacontabil).trim() : (asset.conta_contabil ? String(asset.conta_contabil).trim() : ''),
           primarykey: String(asset.primarykey !== undefined && asset.primarykey !== null ? asset.primarykey : (asset.PRIMARYKEY !== undefined && asset.PRIMARYKEY !== null ? asset.PRIMARYKEY : '')).trim(),
@@ -288,19 +292,41 @@ export const syncService = {
           sn3_recno: asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null),
           
           latitude: asset.latitude ? Number(asset.latitude) : null,
-          longitude: asset.longitude ? Number(asset.longitude) : null,
-          _conferido: Boolean(asset._conferido),
-          _tenantid: asset._tenantid ? String(asset._tenantid).trim() : (asset.tenantId ? String(asset.tenantId).trim() : 'CICOPAL'),
-          _unitid: asset._unitid ? String(asset._unitid).trim() : (asset.filial ? String(asset.filial).trim() : 'MATRIZ'),
-          _version: Number(asset._version || 1),
-          _is_synced: asset._is_synced !== undefined ? Number(asset._is_synced) : 0,
-          _is_deleted: asset._is_deleted !== undefined ? Number(asset._is_deleted) : 0
+          longitude: asset.longitude ? Number(asset.longitude) : null
         };
       });
 
-      // 3. Upsert na tabela remota do Supabase limpando propriedades locais (v2.6)
-      /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-      const payloadSanitizada = (sanitizedAssets as Record<string, unknown>[]).map(({ _version, _unitid, latitude, longitude, _is_synced, _is_deleted, _conferido, _tenantid, ...resto }) => resto);
+      // 3. Upsert na tabela remota do Supabase limpando propriedades locais e mapeando '"tenantId"' para transporte robusto
+      const payloadSanitizada = sanitizedAssets.map((asset) => {
+        return {
+          id: asset.id,
+          '"tenantId"': asset['"tenantId"'],
+          tenantId: asset.tenantId,
+          filial: asset.filial,
+          status: asset.status,
+          etiqueta: asset.etiqueta,
+          qt: asset.qt,
+          descricaodoativo: asset.descricaodoativo,
+          serial: asset.serial,
+          dataaqusic: asset.dataaqusic,
+          cnpj: asset.cnpj,
+          nomefornecedor: asset.nomefornecedor,
+          notafiscal: asset.notafiscal,
+          endereco: asset.endereco,
+          registro: asset.registro,
+          subreg: asset.subreg,
+          sub_registro: asset.sub_registro,
+          databaixa: asset.databaixa,
+          contacontabil: asset.contacontabil,
+          primarykey: asset.primarykey,
+          centrodecusto: asset.centrodecusto,
+          vlraquisic: asset.vlraquisic,
+          sn1_recno: asset.sn1_recno,
+          sn3_recno: asset.sn3_recno,
+          latitude: asset.latitude,
+          longitude: asset.longitude
+        };
+      });
 
       const { error: supabaseError } = await supabase
         .from('assets')
@@ -311,7 +337,7 @@ export const syncService = {
       // 4. Atualiza o status local escapando caracteres especiais nos IDs alfanuméricos complexos
       const idsProcessados = sanitizedAssets.map(a => `'${a.id.replace(/'/g, "''")}'`).join(',');
       const updateLocalQuery = `
-        UPDATE assets 
+        UPDATE ativos 
         SET _is_synced = 1 
         WHERE id IN (${idsProcessados})
       `;

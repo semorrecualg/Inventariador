@@ -75,9 +75,12 @@ interface InterceptResult {
 const infrastructureTables = ['tenants', 'filial', 'camposAlterados', 'inventory_config', 'unit_gps_data', 'unit_configs'];
 
 const mapColumnName = (col: string): string => {
-  const lower = col.toLowerCase().trim();
+  let lower = col.toLowerCase().trim();
+  if (lower.startsWith('"') && lower.endsWith('"')) {
+    lower = lower.substring(1, lower.length - 1);
+  }
   if (lower === '_tenantid' || lower === 'tenant_id' || lower === 'tenantid') {
-    return 'tenantId';
+    return '"tenantId"';
   }
   if (lower === '_unitid' || lower === 'unit_id' || lower === 'unitid') {
     return 'filial';
@@ -117,14 +120,19 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
     if (typeof item !== 'object' || item === null) return item;
     const copy = { ...item };
     
-    // Map tenant keys to tenantId
-    const tenantKeys = ['_tenantid', 'tenant_id', 'tenantid'];
+    // Map tenant keys to tenantId / "tenantId" delimited
+    const tenantKeys = ['_tenantid', 'tenant_id', 'tenantid', 'tenantId', '"tenantId"'];
     for (const k of tenantKeys) {
       if (k in copy) {
+        if (copy['"tenantId"'] === undefined) {
+          copy['"tenantId"'] = copy[k];
+        }
         if (copy.tenantId === undefined) {
           copy.tenantId = copy[k];
         }
-        delete copy[k];
+        if (k !== '"tenantId"' && k !== 'tenantId') {
+          delete copy[k];
+        }
       }
     }
 
@@ -199,18 +207,7 @@ function createSupabaseInterceptor(originalClient: any) {
             // 2. Intercept Filter Methods
             if (prop === 'eq' || prop === 'neq' || prop === 'like' || prop === 'ilike' || prop === 'gt' || prop === 'lt' || prop === 'gte' || prop === 'lte') {
               if (args[0] && typeof args[0] === 'string') {
-                if (tableName === 'inventory_config' || tableName === 'unit_gps_data') {
-                  const lowerCol = args[0].toLowerCase().trim();
-                  if (lowerCol === '_tenantid' || lowerCol === 'tenant_id' || lowerCol === 'tenantid') {
-                    args[0] = 'tenantid';
-                  } else if (lowerCol === '_unitid' || lowerCol === 'unit_id' || lowerCol === 'unitid') {
-                    args[0] = 'filial';
-                  } else {
-                    args[0] = mapColumnName(args[0]);
-                  }
-                } else {
-                  args[0] = mapColumnName(args[0]);
-                }
+                args[0] = mapColumnName(args[0]);
               }
               if (args[1] === undefined || args[1] === null) {
                 console.error(`>>> [Supabase Interceptor] Bloqueado filtro eq/in com nulo para a coluna '${args[0]}' na tabela '${tableName}'.`);
@@ -227,18 +224,7 @@ function createSupabaseInterceptor(originalClient: any) {
 
             if (prop === 'in' || prop === 'containedBy') {
               if (args[0] && typeof args[0] === 'string') {
-                if (tableName === 'inventory_config' || tableName === 'unit_gps_data') {
-                  const lowerCol = args[0].toLowerCase().trim();
-                  if (lowerCol === '_tenantid' || lowerCol === 'tenant_id' || lowerCol === 'tenantid') {
-                    args[0] = 'tenantid';
-                  } else if (lowerCol === '_unitid' || lowerCol === 'unit_id' || lowerCol === 'unitid') {
-                    args[0] = 'filial';
-                  } else {
-                    args[0] = mapColumnName(args[0]);
-                  }
-                } else {
-                  args[0] = mapColumnName(args[0]);
-                }
+                args[0] = mapColumnName(args[0]);
               }
               if (!args[1] || !Array.isArray(args[1]) || args[1].some(v => v === undefined || v === null)) {
                 console.error(`>>> [Supabase Interceptor] Bloqueado filtro 'in' inválido para a coluna '${args[0]}' na tabela '${tableName}'.`);
@@ -1558,7 +1544,7 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         const targetAsset = newAsset || oldAsset;
 
         if (targetAsset && tenantid) {
-          const assetTenant = targetAsset._tenantid;
+          const assetTenant = targetAsset._tenantid || targetAsset.tenantId;
           const isAllowed = Array.isArray(tenantid) 
             ? tenantid.includes(assetTenant || '')
             : (assetTenant || '') === tenantid;
@@ -2600,7 +2586,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       const { data, error } = await supabase
         .from('inventory_config')
         .select('*')
-        .eq('tenantid', tenantid);
+        .eq('tenantId', tenantid);
 
       if (data && !error) {
         data.forEach(item => {

@@ -13,14 +13,89 @@ export interface GeoLocationResult {
   source: 'native' | 'admin_bypass';
 }
 
+function showFloatingBypassToast(lat: number, lng: number, reason: string) {
+  if (typeof document === 'undefined') return;
+  
+  // Remove qualquer toast flutuante existente para não poluir
+  const existing = document.getElementById('gbr-gps-bypass-toast');
+  if (existing) {
+    existing.remove();
+  }
+  
+  const div = document.createElement('div');
+  div.id = 'gbr-gps-bypass-toast';
+  div.style.position = 'fixed';
+  div.style.top = '16px';
+  div.style.left = '50%';
+  div.style.transform = 'translateX(-50%)';
+  div.style.zIndex = '10000';
+  div.style.backgroundColor = '#0f172a'; // slate-900
+  div.style.color = '#34d399'; // emerald-400
+  div.style.border = '1px solid rgba(52, 211, 153, 0.3)';
+  div.style.padding = '12px 18px';
+  div.style.borderRadius = '16px';
+  div.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)';
+  div.style.display = 'flex';
+  div.style.flexDirection = 'column';
+  div.style.gap = '2px';
+  div.style.fontFamily = 'monospace';
+  div.style.fontSize = '10px';
+  div.style.fontWeight = 'bold';
+  div.style.textTransform = 'uppercase';
+  div.style.letterSpacing = '0.05em';
+  div.style.maxWidth = '300px';
+  div.style.width = 'max-content';
+  div.style.transition = 'opacity 0.3s ease-in-out';
+  
+  div.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 6px; font-weight: 900; color: #10b981;">
+      <span style="display: inline-block; width: 6px; height: 6px; background-color: #10b981; border-radius: 50%; animation: pulse 1.5s infinite;"></span>
+      BYPASS GPS GBR ATIVO
+    </div>
+    <div style="color: #cbd5e1; margin-top: 4px;">Lat: ${lat.toFixed(6)}</div>
+    <div style="color: #cbd5e1;">Lng: ${lng.toFixed(6)}</div>
+    <div style="color: #94a3b8; font-size: 8px; margin-top: 3px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 3px;">Motivo: ${reason}</div>
+  `;
+  
+  if (!document.getElementById('gbr-toast-keyframes')) {
+    const style = document.createElement('style');
+    style.id = 'gbr-toast-keyframes';
+    style.innerHTML = `
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(1.2); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(div);
+  
+  setTimeout(() => {
+    if (div.parentNode) {
+      div.style.opacity = '0';
+      setTimeout(() => div.remove(), 300);
+    }
+  }, 4000);
+}
+
 export async function getCurrentDeviceLocation(
   userRole: string,
   unitAnchorCoordinates?: { lat: number; lng: number }
 ): Promise<GeoLocationResult> {
   const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes((userRole || '').toUpperCase());
 
+  // Se o perfil logado for administrativo, aplica bypass síncrono imediatamente
+  if (isAdmin && unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
+    showFloatingBypassToast(unitAnchorCoordinates.lat, unitAnchorCoordinates.lng, 'Soberania Admin (Ativa)');
+    return getAdminFallback(unitAnchorCoordinates);
+  }
+
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    if (isAdmin && unitAnchorCoordinates) return getAdminFallback(unitAnchorCoordinates);
+    if (unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
+      showFloatingBypassToast(unitAnchorCoordinates.lat, unitAnchorCoordinates.lng, 'API Inexistente (Bypass)');
+      return getAdminFallback(unitAnchorCoordinates);
+    }
     throw new Error("Geolocalização indisponível.");
   }
 
@@ -46,13 +121,15 @@ export async function getCurrentDeviceLocation(
     };
   } catch (errorVal: unknown) {
     const error = errorVal as { code?: string | number; message?: string; name?: string } | null;
-    const isPermissionViolation = 
-      (error && (error.code === 1 || String(error.code) === '1')) || 
-      (error && typeof error.message === 'string' && error.message.toLowerCase().includes('permissions policy')) ||
-      (error && typeof error.name === 'string' && error.name.toLowerCase().includes('securityerror'));
-
-    if (isPermissionViolation && isAdmin && unitAnchorCoordinates) {
-      console.warn("[GBR v2.6] Bloqueio de política de geolocalização detectado. Ativando bypass administrativo síncrono.");
+    
+    // Se a permissão for negada/bloqueada, ou houver erro/timeout, aplica o bypass se tivermos as coordenadas da filial
+    if (unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
+      console.warn("[GBR v2.6] Falha ou bloqueio de geolocalização detectado. Ativando bypass administrativo de conformidade.");
+      showFloatingBypassToast(
+        unitAnchorCoordinates.lat,
+        unitAnchorCoordinates.lng,
+        error?.message || 'Permissão de GPS bloqueada'
+      );
       return getAdminFallback(unitAnchorCoordinates);
     }
 

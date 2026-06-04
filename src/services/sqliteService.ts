@@ -258,6 +258,8 @@ const FULL_SCHEMA = `
     DATAAQUISIC TEXT,
     CENTRODECUSTO TEXT,
     conta_contabil TEXT,
+    contacontabil TEXT,
+    dataaqusic TEXT,
     TAG_INVENTARIO TEXT,
     ESTADO_CONSERVACAO TEXT,
     GRUPO_EMPRESARIAL TEXT,
@@ -661,7 +663,7 @@ class SqliteService {
         
         if (table === 'ativos') {
           const required = [
-            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'conta_contabil', 'QT',
+            'DESCRICAODOATIVO', 'CENTRODECUSTO', 'conta_contabil', 'contacontabil', 'dataaqusic', 'QT',
             'currentCampaignId', '_tenantid', '_unitid', '_version', '_is_deleted',
             '_conferido', '_lastUpdated', '_is_synced', '_parent_id',
             '_localMaster', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
