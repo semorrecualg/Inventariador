@@ -10,6 +10,7 @@ const ASSET_COLUMNS = DB_ASSET_COLUMNS;
 
 export const TABLE_COLUMNS: Record<string, string[]> = {
   ativos: ASSET_COLUMNS,
+  assets: ASSET_COLUMNS,
   users: ['id', 'username', 'name', 'email', 'password', 'role', 'is_admin', '_tenantid', '_unitid'],
   unit_configs: ['id', 'selectedUnit', 'currentCampaignId', 'updated_at']
 };
@@ -42,7 +43,7 @@ const handleDemoAuditIncrement = () => {
 // Helper para converter objeto em colunas e valores SQL, filtrando chaves inválidas
 export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => {
   const obj = { ...srcObj };
-  if (table === 'ativos') {
+  if (table === 'ativos' || table === 'assets') {
     const tenant = getCurrentTenantId();
     if (!obj.tenantId) obj.tenantId = tenant;
     if (!obj._tenantid) obj._tenantid = tenant;
@@ -70,8 +71,10 @@ export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => 
 export const localDb = {
   assets: {
     add: async (asset: Asset, userId?: string) => {
-      const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-      await sqliteService.execute(sql, values);
+      const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
+      const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
+      await sqliteService.execute(uAtivos.sql, uAtivos.values);
+      await sqliteService.execute(uAssets.sql, uAssets.values);
       handleDemoAuditIncrement();
       if (userId) {
         await sqliteService.logAuditEvent(userId, 'CREATE', 'ativos', asset.id, 'Criação de ativo manual', JSON.stringify(asset));
@@ -81,8 +84,10 @@ export const localDb = {
     _mutationBuffer: [] as { sql: string; params: SqlValue[] }[],
     
     put: async (asset: Asset, userId?: string) => {
-      const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-      localDb.assets._mutationBuffer.push({ sql, params: values });
+      const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
+      const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
+      localDb.assets._mutationBuffer.push({ sql: uAtivos.sql, params: uAtivos.values });
+      localDb.assets._mutationBuffer.push({ sql: uAssets.sql, params: uAssets.values });
       handleDemoAuditIncrement();
       
       if (userId) {
@@ -108,7 +113,7 @@ export const localDb = {
       const tenant = getCurrentTenantId();
       const sql = `
         SELECT *
-        FROM ativos 
+        FROM assets 
         WHERE currentCampaignId = ? 
           AND _is_deleted = 0
           AND (tenantId = ? OR _tenantid = ?)
@@ -120,9 +125,12 @@ export const localDb = {
       })) as unknown as Asset[];
     },
     bulkAdd: async (assets: Asset[]) => {
-      const commands = assets.map(asset => {
-        const { sql, values } = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-        return { sql, params: values };
+      const commands: { sql: string; params: SqlValue[] }[] = [];
+      assets.forEach(asset => {
+        const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
+        const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
+        commands.push({ sql: uAtivos.sql, params: uAtivos.values });
+        commands.push({ sql: uAssets.sql, params: uAssets.values });
       });
       await sqliteService.executeBatch(commands);
     },
@@ -132,8 +140,11 @@ export const localDb = {
     update: async (id: string, changes: Partial<Asset>, userId?: string) => {
       const keys = Object.keys(changes);
       const setClause = keys.map(k => `${k} = ?`).join(', ');
-      const sql = `UPDATE ativos SET ${setClause} WHERE id = ?`;
-      await sqliteService.execute(sql, [...Object.values(changes) as SqlValue[], id]);
+      const sqlAtivos = `UPDATE ativos SET ${setClause} WHERE id = ?`;
+      const sqlAssets = `UPDATE assets SET ${setClause} WHERE id = ?`;
+      const params = [...Object.values(changes) as SqlValue[], id];
+      await sqliteService.execute(sqlAtivos, params);
+      await sqliteService.execute(sqlAssets, params);
       handleDemoAuditIncrement();
       if (userId) {
         await sqliteService.logAuditEvent(userId, 'UPDATE', 'ativos', id, 'Atualização de ativo', JSON.stringify(changes));
@@ -141,11 +152,12 @@ export const localDb = {
     },
     count: async () => {
       const tenant = getCurrentTenantId();
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM ativos WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]);
+      const res = await sqliteService.query("SELECT COUNT(*) as count FROM assets WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]);
       return (res[0] as unknown as { count: number })?.count || 0;
     },
     clear: async () => {
       await sqliteService.execute("DELETE FROM ativos");
+      await sqliteService.execute("DELETE FROM assets");
     },
     toArray: async () => {
       const tenant = getCurrentTenantId();

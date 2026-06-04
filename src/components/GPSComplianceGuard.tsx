@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as turf from '@turf/turf';
 import { ShieldAlert, Unlock, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
 
@@ -199,15 +200,82 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
   }
 
   if (status === 'denied') {
+    const handleRequestOSPermissions = async () => {
+      try {
+        const result = await Geolocation.requestPermissions({ permissions: ['location'] });
+        if (result.location === 'granted') {
+          window.location.reload();
+        } else {
+          alert('Permissão de geolocalização não concedida pelo sistema operacional.');
+        }
+      } catch (err) {
+        console.error('Falha ao solicitar permissão via Capacitor Geolocation:', err);
+        alert('Dispositivo ou sandbox não suporta solicitação nativa de permissão.');
+      }
+    };
+
+    const handleUseReferenceCoordinates = () => {
+      if (!isAdminUser) {
+        console.warn('[GBR v2.6] Tentativa não autorizada de bypass de coordenadas.');
+        alert('Acesso negado: Essa funcionalidade de contingência é limitada a Administradores e Gestores.');
+        return;
+      }
+      if (unitConfig && unitConfig.lat && unitConfig.lng) {
+        console.log('[GBR v2.6] Ativando coordenadas estimadas/failsafe para fins de conformidade operacional.');
+        setStatus('bypassed');
+        setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
+        setCurrentDistance(0);
+        onGpsStatusChange?.(true);
+      }
+    };
+
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center animate-fadeIn">
-        <div className="w-20 h-20 bg-red-50 border border-red-150 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-red-500/10">
-          <ShieldAlert size={40} className="text-red-500" />
+        <div className="w-20 h-20 bg-amber-50 border border-amber-200 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-amber-500/10">
+          <ShieldAlert size={40} className="text-amber-500 animate-pulse" />
         </div>
-        <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight mb-2">GPS Desativado</h2>
-        <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mb-8 max-w-xs leading-relaxed">
-          O aplicativo GBR requer acesso ao GPS para auditoria de campo. Por favor, habilite a localização nas configurações do seu navegador ou dispositivo.
+        <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight mb-2">Restrição de Localização (GPS)</h2>
+        <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mb-6 max-w-sm leading-relaxed">
+          O acesso ao GPS falhou devido a políticas de segurança da WebView, sandbox de visualização ou ausência de sinal de satélite.
         </p>
+
+        <div className="w-full max-w-xs bg-slate-50 border border-slate-200 rounded-2xl p-4 text-left mb-6 space-y-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Filial Alvo:</span>
+            <span className="text-[10px] font-mono text-slate-600 font-bold">{unitConfig?.unit_id || 'Não Identificada'}</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Coordenadas de Referência:</span>
+            <span className="text-[10px] font-mono text-slate-600 font-bold">
+              {unitConfig?.lat ? `${Number(unitConfig.lat).toFixed(6)}, ${Number(unitConfig.lng).toFixed(6)}` : 'Não parametrizadas'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 w-full max-w-xs block">
+          <button 
+            onClick={handleRequestOSPermissions}
+            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+          >
+            Solicitar Permissão (OS / WebView)
+          </button>
+          
+          {isAdminUser && (
+            <button 
+              onClick={handleUseReferenceCoordinates}
+              className="w-full py-4 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-emerald-100 active:scale-95 transition-all cursor-pointer"
+            >
+              Avançar por Estimativa de Antena (Apenas Admin)
+            </button>
+          )}
+
+          <button 
+            onClick={() => window.history.back()}
+            className="w-full py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all cursor-pointer"
+          >
+            Voltar
+          </button>
+        </div>
       </div>
     );
   }

@@ -440,8 +440,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               continue;
             }
 
-            rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
-            rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
+            rTenantId = (cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL').trim().toUpperCase();
+            rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
             rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
             rEtiqueta = etq;
             rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
@@ -481,8 +481,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           const cleanDataaqusic = String(rDataaqusic).replace(/'/g, "''");
           const cleanQt = String(rQt).replace(/'/g, "''");
 
-          const normalTenant = rTenantId.trim().toUpperCase().replace(/'/g, "''");
-          const normalFilial = rFilial.trim().toUpperCase().replace(/'/g, "''");
+          const normalTenant = rTenantId.replace(/'/g, "''");
+          const normalFilial = rFilial.replace(/'/g, "''");
 
           if (cleanEndereco && cleanEndereco !== '') {
             const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
@@ -495,7 +495,15 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             id, tenantId, filial, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno,
             _origemTransacao, latitude, longitude, _altitude_metros, _id_andar, currentCampaignId, _tenantid, _unitid, TAG_INVENTARIO, conta_contabil, DESCRICAODOATIVO, VLRAQUISIC, DATAAQUISIC, QT, REGISTRO, CENTRODECUSTO
           ) VALUES (
-            '${cleanId}', '${rTenantId.replace(/'/g, "''")}', '${rFilial.replace(/'/g, "''")}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanEtiqueta}', '${cleanQt}', '${cleanDesc}', '${cleanSerial}', '${cleanDataaqusic}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanEndereco}', '${cleanRegistro}', '${cleanSubreg}', '${cleanDatabaixa}', '${cleanContacontabil}', '${cleanPrimarykey}', '${cleanCentrodecusto}', ${rVlrAquisic}, ${rSn1Recno}, ${rSn3Recno},
+            '${cleanId}', '${normalTenant}', '${normalFilial}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanEtiqueta}', '${cleanQt}', '${cleanDesc}', '${cleanSerial}', '${cleanDataaqusic}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanEndereco}', '${cleanRegistro}', '${cleanSubreg}', '${cleanDatabaixa}', '${cleanContacontabil}', '${cleanPrimarykey}', '${cleanCentrodecusto}', ${rVlrAquisic}, ${rSn1Recno}, ${rSn3Recno},
+            'EXPERT_LOAD', NULL, NULL, NULL, 0, '${DEFAULT_CAMPAIGN_ID}', '${normalTenant}', '${normalFilial}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanContacontabil}', '${cleanDesc}', ${rVlrAquisic}, '${cleanDataaqusic}', '${cleanQt}', '${cleanRegistro}', '${cleanCentrodecusto}'
+          );`);
+
+          sqlStatements.push(`INSERT OR REPLACE INTO assets (
+            id, tenantId, filial, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno,
+            _origemTransacao, latitude, longitude, _altitude_metros, _id_andar, currentCampaignId, _tenantid, _unitid, TAG_INVENTARIO, conta_contabil, DESCRICAODOATIVO, VLRAQUISIC, DATAAQUISIC, QT, REGISTRO, CENTRODECUSTO
+          ) VALUES (
+            '${cleanId}', '${normalTenant}', '${normalFilial}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanEtiqueta}', '${cleanQt}', '${cleanDesc}', '${cleanSerial}', '${cleanDataaqusic}', '${cleanCnpj}', '${cleanNomefornecedor}', '${cleanNotafiscal}', '${cleanEndereco}', '${cleanRegistro}', '${cleanSubreg}', '${cleanDatabaixa}', '${cleanContacontabil}', '${cleanPrimarykey}', '${cleanCentrodecusto}', ${rVlrAquisic}, ${rSn1Recno}, ${rSn3Recno},
             'EXPERT_LOAD', NULL, NULL, NULL, 0, '${DEFAULT_CAMPAIGN_ID}', '${normalTenant}', '${normalFilial}', '${rStatus.toUpperCase().trim() || 'PENDENTE'}', '${cleanContacontabil}', '${cleanDesc}', ${rVlrAquisic}, '${cleanDataaqusic}', '${cleanQt}', '${cleanRegistro}', '${cleanCentrodecusto}'
           );`);
         }

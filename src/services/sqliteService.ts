@@ -35,6 +35,7 @@ class MemoryDatabaseConnection {
     AUDIT_LOG: [],
     ativos_imobilizados: [],
     ativos: [],
+    assets: [],
     localidades: [],
     campaigns: [],
     inventory_config: [],
@@ -64,6 +65,7 @@ class MemoryDatabaseConnection {
 
     if (!tableName) {
       if (sqlUpper.includes('ativos'.toUpperCase())) tableName = 'ativos';
+      if (sqlUpper.includes('assets'.toUpperCase())) tableName = 'assets';
     }
 
     // Default SELECT COUNT(*)
@@ -319,6 +321,77 @@ const FULL_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_mestre_endereco ON ativos (ENDERECO);
   CREATE INDEX IF NOT EXISTS idx_mestre_localmaster ON ativos (_localMaster);
   CREATE INDEX IF NOT EXISTS idx_ativos_unidade_campanha ON ativos (UNIDADE_OPERACIONAL, currentCampaignId);
+
+  CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    ETIQUETA TEXT,
+    REGISTRO TEXT,
+    DESCRICAODOATIVO TEXT,
+    VLRAQUISIC REAL,
+    DATAAQUISIC TEXT,
+    CENTRODECUSTO TEXT,
+    conta_contabil TEXT,
+    contacontabil TEXT,
+    dataaqusic TEXT,
+    TAG_INVENTARIO TEXT,
+    ESTADO_CONSERVACAO TEXT,
+    GRUPO_EMPRESARIAL TEXT,
+    UNIDADE_OPERACIONAL TEXT,
+    UNIDADE TEXT,
+    QT TEXT,
+    SERIAL TEXT,
+    CNPJ TEXT,
+    NOMEFORNECEDOR TEXT,
+    NOTAFISCAL TEXT,
+    ENDERECO TEXT,
+    _tenantid TEXT,
+    _unitid TEXT,
+    tenantId TEXT,
+    filial TEXT,
+    _unidade TEXT,
+    _conferido INTEGER DEFAULT 0,
+    _localMaster TEXT,
+    _lastUpdated TEXT,
+    _dataLeitura TEXT,
+    _auditor TEXT,
+    _photoUrl TEXT,
+    latitude REAL,
+    longitude REAL,
+    currentCampaignId TEXT,
+    _version INTEGER DEFAULT 1,
+    _is_deleted INTEGER DEFAULT 0,
+    _plaquetado INTEGER DEFAULT 0,
+    _plaquetaMaster TEXT,
+    _descricaoMaster TEXT,
+    _aprovado INTEGER DEFAULT 0,
+    _dataAprovacao TEXT,
+    _aprovador TEXT,
+    _assinatura TEXT,
+    _isNew INTEGER DEFAULT 0,
+    _is_unitized INTEGER DEFAULT 0,
+    _is_divergent_baixa INTEGER DEFAULT 0,
+    _parent_id TEXT,
+    _is_synced INTEGER DEFAULT 0,
+    _altitude_metros REAL,
+    _id_andar INTEGER,
+    Sn1_recno INTEGER,
+    Sn3_recno INTEGER,
+    DE_PARA TEXT,
+    AUDITOR_STATUS_CONFERENCIA TEXT,
+    _origemTransacao TEXT,
+    STATUS TEXT,
+    DATABAIXA TEXT,
+    SUBREG TEXT,
+    PRIMARYKEY TEXT,
+    timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets (ETIQUETA);
+  CREATE INDEX IF NOT EXISTS idx_assets_unit ON assets (UNIDADE_OPERACIONAL);
+  CREATE INDEX IF NOT EXISTS idx_assets_unitid ON assets (_unitid);
+  CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (TAG_INVENTARIO);
+  CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets (ENDERECO);
+  CREATE INDEX IF NOT EXISTS idx_assets_localmaster ON assets (_localMaster);
+  CREATE INDEX IF NOT EXISTS idx_assets_unidade_campanha ON assets (UNIDADE_OPERACIONAL, currentCampaignId);
 
 CREATE TABLE IF NOT EXISTS localidades (
     id TEXT PRIMARY KEY,
@@ -1685,19 +1758,19 @@ class SqliteService {
   async getOperationalUnitsWithStats(tenantId: string = 'CICOPAL'): Promise<{ id: string; name: string; UNIDADE_OPERACIONAL: string; total_ativos: number; count: number; total_conferidos: number }[]> {
     const res = await this.query(`
       SELECT 
-        filial AS id,
-        filial AS name,
-        filial AS UNIDADE_OPERACIONAL,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS id,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS name,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS UNIDADE_OPERACIONAL,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS filial,
         COUNT(id) AS total_ativos,
         SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS total_conferidos
-      FROM ativos
-      WHERE tenantId = ?
-        AND filial IS NOT NULL 
-        AND TRIM(filial) != ''
-        AND UPPER(TRIM(filial)) != 'CICOPAL'
-        AND UPPER(TRIM(filial)) != UPPER(TRIM(?))
-      GROUP BY filial
-      ORDER BY filial ASC
+      FROM assets
+      WHERE UPPER(TRIM(tenantId)) = UPPER(TRIM(?))
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != ''
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != 'CICOPAL'
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != UPPER(TRIM(?))
+      GROUP BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ')
+      ORDER BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') ASC
     `, [tenantId, tenantId]);
 
     return res.map(row => {
@@ -1884,7 +1957,8 @@ class SqliteService {
 
       for (let i = 0; i < total; i += BATCH_SIZE) {
         const chunk = assets.slice(i, i + BATCH_SIZE);
-        const queries = chunk.map(asset => {
+        const queries: { sql: string; params: (string | number | boolean | null)[] }[] = [];
+        chunk.forEach(asset => {
           // Garante que o ativo baixado/importado tenha _is_synced = 1 (já sincronizado com a nuvem)
           const assetData = {
             ...asset,
@@ -1899,10 +1973,14 @@ class SqliteService {
             if (typeof val === 'boolean') return val ? 1 : 0;
             return val;
           });
-          return {
+          queries.push({
             sql: `INSERT OR REPLACE INTO ativos (${cols}) VALUES (${placeholders})`,
             params: values as (string | number | boolean | null)[]
-          };
+          });
+          queries.push({
+            sql: `INSERT OR REPLACE INTO assets (${cols}) VALUES (${placeholders})`,
+            params: values as (string | number | boolean | null)[]
+          });
         });
 
         await this.executeBatch(queries);

@@ -816,26 +816,35 @@ const App: React.FC = () => {
         }
         
         let success = false;
-        let attempts = 0;
-        const maxAttempts = 3;
+        const isNative = Capacitor.isNativePlatform();
         
-        while (attempts < maxAttempts && !success) {
-          attempts++;
-          try {
-            console.log(`>>> [App] Tentando inicializar SQLite/Jeep-SQLite (Tentativa ${attempts}/${maxAttempts})...`);
-            success = await Promise.race([
-              sqliteService.init(attempts > 1), // Se for a 2ª ou 3ª tentativa, força reset e reconexão limpa no registro
-              new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), 30000)) // 30s de tempo limite por tentativa
-            ]);
-          } catch (dbErr) {
-            console.warn(`>>> [App - Warning] Falha na tentativa ${attempts} de bootstrap do SQLite:`, dbErr);
-            if (attempts < maxAttempts) {
-              console.log(">>> [App] Aguardando 1.5s para acomodação de threads de banco nativas antes da re-tentativa...");
-              await new Promise(resolve => setTimeout(resolve, 1500));
-            } else {
-              console.error(">>> [App - Failsafe] Todas as tentativas falharam ou esgotaram o limite de tempo. Entrando em modo degradado / contingência de memória.", dbErr);
-              await sqliteService.forceMemoryFallback();
-              success = true; // Avança o fluxo lógico com a contingência em memória ativa
+        if (!isNative) {
+          console.log(">>> [App] Ambiente WEB / iFrame detectado. Forçando desvio INSTANTÂNEO de MEMORY_FALLBACK para blindagem total contra restrições de sandbox.");
+          await sqliteService.forceMemoryFallback();
+          success = true;
+        } else {
+          let attempts = 0;
+          const maxAttempts = 3;
+          const timeoutDuration = 30000;
+          
+          while (attempts < maxAttempts && !success) {
+            attempts++;
+            try {
+              console.log(`>>> [App] Tentando inicializar SQLite Nativo (Tentativa ${attempts}/${maxAttempts})...`);
+              success = await Promise.race([
+                sqliteService.init(attempts > 1),
+                new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), timeoutDuration))
+              ]);
+            } catch (dbErr) {
+              console.warn(`>>> [App - Warning] Falha na tentativa ${attempts} de bootstrap do SQLite Nativo:`, dbErr);
+              if (attempts < maxAttempts) {
+                console.log(">>> [App] Aguardando 1.5s para acomodação de threads antes da re-tentativa...");
+                await new Promise(resolve => setTimeout(resolve, 1500));
+              } else {
+                console.error(">>> [App - Failsafe] Todas as tentativas nativas falharam. Entrando em contingência de memória nativa.", dbErr);
+                await sqliteService.forceMemoryFallback();
+                success = true;
+              }
             }
           }
         }

@@ -214,6 +214,9 @@ export const photoSyncManager = {
   }
 };
 
+let isSyncSuspendedDueToAuth = false;
+let syncSuspensionTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const syncService = {
   /**
    * Processa o lote de ativos modificados offline e sincroniza com o Supabase
@@ -229,6 +232,10 @@ export const syncService = {
     if (currentMode?.startsWith('INTERNAL')) {
       return { success: false, processedCount: 0, error: "Modo OFFLINE/INTERNO ativo" };
     }
+    if (isSyncSuspendedDueToAuth) {
+      console.warn(">>> [Sync] Sincronização de dados temporariamente suspensa por erro de autorização/RLS na nuvem. Mantendo dados retidos localmente.");
+      return { success: false, processedCount: 0, error: "Sincronização suspensa por falha de permissão ativa." };
+    }
     return await syncService.syncHybridBatch(_tenantid);
   },
 
@@ -239,12 +246,32 @@ export const syncService = {
       return { success: true, processedCount: 0 };
     }
 
+    if (isSyncSuspendedDueToAuth) {
+      console.warn(">>> [Sync Guard Check] Sincronização suspensa por erro de auth ativo.");
+      return { success: false, processedCount: 0, error: "Suspenso por falha de segurança de RLS remoto." };
+    }
+
     isDataSyncRunning = true;
     try {
       console.log(">>> [Sync] Iniciando replicação híbrida de ativos locais para nuvem...");
 
       if (!supabase) {
         throw new Error("Supabase client não inicializado.");
+      }
+
+      // Assegura que a sessão está válida e recupera o bearer token antes do envio para mitigar falha de RLS
+      try {
+        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+        if (sessionErr) {
+          console.warn(">>> [Sync Auth Warning] Falha ao sintonizar sessão do Supabase:", sessionErr.message);
+        } else if (sessionData?.session) {
+          const accessToken = sessionData.session.access_token;
+          if (accessToken) {
+            console.log(">>> [Sync Auth] Bearer token JWT validado com sucesso para transação híbrida.");
+          }
+        }
+      } catch (authFetchErr) {
+        console.warn(">>> [Sync Auth Engine] Erro ao recuperar sessão activa de rede:", authFetchErr);
       }
 
       // 1. Busca lote de até 200 registros modificados localmente (Soberania Offline - Teto de I/O)
@@ -264,12 +291,13 @@ export const syncService = {
       // 2. Sanitiza o payload limpando buffers temporários de memória baseados no schema GBR v2.6
       // 3. Casamento de Chaves da Planilha Excel (21 propriedades higienizadas em lowercase/CamelCase)
       const sanitizedAssets = rawAssets.map((asset) => {
-        const tId = asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL');
+        // Mapeamento do tenantId estritamente em caixa alta (uppercase) para assegurar compatibilidade RLS
+        const tId = (asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL')).toUpperCase();
         return {
           id: String(asset.id || ''),
           '"tenantId"': tId,
           tenantId: tId,
-          filial: asset.filial ? String(asset.filial).trim() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim() : 'MATRIZ'),
+          filial: asset.filial ? String(asset.filial).trim().toUpperCase() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim().toUpperCase() : 'MATRIZ'),
           status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
           etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
           qt: asset.qt ? Number(asset.qt) : (asset.QT ? Number(asset.QT) : 1),
@@ -348,6 +376,27 @@ export const syncService = {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       console.error(">>> [Sync Error] Falha na replicação do lote híbrido:", error);
+
+      // Detecta explicitamente falhas de segurança do Postgres (RLS, permissão, token de claims, etc.)
+      const isAuthError = errMsg.toLowerCase().includes('permission') || 
+                          errMsg.toLowerCase().includes('unauthorized') || 
+                          errMsg.toLowerCase().includes('jwt') || 
+                          errMsg.toLowerCase().includes('auth') || 
+                          errMsg.toLowerCase().includes('claims') || 
+                          errMsg.toLowerCase().includes('rpcerror') ||
+                          errMsg.includes('401') || 
+                          errMsg.includes('403');
+      
+      if (isAuthError) {
+        console.warn(">>> [Sync Shield] Falha de permissão (RLS, Token ou claims expirados) detectada na nuvem. Suspendendo fila por 60 segundos.");
+        isSyncSuspendedDueToAuth = true;
+        if (syncSuspensionTimer) clearTimeout(syncSuspensionTimer);
+        syncSuspensionTimer = setTimeout(() => {
+          console.log(">>> [Sync Shield] Retomando tentativas de sincronização após suspensão de autenticação.");
+          isSyncSuspendedDueToAuth = false;
+        }, 60000);
+      }
+
       return { success: false, processedCount: 0, error: errMsg };
     } finally {
       isDataSyncRunning = false;

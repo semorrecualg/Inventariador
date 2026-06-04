@@ -652,11 +652,11 @@ const Inventory: React.FC<InventoryProps> = ({
 
     setIsOCRProcessing(true);
     try {
-      // Usar português e inglês com CDN estável e fixada para evitar erros dinâmicos 400/404
+      // Usar português e inglês padrão local referenciado no diretório de assets estático (/assets/ocr/) para suporte offline-first total
       const worker = await createWorker('por+eng', 1, {
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract-worker.min.js',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-wasm.js',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        langPath: `${window.location.origin}/assets/ocr`,
+        workerPath: `${window.location.origin}/assets/ocr/tesseract-worker.min.js`,
+        corePath: `${window.location.origin}/assets/ocr/tesseract-core-wasm.js`
       });
       const { data: { text } } = await worker.recognize(file);
       await worker.terminate();

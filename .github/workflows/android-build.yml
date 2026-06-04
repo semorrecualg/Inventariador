@@ -23,7 +23,7 @@ jobs:
         run: npm install --legacy-peer-deps --force
 
       - name: Build Web Application
-        run: npm run build 
+        run: npm run build
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
