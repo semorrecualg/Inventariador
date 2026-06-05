@@ -7,10 +7,10 @@
 export const DB_ASSET_COLUMNS = [
   'id', 'ETIQUETA', 'REGISTRO', 'DESCRICAODOATIVO', 'VLRAQUISIC', 'DATAAQUISIC',
   'CENTRODECUSTO', 'conta_contabil', 'TAG_INVENTARIO', 'ESTADO_CONSERVACAO',
-  'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'QT', 'SERIAL',
+  'GRUPO_EMPRESARIAL', 'UNIDADE', 'QT', 'SERIAL',
   'CNPJ', 'NOMEFORNECEDOR', 'NOTAFISCAL', 'ENDERECO', 
   'tenantId', 'filial',
-  '_tenantid', '_unitid', '_unidade', '_conferido', '_localMaster',
+  '_unitid', '_unidade', '_conferido', '_localMaster',
   '_lastUpdated', '_dataLeitura', '_auditor', '_photoUrl', 'latitude', 'longitude',
   'currentCampaignId', '_version', '_is_deleted', '_plaquetado', '_plaquetaMaster',
   '_descricaoMaster', '_aprovado', '_dataAprovacao', '_aprovador', '_assinatura',
@@ -24,9 +24,8 @@ export const DB_ASSET_COLUMNS = [
 
 export const SCHEMA_PRIORITY = {
   UNIT: [
-    'UNIDADE_OPERACIONAL',
-    'UNIDADE',
     'FILIAL',
+    'UNIDADE',
     'LOCAL',
     'LOCALIZACAO',
     'N1_LOCAL',

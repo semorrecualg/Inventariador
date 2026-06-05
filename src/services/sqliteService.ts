@@ -80,7 +80,7 @@ class MemoryDatabaseConnection {
         const firstParam = params[0];
         if (typeof firstParam === 'string' || typeof firstParam === 'number') {
           filtered = filtered.filter(item => {
-            const keysToCheck = ['tenantId', 'tenantid', 'tenant_id', '_tenantid', '_unitid', 'unit_id', 'UNIDADE_OPERACIONAL', 'id', 'currentCampaignId', 'ETIQUETA', 'username'];
+            const keysToCheck = ['tenantId', 'tenantid', 'tenant_id', '_tenantid', '_unitid', 'unit_id', 'filial', 'id', 'currentCampaignId', 'ETIQUETA', 'username'];
             return keysToCheck.some(k => {
               const val = item[k];
               if (val === undefined || val === null) return false;
@@ -265,7 +265,6 @@ const FULL_SCHEMA = `
     TAG_INVENTARIO TEXT,
     ESTADO_CONSERVACAO TEXT,
     GRUPO_EMPRESARIAL TEXT,
-    UNIDADE_OPERACIONAL TEXT,
     UNIDADE TEXT,
     QT TEXT,
     SERIAL TEXT,
@@ -315,12 +314,12 @@ const FULL_SCHEMA = `
     timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_mestre_etiqueta ON ativos (ETIQUETA);
-  CREATE INDEX IF NOT EXISTS idx_mestre_unit ON ativos (UNIDADE_OPERACIONAL);
+  CREATE INDEX IF NOT EXISTS idx_mestre_unit ON ativos (filial);
   CREATE INDEX IF NOT EXISTS idx_mestre_unitid ON ativos (_unitid);
   CREATE INDEX IF NOT EXISTS idx_mestre_status ON ativos (TAG_INVENTARIO);
   CREATE INDEX IF NOT EXISTS idx_mestre_endereco ON ativos (ENDERECO);
   CREATE INDEX IF NOT EXISTS idx_mestre_localmaster ON ativos (_localMaster);
-  CREATE INDEX IF NOT EXISTS idx_ativos_unidade_campanha ON ativos (UNIDADE_OPERACIONAL, currentCampaignId);
+  CREATE INDEX IF NOT EXISTS idx_ativos_unidade_campanha ON ativos (filial, currentCampaignId);
 
   CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
@@ -336,7 +335,6 @@ const FULL_SCHEMA = `
     TAG_INVENTARIO TEXT,
     ESTADO_CONSERVACAO TEXT,
     GRUPO_EMPRESARIAL TEXT,
-    UNIDADE_OPERACIONAL TEXT,
     UNIDADE TEXT,
     QT TEXT,
     SERIAL TEXT,
@@ -386,12 +384,12 @@ const FULL_SCHEMA = `
     timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_assets_etiqueta ON assets (ETIQUETA);
-  CREATE INDEX IF NOT EXISTS idx_assets_unit ON assets (UNIDADE_OPERACIONAL);
+  CREATE INDEX IF NOT EXISTS idx_assets_unit ON assets (filial);
   CREATE INDEX IF NOT EXISTS idx_assets_unitid ON assets (_unitid);
   CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (TAG_INVENTARIO);
   CREATE INDEX IF NOT EXISTS idx_assets_endereco ON assets (ENDERECO);
   CREATE INDEX IF NOT EXISTS idx_assets_localmaster ON assets (_localMaster);
-  CREATE INDEX IF NOT EXISTS idx_assets_unidade_campanha ON assets (UNIDADE_OPERACIONAL, currentCampaignId);
+  CREATE INDEX IF NOT EXISTS idx_assets_unidade_campanha ON assets (filial, currentCampaignId);
 
 CREATE TABLE IF NOT EXISTS localidades (
     id TEXT PRIMARY KEY,
@@ -1285,7 +1283,7 @@ class SqliteService {
     let sql = "SELECT * FROM ativos WHERE (_tenantid = ? OR GRUPO_EMPRESARIAL = ?) AND _is_deleted = 0 AND (conta_contabil IS NULL OR conta_contabil != '131105001')";
     const params: (string | number | boolean | null)[] = [tenantId, tenantId];
     if (unitId) {
-      sql += " AND (_unitid = ? OR UNIDADE_OPERACIONAL = ?)";
+      sql += " AND (_unitid = ? OR filial = ?)";
       params.push(unitId, unitId);
     }
     return await this.query(sql, params) as unknown as Asset[];
@@ -1771,22 +1769,21 @@ class SqliteService {
     }).filter(val => val !== '');
   }
 
-  async getOperationalUnitsWithStats(tenantId: string = 'CICOPAL'): Promise<{ id: string; name: string; UNIDADE_OPERACIONAL: string; total_ativos: number; count: number; total_conferidos: number }[]> {
+  async getOperationalUnitsWithStats(tenantId: string = 'CICOPAL'): Promise<{ id: string; name: string; filial: string; total_ativos: number; count: number; total_conferidos: number }[]> {
     const res = await this.query(`
       SELECT 
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS id,
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS name,
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS UNIDADE_OPERACIONAL,
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') AS filial,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS id,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS name,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS filial,
         COUNT(id) AS total_ativos,
         SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS total_conferidos
       FROM assets
       WHERE UPPER(TRIM(tenantId)) = UPPER(TRIM(?))
-        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != ''
-        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != 'CICOPAL'
-        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), '') != UPPER(TRIM(?))
-      GROUP BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ')
-      ORDER BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), NULLIF(TRIM(UPPER(UNIDADE_OPERACIONAL)), ''), 'MATRIZ') ASC
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != ''
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != 'CICOPAL'
+        AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != UPPER(TRIM(?))
+      GROUP BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ')
+      ORDER BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') ASC
     `, [tenantId, tenantId]);
 
     return res.map(row => {
@@ -1796,14 +1793,14 @@ class SqliteService {
       };
       const rawId = getVal('id', getVal('filial', ''));
       const rawName = getVal('name', getVal('filial', ''));
-      const rawUnit = getVal('unidade_operacional', getVal('filial', ''));
+      const rawFilial = getVal('filial', '');
       const totalAtivos = Number(getVal('total_ativos', getVal('total', 0)));
       const totalConferidos = Number(getVal('total_conferidos', 0));
 
       return {
         id: String(rawId || '').trim().toUpperCase(),
         name: String(rawName || '').trim().toUpperCase(),
-        UNIDADE_OPERACIONAL: String(rawUnit || '').trim().toUpperCase(),
+        filial: String(rawFilial || '').trim().toUpperCase(),
         total_ativos: totalAtivos,
         count: totalAtivos,
         total_conferidos: totalConferidos
@@ -1813,7 +1810,7 @@ class SqliteService {
 
   /**
    * REQUISITO v25.01: Consulta de contagem por filial parametrizada respeitando a arquitetura
-   * Concilia as chaves de controle (tenantId/_tenantid e filial/UNIDADE_OPERACIONAL)
+   * Concilia as chaves de controle (tenantId/_tenantid e filial)
    */
   async getAssetCountByFilial(tenantId: string, filialId: string): Promise<number> {
     const res = await this.query(
@@ -1821,8 +1818,8 @@ class SqliteService {
        WHERE _is_deleted = 0 
          AND (conta_contabil IS NULL OR conta_contabil != '131105001')
          AND (_tenantid = ? OR tenantId = ?) 
-         AND (filial = ? OR UNIDADE_OPERACIONAL = ? OR TRIM(UNIDADE_OPERACIONAL) = ? OR TRIM(filial) = ?)`,
-      [tenantId, tenantId, filialId, filialId, filialId.trim(), filialId.trim()]
+         AND (filial = ? OR TRIM(filial) = ?)`,
+      [tenantId, tenantId, filialId, filialId.trim()]
     ).catch(async () => {
       // Fallback simplificado se houver problemas de trim/casting
       return this.query(
@@ -1830,8 +1827,8 @@ class SqliteService {
          WHERE _is_deleted = 0 
            AND (conta_contabil IS NULL OR conta_contabil != '131105001')
            AND (_tenantid = ? OR tenantId = ?) 
-           AND (filial = ? OR UNIDADE_OPERACIONAL = ?)`,
-        [tenantId, tenantId, filialId, filialId]
+           AND filial = ?`,
+        [tenantId, tenantId, filialId]
       );
     });
 
@@ -1861,7 +1858,7 @@ class SqliteService {
     const params: (string | number)[] = [];
     if (unitId && unitId !== 'SEM UNIDADE' && unitId !== 'undefined') {
       // Usamos LIKE ou o mapping normalizado
-      query += ` AND (UNIDADE_OPERACIONAL = ? OR _unitid = ?)`;
+      query += ` AND (filial = ? OR _unitid = ?)`;
       params.push(unitId, unitId);
     }
     
@@ -1919,7 +1916,6 @@ class SqliteService {
   async debugLocalDatabaseStructure(): Promise<{
     sampleRowsCount: number;
     samples: Record<string, unknown>[];
-    distinctUnitOperacional: Record<string, unknown>[];
     distinctFilial: Record<string, unknown>[];
     distinctTenantId: Record<string, unknown>[];
   }> {
@@ -1927,16 +1923,14 @@ class SqliteService {
       const countRes = await this.query("SELECT COUNT(*) as total FROM ativos");
       const total = countRes[0]?.total || 0;
       
-      const samples = await this.query("SELECT id, ETIQUETA, UNIDADE_OPERACIONAL, filial, tenantId, _tenantid, _unitid FROM ativos LIMIT 5");
+      const samples = await this.query("SELECT id, ETIQUETA, filial, tenantId, _tenantid, _unitid FROM ativos LIMIT 5");
       
-      const distinctUnitOperacional = await this.query("SELECT UNIDADE_OPERACIONAL, COUNT(*) as count FROM ativos GROUP BY UNIDADE_OPERACIONAL");
       const distinctFilial = await this.query("SELECT filial, COUNT(*) as count FROM ativos GROUP BY filial");
       const distinctTenantId = await this.query("SELECT tenantId, _tenantid, COUNT(*) as count FROM ativos GROUP BY tenantId, _tenantid");
       
       console.log("=== DB DEBUG STRUCTURE ===");
       console.log("Total assets in DB:", total);
       console.log("Samples of rows:", JSON.stringify(samples, null, 2));
-      console.log("Distinct UNIDADE_OPERACIONAL in DB:", JSON.stringify(distinctUnitOperacional, null, 2));
       console.log("Distinct filial in DB:", JSON.stringify(distinctFilial, null, 2));
       console.log("Distinct tenantId / _tenantid in DB:", JSON.stringify(distinctTenantId, null, 2));
       console.log("==========================");
@@ -1944,7 +1938,6 @@ class SqliteService {
       return {
         sampleRowsCount: Number(total),
         samples,
-        distinctUnitOperacional,
         distinctFilial,
         distinctTenantId
       };

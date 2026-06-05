@@ -15,7 +15,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
 
   const downloadTemplate = () => {
     const headers = [
-      'GRUPO_EMPRESARIAL', 'UNIDADE_OPERACIONAL', 'STATUS', 'ETIQUETA', 'QT', 
+      'GRUPO_EMPRESARIAL', 'FILIAL', 'STATUS', 'ETIQUETA', 'QT', 
       'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 
       'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 
       'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'
@@ -24,7 +24,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
     const exampleData = [
       {
         GRUPO_EMPRESARIAL: 'EXEMPLO_SA',
-        UNIDADE_OPERACIONAL: 'MATRIZ',
+        FILIAL: 'MATRIZ',
         STATUS: 'ATIVO',
         ETIQUETA: 'PAT-0001',
         QT: 1,
@@ -179,7 +179,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
             <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
               <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ordem das Colunas (A-R)</h4>
               <p className="text-[9px] text-slate-700 leading-tight font-mono">
-                GRUPO_EMPRESARIAL; UNIDADE_OPERACIONAL; STATUS; ETIQUETA; QT; DESCRICAO; SERIAL; DATA_AQ; CNPJ; FORNECEDOR; NF; ENDERECO; REGISTRO; SUBREG; DATA_BAIXA; CONTA; PK; CUSTO; VALOR; SN1_RECNO; SN3_RECNO
+                GRUPO_EMPRESARIAL; FILIAL; STATUS; ETIQUETA; QT; DESCRICAO; SERIAL; DATA_AQ; CNPJ; FORNECEDOR; NF; ENDERECO; REGISTRO; SUBREG; DATA_BAIXA; CONTA; PK; CUSTO; VALOR; SN1_RECNO; SN3_RECNO
               </p>
             </div>
             <button 

@@ -20,10 +20,7 @@ export interface User {
   mustChangePassword?: boolean;
   tenantId: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
   filial?: string;    // 2ª Coluna / Unidade Operacional - Oficial
-  _tenantid: string;  // ID da Organização (ex: CICOPAL) - Fallback
   _unitid?: string;   // Unidade Operacional Padrão - Fallback
-  tenantid: string;  // Deprecated: use _tenantid
-  tenants?: string | string[];  // Deprecated: use _tenantid
   unitid?: string;   // Deprecated: use _unitid
   units?: string[];  // Lista de Unidades Operacionais autorizadas
 }
@@ -45,8 +42,7 @@ export interface AuditLogEntry {
   old_data?: unknown;
   new_data?: unknown;
   details?: string;
-  _tenantid?: string;
-  tenantid?: string; // Deprecated
+  tenantId?: string;
   origin?: TransactionOrigin;
 }
 
@@ -89,10 +85,8 @@ export interface Asset {
   filial?: string;            // 2ª Coluna: Unidade Operacional (filial)
   
   // Estrutura Mestre v24 (Nomenclatura de Negócio)
-  _tenantid?: string; // ID da Organização (Campo Unificado)
   _unitid?: string;   // Unidade Operacional (Campo Unificado)
   GRUPO_EMPRESARIAL?: string; // Identificador da Empresa/Grupo
-  UNIDADE_OPERACIONAL?: string; // Unidade Operacional
   ETIQUETA?: string;
   QT?: string | number;
   DESCRICAODOATIVO?: string;
@@ -178,7 +172,7 @@ export interface NCMClassifier {
   group_code: string; // Código do Grupo (4 dígitos)
   annual_depreciation_rate: number;
   useful_life_months: number;
-  _tenantid: string;
+  tenantId: string;
 }
 
 export enum DepreciationMethod {
@@ -198,7 +192,7 @@ export interface AssetGroup {
   annual_depreciation_rate: number; // TAXA
   depreciation_method: DepreciationMethod; // TIPODEPREC
   useful_life_months: number;
-  _tenantid: string;
+  tenantId: string;
 }
 
 export enum AccountType {
@@ -231,7 +225,7 @@ export interface ChartOfAccount {
   classification: AccountClassification; // CLASSIFICACAO
   referential_code?: string; // COD_REF (SPED)
   is_active: boolean; // STATUS
-  _tenantid: string;
+  tenantId: string;
 }
 
 export interface AssetMovement {
@@ -244,7 +238,7 @@ export interface AssetMovement {
   value?: number;
   description?: string;
   user_email: string;
-  _tenantid: string;
+  tenantId: string;
 }
 
 export interface DepreciationHistory {
@@ -255,7 +249,7 @@ export interface DepreciationHistory {
   depreciation_value: number;
   accumulated_depreciation: number;
   residual_value: number;
-  _tenantid: string;
+  tenantId: string;
 }
 
 export interface ModalConfig {
@@ -382,7 +376,7 @@ export interface InventoryState {
 export interface SyncQueueItem {
   id: string; // UUID interno da fila
   assetId: string;
-  tenantid: string;
+  tenantId: string;
   photoBlob: Blob;
   timestamp: number;
   attempts: number;
@@ -404,11 +398,9 @@ export interface InventoryCampaign {
   start_date: string;
   end_date?: string;
   status: CampaignStatus;
-  _tenantid: string;
+  tenantId: string;
   _unitid?: string; // ID ou Nome da Unidade Operacional vinculada
-  tenant_id: string; // Unificado
   unit_id?: string;  // Unificado
-  tenantid: string; // Deprecated: use tenant_id or _tenantid
   created_by: string;
   created_at: string;
   // Estatísticas calculadas
@@ -430,7 +422,7 @@ export interface CampaignSnapshot {
   assets_data: Asset[];
   metadata: Record<string, unknown>;
   closed_by: string;
-  _tenantid: string;
+  tenantId: string;
 }
 
 export interface NavigationParams {
@@ -443,9 +435,8 @@ export interface NavigationParams {
 
 export interface UnitConfig {
   id?: string;
-  _tenantid: string;
+  tenantId: string;
   _unitid: string; // Nome da unidade (ex: "MATRIZ")
-  tenant_id: string; // Deprecated: use _tenantid
   unit_id: string; // Deprecated: use _unitid
   lat: number;
   lng: number;

@@ -241,9 +241,8 @@ const App: React.FC = () => {
           parsed.isAdmin = true;
           parsed.role = UserRole.ADMIN;
           // FORCE CICOPAL for Master User if missing
-          if (!parsed._tenantid || parsed._tenantid === '') {
-            parsed._tenantid = 'CICOPAL';
-            parsed.tenantid = 'CICOPAL';
+          if (!parsed.tenantId || parsed.tenantId === '') {
+            parsed.tenantId = 'CICOPAL';
           }
           if (!parsed._unitid || parsed._unitid === '') {
             parsed._unitid = 'MATRIZ';
@@ -255,22 +254,24 @@ const App: React.FC = () => {
         parsed.is_admin = is_admin;
         parsed.isAdmin = is_admin;
         
-        // Limpar DEFAULT
-        const normalizeValue = (v: unknown) => {
-          if (!v) return '';
-          const s = String(v).toUpperCase();
-          return (s === 'DEFAULT' || s === 'NULL' || s === '0' || s === 'default') ? '' : String(v);
-        };
-        parsed._tenantid = normalizeValue(parsed._tenantid || parsed.tenantid);
-        parsed._unitid = normalizeValue(parsed._unitid || parsed.unitid);
-        parsed.tenantid = parsed._tenantid;
-        parsed.unitid = parsed._unitid;
+        const rawCompanyKey = parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || 'CICOPAL';
+        parsed.tenantId = String(rawCompanyKey).trim().toUpperCase();
+
+        const rawUnitKey = parsed.filial || parsed._unitid || parsed.unitid || 'MATRIZ';
+        parsed.filial = String(rawUnitKey).trim().toUpperCase();
+        parsed.unitid = parsed.filial;
+
+        delete parsed._tenantid;
+        delete parsed.tenant_id;
+        delete parsed.tenantid;
+        delete parsed._unitid;
         
         if (Array.isArray(parsed.units)) {
-          parsed.units = parsed.units.filter((u: unknown) => normalizeValue(u) !== '');
-        }
-        if (Array.isArray(parsed.tenants)) {
-          parsed.tenants = parsed.tenants.filter((t: unknown) => normalizeValue(t) !== '');
+          parsed.units = parsed.units.filter((u: unknown) => {
+            if (!u) return false;
+            const s = String(u).toUpperCase();
+            return s !== 'DEFAULT' && s !== 'NULL' && s !== '0' && s !== '';
+          });
         }
       }
       return parsed;
@@ -480,8 +481,7 @@ const App: React.FC = () => {
           is_admin: true,
           isAdmin: true, 
           mustChangePassword: false,
-          _tenantid: '',
-          tenantid: ''
+          tenantId: 'CICOPAL'
         });
       } else if (userList[adminIndex].password === 'admin') {
         userList[adminIndex].password = "Glaucio@1970";
@@ -579,7 +579,7 @@ const App: React.FC = () => {
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
              console.log(">>> [DBA] Extraindo unidades de " + loaded.assets.length + " ativos...");
              loaded.companies = [...new Set(loaded.assets.map(a => {
-               return (a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
+               return (a.filial || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
           }
           
@@ -900,7 +900,7 @@ const App: React.FC = () => {
                   let recoveredCampaign = activeSession.currentCampaignId;
                   
                   if (!recoveredUnit) {
-                    const tid = parsedUser?._tenantid || parsedUser?.tenantid || 'CICOPAL';
+                    const tid = parsedUser?.tenantId || 'CICOPAL';
                     const sqlConfigs = await sqliteService.getUnitConfigs(tid);
                     if (sqlConfigs && sqlConfigs.length > 0) {
                       recoveredUnit = sqlConfigs[0].selectedUnit as string | null;
@@ -935,10 +935,12 @@ const App: React.FC = () => {
                   }
                 } catch (bootErr) {
                   console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
+                  setInitError(bootErr instanceof Error ? bootErr.message : String(bootErr));
                 }
               }
             } catch (sqliteErr) {
               console.error(">>> [App - SQLite Access Error] Erro ao consultar tabelas físicas (modo contingência ativado):", sqliteErr);
+              setInitError(sqliteErr instanceof Error ? sqliteErr.message : String(sqliteErr));
             } finally {
               setIsInitializing(false);
             }
@@ -1207,15 +1209,13 @@ const App: React.FC = () => {
     const filtered = [];
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
-      // Verifica filial (Prioridade), _unitid, UNIDADE_OPERACIONAL ou _tenantid/GRUPO_EMPRESARIAL
+      // Verifica filial (Prioridade), _unitid ou tenantId/GRUPO_EMPRESARIAL
       const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
-      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
-      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
+      const assetTenant = normalizeKey(a.tenantId || a.GRUPO_EMPRESARIAL || '');
       
       if (assetFilial === selKey || 
           assetUnitId === selKey || 
-          assetUnitOp === selKey || 
           assetTenant === selKey) {
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
@@ -1251,21 +1251,21 @@ const App: React.FC = () => {
         let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE _is_deleted = 0 AND (";
         const params: (string | number)[] = [];
 
-        queryStr += "TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-        params.push(normalizedUnit, normalizedUnit, normalizedUnit);
+        queryStr += "TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+        params.push(normalizedUnit, normalizedUnit);
 
         if (unitCode) {
-          queryStr += " OR TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-          params.push(unitCode, unitCode, unitCode);
+          queryStr += " OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+          params.push(unitCode, unitCode);
 
           const numCode = parseInt(unitCode, 10);
           if (!isNaN(numCode)) {
-            queryStr += " OR CAST(UNIDADE_OPERACIONAL AS INTEGER) = ? OR CAST(filial AS INTEGER) = ?";
-            params.push(numCode, numCode);
+            queryStr += " OR CAST(filial AS INTEGER) = ?";
+            params.push(numCode);
           }
         }
 
-        queryStr += " OR ? LIKE '%' || TRIM(UNIDADE_OPERACIONAL) || '%' OR TRIM(UNIDADE_OPERACIONAL) LIKE '%' || ? || '%'";
+        queryStr += " OR ? LIKE '%' || TRIM(filial) || '%' OR TRIM(filial) LIKE '%' || ? || '%'";
         params.push(normalizedUnit, normalizedUnit);
 
         queryStr += ")";
@@ -1308,33 +1308,34 @@ const App: React.FC = () => {
         console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
         return;
       }
-      if (!currentUnit) {
+      if (!currentUnit || currentUnit.toUpperCase().trim() === 'CARREGANDO...' || currentUnit.toUpperCase().trim() === 'CARREGANDO') {
+        console.log("⏸️ [Kardek Guard] Ignorando busca prematura de ativos locais porque a unidade está em estado de carregamento.");
         if (active) setSqliteUnitAssets([]);
         return;
       }
       try {
-        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para UNIDADE_OPERACIONAL: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
+        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para filial: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
         const normalizedUnit = currentUnit.toUpperCase().trim();
         const unitCode = normalizedUnit.match(/^\d+/)?.[0];
 
         let queryStr = "SELECT * FROM ativos WHERE _is_deleted = 0 AND (";
         const params: (string | number)[] = [];
 
-        queryStr += "TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-        params.push(normalizedUnit, normalizedUnit, normalizedUnit);
+        queryStr += "TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+        params.push(normalizedUnit, normalizedUnit);
 
         if (unitCode) {
-          queryStr += " OR TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-          params.push(unitCode, unitCode, unitCode);
+          queryStr += " OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
+          params.push(unitCode, unitCode);
 
           const numCode = parseInt(unitCode, 10);
           if (!isNaN(numCode)) {
-            queryStr += " OR CAST(UNIDADE_OPERACIONAL AS INTEGER) = ? OR CAST(filial AS INTEGER) = ?";
-            params.push(numCode, numCode);
+            queryStr += " OR CAST(filial AS INTEGER) = ?";
+            params.push(numCode);
           }
         }
 
-        queryStr += " OR ? LIKE '%' || TRIM(UNIDADE_OPERACIONAL) || '%' OR TRIM(UNIDADE_OPERACIONAL) LIKE '%' || ? || '%'";
+        queryStr += " OR ? LIKE '%' || TRIM(filial) || '%' OR TRIM(filial) LIKE '%' || ? || '%'";
         params.push(normalizedUnit, normalizedUnit);
 
         queryStr += ")";
@@ -1411,7 +1412,7 @@ const App: React.FC = () => {
 
   const currentTenantId = useMemo(() => {
     // 1. Prioridade: Tenant do usuário logado
-    let t = (user?._tenantid || user?.tenantid || '').trim();
+    let t = (user?.tenantId || '').trim();
     
     // 2. Fallback: Se for Admin/Gestor e não tiver tenant, assume CICOPAL
     const isAdmin = !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
@@ -1420,8 +1421,8 @@ const App: React.FC = () => {
     // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados, 
     // tenta extrair o tenant do primeiro ativo válido para manter o contexto
     if (!t && inventory.assets.length > 0) {
-      const firstValid = inventory.assets.find(a => a._tenantid || a.GRUPO_EMPRESARIAL);
-      if (firstValid) t = (firstValid._tenantid || firstValid.GRUPO_EMPRESARIAL || '').trim();
+      const firstValid = inventory.assets.find(a => a.tenantId || a.GRUPO_EMPRESARIAL);
+      if (firstValid) t = (firstValid.tenantId || firstValid.GRUPO_EMPRESARIAL || '').trim();
     }
 
     if (t === "UNIDADE_DEFAULT_KARDEK" || t === "CARREGANDO...") return '';
@@ -1504,7 +1505,7 @@ const App: React.FC = () => {
     
     // Fallback de segurança para Tenant caso o useMemo esteja em delay
     if (!tenantId) {
-      tenantId = (user?._tenantid || user?.tenantid || '').trim();
+      tenantId = (user?.tenantId || '').trim();
       if (!tenantId && !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER)) {
         tenantId = 'CICOPAL';
       }
@@ -1577,13 +1578,21 @@ const App: React.FC = () => {
     if (!dbInitialized || sqliteStatus.loading) {
       return;
     }
-    if (user?.tenantid) {
-       fetchUnitConfigs(user.tenantid).then(configs => {
+    if (user?.tenantId) {
+       fetchUnitConfigs(user.tenantId).then(configs => {
          setUnitConfigs(configs);
          setInventory(prev => ({ ...prev, unitConfigs: configs }));
-       }).catch(err => console.error(">>> [App] Erro ao carregar UnitConfigs:", err));
+       }).catch(err => {
+         console.error(">>> [App] Erro ao carregar UnitConfigs:", err);
+         setModalConfig({
+           isOpen: true,
+           title: "Erro de Geocerca",
+           message: err instanceof Error ? err.message : "Falha ao carregar configurações de unidade (GPS).",
+           type: "error"
+         });
+       });
     }
-  }, [user?.tenantid, databaseMode]);
+  }, [user?.tenantId, databaseMode]);
 
   // Sincronização Reativa Obrigatória no Foco (Governança GBR)
   useEffect(() => {
@@ -1611,7 +1620,7 @@ const App: React.FC = () => {
 
       if (lastImportingState && !currentState) {
         console.log(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
-        const tenantId = user?.tenantid || user?._tenantid || 'CICOPAL';
+        const tenantId = user?.tenantId || 'CICOPAL';
         
         // Se for Mobile Nativo, força salvar para flush total
         const { Capacitor } = await import('@capacitor/core');
@@ -1696,9 +1705,8 @@ const App: React.FC = () => {
     if (!user) return;
     
     const configToSave: UnitConfig = {
-      _tenantid: user.tenantid || 'default',
+      tenantId: user.tenantId || 'CICOPAL',
       _unitid: unitId,
-      tenant_id: user.tenantid || 'default',
       unit_id: unitId,
       lat: lat,
       lng: lng,
@@ -1714,7 +1722,7 @@ const App: React.FC = () => {
       await saveUnitConfig(configToSave);
       
       // Atualiza o estado local imediatamente para refletir a mudança
-      const updatedConfigs = await fetchUnitConfigs(user.tenantid);
+      const updatedConfigs = await fetchUnitConfigs(user.tenantId);
       setInventory(prev => ({
         ...prev,
         unitConfigs: updatedConfigs,
@@ -1731,6 +1739,12 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error('Erro ao salvar configuração de GPS:', err);
+      setModalConfig({
+        isOpen: true,
+        title: "Erro ao Salvar Configuração de GPS",
+        message: err instanceof Error ? err.message : "Falha ao salvar configuração da geocerca física.",
+        type: "error"
+      });
     }
   };
 
@@ -1787,7 +1801,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'SYNC_PUSH',
             details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
-            _tenantid: user?._tenantid || user?.tenantid
+            tenantId: user?.tenantId || 'CICOPAL'
           });
         }
       } catch (err) {
@@ -1798,7 +1812,7 @@ const App: React.FC = () => {
         if (!skipLoadingState) setIsSyncing(false);
       }
     }
-  }, [databaseMode, user?.tenantid, isSyncing]);
+  }, [databaseMode, user?.tenantId, isSyncing]);
 
   const toggleFieldMode = useCallback(() => {
     const next = !isFieldMode;
@@ -1851,7 +1865,7 @@ const App: React.FC = () => {
     }
     
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-    const rawTenantId = explicitTenantId || user?._tenantid || user?.tenantid;
+    const rawTenantId = explicitTenantId || user?.tenantId;
     
     // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
     const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
@@ -1949,7 +1963,7 @@ const App: React.FC = () => {
                       old_data: cloudAsset,
                       new_data: localDirty,
                       details: `Conflito de sincronização: Item conferido na nuvem por ${cloudAsset._auditor} em ${cloudAsset._dataLeitura}. Prevalecendo alteração local do auditor atual.`,
-                      _tenantid: user?._tenantid || user?.tenantid
+                      tenantId: user?.tenantId || 'CICOPAL'
                     });
                   }
 
@@ -1961,7 +1975,7 @@ const App: React.FC = () => {
             });
           }
 
-          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
@@ -1980,7 +1994,7 @@ const App: React.FC = () => {
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
               details: `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`,
-              _tenantid: user?._tenantid || user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : tenantid)
+              tenantId: user?.tenantId || (Array.isArray(tenantid) ? tenantid[0] : 'CICOPAL')
             });
           }
 
@@ -2111,7 +2125,7 @@ const App: React.FC = () => {
 
       // 2. Salva e atualiza o estado
       const syncTimestamp = new Date().toISOString();
-      const extractedCompanies = Array.from(new Set(assets.map(a => (a.filial || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase()))).filter(Boolean);
+      const extractedCompanies = Array.from(new Set(assets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
 
       const newState: InventoryState = {
         ...inventory,
@@ -2507,6 +2521,54 @@ const App: React.FC = () => {
             }
           }
         }
+
+        // CORREÇÃO DO GATILHO 'GBR-Emergency' NO LOADER & ADIAMENTO DO SALVAMENTO 'Fast Path'
+        // Se a base local estiver vazia e estivermos em modo nuvem com rede disponível,
+        // sincroniza de forma SÍNCRONA dentro da inicialização para que o loader e a tela de Splash
+        // permaneçam ativos até que a busca e os 12.636 ativos sejam concluídos de fato!
+        const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
+        const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
+        if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared) {
+          console.log('>>> [Boot Loader] Base local vazia detectada. Baixando 12.636 ativos via busca paginada antes de dispensar o splash...');
+          // Define flag indicando gravação em andamento para bloquear salvamentos parciais fast path
+          if (typeof window !== 'undefined') {
+            ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = true;
+          }
+          const cloudData = await fetchFullInventory(
+            user?.tenantid, 
+            undefined, 
+            undefined, 
+            async (loadedConfig) => {
+              // Mova a chamada de persistência de configuração para ser executada uma única vez, de forma atômica, junto ao método onComplete() no final de toda a paginação de registros
+              try {
+                console.log(">>> [onComplete] Persistindo configuração do tenant de forma única e atômica no final da paginação.");
+                await saveConfigOnly(loadedConfig);
+              } catch (e) {
+                console.warn(">>> [onComplete Fast Path Error] Falha ao persistir a configuração:", e);
+              }
+            }
+          );
+          if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
+            console.log(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
+            const newState: InventoryState = {
+              ...inventory,
+              ...cloudData.config,
+              assets: cloudData.assets,
+              status: DatabaseStatus.LOADED,
+              lastUpdated: new Date().toISOString()
+            };
+            setInventory(newState);
+            await saveInventory(newState);
+            savedInventory = newState;
+            setLastSyncTime(new Date().toISOString());
+            setRecoverySource('CLOUD');
+            setShowRecoveryToast(true);
+            setTimeout(() => setShowRecoveryToast(false), 5000);
+          }
+          if (typeof window !== 'undefined') {
+            ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+          }
+        }
       } catch (e) { 
         console.error("Data load failed", e); 
       } finally {
@@ -2519,62 +2581,79 @@ const App: React.FC = () => {
           setIsDatabaseLoaded(true);
         }
         
-        // @ts-expect-error - appStarted is a custom property for the loader fallback
-        window.appStarted = true;
+        // Sinaliza que a busca foi concluída
+        if (typeof window !== 'undefined') {
+          ((window as unknown) as { gbr_search_concluded?: boolean }).gbr_search_concluded = true;
+          ((window as unknown) as { appStarted?: boolean }).appStarted = true;
+        }
         // Remove o loader do index.html o mais rápido possível
-        const loader = document.getElementById('app-loader');
+        // ATENÇÃO: corrigido ID do gbr-initial-loader para buscar o loader real do index.html!
+        const loader = document.getElementById('gbr-initial-loader') || document.getElementById('app-loader');
         if (loader) {
-          loader.classList.add('hidden');
+          console.log(">>> [App] Removendo gbr-initial-loader de forma limpa e coordenada.");
+          loader.style.opacity = '0';
           setTimeout(() => loader.remove(), 500);
         }
 
-        // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background)
-        // Adicionado timeout e verificação rigorosa de modo para evitar travamento no splash screen
+        // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background) - Apenas se não acabamos de baixar
         if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine) {
           try {
-            // Promise.race para garantir que o fetch não trave o init por mais de 8s
-            const cloudData = await Promise.race([
-              fetchFullInventory(user?.tenantid),
-              new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
-            ]).catch(() => null);
+            // Se já inicializamos acima com sucesso, não precisamos buscar de novo, apenas agenda se houver update pendente
+            const currentAssetsCount = savedInventory?.assets?.length || 0;
+            if (currentAssetsCount === 0) {
+              const cloudData = await Promise.race([
+                fetchFullInventory(user?.tenantid),
+                new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
+              ]).catch(() => null);
 
-            if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
-              const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
-              const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
-              
-              const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
-              const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
+              if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
+                const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
+                const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
+                
+                const isLocalEmptySec = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
+                const justClearedSec = sessionStorage.getItem('app_just_cleared_data') === 'true';
 
-              // Se a base local estiver vazia e houver dados na nuvem, sincroniza AUTOMATICAMENTE
-              // Mas apenas se não tivermos acabado de limpar a base (para evitar loop de recuperação)
-              if (isLocalEmpty && cloudData.assets && cloudData.assets.length > 0 && !justCleared) {
-                console.log('Base local vazia detectada. Sincronizando automaticamente com a nuvem...');
-                const newState: InventoryState = {
-                  ...inventory,
-                  ...cloudData.config,
-                  assets: cloudData.assets,
-                  status: DatabaseStatus.LOADED,
-                  lastUpdated: new Date().toISOString()
-                };
-                setInventory(newState);
-                await saveInventory(newState);
-                setLastSyncTime(new Date().toISOString());
-                setRecoverySource('CLOUD');
-                setShowRecoveryToast(true);
-                setTimeout(() => setShowRecoveryToast(false), 5000);
-              } 
-              // Se a base local estiver vazia E a nuvem também estiver vazia para este tenant
-              else if (isLocalEmpty && (!cloudData.assets || cloudData.assets.length === 0)) {
-                console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
-                if (!user?.tenantid) {
-                  setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
-                } else {
-                  setSyncError(`Erro ao sincronizar dados da nuvem.`);
+                if (isLocalEmptySec && cloudData.assets && cloudData.assets.length > 0 && !justClearedSec) {
+                  console.log('Base local vazia detectada em verificação secundária. Sincronizando com a nuvem...');
+                  const newState: InventoryState = {
+                    ...inventory,
+                    ...cloudData.config,
+                    assets: cloudData.assets,
+                    status: DatabaseStatus.LOADED,
+                    lastUpdated: new Date().toISOString()
+                  };
+                  setInventory(newState);
+                  await saveInventory(newState);
+                  setLastSyncTime(new Date().toISOString());
+                  setRecoverySource('CLOUD');
+                  setShowRecoveryToast(true);
+                  setTimeout(() => setShowRecoveryToast(false), 5000);
+                } else if (isLocalEmptySec && (!cloudData.assets || cloudData.assets.length === 0)) {
+                  console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
+                  if (!user?.tenantid) {
+                    setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
+                  } else {
+                    setSyncError(`Erro ao sincronizar dados da nuvem.`);
+                  }
+                } else if (cloudTime > localTime + 5000) {
+                  setIsCloudUpdatePending(true);
                 }
               }
-              // Se não estiver vazia, mas a nuvem for mais nova, apenas avisa (comportamento atual)
-              else if (cloudTime > localTime + 5000) {
-                setIsCloudUpdatePending(true);
+            } else {
+              // Se já temos ativos locais, apenas verifica em background se a nuvem é mais nova sem puxar todos os ativos de novo
+              // de uma só vez (otimização)
+              const { data: configData } = await supabase
+                .from('inventory_config')
+                .select('last_updated')
+                .eq('id', user?.tenantid ? `config_${user.tenantid}` : 'global_config')
+                .maybeSingle();
+
+              if (configData && configData.last_updated) {
+                const cloudTime = new Date(configData.last_updated).getTime();
+                const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
+                if (cloudTime > localTime + 5000) {
+                  setIsCloudUpdatePending(true);
+                }
               }
             }
           } catch (err) {
@@ -2836,14 +2915,12 @@ const App: React.FC = () => {
 
       const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
-      const assetUnitOp = normalizeKey(a.UNIDADE_OPERACIONAL || '');
-      const assetTenant = normalizeKey(a._tenantid || a.GRUPO_EMPRESARIAL || '');
+      const assetTenant = normalizeKey(a.tenantId || a.GRUPO_EMPRESARIAL || '');
       
       // Se houver unidade selecionada, o ativo deve pertencer a ela (por ID ou Nome)
       if (currentCompKey && 
           assetFilial !== currentCompKey && 
           assetUnitId !== currentCompKey && 
-          assetUnitOp !== currentCompKey && 
           assetTenant !== currentCompKey) {
         continue;
       }
@@ -2902,7 +2979,7 @@ const App: React.FC = () => {
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
     
     // 3. ADOTADO EXTERNO (Empresa diferente)
-    const assetCompKey = normalizeKey(asset.filial || asset.UNIDADE_OPERACIONAL || asset._unitid || asset._tenantid || asset.GRUPO_EMPRESARIAL || '');
+    const assetCompKey = normalizeKey(asset.filial || asset._unitid || asset.tenantId || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeKey(selectedUnit || '');
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;
@@ -2972,12 +3049,13 @@ const App: React.FC = () => {
           } else {
             // FAST PATH: Salva apenas a config se não houver necessidade de sync pesado
             // Os ativos já estão sendo salvos incrementalmente via saveAssetIncremental
-            const { assets: _assets, ...config } = inventory;
-            if (_assets.length > 0) {
-              // Assets are saved incrementally, so we only log here for debug
-              console.debug('Config sync: assets present but skipped in this path', _assets.length);
+            const config = { ...inventory, assets: undefined } as unknown as Omit<InventoryState, 'assets'>;
+            const isImporting = sqliteService.isImportingBatch || (typeof window !== 'undefined' && !!((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch);
+            if (!isImporting) {
+              await saveConfigOnly(config);
+            } else {
+              console.log(">>> [Persistence] Ignorando persistência Fast Path de configuração durante importação massiva/ingestão.");
             }
-            await saveConfigOnly(config as unknown as Omit<InventoryState, 'assets'>);
           }
           
           dirtyAssetsRef.current.clear();
@@ -3100,7 +3178,7 @@ const App: React.FC = () => {
       const currentUser = userRef.current;
       
       // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido, não fazemos nada para evitar loop
-      if (currentUser && currentUser.email === session.user.email && currentUser.tenantid) return;
+      if (currentUser && currentUser.email === session.user.email && currentUser.tenantId) return;
 
       setIsLoading(true);
       try {
@@ -3112,15 +3190,17 @@ const App: React.FC = () => {
           ...(session.user.app_metadata || {}) 
         };
         const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
+        const permissionsObj = permissions as unknown as Record<string, unknown>;
+        const unifiedMetadataObj = unifiedMetadata as unknown as Record<string, unknown>;
         console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
-          dbTenant: permissions.tenantid, 
-          metaTenant: unifiedMetadata.tenantid,
-          finalTenant: permissions.tenantid || unifiedMetadata.tenantid || ''
+          dbTenant: permissions.tenantId || (permissionsObj.tenantid as string), 
+          metaTenant: unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string),
+          finalTenant: permissions.tenantId || (permissionsObj.tenantid as string) || ''
         });
         
         const is_master = (session.user.email?.toLowerCase() === 'semorr@gmail.com' || session.user.email?.toLowerCase() === 'semorr@gmail.com.br');
-        const resolvedTenantId = permissions._tenantid || permissions.tenantid || unifiedMetadata._tenantid || unifiedMetadata.tenantid || (is_master ? 'CICOPAL' : '');
-        const resolvedUnitId = permissions._unitid || permissions.unitid || unifiedMetadata._unitid || unifiedMetadata.unitid || (is_master ? 'MATRIZ' : '');
+        const resolvedTenantId = permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || (is_master ? 'CICOPAL' : 'CICOPAL');
+        const resolvedUnitId = permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || (is_master ? 'MATRIZ' : 'MATRIZ');
 
         if (!resolvedTenantId && !is_master) {
           console.warn(`[Auth] Usuário logado sem tenantId associado: ${session.user.email}`);
@@ -3153,18 +3233,23 @@ const App: React.FC = () => {
           is_admin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           mustChangePassword: false,
-          _tenantid: resolvedTenantId,
+          tenantId: resolvedTenantId,
           _unitid: resolvedUnitId,
-          tenantid: resolvedTenantId,
           unitid: resolvedUnitId,
-          units: permissions.units || unifiedMetadata.units || (resolvedUnitId ? [resolvedUnitId] : []),
-          tenants: permissions.tenants || unifiedMetadata.tenants || (resolvedTenantId ? [resolvedTenantId] : [])
+          units: permissions.units || unifiedMetadata.units || (resolvedUnitId ? [resolvedUnitId] : [])
         };
+
+        // Higienizar explicitamente propriedades legadas de tranca multidomínio
+        const userObj = loggedUser as unknown as Record<string, unknown>;
+        delete userObj._tenantid;
+        delete userObj.tenant_id;
+        delete userObj.tenantid;
+        delete userObj.tenants;
 
         // Só atualizamos se houver mudança real para evitar loops de renderização
         const hasChanged = !currentUser || 
                           currentUser.email !== loggedUser.email || 
-                          currentUser.tenantid !== loggedUser.tenantid || 
+                          currentUser.tenantId !== loggedUser.tenantId || 
                           currentUser.role !== loggedUser.role;
 
         if (hasChanged) {
@@ -3177,7 +3262,7 @@ const App: React.FC = () => {
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Usuário logado no sistema (${loggedUser.role})`,
-          _tenantid: loggedUser._tenantid || loggedUser.tenantid
+          tenantId: loggedUser.tenantId
         });
         
         // Se logou via Supabase, garante que o modo está correto
@@ -3192,8 +3277,8 @@ const App: React.FC = () => {
         }
         
         // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-        syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
-  } catch (err) {
+        syncFromCloud(loggedUser.tenantId, DatabaseMode.SUPABASE);
+      } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
         const fallbackUser: User = {
@@ -3202,9 +3287,7 @@ const App: React.FC = () => {
           role: UserRole.AUDITOR,
           isAdmin: false,
           mustChangePassword: false,
-          _tenantid: '',
-          tenantid: '',
-          tenants: []
+          tenantId: 'CICOPAL'
         };
         setUser(fallbackUser);
         localStorage.setItem('app_current_user', safeStringify(fallbackUser));
@@ -3429,14 +3512,14 @@ const App: React.FC = () => {
           action: 'DELETE',
           table_name: 'assets',
           details: `Limpeza em massa de banco de dados (Unidades: ${companiesToClear.join(', ')})`,
-          _tenantid: user?._tenantid || user?.tenantid
+          tenantId: user?.tenantId || 'CICOPAL'
         });
       }
 
       // 3. Atualiza o estado local
       sessionStorage.setItem('app_just_cleared_data', 'true');
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
-      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.filial || a.UNIDADE_OPERACIONAL || '').toUpperCase().trim()));
+      const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.filial || '').toUpperCase().trim()));
       
       setInventory(prev => {
         const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
@@ -3524,7 +3607,7 @@ const App: React.FC = () => {
         action: 'UPDATE',
         table_name: 'config',
         details: `Alteração do modo de banco de dados para: ${mode}`,
-        _tenantid: user?._tenantid || user?.tenantid
+        tenantId: user?.tenantId || 'CICOPAL'
       });
 
       // 3. Tenta carregar o estado do novo modo do IndexedDB
@@ -3670,8 +3753,14 @@ const App: React.FC = () => {
     updates._origemTransacao = origin; // Aplica o código fixo
     
     // Garantir que tenant e unit estão definidos
-    if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+    if (!updates.tenantId) updates.tenantId = user?.tenantId || 'CICOPAL';
     if (!updates._unitid) updates._unitid = user?.unitid || '';
+    
+    // Higienizar legado
+    const updatesObj = updates as unknown as Record<string, unknown>;
+    delete updatesObj._tenantid;
+    delete updatesObj.tenant_id;
+    delete updatesObj.tenantid;
     
     // Log de Auditoria
     const index = inventory.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
@@ -3736,7 +3825,7 @@ const App: React.FC = () => {
       if (idx !== -1) {
         newAssets[idx] = updates;
       } else {
-        const isSameUnit = String(updates.filial || updates.UNIDADE_OPERACIONAL || '').toUpperCase().trim() === String(currentUnit || '').toUpperCase().trim();
+        const isSameUnit = String(updates.filial || '').toUpperCase().trim() === String(currentUnit || '').toUpperCase().trim();
         if (isSameUnit) {
           newAssets.push(updates);
         }
@@ -4171,7 +4260,7 @@ const App: React.FC = () => {
         await sqliteService.bulkInsertAssets([deletedAsset]);
       } else {
         // No modo Supabase, sincronizamos o flag _is_deleted
-        await syncAssetsToCloud([deletedAsset], user?.tenantid);
+        await syncAssetsToCloud([deletedAsset], user?.tenantId);
         
         // Log de Auditoria Global
         await logAuditEvent({
@@ -4181,7 +4270,7 @@ const App: React.FC = () => {
           record_id: assetId,
           old_data: assetToDelete,
           details: `Exclusão lógica do ativo: ${assetToDelete.ETIQUETA} - ${assetToDelete.DESCRICAODOATIVO}`,
-          _tenantid: user?.tenantid
+          tenantId: user?.tenantId || 'CICOPAL'
         });
       }
 
@@ -4255,8 +4344,14 @@ const App: React.FC = () => {
         };
         
         // Garantir que tenant e unit estão definidos
-        if (!updates._tenantid) updates._tenantid = user?.tenantid || '';
+        if (!updates.tenantId) updates.tenantId = user?.tenantId || 'CICOPAL';
         if (!updates._unitid) updates._unitid = user?.unitid || '';
+        
+        // Higienizar legado
+        const updatesObj = updates as unknown as Record<string, unknown>;
+        delete updatesObj._tenantid;
+        delete updatesObj.tenant_id;
+        delete updatesObj.tenantid;
         
         // Log de Auditoria para atualização em lote
         const historyEntry: AuditLogEntry = {
@@ -4264,7 +4359,7 @@ const App: React.FC = () => {
           user: user?.name || user?.username || user?.email || 'SISTEMA',
           action: 'BULK_UPDATE',
           details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          tenantid: user?.tenantid || '',
+          tenantId: user?.tenantId || 'CICOPAL',
           origin: origin // Aplica o código fixo no log
         };
         updates._history = [...(updates._history || []), historyEntry];
@@ -4336,14 +4431,14 @@ const App: React.FC = () => {
         // SOBERANIA SQLITE: Transação atômica que NÃO sobrescreve dados antigos sem intenção (merge via spread)
         await sqliteService.bulkInsertAssets(updatedAssetsList);
       } else {
-        await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
+        await syncAssetsToCloud(updatedAssetsList, user?.tenantId);
         
         logAuditEvent({
           user_email: user?.email || 'unknown',
           action: 'BULK_UPDATE',
           table_name: 'assets',
           details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          _tenantid: user?._tenantid || user?.tenantid,
+          tenantId: user?.tenantId || 'CICOPAL',
           origin: origin
         });
       }
@@ -4459,7 +4554,7 @@ const App: React.FC = () => {
         action: 'EXPORT',
         table_name: 'assets',
         details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
-        _tenantid: user?._tenantid || user?.tenantid
+        tenantId: user?.tenantId || 'CICOPAL'
       });
     }
   };
@@ -4472,7 +4567,7 @@ const App: React.FC = () => {
         user_email: user?.email || 'unknown',
         action: 'EXPORT',
         details: 'Backup manual do sistema realizado.',
-        _tenantid: user?._tenantid || user?.tenantid
+        tenantId: user?.tenantId || 'CICOPAL'
       });
 
       setModalConfig({
@@ -4508,7 +4603,7 @@ const App: React.FC = () => {
           user_email: user?.email || 'unknown',
           action: 'RESTORE',
           details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
-          _tenantid: user?._tenantid || user?.tenantid
+          tenantId: user?.tenantId || 'CICOPAL'
         });
       }
     } else {
@@ -4572,7 +4667,7 @@ const App: React.FC = () => {
             user_email: user?.email || 'unknown',
             action: 'DOWNLOAD',
             details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
-            _tenantid: user?._tenantid || user?.tenantid
+            tenantId: user?.tenantId || 'CICOPAL'
           });
         }
       } else {
@@ -4612,7 +4707,7 @@ const App: React.FC = () => {
           // Fallback total se a query falhar: Extração direta dos objetos
           const unitSet = new Set<string>();
           assets.forEach(a => {
-            const unit = (a.filial || a.UNIDADE_OPERACIONAL || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
+            const unit = (a.filial || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
             if (unit && unit !== 'NULL') unitSet.add(unit);
           });
           finalCompanies = Array.from(unitSet);
@@ -4704,7 +4799,7 @@ const App: React.FC = () => {
       if (databaseMode === DatabaseMode.SUPABASE) {
         try {
           const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-          const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+          const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantId;
           await clearCloudInventory(selectedUnit || undefined, effectiveTenantId);
           
           // Log de Auditoria na Nuvem
@@ -4713,7 +4808,7 @@ const App: React.FC = () => {
             action: 'DELETE',
             table_name: 'assets',
             details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
-            _tenantid: user?._tenantid || user?.tenantid
+            tenantId: user?.tenantId || 'CICOPAL'
           });
 
           // Atualiza o timestamp na nuvem para notificar outros usuários
@@ -4761,7 +4856,7 @@ const App: React.FC = () => {
         setIsDataLoaded(false);
       } else {
         const normalizedSel = selectedUnit.toUpperCase().trim();
-        const remainingAssets = inventory.assets.filter(a => (a.filial || a.UNIDADE_OPERACIONAL || '').toUpperCase().trim() !== normalizedSel);
+        const remainingAssets = inventory.assets.filter(a => (a.filial || '').toUpperCase().trim() !== normalizedSel);
         
         setInventory(prev => ({
           ...prev,
@@ -5091,7 +5186,7 @@ const App: React.FC = () => {
       const emergencyUnits = new Set<string>();
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
-        const company = (a.filial || a.UNIDADE_OPERACIONAL || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+        const company = (a.filial || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0' && company !== 'CICOPAL' && normalizeKey(company) !== 'CICOPAL') {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
@@ -5126,8 +5221,8 @@ const App: React.FC = () => {
     
     // 1. De Ativos (Fonte mais confiável de relação: filial real)
     inventory.assets.forEach(a => {
-      const t = (a.tenantId || a.GRUPO_EMPRESARIAL || a._tenantid || '').toUpperCase();
-      const u = a.filial || a.UNIDADE_OPERACIONAL; // Usar apenas a unidade operacional real da base
+      const t = (a.tenantId || a.GRUPO_EMPRESARIAL || '').toUpperCase();
+      const u = a.filial; // Usar apenas a unidade operacional real da base
       
       if (u && u.toUpperCase() !== 'DEFAULT' && u.toUpperCase() !== 'NULL' && u !== '0') {
         if (!map.has(t)) map.set(t, new Set());
@@ -5137,7 +5232,7 @@ const App: React.FC = () => {
 
     // 2. De Usuários (Apenas para garantir que unidades já atribuídas apareçam, se forem válidas)
     users.forEach(u => {
-      const t = (u.tenantid || '').toUpperCase();
+      const t = (u.tenantId || '').toUpperCase();
       const isValidUnit = (unit: string) => {
         if (!unit) return false;
         const upper = unit.toUpperCase();
@@ -5162,7 +5257,7 @@ const App: React.FC = () => {
   }, [inventory.assets, users]);
 
   const availableUnits = useMemo(() => {
-    const fromAssets = inventory.assets.map(a => a._unitid || a._tenantid).filter(Boolean);
+    const fromAssets = inventory.assets.map(a => a._unitid || a.tenantId).filter(Boolean);
     const fromCompanies = inventory.companies.map(c => c.toLowerCase().replace(/\s/g, '_')).filter(Boolean);
     const fromUsers = users.flatMap(u => {
       const t = [];
@@ -5416,8 +5511,7 @@ const App: React.FC = () => {
                     const updatedUser: User = {
                       ...user,
                       role: 'MOBILE_SINGLE' as unknown as UserRole,
-                      _tenantid: user.id || 'MOBILE_USER',
-                      tenantid: user.id || 'MOBILE_USER',
+                      tenantId: user.id || 'MOBILE_USER',
                     };
                     setUser(updatedUser);
                     localStorage.setItem('app_current_user', safeStringify(updatedUser));
@@ -6111,7 +6205,6 @@ const App: React.FC = () => {
                 })
                 .map(c => ({ 
                   filial: c.name,
-                  UNIDADE_OPERACIONAL: c.name, 
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
                   isDownloaded: false,
@@ -6130,7 +6223,7 @@ const App: React.FC = () => {
                 sessionStorage.setItem('filial', u);
                 localStorage.setItem('filial', u);
                 
-                const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+                const tid = (user?.tenantId || 'CICOPAL').toString().trim();
                 sessionStorage.setItem('tenantId', tid);
                 localStorage.setItem('tenantId', tid);
 
@@ -6154,7 +6247,7 @@ const App: React.FC = () => {
                       user_email: user?.email || 'unknown',
                       action: 'LOGOUT',
                       details: 'Usuário saiu do sistema.',
-                      _tenantid: user?._tenantid || user?.tenantid
+                      tenantId: user?.tenantId || 'CICOPAL'
                     });
                     await supabase.auth.signOut();
                   }
@@ -6237,7 +6330,7 @@ const App: React.FC = () => {
                     user_email: user?.email || 'unknown',
                     action: 'LOGOUT',
                     details: 'Usuário saiu do sistema.',
-                    _tenantid: user?._tenantid || user?.tenantid
+                    tenantId: user?.tenantId || 'CICOPAL'
                   });
                   await supabase.auth.signOut();
                 }
@@ -6266,7 +6359,7 @@ const App: React.FC = () => {
           {screen === AppScreen.ASSET_CONTROL_HOME && (
             <AssetControlModule 
               username={user?.username || ''}
-              tenantid={user?.tenantid || ''}
+              tenantId={user?.tenantId || 'CICOPAL'}
               databaseMode={databaseMode}
               onBack={() => {
                 setCurrentModule(null);
@@ -6285,7 +6378,7 @@ const App: React.FC = () => {
               onBack={popScreen} 
               onActivate={async (id) => {
                 // Unified v2.6 Keys & Session Metadata
-                const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
+                const tid = (user?.tenantId || 'CICOPAL').toString().trim();
                 sessionStorage.setItem('tenantId', tid);
                 localStorage.setItem('tenantId', tid);
                 if (selectedUnit) {

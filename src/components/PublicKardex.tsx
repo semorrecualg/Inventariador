@@ -32,7 +32,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
   const isBaixado = String(asset.STATUS || '').toUpperCase().includes('BAIXA') || !!asset.DATABAIXA;
   
   // Regra de Ouro: Determina a Tag e os Metadados (Cores/Legendas)
-  const tag = determineAssetTag(asset, asset._localMaster || asset.ENDERECO || "", selectedUnit || asset._unitid || asset.UNIDADE_OPERACIONAL || null);
+  const tag = determineAssetTag(asset, asset._localMaster || asset.ENDERECO || "", selectedUnit || asset._unitid || asset.filial || null);
   const meta = getTagMetadata(tag);
   const TagIcon = meta.icon;
 
@@ -65,7 +65,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
             {asset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO'}
           </h2>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-            {asset.UNIDADE_OPERACIONAL || asset._unitid || 'UNIDADE NÃO INFORMADA'}
+            {asset.filial || asset._unitid || 'UNIDADE NÃO INFORMADA'}
           </p>
         </div>
 

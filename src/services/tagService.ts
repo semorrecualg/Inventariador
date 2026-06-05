@@ -210,7 +210,7 @@ export const determineAssetTag = (asset: Asset, targetLocation: string, selected
   
   // 3. ADOTADO EXTERNO (Empresa/Unidade diferente)
   if (selectedUnit) {
-    const assetCompKey = normalizeString(asset.UNIDADE_OPERACIONAL || asset._unitid || asset.GRUPO_EMPRESARIAL || '');
+    const assetCompKey = normalizeString(asset.filial || asset._unitid || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeString(selectedUnit);
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       return TagInventario.ADOTADO_EXTERNO;

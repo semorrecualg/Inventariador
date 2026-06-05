@@ -367,7 +367,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       title: 'LOCALIZAÇÃO E CUSTO',
       fields: [
         { key: 'GRUPO_EMPRESARIAL', label: TYPE_LABELS.GROUP, icon: Building2 },
-        { key: unitMapping || 'UNIDADE_OPERACIONAL', label: TYPE_LABELS.UNIT, icon: Building2 },
+        { key: unitMapping || 'filial', label: TYPE_LABELS.UNIT, icon: Building2 },
         { key: 'ENDERECO', label: TYPE_LABELS.ADDRESS, icon: MapPin },
         { key: ccMapping || 'CENTRODECUSTO', label: TYPE_LABELS.COST_CENTER, icon: Briefcase }
       ]
@@ -1154,7 +1154,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {isQrModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsQrModalOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[3rem] border border-border shadow-2xl p-10 flex flex-col items-center text-center modern-card" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.UNIDADE_OPERACIONAL || workingAsset._unitid}</p>
+            <p className="text-xl font-bold text-ink uppercase tracking-tight font-mono mb-6">{workingAsset.filial || workingAsset._unitid}</p>
             <div className="bg-white p-6 border-2 border-ink rounded-3xl shadow-inner mb-8">
               <QRCodeSVG 
                 value={qrCodeData} 

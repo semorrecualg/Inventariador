@@ -17,7 +17,7 @@ export interface ProtheusUpdateResponse {
  */
 export const normalizeToProtheus = (asset: Asset) => {
   return {
-    N1_FILIAL: asset.UNIDADE_OPERACIONAL || asset._unitid || '',
+    N1_FILIAL: asset.filial || asset._unitid || '',
     N1_CBASE: asset.ETIQUETA || '',
     N1_ITEM: '0001', // Padrão Protheus para item único
     N1_STATUS: asset.STATUS === 'ATIVO' ? '1' : '0', // Exemplo de mapeamento de status
@@ -43,7 +43,7 @@ export const validateForProtheus = (asset: Asset): { valid: boolean; errors: str
     errors.push('Identificador Protheus (Sn3_recno) não encontrado.');
   }
   
-  if (!asset.UNIDADE_OPERACIONAL && !asset._unitid) errors.push('Filial (UNIDADE_OPERACIONAL) é obrigatória.');
+  if (!asset.filial && !asset._unitid) errors.push('Filial (filial) é obrigatória.');
   if (!asset.ETIQUETA) errors.push('Código Base (ETIQUETA) é obrigatório.');
   
   return {

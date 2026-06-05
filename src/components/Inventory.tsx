@@ -3,7 +3,7 @@
  * GBR v24.50 KARDEK - REGISTRADOR DE SOBERANIA NATIVA
  * 
  * Query Principal de Alimentação da Unidade Operacional Selecionada (Filtro Estrito SQLite):
- * SELECT * FROM ativos WHERE TRIM(UNIDADE_OPERACIONAL) = ? AND _is_deleted = 0;
+ * SELECT * FROM ativos WHERE TRIM(filial) = ? AND _is_deleted = 0;
  * 
  * Assinatura do Componente de Listagem de Ativos (Garantia de Isolamento Total):
  * export const Inventory: React.FC<InventoryProps>
@@ -198,6 +198,34 @@ const Inventory: React.FC<InventoryProps> = ({
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
+
+  const cleanAndCapitalizeAsset = (rawAsset: Asset): Asset => {
+    const cleanTenantId = String(rawAsset.tenantId || user?.tenantId || 'CICOPAL').trim().toUpperCase();
+    const cleanFilial = String(rawAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
+    
+    if (!cleanTenantId || cleanTenantId === 'NULL' || cleanTenantId === 'UNDEFINED' || cleanTenantId === '') {
+      alert("Erro de Governança: tenantId inválido ou não autenticado.");
+      throw new Error("TenantId inválido ou não autenticado para gravação.");
+    }
+
+    if (!cleanFilial || cleanFilial === 'NULL' || cleanFilial === 'UNDEFINED' || cleanFilial === '') {
+      alert("Erro de Governança: filial inválido.");
+      throw new Error("Filial inválido para gravação.");
+    }
+
+    const trimmedAsset = { ...rawAsset } as unknown as Record<string, unknown>;
+    delete trimmedAsset._tenantid;
+    delete trimmedAsset.tenant_id;
+    delete trimmedAsset.tenantid;
+    delete trimmedAsset._unitid;
+    delete trimmedAsset.unitid;
+
+    return {
+      ...trimmedAsset,
+      tenantId: cleanTenantId,
+      filial: cleanFilial
+    } as Asset;
+  };
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -437,7 +465,7 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsHierarchyLoading(true);
     try {
       // NÍVEL 1 - Busca Local (Automática)
-      // Filtra ETIQUETA + UNIDADE_OPERACIONAL atual
+      // Filtra ETIQUETA + filial atual
       const currentUnit = selectedUnitRef.current || '';
       const foundAsset = await assetRepository.findByEtiquetaInUnit(term, currentUnit);
       
@@ -450,11 +478,12 @@ const Inventory: React.FC<InventoryProps> = ({
         }
         
         if (autoConfirmOnScanRef.current) {
-          await onUpdateAssetRef.current({
+          const cleanAsset = cleanAndCapitalizeAsset({
             ...foundAsset,
             _conferido: true,
             _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
           });
+          await onUpdateAssetRef.current(cleanAsset);
           setCommittedSearch('');
           setDisplayValue('');
         } else {
@@ -474,6 +503,7 @@ const Inventory: React.FC<InventoryProps> = ({
       console.error(">>> [Inventory] Erro na busca hierárquica:", err);
       setIsHierarchyLoading(false);
       setScannedResult(result); // Fallback
+      alert(`Erro na busca hierárquica de ativos: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [normalizeKey]);
 
@@ -489,6 +519,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     } catch (err) {
       console.error(">>> [Inventory] Erro na busca global:", err);
+      alert(`Falha ao realizar a busca global de ativos: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsHierarchyLoading(false);
     }
@@ -500,7 +531,7 @@ const Inventory: React.FC<InventoryProps> = ({
     setGlobalSearchResults([]);
     setManualAsset({
       ETIQUETA: etiqueta,
-      UNIDADE_OPERACIONAL: selectedUnit || "",
+      filial: selectedUnit || "",
       STATUS: "ATIVO",
       DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -516,10 +547,9 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleLinkToUnit = async (asset: Asset) => {
     try {
       setIsHierarchyLoading(true);
-      const updatedAsset = {
+      const rawUpdatedAsset = {
         ...asset,
-        UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL,
-        _unitid: selectedUnit || asset._unitid,
+        filial: selectedUnit || asset.filial,
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
         _localMaster: selectedLocation || asset.ENDERECO,
@@ -527,7 +557,8 @@ const Inventory: React.FC<InventoryProps> = ({
         _origemTransacao: TransactionOrigin.INVENTORY
       };
       
-      await onUpdateAssetRef.current(updatedAsset);
+      const cleanAsset = cleanAndCapitalizeAsset(rawUpdatedAsset);
+      await onUpdateAssetRef.current(cleanAsset);
       
       // Limpa estados
       setShowGlobalSearchResolution(null);
@@ -536,6 +567,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setDisplayValue('');
     } catch (err) {
       console.error(">>> [Inventory] Erro ao vincular ativo:", err);
+      alert(`Falha técnica ao vincular/adotar ativo de outra unidade operacional: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsHierarchyLoading(false);
     }
@@ -604,7 +636,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div key={String(asset.id)} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-3">
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1">
-                          <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest">{asset.UNIDADE_OPERACIONAL || asset._unitid || 'SEM UNIDADE'}</p>
+                          <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest">{asset.filial || asset._unitid || 'SEM UNIDADE'}</p>
                           <h4 className="text-[11px] font-bold text-slate-800 line-clamp-2 mt-0.5">{asset.DESCRICAODOATIVO}</h4>
                         </div>
                         <span className="text-[9px] font-black text-slate-400 ml-2">#{String(asset.REGISTRO || '').slice(-4)}</span>
@@ -836,10 +868,14 @@ const Inventory: React.FC<InventoryProps> = ({
     if (pendingInSearch.length === 0) return;
     
     const ids = pendingInSearch.map(a => String(a.id));
-    await onBulkUpdateAssets(ids);
-    
-    setCommittedSearch('');
-    setDisplayValue('');
+    try {
+      await onBulkUpdateAssets(ids);
+      setCommittedSearch('');
+      setDisplayValue('');
+    } catch (err) {
+      console.error(">>> [Inventory] Erro na gravação de lote:", err);
+      alert(`Falha crítica na injeção ou atualização em lote: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleMakeDecision = useCallback(async (id: string, decision: 'YES' | 'NO') => {
@@ -856,7 +892,7 @@ const Inventory: React.FC<InventoryProps> = ({
       // Restrito à UNIDADE ATUAL e STATUS ATIVO
       const related = allAssets.filter(a => {
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
+        const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
         const sUpper = String(a.STATUS || '').toUpperCase();
         const isNotB = !sUpper.includes('BAIXA') && !a.DATABAIXA;
         return sameEtq && sameComp && isNotB && !a._conferido;
@@ -883,7 +919,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const etq = normalizeKey(asset.ETIQUETA || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
-    const assetCompKey = normalizeKey(asset.UNIDADE_OPERACIONAL || asset._unitid || '');
+    const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
     
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
     if (asset._conferido) {
@@ -895,7 +931,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       await onUpdateAsset({ 
         ...asset, 
-        UNIDADE_OPERACIONAL: selectedUnit || asset.UNIDADE_OPERACIONAL || asset._unitid,
+        filial: selectedUnit || asset.filial || asset._unitid,
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
         _localMaster: selectedLocation || asset.ENDERECO
@@ -906,7 +942,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
       const related = allAssets.filter(a => {
         const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
-        const sameComp = normalizeKey(a.UNIDADE_OPERACIONAL || a._unitid || "") === currentCompKey;
+        const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isNotBaixado = !statusUpper.includes('BAIXA') && !a.DATABAIXA;
         return sameEtq && sameComp && isNotBaixado && !a._conferido;
@@ -940,7 +976,12 @@ const Inventory: React.FC<InventoryProps> = ({
     });
 
     if (ids.length > 0) {
-      await onBulkUpdateAssets(ids);
+      try {
+        await onBulkUpdateAssets(ids);
+      } catch (err) {
+        console.error(">>> [Inventory] Erro na gravação de lote em massa:", err);
+        alert(`Falha na atualização em lote de ativos selecionados: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     
     setSelectedIds(new Set());
@@ -959,7 +1000,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleCreateNew = () => {
     setManualAsset({
         ETIQUETA: committedSearch || "",
-        UNIDADE_OPERACIONAL: selectedUnit || "",
+        filial: selectedUnit || "",
         STATUS: "ATIVO",
         DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1031,17 +1072,17 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const saveManualEntry = () => {
-    const newAsset: Asset = {
+    const rawAsset: Asset = {
         ...manualAsset,
         id: generateUUID(),
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
         currentCampaignId: currentCampaignId,
-        _localMaster: selectedLocation || "",
-        _tenantid: user?.tenantid || '',
-        _unitid: selectedUnit || user?.unitid || ''
+        _localMaster: selectedLocation || ""
     } as Asset;
+    
+    const newAsset = cleanAndCapitalizeAsset(rawAsset);
     
     onUpdateAsset(newAsset);
     setIsManualEntryOpen(false);
@@ -1178,7 +1219,7 @@ const Inventory: React.FC<InventoryProps> = ({
               
         <div className="p-8 space-y-4">
                 {/* Info de Local de Origem se for diferente */}
-                {(normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') || 
+                {(normalizeKey(scannedAsset.filial || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') || 
                   normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '') !== normalizeKey(selectedLocation || '')) && (
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
                     <div className="flex items-center space-x-2 text-amber-700">
@@ -1187,7 +1228,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                     <div className="space-y-1">
                       <p className="text-[10px] font-bold text-slate-700 uppercase">
-                        {scannedAsset.UNIDADE_OPERACIONAL || 'Unidade não informada'}
+                        {scannedAsset.filial || 'Unidade não informada'}
                       </p>
                       <p className="text-[9px] text-slate-500 font-medium uppercase italic">
                         {scannedAsset.ENDERECO || 'Endereço não informado'}
@@ -1229,7 +1270,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                   <button 
                     onClick={() => {
-                      const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                      const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                       const currentCompKey = normalizeKey(selectedUnit || '');
                       const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
                       const currentLocKey = normalizeKey(selectedLocation || '');
@@ -1239,7 +1280,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                         updatedAsset = { 
                           ...scannedAsset, 
-                          UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                          filial: selectedUnit || scannedAsset.filial,
                           _conferido: true,
                           TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
@@ -1260,9 +1301,10 @@ const Inventory: React.FC<InventoryProps> = ({
                         };
                       }
 
-                      onUpdateAsset(updatedAsset);
+                      const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
+                      onUpdateAsset(cleanAsset);
                       setScannedAsset(null);
-                      onSelectAsset(updatedAsset); // Abre detalhes para foto
+                      onSelectAsset(cleanAsset); // Abre detalhes para foto
                     }} 
                     className="flex-1 py-4 bg-emerald-500 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
                   >
@@ -1271,36 +1313,40 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                   <button 
                     onClick={() => {
-                      const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                      const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                       const currentCompKey = normalizeKey(selectedUnit || '');
                       const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
                       const currentLocKey = normalizeKey(selectedLocation || '');
                       
+                      let updatedAsset: Asset;
                       if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
                         // Caso seja de outra empresa, adota como externo
-                        onUpdateAsset({ 
+                        updatedAsset = { 
                           ...scannedAsset, 
-                          UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                          filial: selectedUnit || scannedAsset.filial,
                           _conferido: true,
                           TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        });
+                        };
                       } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
                         // Caso seja da mesma empresa mas outro endereço, adota como sobra física
-                        onUpdateAsset({
+                        updatedAsset = {
                           ...scannedAsset,
                           _conferido: true,
                           TAG_INVENTARIO: TagInventario.ADOTADO,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        });
+                        };
                       } else {
                         // Caso seja do mesmo endereço
-                        onUpdateAsset({
+                        updatedAsset = {
                           ...scannedAsset,
                           _conferido: true,
                           _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        });
+                        };
                       }
+                      
+                      const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
+                      onUpdateAsset(cleanAsset);
                       setScannedAsset(null);
                     }} 
                     className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
@@ -1338,7 +1384,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     onClick={() => {
                       setManualAsset({
                         ETIQUETA: scannedResult,
-                        UNIDADE_OPERACIONAL: selectedUnit || "",
+                        filial: selectedUnit || "",
                         STATUS: "ATIVO",
                         DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
                         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1740,7 +1786,7 @@ const Inventory: React.FC<InventoryProps> = ({
             setIsScannerOpen(false);
             setManualAsset({
               ETIQUETA: "",
-              UNIDADE_OPERACIONAL: selectedUnit || "",
+              filial: selectedUnit || "",
               STATUS: "ATIVO",
               DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
               AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -1927,7 +1973,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                   </div>
 
-                  {normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') && (
+                  {normalizeKey(scannedAsset.filial || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') && (
                     <div className="p-2 bg-amber-50 rounded-lg border border-amber-100 flex items-center space-x-2">
                       <AlertTriangle size={12} className="text-amber-600 shrink-0" />
                       <span className="text-[8px] font-bold text-amber-700 uppercase leading-none">
@@ -1947,24 +1993,28 @@ const Inventory: React.FC<InventoryProps> = ({
                 </button>
                 <button 
                   onClick={() => {
-                    const assetCompKey = normalizeKey(scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid || '');
+                    const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                     const currentCompKey = normalizeKey(selectedUnit || '');
                     
+                    let updatedAsset: Asset;
                     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                      onUpdateAsset({ 
+                      updatedAsset = { 
                         ...scannedAsset, 
-                        UNIDADE_OPERACIONAL: selectedUnit || scannedAsset.UNIDADE_OPERACIONAL || scannedAsset._unitid,
+                        filial: selectedUnit || scannedAsset.filial,
                         _conferido: true,
                         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
                         _localMaster: selectedLocation || scannedAsset.ENDERECO
-                      });
+                      };
                     } else {
-                      onUpdateAsset({
+                      updatedAsset = {
                         ...scannedAsset,
                         _conferido: true,
                         _localMaster: selectedLocation || scannedAsset.ENDERECO
-                      });
+                      };
                     }
+                    
+                    const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
+                    onUpdateAsset(cleanAsset);
                     setScannedAsset(null);
                   }} 
                   className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
@@ -2006,7 +2056,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   onClick={() => {
                     setManualAsset({
                       ETIQUETA: scannedResult,
-                      UNIDADE_OPERACIONAL: selectedUnit || "",
+                      filial: selectedUnit || "",
                       STATUS: "ATIVO",
                       DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
                       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
@@ -2122,7 +2172,7 @@ const Inventory: React.FC<InventoryProps> = ({
                   <div className="p-4 bg-accent-soft border border-accent/10 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Unidade Operacional:</span>
-                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.UNIDADE_OPERACIONAL}</span>
+                      <span className="text-[9px] font-black text-accent uppercase">{manualAsset.filial}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local:</span>

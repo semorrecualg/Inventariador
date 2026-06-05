@@ -306,7 +306,7 @@ export const syncService = {
           id: String(asset.id || ''),
           '"tenantId"': tId,
           tenantId: tId,
-          filial: asset.filial ? String(asset.filial).trim().toUpperCase() : (asset.UNIDADE_OPERACIONAL ? String(asset.UNIDADE_OPERACIONAL).trim().toUpperCase() : 'MATRIZ'),
+          filial: asset.filial ? String(asset.filial).trim().toUpperCase() : 'MATRIZ',
           status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
           etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
           qt: asset.qt ? Number(asset.qt) : (asset.QT ? Number(asset.QT) : 1),
@@ -421,7 +421,7 @@ export const syncService = {
     // Query simétrica que cobre tanto a coluna do ERP quanto o metadado da Cloud
     let query = `
       SELECT * FROM ativos 
-      WHERE (TRIM(UNIDADE_OPERACIONAL) = ? OR TRIM(_unitid) = ?)
+      WHERE (TRIM(filial) = ? OR TRIM(_unitid) = ?)
         AND _is_deleted = 0
     `;
     const params: (string | number | boolean | null)[] = [cleanUnitId, cleanUnitId];

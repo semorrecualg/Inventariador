@@ -142,7 +142,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
       const etq = String(a.ETIQUETA || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
-      const unit = a._unitid || a.UNIDADE_OPERACIONAL || 'SEM UNIDADE';
+      const unit = a.filial || a._unitid || 'SEM UNIDADE';
 
       // Financials
       const valorAquisicao = typeof a._valor_aquisicao === 'number' ? a._valor_aquisicao : parseFloat(String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;

@@ -11,7 +11,7 @@ export { SCHEMA_PRIORITY, TYPE_LABELS };
 
 /**
  * Normaliza o cabeçalho para comparação (Uppercase, Trim)
- * Garante que 'unidade_operacional' === 'UNIDADE_OPERACIONAL'
+ * Garante que 'filial' === 'FILIAL'
  */
 export const normalizeHeader = (header: string | null | undefined): string => {
   if (!header) return '';
@@ -110,7 +110,7 @@ export function getAssetUnit(asset: Asset | Record<string, unknown>): string {
  * Normaliza um objeto ativo para o contrato unificado de campos GBR v2.6.
  * Mapeamentos prioritários:
  * - GRUPO_EMPRESARIAL, tenant_id, group_id -> tenantId
- * - UNIDADE_OPERACIONAL, _unitid, unit_id, filial_id -> filial
+ * - filial, _unitid, unit_id, filial_id -> filial
  */
 export function normalizeAssetContract(asset: Asset | Record<string, unknown> | null | undefined): Asset {
   if (!asset) return asset as unknown as Asset;
@@ -129,7 +129,6 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   
   const filial = (
     originalAsset.filial ||
-    originalAsset.UNIDADE_OPERACIONAL ||
     originalAsset._unitid ||
     originalAsset.unit_id ||
     originalAsset.filial_id ||
@@ -263,10 +262,8 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   asset.sn3_recno = sn3_recno;
 
   // Sync fallbacks for existing code
-  asset._tenantid = tenantId;
   asset._unitid = filial;
   asset.GRUPO_EMPRESARIAL = tenantId;
-  asset.UNIDADE_OPERACIONAL = filial;
   asset.STATUS = status;
   asset.ETIQUETA = etiqueta;
   asset.QT = qt;
@@ -286,6 +283,11 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   asset.VLRAQUISIC = vlraquisic;
   asset.Sn1_recno = sn1_recno;
   asset.Sn3_recno = sn3_recno;
+
+  // Higienizar explicitamente propriedades legadas
+  delete asset._tenantid;
+  delete asset.tenant_id;
+  delete asset.tenantid;
 
   return asset as Asset;
 }

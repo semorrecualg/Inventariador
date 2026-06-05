@@ -43,13 +43,13 @@ import { Layers, ShieldCheck } from 'lucide-react';
 interface AssetControlModuleProps {
   onBack: () => void;
   username: string;
-  tenantid: string;
+  tenantId: string;
   databaseMode: DatabaseMode;
 }
 
 type SubModule = 'DASHBOARD' | 'ASSETS' | 'UNITS' | 'MOVEMENTS' | 'DEPRECIATION' | 'CATEGORIES' | 'REPORTS';
 
-const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantid, databaseMode }) => {
+const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, username, tenantId, databaseMode }) => {
   const [activeSubModule, setActiveSubModule] = useState<SubModule>('DASHBOARD');
   const [configTab, setConfigTab] = useState<'ACCOUNTS' | 'GROUPS' | 'NCM'>('ACCOUNTS');
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -105,7 +105,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     fetchNCMClassifiers();
     fetchChartOfAccounts();
     fetchUnits();
-  }, [tenantid, databaseMode]);
+  }, [tenantId, databaseMode]);
 
   // Auto-normalização se a base de unidades estiver vazia mas houver ativos
   useEffect(() => {
@@ -122,7 +122,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         setUnitConfigs(data);
       } else {
         if (!supabase) return;
-        const { data, error } = await supabase.from('unit_configs').select('*').eq('_tenantid', tenantid);
+        const { data, error } = await supabase.from('unit_configs').select('*').eq('tenantId', tenantId);
         if (error) throw error;
         setUnitConfigs(data || []);
       }
@@ -133,7 +133,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const fetchChartOfAccounts = async () => {
     try {
-      const data = await assetControlService.getChartOfAccounts(tenantid);
+      const data = await assetControlService.getChartOfAccounts(tenantId);
       setChartOfAccounts(data);
     } catch (err) {
       console.error('Erro ao carregar plano de contas:', err);
@@ -153,7 +153,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         const { data, error } = await supabase
           .from('assets')
           .select('*')
-          .eq('_tenantid', tenantid);
+          .eq('tenantId', tenantId);
 
         if (error) throw error;
         setAssets(data || []);
@@ -168,7 +168,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleNormalizeUnits = async () => {
     try {
       setLoading(true);
-      const result = await assetControlService.normalizeUnits(tenantid);
+      const result = await assetControlService.normalizeUnits(tenantId);
       alert(`Normalização concluída! ${result.discovered} unidades encontradas na base de ativos, ${result.created} novas configurações criadas.`);
       fetchUnits();
     } catch (err) {
@@ -181,7 +181,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const fetchAssetGroups = async () => {
     try {
-      const data = await assetControlService.getAssetGroups(tenantid);
+      const data = await assetControlService.getAssetGroups(tenantId);
       setAssetGroups(data);
     } catch (err) {
       console.error('Erro ao carregar grupos contábeis:', err);
@@ -190,7 +190,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const fetchNCMClassifiers = async () => {
     try {
-      const data = await assetControlService.getNCMClassifiers(tenantid);
+      const data = await assetControlService.getNCMClassifiers(tenantId);
       setNcmClassifiers(data);
     } catch (err) {
       console.error('Erro ao carregar classificadores NCM:', err);
@@ -199,7 +199,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const handleSaveChartOfAccount = async (acc: Partial<ChartOfAccount>) => {
     try {
-      await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantid });
+      await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantId, tenantId: tenantId });
       
       // Log de Auditoria
       await logAuditEvent({
@@ -209,7 +209,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: String(acc.id || acc.code),
         new_data: acc,
         details: `${acc.id ? 'Atualização' : 'Criação'} de conta contábil: ${acc.code} - ${acc.name}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchChartOfAccounts();
@@ -232,7 +232,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: id,
         old_data: accToDelete,
         details: `Exclusão de conta contábil: ${accToDelete?.code} - ${accToDelete?.name}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchChartOfAccounts();
@@ -256,7 +256,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const acc of standardData) {
-        await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantid });
+        await assetControlService.saveChartOfAccount({ ...acc, _tenantid: tenantId, tenantId: tenantId });
       }
       await fetchChartOfAccounts();
     } catch (err) {
@@ -267,7 +267,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   };
   const handleSaveAssetGroup = async (group: Partial<AssetGroup>) => {
     try {
-      await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantid });
+      await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantId, tenantId: tenantId });
       
       // Log de Auditoria
       await logAuditEvent({
@@ -277,7 +277,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: String(group.id || group.group_code),
         new_data: group,
         details: `${group.id ? 'Atualização' : 'Criação'} de grupo de ativos: ${group.group_code} - ${group.name}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchAssetGroups();
@@ -300,7 +300,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: id,
         old_data: groupToDelete,
         details: `Exclusão de grupo de ativos: ${groupToDelete?.group_code} - ${groupToDelete?.name}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchAssetGroups();
@@ -322,7 +322,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const group of standardData) {
-        await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantid });
+        await assetControlService.saveAssetGroup({ ...group, _tenantid: tenantId, tenantId: tenantId });
       }
       await fetchAssetGroups();
     } catch (err) {
@@ -334,7 +334,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
   const handleSaveNCMClassifier = async (cls: Partial<NCMClassifier>) => {
     try {
-      await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantid });
+      await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantId, tenantId: tenantId });
       
       // Log de Auditoria
       await logAuditEvent({
@@ -344,7 +344,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: String(cls.id || cls.ncm_code),
         new_data: cls,
         details: `${cls.id ? 'Atualização' : 'Criação'} de classificador NCM: ${cls.ncm_code} - ${cls.description}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchNCMClassifiers();
@@ -367,7 +367,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: id,
         old_data: clsToDelete,
         details: `Exclusão de classificador NCM: ${clsToDelete?.ncm_code} - ${clsToDelete?.description}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchNCMClassifiers();
@@ -386,7 +386,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       for (const cls of standardData) {
-        await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantid });
+        await assetControlService.saveNCMClassifier({ ...cls, _tenantid: tenantId, tenantId: tenantId });
       }
       await fetchNCMClassifiers();
     } catch (err) {
@@ -399,7 +399,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   const handleNCMLookup = async (ncmCode: string) => {
     if (!ncmCode || ncmCode.length < 4) return;
     try {
-      const classifier = await assetControlService.getNCMClassifierByCode(ncmCode, tenantid);
+      const classifier = await assetControlService.getNCMClassifierByCode(ncmCode, tenantId);
       if (classifier) {
         const group = assetGroups.find(g => g.group_code === classifier.group_code);
         
@@ -438,9 +438,9 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       const assetToSave = {
         ...newAssetForm,
         ...gpsData,
-        _tenantid: tenantid,
-        tenantId: tenantid,
-        filial: newAssetForm.UNIDADE_OPERACIONAL || 'MATRIZ',
+        _tenantid: tenantId,
+        tenantId: tenantId,
+        filial: newAssetForm.filial || 'MATRIZ',
         _valor_residual: newAssetForm._valor_residual || 0,
         _depreciacao_acumulada: newAssetForm._depreciacao_acumulada || 0,
         _status_contabil: newAssetForm._status_contabil || 'ATIVO',
@@ -483,7 +483,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         old_data: editingAsset,
         new_data: assetToSave,
         details: `${editingAsset ? 'Atualização' : 'Criação'} manual de ativo imobilizado: ${assetToSave.ETIQUETA}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       setEditingAsset(null);
@@ -524,7 +524,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         old_data: selectedAsset,
         new_data: updatedAsset,
         details: `Teste de recuperabilidade realizado. Perda: ${updatedAsset._perda_impairment}`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       fetchAssets();
@@ -631,7 +631,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         old_data: selectedAsset,
         new_data: { parent: updatedParent, children: newAssets.length },
         details: `Ativo desmembrado em ${numberOfUnits} unidades.`,
-        _tenantid: tenantid
+        tenantId: tenantId
       });
 
       setSelectedAsset(null);
@@ -998,7 +998,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                           <div className="text-xs text-slate-500 truncate max-w-[200px]">{asset.DESCRICAODOATIVO}</div>
                         </td>
                         <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
-                          <div className="text-sm text-slate-700">{asset._unidade_operacional || asset.UNIDADE_OPERACIONAL || '-'}</div>
+                          <div className="text-sm text-slate-700">{asset.filial || asset._unidade_operacional || '-'}</div>
                           <div className="text-xs text-slate-400">{asset._centro_custo || asset.CENTRODECUSTO || '-'}</div>
                         </td>
                         <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
@@ -1229,7 +1229,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                 {activeSubModule === 'UNITS' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
                     <UnitConfigurator 
-                      user={{ username, _tenantid: tenantid, tenantid, email: username, role: UserRole.ADMIN } as User}
+                      user={{ username, tenantId, email: username, role: UserRole.ADMIN } as User}
                       units={unitConfigs.map(u => u._unitid)}
                       onBack={() => setActiveSubModule('DASHBOARD')} 
                     />

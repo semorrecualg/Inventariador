@@ -36,15 +36,15 @@
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
     <script>
-      // Emergency Reset: If React doesn't mount in 8s, force hide loader
+      // Emergency Reset: If React doesn't mount or data loading fails to complete, force hide loader as a safety fallback
       setTimeout(() => {
         const loader = document.getElementById('gbr-initial-loader');
         if (loader && loader.style.display !== 'none') {
-          console.warn("[GBR-Emergency] Forçando remoção do loader...");
+          console.warn("[GBR-Emergency] Timeout safety fallback atingido. Forçando remoção do gbr-initial-loader...");
           loader.style.opacity = '0';
           setTimeout(() => { loader.style.display = 'none'; }, 500);
         }
-      }, 8000);
+      }, 95000); // 95s threshold keeps loader visible throughout the download of 12,636 assets
     </script>
   </body>
 </html>

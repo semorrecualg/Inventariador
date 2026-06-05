@@ -184,7 +184,7 @@ export const localDb = {
         first: async () => {
           const tenant = getCurrentTenantId();
           if (Array.isArray(value)) {
-            // Suporte para chaves compostas ex: [ETIQUETA+UNIDADE_OPERACIONAL]
+            // Suporte para chaves compostas ex: [ETIQUETA+filial]
             const fields = field.replace('[', '').replace(']', '').split('+');
             const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
             const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} AND (tenantId = ? OR _tenantid = ?) LIMIT 1`, [...value, tenant, tenant]);
@@ -212,7 +212,7 @@ export const localDb = {
           COUNT(*) AS total,
           SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS checked
         FROM ativos
-        WHERE (_unitid = ? OR UNIDADE_OPERACIONAL = ?)
+        WHERE (_unitid = ? OR filial = ?)
           AND _is_deleted = 0
       `;
       const params: SqlValue[] = [
@@ -244,7 +244,7 @@ export const localDb = {
 
       let sql = `
          SELECT * FROM ativos 
-         WHERE (TRIM(UPPER(UNIDADE_OPERACIONAL)) = ? OR TRIM(UPPER(_unitid)) = ?) 
+         WHERE (TRIM(UPPER(filial)) = ? OR TRIM(UPPER(_unitid)) = ?) 
            AND _is_deleted = 0
            AND (ETIQUETA IS NULL OR TRIM(ETIQUETA) = '' OR TRIM(UPPER(ETIQUETA)) = 'ETIQUETAR' OR _plaquetado = 0)
       `;

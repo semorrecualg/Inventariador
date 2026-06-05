@@ -19,8 +19,7 @@ import { DatabaseMode } from '../types';
 
 interface UnitSelectorProps {
   units: Array<{ 
-    filial?: string; // Unified GBR v2.6
-    UNIDADE_OPERACIONAL: string; 
+    filial: string; // Unified GBR v2.6 filial field
     hasData: boolean; 
     isDownloaded?: boolean; 
     hasCampaign?: boolean;
@@ -56,12 +55,12 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   const purifiedUnits = units.filter(u => {
-    const unitName = u && (u.filial || u.UNIDADE_OPERACIONAL);
+    const unitName = u && u.filial;
     return unitName && unitName.trim() !== '';
   });
 
   const filteredUnits = purifiedUnits.filter(u => {
-    const unitName = u.filial || u.UNIDADE_OPERACIONAL || '';
+    const unitName = u.filial || '';
     return unitName.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
@@ -166,7 +165,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         ) : filteredUnits.length > 0 ? (
           <div className="h-full overflow-y-auto pb-24 px-5 pt-3 space-y-3.5">
             {filteredUnits.map((unit) => {
-              const rawName = unit ? (unit.filial || unit.UNIDADE_OPERACIONAL) : '';
+              const rawName = unit ? unit.filial : '';
               if (!unit || !rawName || rawName.trim() === '') {
                 return null;
               }

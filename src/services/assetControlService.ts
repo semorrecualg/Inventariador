@@ -9,9 +9,9 @@ export const assetControlService = {
     let query = supabase.from('chart_of_accounts').select('*');
     
     if (Array.isArray(tenantid)) {
-      query = query.in('_tenantid', tenantid);
+      query = query.in('tenantId', tenantid);
     } else {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantId', tenantid);
     }
     
     const { data, error } = await query.order('code', { ascending: true });
@@ -45,9 +45,9 @@ export const assetControlService = {
     let query = supabase.from('asset_groups').select('*');
     
     if (Array.isArray(tenantid)) {
-      query = query.in('_tenantid', tenantid);
+      query = query.in('tenantId', tenantid);
     } else {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantId', tenantid);
     }
     
     const { data, error } = await query;
@@ -81,9 +81,9 @@ export const assetControlService = {
     let query = supabase.from('ncm_classifiers').select('*');
     
     if (Array.isArray(tenantid)) {
-      query = query.in('_tenantid', tenantid);
+      query = query.in('tenantId', tenantid);
     } else {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantId', tenantid);
     }
     
     const { data, error } = await query;
@@ -118,19 +118,19 @@ export const assetControlService = {
     // 1. Buscar todas as unidades únicas presentes nos ativos
     const { data: assetUnits, error: assetError } = await supabase
       .from('assets')
-      .select('UNIDADE_OPERACIONAL')
-      .eq('_tenantid', tenantid)
-      .not('UNIDADE_OPERACIONAL', 'is', null);
+      .select('filial')
+      .eq('tenantId', tenantid)
+      .not('filial', 'is', null);
 
     if (assetError) throw assetError;
 
-    const uniqueUnitsFromAssets = Array.from(new Set(assetUnits.map(a => a.UNIDADE_OPERACIONAL?.trim()).filter(Boolean)));
+    const uniqueUnitsFromAssets = Array.from(new Set(assetUnits.map(a => a.filial?.trim()).filter(Boolean)));
 
     // 2. Buscar unidades já configuradas
     const { data: existingConfigs, error: configError } = await supabase
       .from('unit_configs')
       .select('_unitid')
-      .eq('_tenantid', tenantid);
+      .eq('tenantId', tenantid);
 
     if (configError) throw configError;
 
@@ -143,10 +143,10 @@ export const assetControlService = {
 
     // 4. Criar configurações básicas para as novas unidades
     const newConfigs = unitsToCreate.map(unit => ({
-      _tenantid: tenantid,
+      tenantId: tenantid,
       _unitid: unit,
-      tenant_id: tenantid,
       unit_id: unit,
+      filial: unit,
       lat: -15.7942, // Default Brasília
       lng: -47.8822,
       radius_meters: 500,
@@ -168,9 +168,9 @@ export const assetControlService = {
     let query = supabase.from('ncm_classifiers').select('*').eq('ncm_code', ncmCode);
     
     if (Array.isArray(tenantid)) {
-      query = query.in('_tenantid', tenantid);
+      query = query.in('tenantId', tenantid);
     } else {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantId', tenantid);
     }
     
     const { data, error } = await query.single();
@@ -186,7 +186,7 @@ export const assetControlService = {
       .from('asset_movements')
       .select('*')
       .eq('asset_id', assetId)
-      .eq('_tenantid', tenantid)
+      .eq('tenantId', tenantid)
       .order('date', { ascending: false });
     
     if (error) throw error;
@@ -209,7 +209,7 @@ export const assetControlService = {
       .from('asset_depreciation_history')
       .select('*')
       .eq('asset_id', assetId)
-      .eq('_tenantid', tenantid)
+      .eq('tenantId', tenantid)
       .order('period_year', { ascending: false })
       .order('period_month', { ascending: false });
     

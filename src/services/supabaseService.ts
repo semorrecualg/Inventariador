@@ -467,7 +467,7 @@ export const getLocations = async (tenantid: string) => {
     const { data, error } = await supabase
       .from('locations')
       .select('*')
-      .eq('_tenantid', tenantid);
+      .eq('tenantId', tenantid);
       
     if (error) {
       console.error('Erro ao buscar localidades:', error);
@@ -815,7 +815,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       return {
         id: String(cleanAsset.id || ''),
         tenantId: finalTenantId,
-        filial: (cleanAsset.filial || cleanAsset.UNIDADE_OPERACIONAL || 'MATRIZ').trim().toUpperCase(),
+        filial: (cleanAsset.filial || 'MATRIZ').trim().toUpperCase(),
         status: (cleanAsset.status || cleanAsset.STATUS || 'PENDENTE').trim().toUpperCase(),
         etiqueta: (cleanAsset.etiqueta || cleanAsset.ETIQUETA || '').trim(),
         qt: String(cleanAsset.qt !== undefined ? cleanAsset.qt : (cleanAsset.QT !== undefined ? cleanAsset.QT : '1')),
@@ -840,7 +840,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         longitude: typeof cleanAsset.longitude === 'number' ? cleanAsset.longitude : null,
         _conferido: Boolean(cleanAsset._conferido),
         _tenantid: finalTenantId,
-        _unitid: (cleanAsset._unitid || cleanAsset.UNIDADE_OPERACIONAL || '').toUpperCase().trim() || null,
+        _unitid: (cleanAsset._unitid || cleanAsset.filial || '').toUpperCase().trim() || null,
         _version: cleanAsset._version || 1,
         _is_deleted: cleanAsset._is_deleted || false
       };
@@ -1322,7 +1322,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     query = query.or('_is_deleted.is.null,_is_deleted.eq.false');
     
     if (tenantid) {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantId', tenantid);
     }
 
     const { data, error } = await query.single();
@@ -1336,7 +1336,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           .eq('ETIQUETA', tag.toUpperCase().trim());
         
         if (tenantid) {
-          retryQuery = retryQuery.eq('_tenantid', tenantid);
+          retryQuery = retryQuery.eq('tenantId', tenantid);
         }
         
         const { data: retryData, error: retryError } = await retryQuery.single();
@@ -1360,10 +1360,34 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
   }
 };
 
-export const fetchFullInventory = async (tenantid?: string | string[], unitid?: string): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+export const fetchFullInventory = async (
+  tenantid?: string | string[], 
+  unitid?: string,
+  onProgress?: (processed: number, total: number) => void,
+  onComplete?: (config: Partial<InventoryState>) => void
+): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
-  console.log(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(tenantid)}, unitid: ${unitid || 'GERAL'}`);
+  let resolvedTenantId: string | string[] | undefined = tenantid;
+
+  // Se resolvedTenantId for undefined, null, string "undefined" ou vazio, resolvemos via estado da sessão/perfil
+  if (!resolvedTenantId || resolvedTenantId === 'undefined' || (Array.isArray(resolvedTenantId) && resolvedTenantId.length === 0)) {
+    console.log(">>> [Supabase Param check] tenantid recebido como indefinido ou vazio. Resolvendo via Sessão Suprema do Usuário...");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const profile = await ensureUserProfile(session.user.email, undefined, session.user.id);
+        if (profile) {
+          resolvedTenantId = profile._tenantid || (profile.tenants && profile.tenants.length > 0 ? profile.tenants : undefined);
+          console.log(`>>> [Supabase Param resolved] tenantid sanitizado de undefined para perfil real: ${JSON.stringify(resolvedTenantId)}`);
+        }
+      }
+    } catch (authErr) {
+      console.warn(">>> [Supabase Param err] Falha ao resolver tenantid via Auth Check:", authErr);
+    }
+  }
+
+  console.log(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantId)}, unitid: ${unitid || 'GERAL'}`);
 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid (PAGINADO)
@@ -1380,9 +1404,9 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
         .select('*')
         .range(from, from + PAGE_SIZE - 1);
       
-      if (tenantid) {
-        if (Array.isArray(tenantid)) assetsQuery = assetsQuery.in('_tenantid', tenantid);
-        else assetsQuery = assetsQuery.eq('_tenantid', tenantid);
+      if (resolvedTenantId) {
+        if (Array.isArray(resolvedTenantId)) assetsQuery = assetsQuery.in('tenantId', resolvedTenantId);
+        else assetsQuery = assetsQuery.eq('tenantId', resolvedTenantId);
       }
       
       if (unitid && unitid !== '') {
@@ -1409,6 +1433,10 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
         
         assets = [...assets, ...mappedPage];
         console.log(`>>> [Supabase] Carregados ${assets.length} ativos...`);
+
+        if (onProgress) {
+          onProgress(assets.length, 12636);
+        }
         
         if (pageData.length < PAGE_SIZE) {
           hasMore = false;
@@ -1425,8 +1453,8 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
     console.log(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
     // 2. Busca a configuração
-    const rawTenantid = tenantid 
-      ? (Array.isArray(tenantid) ? tenantid[0] : tenantid)
+    const rawTenantid = resolvedTenantId 
+      ? (Array.isArray(resolvedTenantId) ? resolvedTenantId[0] : resolvedTenantId)
       : '';
     // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
     const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
@@ -1484,6 +1512,11 @@ export const fetchFullInventory = async (tenantid?: string | string[], unitid?: 
       const camelKey = reverseMapping[key] || key;
       mappedConfig[camelKey] = (config as Record<string, unknown>)[key];
     });
+
+    if (onComplete) {
+      console.log(`>>> [Supabase] Invocando onComplete() de forma atômica no final da paginação.`);
+      await onComplete(mappedConfig);
+    }
 
     return {
       assets: assets,
@@ -1573,7 +1606,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     let query = supabase.from('assets').delete({ count: 'exact' });
     
     try {
-      if (tenantid) query = query.eq('_tenantid', tenantid);
+      if (tenantid) query = query.eq('tenantId', tenantid);
       
       if (companyToClear) {
         if (Array.isArray(companyToClear)) {
@@ -1602,14 +1635,14 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
         console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallbacks...');
         let retryQuery = supabase.from('assets').delete({ count: 'exact' });
         
-        // Se houver empresa, tenta UNIDADE_OPERACIONAL
+        // Se houver empresa, tenta filial
         if (companyToClear) {
           if (Array.isArray(companyToClear)) {
             const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
-            retryQuery = retryQuery.or(`UNIDADE_OPERACIONAL.in.(${normalizedCompanies.join(',')}),unidade_operacional.in.(${normalizedCompanies.join(',')})`);
+            retryQuery = retryQuery.or(`filial.in.(${normalizedCompanies.join(',')})`);
           } else {
             const normalized = companyToClear.toUpperCase().trim();
-            retryQuery = retryQuery.or(`UNIDADE_OPERACIONAL.eq.${normalized},unidade_operacional.eq.${normalized}`);
+            retryQuery = retryQuery.or(`filial.eq.${normalized}`);
           }
         } else if (!tenantid) {
            // Removido o filtro de ID fixo que causava erro de bigint/uuid
@@ -1886,7 +1919,7 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
   const { data, error } = await supabase
     .from('assets')
     .select('*')
-    .eq('_tenantid', tenantid)
+    .eq('tenantId', tenantid)
     .in('ETIQUETA', variations)
     .maybeSingle();
 
@@ -1952,7 +1985,7 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
     .from('assets')
     .update({ _photoUrl: photoUrl })
     .eq('id', assetId)
-    .eq('_tenantid', tenantid);
+    .eq('tenantId', tenantid);
   if (error) throw error;
 };
 
@@ -2219,7 +2252,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         const allAssets = await sqliteService.getAllAssets();
         const unitId = currentCampaign._unitid || currentCampaign.unit_id;
         const assets = allAssets.filter(a => {
-            const aUnit = (a._unitid || a.UNIDADE_OPERACIONAL || '').trim().toUpperCase();
+            const aUnit = (a._unitid || a.filial || '').trim().toUpperCase();
             const cUnit = (unitId || '').trim().toUpperCase();
             return cUnit === '' || aUnit === cUnit;
         });
@@ -2279,7 +2312,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         const { data: assets, error: assetError } = await supabase
             .from('assets')
             .select('*')
-            .eq('_tenantid', tenantId)
+            .eq('tenantId', tenantId)
             .eq('_unitid', campaign.unit_id || campaign._unitid);
 
         if (assetError) throw assetError;
@@ -2390,20 +2423,20 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
     const { count: totalCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid);
+      .eq('tenantId', tenantid);
       
     // Ativos inventariados nesta campanha
     const { count: inventoriedCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid)
+      .eq('tenantId', tenantid)
       .eq('currentCampaignId', campaignId);
 
     // Divergências nesta campanha
     const { count: divergenceCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid)
+      .eq('tenantId', tenantid)
       .eq('currentCampaignId', campaignId)
       .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
 

@@ -43,7 +43,7 @@ export const assetRepository = {
     
     // Tenta busca exata na unidade
     let asset = await localDb.assets
-      .where('[ETIQUETA+UNIDADE_OPERACIONAL]')
+      .where('[ETIQUETA+filial]')
       .equals([upperTerm, upperUnit])
       .first();
     
@@ -51,12 +51,12 @@ export const assetRepository = {
     if (!asset && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
       const padded = rawTerm.padStart(6, '0');
       asset = await localDb.assets
-        .where('[ETIQUETA+UNIDADE_OPERACIONAL]')
+        .where('[ETIQUETA+filial]')
         .equals([padded, upperUnit])
         .first();
     }
     
-    // Fallback para _unitid se UNIDADE_OPERACIONAL falhar (compatibilidade legado)
+    // Fallback para _unitid se filial falhar (compatibilidade legado)
     if (!asset) {
        asset = await localDb.assets
          .where('[ETIQUETA+_unitid]')

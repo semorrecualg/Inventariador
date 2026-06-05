@@ -402,7 +402,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             }
 
             rTenantId = cleanValue(row[0]) || 'CICOPAL';
-            rFilial = cleanValue(row[1]) || 'MATRIZ';
+            rFilial = (cleanValue(row[1]) || 'MATRIZ').trim().toUpperCase();
             rStatus = cleanValue(row[2]) || 'PENDENTE';
             rEtiqueta = etq;
             rQt = cleanValue(row[4]) || '1';
@@ -441,7 +441,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             }
 
             rTenantId = (cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL').trim().toUpperCase();
-            rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
+            rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
             rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
             rEtiqueta = etq;
             rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
@@ -563,7 +563,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
               if (Array.isArray(row)) {
                 rTenantId = cleanValue(row[0]) || 'CICOPAL';
-                rFilial = cleanValue(row[1]) || 'MATRIZ';
+                rFilial = (cleanValue(row[1]) || 'MATRIZ').trim().toUpperCase();
                 rStatus = cleanValue(row[2]) || 'PENDENTE';
                 rEtiqueta = cleanValue(row[3]);
                 rQt = cleanValue(row[4]) || '1';
@@ -592,7 +592,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 };
 
                 rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
-                rFilial = cleanValue(findVal(['FILIAL', 'UNIDADE_OPERACIONAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ';
+                rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
                 rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
                 rEtiqueta = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
                 rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
@@ -615,7 +615,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               }
 
               const pkeyVal = rPrimarykey || rEtiqueta || generateUUID();
-              return {
+              const rawObject = {
                 id: String(pkeyVal),
                 '"tenantId"': rTenantId,
                 tenantId: rTenantId,
@@ -639,9 +639,19 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 vlraquisic: rVlrAquisic,
                 sn1_recno: rSn1Recno,
                 sn3_recno: rSn3Recno,
+                _unitid: rFilial,
                 _tenantid: rTenantId,
-                _unitid: rFilial
+                tenant_id: rTenantId
               };
+
+              // Higienização rigorosa e explícita de chaves legadas de acordo com as especificações
+              const cleanPayload = { ...rawObject, tenantId: rawObject.tenantId || 'CICOPAL' };
+              const cleanPayloadObj = cleanPayload as unknown as Record<string, unknown>;
+              delete cleanPayloadObj._tenantid;
+              delete cleanPayloadObj.tenant_id;
+              delete cleanPayloadObj.tenantid;
+
+              return cleanPayload;
             });
 
             const BATCH_SIZE = 200;
@@ -654,6 +664,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
               if (cloudErr) {
                 console.error(`>>> [Supabase Silent Backup Error] failed at chunk ${chunkIdx}:`, cloudErr);
+                if (showModal) {
+                  showModal(
+                    "Erro Crítico de Integridade (Supabase)",
+                    `A operação de sincronização foi interrompida devido a um erro no servidor de banco de dados (Código: ${cloudErr.code}, Mensagem: ${cloudErr.message || 'Restrição de chave nula detectada'}). Por favor, limpe os registros de rastreamento pendentes e tente novamente.`,
+                    "error"
+                  );
+                }
+                throw new Error(`Sincronização abortada por erro do Supabase: ${cloudErr.message}`);
               } else {
                 successCloudCount += chunk.length;
               }
@@ -661,6 +679,14 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
             console.log(`>>> [Supabase Silent Backup] finalizado: ${successCloudCount} ativos replicados.`);
           } catch (supErr: unknown) {
             console.error(">>> [Supabase Silent Backup Error] Falha geral no background:", supErr);
+            if (showModal) {
+              const err = supErr as Error;
+              showModal(
+                "Falha na Importação de Nuvem",
+                `Não foi possível concluir o backup na nuvem: ${err.message || 'Erro inesperado'}`,
+                "error"
+              );
+            }
           }
         });
       }
