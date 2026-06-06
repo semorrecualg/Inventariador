@@ -1088,24 +1088,36 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleSessionExpired = (e: Event) => {
-      console.warn(">>> [Session] Evento de Sessão Expirada capturado. Redirecionando para autenticação.");
-      const eventDetail = (e as CustomEvent)?.detail;
-      const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
-      
-      setModalConfig({
-        isOpen: true,
-        title: "Sessão Expirada",
-        message: customMessage,
-        type: "error"
-      });
-      setScreen(AppScreen.LOGIN);
+      try {
+        console.warn(">>> [Session] Evento de Sessão Expirada capturado. Redirecionando para autenticação.");
+        const eventDetail = (e as CustomEvent)?.detail;
+        const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
+        
+        setModalConfig({
+          isOpen: true,
+          title: "Sessão Expirada",
+          message: customMessage,
+          type: "error"
+        });
+
+        const setCurrentScreen = (scr: AppScreen) => {
+          setHistory([scr]);
+        };
+
+        setCurrentScreen(AppScreen.LOGIN);
+      } catch (redirectErr) {
+        console.error(">>> [Session] Falha crítica de ciclo de vida ao tentar redirecionar no handleSessionExpired:", redirectErr);
+        try {
+          alert("Sua sessão expirou. Por favor, re-autentique o aplicativo.");
+        } catch { /* ignore if alert is blocked */ }
+      }
     };
 
     window.addEventListener('gbr_session_expired', handleSessionExpired);
     return () => {
       window.removeEventListener('gbr_session_expired', handleSessionExpired);
     };
-  }, []);
+  }, [setHistory]);
 
   useEffect(() => {
     // Check inicial
