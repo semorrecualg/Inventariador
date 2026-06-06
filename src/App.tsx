@@ -947,24 +947,75 @@ const App: React.FC = () => {
 
             // REQUISITO 2: Encadeamento Seguro de Autenticação (Soberania de Nuvem) pós-boot
             if (!isInternalMode) {
-              try {
-                setAuthLoading(true);
-                console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
-                
-                const sessionPromise = supabase.auth.getSession();
-                const timeoutPromise = new Promise<{ data: { session: null } }>(resolve => 
-                  setTimeout(() => resolve({ data: { session: null } }), 3500)
-                );
-                
-                const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
-                
-                // REQUISITO 1: Checagem Estrita do Objeto de Sessão
-                const isValid = !!session && !!session.user && typeof session.user.id === "string";
-                setIsSessionValid(isValid);
-                
-                if (!isValid) {
-                  // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
-                  const currentUserStr = localStorage.getItem('app_current_user');
+              const currentUserStr = localStorage.getItem('app_current_user');
+              const hasCachedUser = !!currentUserStr;
+              const isNetworkOffline = !navigator.onLine;
+
+              if (isNetworkOffline && hasCachedUser) {
+                console.log(">>> [Boot Offline Bypass] Conexão indisponível mas usuário em cache detectado. Efetuando bypass na nuvem!");
+                try {
+                  const parsed = JSON.parse(currentUserStr || '');
+                  setUser(parsed);
+                } catch (e) {
+                  console.warn("Falha ao carregar usuário temporário:", e);
+                }
+                setIsSessionValid(true);
+                setAuthLoading(false);
+              } else {
+                try {
+                  setAuthLoading(true);
+                  console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+                  
+                  const sessionPromise = supabase.auth.getSession();
+                  const timeoutPromise = new Promise<{ data: { session: null } }>(resolve => 
+                    setTimeout(() => resolve({ data: { session: null } }), 3500)
+                  );
+                  
+                  const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
+                  
+                  // REQUISITO 1: Checagem Estrita do Objeto de Sessão
+                  const isValid = !!session && !!session.user && typeof session.user.id === "string";
+                  setIsSessionValid(isValid);
+                  
+                  if (!isValid) {
+                    // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
+                    let isLocal = false;
+                    if (currentUserStr) {
+                      try {
+                        const parsed = JSON.parse(currentUserStr);
+                        const lowerEmail = (parsed.email || '').toLowerCase();
+                        const lowerUsername = (parsed.username || '').toLowerCase();
+                        if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                          isLocal = true;
+                        }
+                      } catch { /* ignore */ }
+                    }
+
+                    if (isLocal) {
+                      console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
+                      setIsSessionValid(true);
+                      if (currentUserStr) {
+                        try {
+                          const parsed = JSON.parse(currentUserStr);
+                          setUser(parsed);
+                        } catch (e) {
+                          console.warn("Erro ao fazer parse de currentUserStr:", e);
+                        }
+                      }
+                    } else {
+                      console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                      setUser(null);
+                      localStorage.removeItem('app_current_user');
+                      setHistory([AppScreen.LOGIN]);
+                    }
+                  } else {
+                    console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+                  }
+                } catch (jwtErr) {
+                  console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
+                  const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
+                  const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
+
                   let isLocal = false;
                   if (currentUserStr) {
                     try {
@@ -977,46 +1028,27 @@ const App: React.FC = () => {
                     } catch { /* ignore */ }
                   }
 
-                  if (isLocal) {
-                    console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
+                  if (isLocal || isNetworkError) {
+                    console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
+                    if (currentUserStr) {
+                      try {
+                        const parsed = JSON.parse(currentUserStr);
+                        setUser(parsed);
+                      } catch (e) {
+                        console.warn("Falha no parse ao reter sessão local:", e);
+                      }
+                    }
                     setIsSessionValid(true);
                   } else {
-                    console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                    // REQUISITO 3: Purga de Cache de Inicialização
+                    setIsSessionValid(false);
                     setUser(null);
                     localStorage.removeItem('app_current_user');
                     setHistory([AppScreen.LOGIN]);
                   }
-                } else {
-                  console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+                } finally {
+                  setAuthLoading(false);
                 }
-              } catch (jwtErr) {
-                console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
-                
-                const currentUserStr = localStorage.getItem('app_current_user');
-                let isLocal = false;
-                if (currentUserStr) {
-                  try {
-                    const parsed = JSON.parse(currentUserStr);
-                    const lowerEmail = (parsed.email || '').toLowerCase();
-                    const lowerUsername = (parsed.username || '').toLowerCase();
-                    if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
-                      isLocal = true;
-                    }
-                  } catch { /* ignore */ }
-                }
-
-                if (isLocal) {
-                  console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
-                  setIsSessionValid(true);
-                } else {
-                  // REQUISITO 3: Purga de Cache de Inicialização
-                  setIsSessionValid(false);
-                  setUser(null);
-                  localStorage.removeItem('app_current_user');
-                  setHistory([AppScreen.LOGIN]);
-                }
-              } finally {
-                setAuthLoading(false);
               }
             } else {
               setAuthLoading(false);
@@ -1053,6 +1085,27 @@ const App: React.FC = () => {
       window.removeEventListener('gbr_db_init_failed', handleInitFailed);
     };
   }, [databaseMode]);
+
+  useEffect(() => {
+    const handleSessionExpired = (e: Event) => {
+      console.warn(">>> [Session] Evento de Sessão Expirada capturado. Redirecionando para autenticação.");
+      const eventDetail = (e as CustomEvent)?.detail;
+      const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
+      
+      setModalConfig({
+        isOpen: true,
+        title: "Sessão Expirada",
+        message: customMessage,
+        type: "error"
+      });
+      setScreen(AppScreen.LOGIN);
+    };
+
+    window.addEventListener('gbr_session_expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener('gbr_session_expired', handleSessionExpired);
+    };
+  }, []);
 
   useEffect(() => {
     // Check inicial
@@ -3352,15 +3405,65 @@ const App: React.FC = () => {
 
     handleUrlErrors();
 
-    // Verifica sessão atual ao montar
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const isValid = !!session && !!session.user && typeof session.user.id === "string";
-      setIsSessionValid(isValid);
-      if (isValid) {
-        processSession(session);
-      } else {
-        // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
-        const currentUserStr = localStorage.getItem('app_current_user');
+    // Verifica sessão atual ao montar com proteção especial Offline-First
+    const currentUserStr = localStorage.getItem('app_current_user');
+    const isNetworkOffline = !navigator.onLine;
+
+    if (isNetworkOffline && currentUserStr) {
+      console.log(">>> [Boot Offline Bypass] Conexão indisponível na montagem. Carregando usuário local do cache offline.");
+      try {
+        const parsed = JSON.parse(currentUserStr);
+        setUser(parsed);
+      } catch (e) {
+        console.warn("Falha no parse ao carregar do cache offline:", e);
+      }
+      setIsSessionValid(true);
+    } else {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        const isValid = !!session && !!session.user && typeof session.user.id === "string";
+        setIsSessionValid(isValid);
+        if (isValid) {
+          processSession(session);
+        } else {
+          // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
+          let isLocal = false;
+          if (currentUserStr) {
+            try {
+              const parsed = JSON.parse(currentUserStr);
+              const lowerEmail = (parsed.email || '').toLowerCase();
+              const lowerUsername = (parsed.username || '').toLowerCase();
+              if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                isLocal = true;
+              }
+            } catch { /* ignore */ }
+          }
+
+          if (isLocal) {
+            console.log('[Boot] Mantendo sessão local de soberania nativa apesar de sessão cloud nula/vazia.');
+            setIsSessionValid(true);
+            if (currentUserStr) {
+              try {
+                const parsed = JSON.parse(currentUserStr);
+                setUser(parsed);
+              } catch (e) {
+                console.warn("Erro no parse do usuário em sessão cloud nula:", e);
+              }
+            }
+            return;
+          }
+
+          if (!isInternalMode) {
+            console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+            setUser(null);
+            localStorage.removeItem('app_current_user');
+            setHistory([AppScreen.LOGIN]);
+          }
+        }
+      }).catch(err => {
+        console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
+        const errMsg = String(err instanceof Error ? err.message : err);
+        const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
+        
         let isLocal = false;
         if (currentUserStr) {
           try {
@@ -3373,46 +3476,26 @@ const App: React.FC = () => {
           } catch { /* ignore */ }
         }
 
-        if (isLocal) {
-          console.log('[Boot] Mantendo sessão local de soberania nativa apesar de sessão cloud nula/vazia.');
+        if (isLocal || isNetworkError) {
+          console.log('[Boot] Preservando sessão local ativa pós exceção do Supabase do tipo Rede/Tempo limite.');
+          if (currentUserStr) {
+            try {
+              const parsed = JSON.parse(currentUserStr);
+              setUser(parsed);
+            } catch (e) {
+              console.warn("Erro no parse do usuário sob rede/erro Supabase:", e);
+            }
+          }
           setIsSessionValid(true);
           return;
         }
 
-        if (!isInternalMode) {
-          console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
-          setUser(null);
-          localStorage.removeItem('app_current_user');
-          setHistory([AppScreen.LOGIN]);
-        }
-      }
-    }).catch(err => {
-      console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
-      
-      const currentUserStr = localStorage.getItem('app_current_user');
-      let isLocal = false;
-      if (currentUserStr) {
-        try {
-          const parsed = JSON.parse(currentUserStr);
-          const lowerEmail = (parsed.email || '').toLowerCase();
-          const lowerUsername = (parsed.username || '').toLowerCase();
-          if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
-            isLocal = true;
-          }
-        } catch { /* ignore */ }
-      }
-
-      if (isLocal) {
-        console.log('[Boot] Preservando sessão local ativa pós exceção do Supabase.');
-        setIsSessionValid(true);
-        return;
-      }
-
-      setIsSessionValid(false);
-      setUser(null);
-      localStorage.removeItem('app_current_user');
-      setHistory([AppScreen.LOGIN]);
-    });
+        setIsSessionValid(false);
+        setUser(null);
+        localStorage.removeItem('app_current_user');
+        setHistory([AppScreen.LOGIN]);
+      });
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
@@ -3442,7 +3525,7 @@ const App: React.FC = () => {
           return;
         }
 
-        if (currentUserStr && databaseMode === DatabaseMode.SUPABASE && !isLocalUser) {
+        if (currentUserStr && databaseMode === DatabaseMode.SUPABASE && !isLocalUser && navigator.onLine) {
           console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
           setModalConfig({
             isOpen: true,
@@ -5008,7 +5091,7 @@ const App: React.FC = () => {
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
-      if (!company || company === 'CICOPAL' || normalizeKey(company) === 'CICOPAL') continue;
+      if (!company || company === 'CICOPAL' || normalizeKey(company) === 'CICOPAL' || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
       
       let stats = companyStatsMap.get(company);
       if (!stats) {
@@ -6214,6 +6297,18 @@ const App: React.FC = () => {
                 }))
               } 
               onSelect={(u) => { 
+                const tid = user?.tenantId;
+                if (!tid) {
+                  setModalConfig({
+                    isOpen: true,
+                    title: "Erro de Segurança",
+                    message: "Contrato (tenantId) não identificado no perfil do usuário logado. Contate o Administrador do sistema.",
+                    type: "error"
+                  });
+                  return;
+                }
+                const validatedTenant = String(tid).trim();
+
                 // 1º: Persistir o objeto da unidade selecionada no sessionStorage para isolamento de contexto.
                 sessionStorage.setItem('selectedUnit', u);
                 sessionStorage.setItem('app_selected_unit', u);
@@ -6223,9 +6318,8 @@ const App: React.FC = () => {
                 sessionStorage.setItem('filial', u);
                 localStorage.setItem('filial', u);
                 
-                const tid = (user?.tenantId || 'CICOPAL').toString().trim();
-                sessionStorage.setItem('tenantId', tid);
-                localStorage.setItem('tenantId', tid);
+                sessionStorage.setItem('tenantId', validatedTenant);
+                localStorage.setItem('tenantId', validatedTenant);
 
                 setSelectedUnit(u);
                 setIsInventorying(false);

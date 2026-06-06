@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { Device } from '@capacitor/device';
 import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
 import Modal from './Modal';
 import BackButton from './BackButton';
@@ -192,63 +193,126 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isDataMenuOpen && !isAdmin) {
       setIsDataMenuOpen(false);
       return;
     }
     if (isDataMenuOpen) {
-      import('../services/sqliteService').then(m => {
-        m.sqliteService.getFileStatus().then(status => {
-          setDirStatus(status as { status: string; path: string; fileName?: string });
-        });
+      sqliteService.getFileStatus().then(status => {
+        setDirStatus(status as { status: string; path: string; fileName?: string });
       });
     }
   }, [isDataMenuOpen, isAdmin]);
+
+  const validateBatteryLevel = async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform()) return true;
+    try {
+      const info = await Device.getBatteryInfo();
+      if (info.batteryLevel !== undefined && info.batteryLevel < 0.05 && !info.isCharging) {
+        showModal(
+          "Bateria Crítica", 
+          "Operação bloqueada preventivamente. Dispositivo com carga abaixo de 5% e desconectado da fonte de alimentação para evitar a corrupção do banco de dados.", 
+          "error"
+        );
+        return false;
+      }
+    } catch (e) {
+      console.warn("Falha ao ler status da bateria:", e);
+    }
+    return true;
+  };
 
   const handleSecureAction = (action: () => void) => {
     setPendingAction(() => action);
     setIsSecurityPinOpen(true);
   };
 
+  // 1. EXTRAÇÃO DEFENSIVA SEM CRASH DE RUNTIME
+  const extractTenantId = (): string | null => {
+    const tid = user?.tenantId;
+    if (!tid) {
+      showModal(
+        "Erro de Segurança", 
+        "Contrato (tenantId) não identificado no perfil do usuário logado. Contate o Administrador do sistema.", 
+        "error"
+      );
+      return null; // Interrompe sem disparar exceção fatal ('throw') que derruba a UI
+    }
+    return String(tid).trim();
+  };
+
+  // 2. MALHA DE NAVEGAÇÃO À PROVA DE FALHAS DE MEMÓRIA E ESTADOS NULOS
+  const handleModuleNavigation = (targetScreen: AppScreen) => {
+    try {
+      if (selectedUnit) {
+        const validatedTenant = extractTenantId();
+        if (!validatedTenant) return; // Bloqueio controlado e seguro
+
+        sessionStorage.setItem('tenantId', validatedTenant);
+        localStorage.setItem('tenantId', validatedTenant);
+        sessionStorage.setItem('filial', selectedUnit);
+        localStorage.setItem('filial', selectedUnit);
+        onNavigate(targetScreen);
+      } else {
+        onNavigate(AppScreen.UNIT_SELECTION);
+      }
+    } catch (e) {
+      console.error(">>> [SessionStorage Error] Falha técnica de persistência:", e);
+      showModal(
+        "Falha de Armazenamento", 
+        "O armazenamento volátil do dispositivo está temporariamente indisponível. Libere memória no sistema.", 
+        "error"
+      );
+    }
+  };
+
+  // 3. BLINDAGEM DE HARDWARE E ISOLAMENTO DE ERRO NO DISK FLUSH
   const handleValidateSovereignty = async () => {
+    // Flag ou controle visual para evitar clique duplo e sobrecarga na ponte nativa
+    if (isCheckingIntegrity) return; 
+    
     try {
       console.log(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
       
-      if (Capacitor.isNativePlatform()) {
-        await sqliteService.mapLocalFolder();
-      } else {
-        try {
-          await sqliteService.mapLocalFolder();
-        } catch (e) {
-          console.warn("Folder picker ignored on browser fallback:", e);
-        }
-      }
+      const isBatteryOk = await validateBatteryLevel();
+      if (!isBatteryOk) return;
 
-      // Congelamento de banco definitivo e geração da chave de integridade no runtime
+      setIsCheckingIntegrity(true); // Bloqueia concorrência de cliques imediatamente
+
+      await sqliteService.mapLocalFolder();
+
       const randomSeed = Math.random().toString(36).substring(2, 10).toUpperCase();
       const count = await sqliteService.getAssetCount();
       const checksum = `GBR-AES256-SHA512::KARDEX_CONF_LOCKED_${count}_${randomSeed}`;
-
+      
       localStorage.setItem('is_system_locked', 'true');
       localStorage.setItem('gbr_integrity_key', checksum);
       setIsSystemLocked(true);
       setIntegrityKey(checksum);
 
-      // Sincroniza / descarrega as mutações locais
-      await sqliteService.forceSync();
+      // Tratamento específico isolado para escrita física offline-first
+      try {
+        await sqliteService.forceSync();
+      } catch (syncErr) {
+        console.error(">>> [SQLite IO Error] Falha crítica de escrita física:", syncErr);
+        showModal("Falha de Gravação", "O driver nativo do banco de dados falhou ao realizar o Disk Flush físico. Verifique permissões.", "error");
+        return;
+      }
 
       const status = await sqliteService.getFileStatus();
       setDirStatus(status as { status: string; path: string; fileName?: string });
-
+      
       showModal(
-        "Dispositivo Pronto para Campo",
-        "Soberania e integridade da base de dados validadas com sucesso pelo Administrador!\n\nO arquivo 'gbr_kardek.db' foi congelado de forma definitiva com o HASH de verificação:\n" + checksum + "\n\nO Status de Blindagem técnica foi atualizado para PROTEGIDO. Ao entregar o coletor ao auditor, o aplicativo operará exclusivamente no modo offline incremental resiliente, livre de qualquer risco de wipe acidental ou sobregravação da nuvem.",
+        "Dispositivo Ready-to-Field",
+        "Soberania e integridade da base de dados validadas com sucesso pelo Administrador!\n\nO arquivo 'gbr_kardek.db' foi blindado com o HASH:\n" + checksum,
         "success"
       );
     } catch (err: unknown) {
       console.error(err);
       showModal("Erro na Validação", "Não foi possível validar a soberania: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setIsCheckingIntegrity(false); // Restaura o estado de escuta de forma segura
     }
   };
 
@@ -379,18 +443,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans w-full">
         {/* Module 1: INVENTÁRIO */}
         <button
-          onClick={() => {
-            if (selectedUnit) {
-              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
-              sessionStorage.setItem('tenantId', tid);
-              localStorage.setItem('tenantId', tid);
-              sessionStorage.setItem('filial', selectedUnit);
-              localStorage.setItem('filial', selectedUnit);
-              onNavigate(AppScreen.INVENTORY);
-            } else {
-              onNavigate(AppScreen.UNIT_SELECTION);
-            }
-          }}
+          onClick={() => handleModuleNavigation(AppScreen.INVENTORY)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
         >
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
@@ -405,16 +458,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
         {/* Module 2: FICHA DO ATIVO */}
         <button
-          onClick={() => {
-            if (selectedUnit) {
-              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
-              sessionStorage.setItem('tenantId', tid);
-              localStorage.setItem('tenantId', tid);
-              sessionStorage.setItem('filial', selectedUnit);
-              localStorage.setItem('filial', selectedUnit);
-            }
-            onNavigate(AppScreen.CONSULTATION);
-          }}
+          onClick={() => handleModuleNavigation(AppScreen.CONSULTATION)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:50ms]"
         >
           <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-purple-600 group-hover:text-white transition-colors">
@@ -429,16 +473,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
         {/* Module 3: ETIQUETAR */}
         <button
-          onClick={() => {
-            if (selectedUnit) {
-              const tid = (user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').toString().trim();
-              sessionStorage.setItem('tenantId', tid);
-              localStorage.setItem('tenantId', tid);
-              sessionStorage.setItem('filial', selectedUnit);
-              localStorage.setItem('filial', selectedUnit);
-            }
-            onNavigate(AppScreen.LABELING);
-          }}
+          onClick={() => handleModuleNavigation(AppScreen.LABELING)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:100ms]"
         >
           <div className="w-12 h-12 bg-accent-soft text-accent rounded-xl flex-items-center justify-center mr-5 group-hover:bg-accent group-hover:text-white transition-colors">
@@ -1031,6 +1066,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
               <button 
                 onClick={async () => { 
+                  const canWrite = await validateBatteryLevel();
+                  if (!canWrite) return;
                   const success = await sqliteService.forceSync();
                   if (success) {
                     showModal("Sincronização OK", "Os dados foram forçados para o seu arquivo físico no disco (D:). Verifique o tamanho do arquivo agora.", "success");

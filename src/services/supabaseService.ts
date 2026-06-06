@@ -102,7 +102,12 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
   for (const item of items) {
     if (typeof item !== 'object' || item === null) continue;
     
-    for (const key of Object.keys(item)) {
+    const itemKeys = Object.keys(item);
+    for (const key of itemKeys) {
+      if (item[key] === undefined) {
+        delete item[key];
+        continue;
+      }
       const val = item[key];
       // IF infrastructure table, ANY null or undefined is blocked
       if (val === undefined || val === null) {
@@ -808,14 +813,26 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           finalTenantId = tenantid;
         }
       } else {
-        finalTenantId = assetGrupo || 'CICOPAL';
+        finalTenantId = assetGrupo || (localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
+      }
+
+      const finalFilial = (cleanAsset.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+
+      if (!finalTenantId || finalTenantId === 'undefined' || finalTenantId === 'null' || !finalFilial || finalFilial === 'undefined' || finalFilial === 'null') {
+        console.warn(">>> [Session] Falha crítica de isolamento em syncAssetsToCloud: Contrato ou Filial ausente.");
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+            detail: { message: "Sua sessão expirou ou o identificador de Contrato/Filial foi perdido. Sincronização de ativos abortada." }
+          }));
+        }
+        throw new Error("Sessão Expirada: Contrato ou Filial ausente para sincronização.");
       }
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas
       return {
         id: String(cleanAsset.id || ''),
         tenantId: finalTenantId,
-        filial: (cleanAsset.filial || 'MATRIZ').trim().toUpperCase(),
+        filial: finalFilial,
         status: (cleanAsset.status || cleanAsset.STATUS || 'PENDENTE').trim().toUpperCase(),
         etiqueta: (cleanAsset.etiqueta || cleanAsset.ETIQUETA || '').trim(),
         qt: String(cleanAsset.qt !== undefined ? cleanAsset.qt : (cleanAsset.QT !== undefined ? cleanAsset.QT : '1')),
@@ -920,15 +937,44 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     '_tenantid'
   ];
 
-  const rawTenantid = tenantid 
-    ? (Array.isArray(tenantid) ? tenantid[0] : tenantid)
-    : '';
-  // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
-  const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
-  const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
+  const resolvedTenantId = (
+    (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
+    (config as Record<string, unknown>)._tenantid ||
+    (config as Record<string, unknown>).tenantId ||
+    localStorage.getItem('tenantId') ||
+    sessionStorage.getItem('tenantId') ||
+    ''
+  ).toString().trim();
+
+  const cleanTenantIdRaw = resolvedTenantId !== 'undefined' && resolvedTenantId !== 'null' ? resolvedTenantId : '';
+  const currentFilial = (localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').toString().trim();
+  const cleanFilialRaw = currentFilial !== 'undefined' && currentFilial !== 'null' ? currentFilial : '';
+
+  if (!cleanTenantIdRaw || !cleanFilialRaw) {
+    console.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantId ou filial ausente.");
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
+      }));
+    }
+    return; // Interrompe a operação de sync
+  }
+
+  const cleanTenant = encodeURIComponent(cleanTenantIdRaw.replace(/[%_\s]+/g, ''));
+  if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+        detail: { message: "Contrato inválido para sincronização. Por favor, reautentique para carregar a sessão." }
+      }));
+    }
+    return; // Interrompe a operação de sync
+  }
+  const configId = `config_${cleanTenant}`;
   
-  const payload: Record<string, unknown> = { id: configId };
-  if (tenantid) payload._tenantid = cleanTenant;
+  const payload: Record<string, unknown> = { 
+    id: configId,
+    _tenantid: cleanTenant
+  };
   
   // Mapeamento de camelCase para snake_case
   const mapping: Record<string, string> = {
@@ -954,7 +1000,14 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
       return;
     }
     if (allowedKeys.includes(dbKey)) {
-      payload[dbKey] = (config as Record<string, unknown>)[key];
+      const val = (config as Record<string, unknown>)[key];
+      // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
+      if (val !== undefined && val !== null) {
+        if (dbKey === '_tenantid' && (!val || val === 'undefined' || val === 'null' || String(val).trim() === '')) {
+          return; // ignora valores inválidos de _tenantid no config
+        }
+        payload[dbKey] = val;
+      }
     }
   });
 
@@ -2469,8 +2522,24 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       console.error('>>> [Persistence] Falha ao gravar GPS no SQLite:', sqlErr);
     }
 
-    const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
-    const unitId = config._unitid || config.unit_id;
+    const tenantIdRaw = (config._tenantid || config.tenant_id || config.tenantId || localStorage.getItem('tenantId') || '').toString().trim();
+    const cleanTenantIdRaw = tenantIdRaw !== 'undefined' && tenantIdRaw !== 'null' ? tenantIdRaw : '';
+    
+    const unitIdRaw = (config._unitid || config.unit_id || config.filial || localStorage.getItem('filial') || '').toString().trim();
+    const cleanUnitIdRaw = unitIdRaw !== 'undefined' && unitIdRaw !== 'null' ? unitIdRaw : '';
+
+    if (!cleanTenantIdRaw || !cleanUnitIdRaw) {
+      console.warn(">>> [Session] Identificador de Contrato ou Filial ausente ao salvar configuração de filial. Sessão expirada.");
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+          detail: { message: "Identificador de Contrato ou Unidade Operacional ausente/expirado. Sua sessão foi encerrada de forma segura." }
+        }));
+      }
+      return false; // Interrompe a operação
+    }
+    
+    const tenantId = cleanTenantIdRaw;
+    const unitId = cleanUnitIdRaw;
     const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
     
     const payload = {

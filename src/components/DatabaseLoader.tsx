@@ -341,8 +341,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     const CHUNK_SIZE = 200;
     const totalItems = rows.length;
     
+    let startIndex = 0;
+    const pausedIndexStr = localStorage.getItem('gbr_expert_load_paused_index');
+    if (pausedIndexStr) {
+      const parsedIdx = parseInt(pausedIndexStr, 10);
+      if (!isNaN(parsedIdx) && parsedIdx > 0 && parsedIdx < totalItems) {
+        startIndex = parsedIdx;
+        addLog(`Ponto de interrupção detectado. Retomando importação a partir do lote ${startIndex.toLocaleString()}...`);
+        localStorage.removeItem('gbr_expert_load_paused_index'); // Consumido para evitar looping
+        localStorage.removeItem('gbr_expert_load_paused_total');
+      }
+    }
+
     setStatus('IMPORTING');
-    setProgress({ current: 0, total: totalItems });
+    setProgress({ current: startIndex, total: totalItems });
     addLog(`Iniciando Carga Expert: ${totalItems} ativos identificados.`);
 
     const cleanValue = (val: unknown): string => {
@@ -361,7 +373,31 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
 
     try {
-      for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+      for (let i = startIndex; i < totalItems; i += CHUNK_SIZE) {
+        // Safe check for battery level *during* long-running loop chunks
+        try {
+          const batteryInfo = await Device.getBatteryInfo();
+          if (batteryInfo.batteryLevel !== undefined && batteryInfo.batteryLevel < 0.05 && !batteryInfo.isCharging) {
+            localStorage.setItem('gbr_expert_load_paused_index', String(i));
+            localStorage.setItem('gbr_expert_load_paused_total', String(totalItems));
+            
+            addLog(`ALERTA DE SEGURANÇA: Batería caiu para ${(batteryInfo.batteryLevel * 100).toFixed(1)}% (limite crítico de 5%) sem fonte de energia activa!`);
+            addLog(`Ingestão PAUSADA de forma persistente no lote ${i.toLocaleString()} de ${totalItems.toLocaleString()}. Recarregue o aparelho para retomar.`);
+            
+            if (showModal) {
+              showModal(
+                "Bateria Crítica - Importação Pausada",
+                `A bateria do dispositivo caiu abaixo do limite de segurança (5%) sem um carregador conectado. Para evitar a corrupção do banco SQLite, a importação foi pausada no lote ${i.toLocaleString()} e o ponteiro foi salvo. Conecte o dispositivo a uma fonte de energia e realize a operação novamente para retomar de onde parou.`,
+                "warning"
+              );
+            }
+            setStatus('IDLE');
+            return;
+          }
+        } catch {
+          // Monitor de bateria pode falhar ou não ser suportado dependendo da plataforma, ignoramos de forma segura
+        }
+
         const chunk = rows.slice(i, i + CHUNK_SIZE);
         const sqlStatements: string[] = [];
 
@@ -898,6 +934,21 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Base Vazia Detectada</h3>
               <p className="text-[11px] text-slate-500 font-bold uppercase tracking-tight">O sistema está pronto para receber dados.</p>
             </div>
+
+            {localStorage.getItem('gbr_expert_load_paused_index') && (
+              <div className="mb-4 p-4 bg-amber-50/90 border border-amber-200 rounded-3xl text-left w-full text-amber-800 space-y-1 max-w-sm animate-pulse">
+                <div className="flex items-center gap-1.5 font-bold text-xs uppercase tracking-wider text-amber-700">
+                  <AlertCircle size={14} className="text-amber-600" />
+                  Carga Expert Interrompida
+                </div>
+                <p className="text-[10px] font-bold uppercase text-amber-600 leading-normal">
+                  Uma importação anterior foi suspensa por bateria crítica no lote {localStorage.getItem('gbr_expert_load_paused_index')} de {localStorage.getItem('gbr_expert_load_paused_total')} ativos.
+                </p>
+                <p className="text-[10px] text-amber-500 leading-normal font-medium">
+                  Carregue o aparelho acima de 5% e re-selecione a planilha para retomar as escritas SQLite automaticamente a partir desse bloco de dados.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 gap-3 w-full max-w-sm mt-4">
               {databaseMode === DatabaseMode.INTERNAL && onCargaInicial && (

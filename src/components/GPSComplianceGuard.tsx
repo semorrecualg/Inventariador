@@ -80,10 +80,18 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
     const checkLocation = (lat: number, lng: number) => {
       try {
+        if (lat === null || lat === undefined || isNaN(lat) || lng === null || lng === undefined || isNaN(lng)) {
+          throw new Error("Coordenadas do dispositivo inválidas.");
+        }
+        
+        if (!unitConfig || !unitConfig.lat || !unitConfig.lng || isNaN(Number(unitConfig.lat)) || isNaN(Number(unitConfig.lng))) {
+          throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
+        }
+
         const fromPoint = turf.point([lng, lat]);
         const toPoint = turf.point([Number(unitConfig.lng), Number(unitConfig.lat)]);
         
-        // Distância em metros via Turf.js
+        // Distância em metros via Turf.js com isolamento
         const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
         setCurrentDistance(distanceM);
         setUserLocation({ lat, lng });
@@ -104,9 +112,15 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           }
         }
       } catch (err) {
-        console.error('[Geofencing] Erro Turf.js ao calcular perímetro:', err);
-        setStatus('granted'); // Failsafe para não travar em caso de erro matemático
-        onGpsStatusChange?.(true);
+        console.error('[Geofencing] Erro Turf.js ao calcular perímetro (ativando fallback):', err);
+        if (isAdminUser) {
+          setStatus('bypassed');
+          onGpsStatusChange?.(true);
+          setShowAdminToast(true);
+        } else {
+          setStatus('granted'); // Failsafe para auditores em caso de erro matemático
+          onGpsStatusChange?.(true);
+        }
       }
     };
 
@@ -117,7 +131,32 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         const roleStr = userRole || (isAdminUser ? 'ADMIN' : 'USER');
         const anchorCoords = { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) };
         
-        const geoResult = await getCurrentDeviceLocation(roleStr, anchorCoords);
+        let geoResult;
+        try {
+          if (isAdminUser) {
+            console.warn('[Sandbox GPS Bypass Active]');
+            setStatus('bypassed');
+            setUserLocation(anchorCoords);
+            setCurrentDistance(0);
+            setShowAdminToast(true);
+            onGpsStatusChange?.(true);
+            return;
+          }
+          geoResult = await getCurrentDeviceLocation(roleStr, anchorCoords);
+        } catch (locationErr: unknown) {
+          const errMsg = locationErr instanceof Error ? locationErr.message : String(locationErr);
+          console.warn('[Sandbox GPS Bypass Active] Rejeição ou violação de política ao capturar coordenadas:', errMsg);
+          if (isAdminUser) {
+            setStatus('bypassed');
+            setUserLocation(anchorCoords);
+            setCurrentDistance(0);
+            setShowAdminToast(true);
+            onGpsStatusChange?.(true);
+            return;
+          } else {
+            throw locationErr;
+          }
+        }
         
         if (!isActive) return;
 
@@ -139,9 +178,11 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         }
       } catch (err: unknown) {
         if (!isActive) return;
-        console.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', errMsg);
         
         if (isAdminUser) {
+          console.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo.');
           setStatus('bypassed');
           setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
           setCurrentDistance(0);
@@ -158,7 +199,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
     // Registro do monitor contínuo opcionalmente protegido
     try {
-      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      if (!isAdminUser && typeof navigator !== 'undefined' && navigator.geolocation) {
         watchId = navigator.geolocation.watchPosition(
           (pos) => {
             if (isActive) {

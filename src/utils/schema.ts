@@ -99,11 +99,30 @@ export function getAssetValueByPriority(asset: Asset | Record<string, unknown>, 
  * Helper para extrair a unidade operacional de um ativo de forma soberana
  */
 export function getAssetUnit(asset: Asset | Record<string, unknown>): string {
-  if (asset && (asset as Record<string, unknown>).filial) {
-    return String((asset as Record<string, unknown>).filial).trim().toUpperCase();
+  if (!asset) return 'UNIT_UNDEFINED';
+  const rawObj = asset as Record<string, unknown>;
+  let unitName = '';
+  
+  if (rawObj.filial) {
+    unitName = String(rawObj.filial).trim();
+  } else if (rawObj.UNIDADE_OPERACIONAL) {
+    unitName = String(rawObj.UNIDADE_OPERACIONAL).trim();
+  } else if (rawObj.unidade_operacional) {
+    unitName = String(rawObj.unidade_operacional).trim();
+  } else if (rawObj.UNIDADE) {
+    unitName = String(rawObj.UNIDADE).trim();
+  } else if (rawObj.unidade) {
+    unitName = String(rawObj.unidade).trim();
+  } else {
+    const val = getAssetValueByPriority(asset, SCHEMA_PRIORITY.UNIT);
+    unitName = (val || '').toString().trim();
   }
-  const val = getAssetValueByPriority(asset, SCHEMA_PRIORITY.UNIT);
-  return (val || '').toString().trim().toUpperCase() || 'UNIT_UNDEFINED';
+
+  const upper = unitName.toUpperCase();
+  if (!upper || upper === 'UNIT_UNDEFINED' || upper === 'DEFAULT' || upper === 'NULL' || upper === 'UNDEFINED' || upper === '0' || upper === 'CICOPAL') {
+    return 'UNIT_UNDEFINED';
+  }
+  return upper;
 }
 
 /**
@@ -129,9 +148,13 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   
   const filial = (
     originalAsset.filial ||
+    originalAsset.UNIDADE_OPERACIONAL ||
+    originalAsset.unidade_operacional ||
     originalAsset._unitid ||
     originalAsset.unit_id ||
     originalAsset.filial_id ||
+    originalAsset.UNIDADE ||
+    originalAsset.unidade ||
     'MATRIZ'
   ).toString().trim();
 
