@@ -87,7 +87,7 @@ const checkIsAdmin = (u: User | null | undefined) => {
 
   if (!u) {
     try {
-      const userStr = localStorage.getItem('app_current_user') || sessionStorage.getItem('app_current_user');
+      const userStr = sessionStorage.getItem('app_current_user');
       if (userStr) {
         const parsed = JSON.parse(userStr);
         email = parsed?.email?.toLowerCase() || '';
@@ -187,7 +187,7 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
 // App Component
 const App: React.FC = () => {
   const [sqliteStatus, setSqliteStatusState] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
     const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
     return {
       connected: !!hasFilial,
@@ -216,18 +216,12 @@ const App: React.FC = () => {
         return s; // Assuma a string literal diretamente como o valor válido!
       }
     }
-    try {
-      const local = localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-      if (local) return local;
-    } catch (err) {
-      console.warn(">>> [Boot] Falha ao recuperar app_selected_unit do localStorage:", err);
-    }
     return "CARREGANDO...";
   });
 
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('app_current_user');
+      const saved = sessionStorage.getItem('app_current_user');
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       if (parsed && parsed.email) {
@@ -240,11 +234,11 @@ const App: React.FC = () => {
           role = 'ADMIN';
         }
 
-        const resolvedTenantId = (parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
-        const resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+        const resolvedTenantId = (parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || sessionStorage.getItem('tenantId') || sessionStorage.getItem('gbr_current_tenant') || '').trim().toUpperCase();
+        const resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
         if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedFilial || resolvedFilial === 'NULL' || resolvedFilial === 'UNDEFINED') {
-          console.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user local. Interrompendo.");
+          console.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user da sessão. Interrompendo.");
           sessionStorage.clear();
           setTimeout(() => {
             if (typeof window !== 'undefined') {
@@ -763,7 +757,7 @@ const App: React.FC = () => {
           const { error } = result as { error: { message: string } | null; data: { session: unknown; user: unknown } };
           if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
             console.warn('[Supabase] Sessão inválida detectada. Limpando...');
-            localStorage.removeItem('app_current_user');
+            sessionStorage.removeItem('app_current_user');
             
             const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
             if (!hasReloaded) {
@@ -889,7 +883,7 @@ const App: React.FC = () => {
                   console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
                 }
                 try {
-                  const savedUser = localStorage.getItem('app_current_user');
+                  const savedUser = sessionStorage.getItem('app_current_user');
                   const parsedUser = savedUser ? JSON.parse(savedUser) : null;
 
                   if (isFilePresent && isDbLocked) {
@@ -951,7 +945,7 @@ const App: React.FC = () => {
 
             // REQUISITO 2: Encadeamento Seguro de Autenticação (Soberania de Nuvem) pós-boot
             if (!isInternalMode) {
-              const currentUserStr = localStorage.getItem('app_current_user');
+              const currentUserStr = sessionStorage.getItem('app_current_user');
               const hasCachedUser = !!currentUserStr;
               const isNetworkOffline = !navigator.onLine;
 
@@ -1009,7 +1003,7 @@ const App: React.FC = () => {
                     } else {
                       console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
                       setUser(null);
-                      localStorage.removeItem('app_current_user');
+                      sessionStorage.removeItem('app_current_user');
                       setHistory([AppScreen.LOGIN]);
                     }
                   } else {
@@ -1047,7 +1041,7 @@ const App: React.FC = () => {
                     // REQUISITO 3: Purga de Cache de Inicialização
                     setIsSessionValid(false);
                     setUser(null);
-                    localStorage.removeItem('app_current_user');
+                    sessionStorage.removeItem('app_current_user');
                     setHistory([AppScreen.LOGIN]);
                   }
                 } finally {
@@ -1093,22 +1087,62 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleSessionExpired = (e: Event) => {
       try {
-        console.warn(">>> [Session] Evento de Sessão Expirada capturado. Redirecionando para autenticação.");
+        console.warn(">>> [Session] Evento de Sessão Expirada capturado. Inicializando canal assíncrono de proteção de hardware...");
+        
         const eventDetail = (e as CustomEvent)?.detail;
         const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
         
-        setModalConfig({
-          isOpen: true,
-          title: "Sessão Expirada",
-          message: customMessage,
-          type: "error"
-        });
-
-        const setCurrentScreen = (scr: AppScreen) => {
-          setHistory([scr]);
+        // Fila de Expiração Assíncrona e Proteção de Hardware
+        const waitBatchAndSave = () => {
+          return new Promise<void>((resolve) => {
+            let elapsedTime = 0;
+            const checkAndResolve = async () => {
+              const isImporting = sqliteService.isImportingBatch || (typeof window !== 'undefined' && !!((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch);
+              if (isImporting && elapsedTime < 5000) {
+                console.warn(`>>> [Session] Escrevendo lote em andamento (isImportingBatch). Aguardando conclusão para garantir integridade física do SQLite... (${elapsedTime}ms/5000ms)`);
+                elapsedTime += 200;
+                setTimeout(checkAndResolve, 200);
+              } else {
+                if (elapsedTime >= 5000) {
+                  console.warn(">>> [Session] Limite de segurança de 5 segundos esgotado no escape do lote. Forçando gravação atômica emergencial.");
+                }
+                try {
+                  console.log(">>> [Session] Gravando estado físico atômico (saveDatabase)...");
+                  await sqliteService.saveDatabase();
+                } catch (dbErr) {
+                  console.error(">>> [Session] Falha ao persistir alterações antes do encerramento da sessão:", dbErr);
+                }
+                resolve();
+              }
+            };
+            checkAndResolve();
+          });
         };
 
-        setCurrentScreen(AppScreen.LOGIN);
+        waitBatchAndSave().then(() => {
+          // Limpa estados e chaves de sessão síncronas após a segurança dos arquivos ser assegurada
+          setUser(null);
+          setIsAdmin(false);
+          setRole(null);
+          sessionStorage.clear();
+
+          setModalConfig({
+            isOpen: true,
+            title: "Sessão Expirada",
+            message: customMessage,
+            type: "error"
+          });
+
+          setHistory([AppScreen.LOGIN]);
+        }).catch((err) => {
+          console.error(">>> [Session] Erro inesperado na segurança física de expiração:", err);
+          setUser(null);
+          setIsAdmin(false);
+          setRole(null);
+          sessionStorage.clear();
+          setHistory([AppScreen.LOGIN]);
+        });
+
       } catch (redirectErr) {
         console.error(">>> [Session] Falha crítica de ciclo de vida ao tentar redirecionar no handleSessionExpired:", redirectErr);
         try {
@@ -1143,7 +1177,7 @@ const App: React.FC = () => {
           message: 'O sistema detectou uma tentativa de depuração ou scripts não autorizados. Por segurança, sua sessão será encerrada.',
           type: 'error',
           onConfirm: () => {
-             localStorage.removeItem('app_current_user');
+             sessionStorage.removeItem('app_current_user');
              window.location.reload();
           }
         });
@@ -2397,8 +2431,12 @@ const App: React.FC = () => {
     }
   }, [databaseMode, inventory.darkMode]);
 
-  // Load inventory from IndexedDB on mount
+  // Load inventory from IndexedDB on mount only after the user session is synchronously established
   useEffect(() => {
+    if (!user) {
+      console.log("App init - Aguardando confirmação síncrona do estado do usuário antes de iniciar o carregamento de dados...");
+      return;
+    }
     const init = async () => {
       // Solicita persistência durável para evitar perda de dados em limpeza de cache
       await requestPersistentStorage();
@@ -2732,7 +2770,7 @@ const App: React.FC = () => {
       }
     };
     init();
-  }, []);
+  }, [user, databaseMode]);
 
 
 
@@ -3130,7 +3168,7 @@ const App: React.FC = () => {
           dirtyAssetsRef.current.clear();
         }
         localStorage.setItem('app_screen_history', safeStringify(history));
-        localStorage.setItem('app_current_user', safeStringify(user));
+        sessionStorage.setItem('app_current_user', safeStringify(user));
         localStorage.setItem('app_users', safeStringify(users));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
@@ -3274,7 +3312,7 @@ const App: React.FC = () => {
           console.warn(`[Auth Fail-Safe] Usuário logado sem tenantId ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
-          localStorage.removeItem('app_current_user');
+          sessionStorage.removeItem('app_current_user');
           sessionStorage.clear();
           setHistory([AppScreen.LOAD_DATABASE]);
           
@@ -3315,7 +3353,7 @@ const App: React.FC = () => {
 
         if (hasChanged) {
           setUser(loggedUser);
-          localStorage.setItem('app_current_user', safeStringify(loggedUser));
+          sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
         }
         
         // Log de Auditoria na Nuvem
@@ -3351,7 +3389,7 @@ const App: React.FC = () => {
           tenantId: 'CICOPAL'
         };
         setUser(fallbackUser);
-        localStorage.setItem('app_current_user', safeStringify(fallbackUser));
+        sessionStorage.setItem('app_current_user', safeStringify(fallbackUser));
         setDatabaseMode(DatabaseMode.SUPABASE);
         pushScreen(AppScreen.MODULE_SELECTION);
       } finally {
@@ -3414,7 +3452,7 @@ const App: React.FC = () => {
     handleUrlErrors();
 
     // Verifica sessão atual ao montar com proteção especial Offline-First
-    const currentUserStr = localStorage.getItem('app_current_user');
+    const currentUserStr = sessionStorage.getItem('app_current_user');
     const isNetworkOffline = !navigator.onLine;
 
     if (isNetworkOffline && currentUserStr) {
@@ -3463,7 +3501,7 @@ const App: React.FC = () => {
           if (!isInternalMode) {
             console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
             setUser(null);
-            localStorage.removeItem('app_current_user');
+            sessionStorage.removeItem('app_current_user');
             setHistory([AppScreen.LOGIN]);
           }
         }
@@ -3500,7 +3538,7 @@ const App: React.FC = () => {
 
         setIsSessionValid(false);
         setUser(null);
-        localStorage.removeItem('app_current_user');
+        sessionStorage.removeItem('app_current_user');
         setHistory([AppScreen.LOGIN]);
       });
     }
@@ -3514,7 +3552,7 @@ const App: React.FC = () => {
         processSession(session);
       } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED' || !isValid) {
         // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
-        const currentUserStr = localStorage.getItem('app_current_user');
+        const currentUserStr = sessionStorage.getItem('app_current_user');
         let isLocalUser = false;
         try {
           if (currentUserStr) {
@@ -3544,14 +3582,14 @@ const App: React.FC = () => {
               import('./services/supabaseService').then(m => m.signOut());
               setIsSessionValid(false);
               setUser(null);
-              localStorage.removeItem('app_current_user');
+              sessionStorage.removeItem('app_current_user');
               setHistory([AppScreen.LOGIN]);
             }
           });
         } else if (event === 'SIGNED_OUT' || !isValid) {
           setIsSessionValid(false);
           setUser(null);
-          localStorage.removeItem('app_current_user');
+          sessionStorage.removeItem('app_current_user');
           setHistory([AppScreen.LOGIN]);
         }
       }
@@ -5456,8 +5494,8 @@ const App: React.FC = () => {
   if (dbInitialized && !isInitializing && !authLoading && !isUserAuthenticated) {
     console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DE SEGURANÇA (Formulário de Login Unificado).");
     return (
-      <div className="w-full min-h-screen bg-slate-950 flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
-        <div className="flex-1 relative z-[500] no-scrollbar flex items-center justify-center">
+      <div className="w-full min-h-screen bg-white flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
+        <div className="flex-1 w-full relative z-[500] no-scrollbar flex flex-col">
           <Login 
             users={users} 
             databaseMode={databaseMode}
@@ -5469,20 +5507,19 @@ const App: React.FC = () => {
             onUpdateDatabaseMode={handleUpdateDatabaseMode}
             onLogin={async (u) => { 
               setUser(u); 
-              localStorage.setItem('app_current_user', safeStringify(u));
+              sessionStorage.setItem('app_current_user', safeStringify(u));
               
               if (databaseMode !== DatabaseMode.INTERNAL) {
                 setDatabaseMode(DatabaseMode.SUPABASE);
-                localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
               }
 
               // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
-              const defaultTenant = u.tenants || u.tenantid || 'CICOPAL';
-              const defaultUnit = u.unitid || u._unitid || 'MATRIZ';
+              const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
+              const defaultUnit = String(u.filial || u.unitid || u._unitid || 'MATRIZ').toUpperCase().trim();
               
               setSelectedUnit(defaultUnit);
-              localStorage.setItem('app_selected_unit', defaultUnit);
-              localStorage.setItem('app_current_unit', defaultUnit);
+              sessionStorage.setItem('tenantId', defaultTenant);
+              sessionStorage.setItem('filial', defaultUnit);
 
               if (databaseMode !== DatabaseMode.INTERNAL) {
                 console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem com contexto real...');
@@ -5545,7 +5582,7 @@ const App: React.FC = () => {
                   onConfirm: () => {}
                 });
                 setUser(null);
-                localStorage.removeItem('app_current_user');
+                sessionStorage.removeItem('app_current_user');
                 setHistory([AppScreen.LOGIN]);
                 return;
               }
@@ -5601,7 +5638,7 @@ const App: React.FC = () => {
                       tenantId: user.id || 'MOBILE_USER',
                     };
                     setUser(updatedUser);
-                    localStorage.setItem('app_current_user', safeStringify(updatedUser));
+                    sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
                     // Salva no SQLite local
                     localDb.users.add(updatedUser);
                   }
@@ -5616,7 +5653,7 @@ const App: React.FC = () => {
                 if (supabase) {
                   await supabase.auth.signOut();
                 }
-                localStorage.removeItem('app_current_user');
+                sessionStorage.removeItem('app_current_user');
                 setUser(null);
                 setHistory([AppScreen.LOGIN]);
               }}
@@ -5710,7 +5747,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-full min-h-[100dvh] bg-bg-main overflow-hidden relative font-sans max-w-full flex flex-col safe-area-p">
+      <div className={`w-full h-full min-h-[100dvh] ${screen === AppScreen.LOGIN ? 'bg-white' : 'bg-bg-main'} overflow-hidden relative font-sans max-w-full flex flex-col ${screen === AppScreen.LOGIN ? '' : 'safe-area-p'}`}>
         {showCompanyHeader && (
           <div className="bg-white border-b border-slate-100 z-[200] flex-shrink-0">
             <div className="px-5 py-3 flex items-center justify-between">
@@ -5838,21 +5875,20 @@ const App: React.FC = () => {
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
               onLogin={async (u) => { 
                 setUser(u); 
-                localStorage.setItem('app_current_user', safeStringify(u));
+                sessionStorage.setItem('app_current_user', safeStringify(u));
 
                 // Se logou via Supabase, garante que o modo está correto
                 if (databaseMode !== DatabaseMode.INTERNAL) {
                   setDatabaseMode(DatabaseMode.SUPABASE);
-                  localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
                 }
 
                 // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
-                const defaultTenant = u.tenants || u.tenantid || 'CICOPAL';
-                const defaultUnit = u.unitid || u._unitid || 'MATRIZ';
+                const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
+                const defaultUnit = String(u.filial || u.unitid || u._unitid || 'MATRIZ').toUpperCase().trim();
                 
                 setSelectedUnit(defaultUnit);
-                localStorage.setItem('app_selected_unit', defaultUnit);
-                localStorage.setItem('app_current_unit', defaultUnit);
+                sessionStorage.setItem('tenantId', defaultTenant);
+                sessionStorage.setItem('filial', defaultUnit);
 
                 // Sempre tenta sincronizar de forma assíncrona e silenciosa em segundo plano no login para garantir dados frescos e permissões atualizadas
                 if (databaseMode !== DatabaseMode.INTERNAL) {
@@ -5913,7 +5949,7 @@ const App: React.FC = () => {
                     onConfirm: () => {}
                   });
                   setUser(null);
-                  localStorage.removeItem('app_current_user');
+                  sessionStorage.removeItem('app_current_user');
                   setHistory([AppScreen.LOGIN]);
                   return;
                 }

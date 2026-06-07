@@ -348,7 +348,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       if (setUser) {
         setUser(updatedUser);
       }
-      localStorage.setItem('app_current_user', safeStringify(updatedUser));
+      sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
     }
 
     setIsEditModalOpen(false);

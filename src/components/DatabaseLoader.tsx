@@ -108,6 +108,7 @@ export const UnifiedDatabaseLoader: React.FC<UnifiedLoaderProps> = ({
 const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({ 
   onDataLoaded,
   onBack,
+  user,
   showModal,
   databaseMode,
   isSyncing = false,
@@ -121,6 +122,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [errorLog, setErrorLog] = useState<string[]>([]);
   const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
   const [showCargaPrompt, setShowCargaPrompt] = useState(false);
+  const [isUserInitializing, setIsUserInitializing] = useState(true);
   
   const loadingAttempted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,6 +143,35 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
     setErrorLog(prev => [...prev, msg].slice(-200)); // Maintain high limit for terminal fluidity
   };
+
+  // Monitoramento reativo do boot do usuário com retry de 1500ms para evitar falsos positivos de tela branca
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    let attempts = 0;
+    
+    const checkUser = () => {
+      if (user) {
+        addLog(`[Sincronização de Boot] Operador autenticado localizado: ${user.email || 'Usuário Ativo'}. Liberando motor SQLite.`);
+        setIsUserInitializing(false);
+      } else {
+        attempts += 100;
+        if (attempts < 1500) {
+          addLog(`[Sincronização de Boot] Operador ausente no milissegundo zero. Retrying em 100ms... (${attempts}ms/1500ms)`);
+          timer = setTimeout(checkUser, 100);
+        } else {
+          addLog("[Sincronização de Boot] FALHA NA AUTENTICAÇÃO LOCAL: Nenhum operador ativo localizado após 1500ms.");
+          setStatus('ERROR');
+          setIsUserInitializing(false);
+        }
+      }
+    };
+
+    checkUser();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [user]);
 
   // Monitor cloud synchronization updates and map them directly into terminal logs
   useEffect(() => {
@@ -298,6 +329,13 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   }, []);
 
   useEffect(() => {
+    if (isUserInitializing) {
+      return; // Aguarda a resolução reativa e síncrona do usuário para evitar tela branca ou null access no milissegundo zero
+    }
+    if (!user || status === 'ERROR') {
+      addLog(">>> [Boot Safety Shield] Abortando carregamento do banco de dados físico por falha de autenticação do operador.");
+      return;
+    }
     const isExpertPending = sessionStorage.getItem('gbr_pending_expert_load') === 'true';
     if (isExpertPending) {
       return; // Será gerenciado pelo effect do checkExpertPending acima
@@ -311,7 +349,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       loadingAttempted.current = true;
       loadDataFlow();
     }
-  }, [isDatabaseLoaded]);
+  }, [isDatabaseLoaded, isUserInitializing, user, status]);
 
   const handleReconnect = async () => {
     addLog("Re-operando vínculos sob permissões nítidas...");
@@ -322,6 +360,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   };
 
   const processRowsToDatabaseBatch = async (rows: unknown[]) => {
+    // Se o usuário estiver ausente, o pipeline NÃO deve prosseguir às cegas. Ele lança uma rejeição controlada.
+    if (!user) {
+      throw new Error("user is not defined");
+    }
     // Validação preventiva de Bateria Crítica (Soberania de Energia v26)
     try {
       const batteryInfo = await Device.getBatteryInfo();
@@ -402,8 +444,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const sqlStatements: string[] = [];
 
         for (const row of chunk) {
-          let rTenantId = (user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
-          let rFilial = (user?.filial || user?.unitid || user?._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+          let rTenantId = (user?.tenantId || '').trim().toUpperCase();
+          let rFilial = (user?.filial || user?.unitid || user?._unitid || '').trim().toUpperCase();
           let rStatus = 'PENDENTE';
           let rEtiqueta = '';
           let rQt = '1';
@@ -589,8 +631,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           try {
             console.log("Iniciando backup silencioso para o Supabase...");
             const cloudAssets = rowsCopy.map((row) => {
-              let rTenantId = (user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
-              let rFilial = (user?.filial || user?.unitid || user?._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+              let rTenantId = (user?.tenantId || '').trim().toUpperCase();
+              let rFilial = (user?.filial || user?.unitid || user?._unitid || '').trim().toUpperCase();
               let rStatus = 'PENDENTE';
               let rEtiqueta = '';
               let rQt = '1';
@@ -894,7 +936,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const currentProcessedVal = isSyncing && syncProgress ? syncProgress.processed : progress.current;
 
   // Determine which screen is loaded
-  const isUnifiedView = status === 'LOADING' || status === 'IMPORTING' || isSyncing;
+  const isUnifiedView = status === 'LOADING' || status === 'IMPORTING' || isSyncing || isUserInitializing;
 
   if (isDatabaseLoaded) {
     return (
@@ -1038,8 +1080,10 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           </div>
         ) : status === 'ERROR' ? (
           <div className="flex flex-col items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-slate-200/50 backdrop-blur-sm min-h-[400px] w-full max-w-xl mx-auto safe-area-p animate-fadeIn">
-            <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-            <h3 className="text-sm font-black text-red-800 uppercase tracking-widest mb-2">Falha na Sincronização</h3>
+            <AlertCircle className="w-12 h-12 text-red-500 mb-4 animate-bounce" />
+            <h3 className="text-sm font-black text-red-800 uppercase tracking-widest mb-2 font-mono">
+              {errorLog.some(log => log.includes("FALHA NA AUTENTICAÇÃO LOCAL")) ? "FALHA NA AUTENTICAÇÃO LOCAL" : "Falha na Sincronização"}
+            </h3>
             <p className="text-[10px] text-slate-500 max-w-xs text-center mb-6">{errorLog[errorLog.length - 1] || "Ocorreu um erro desconhecido."}</p>
             <button
               onClick={() => {

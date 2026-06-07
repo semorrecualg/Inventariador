@@ -82,7 +82,7 @@ const Login: React.FC<LoginProps> = ({
         );
 
         if (localUser) {
-          localStorage.setItem('app_current_user', safeStringify(localUser));
+          sessionStorage.setItem('app_current_user', safeStringify(localUser));
           
           // Log de Auditoria
           logAuditEvent({
@@ -332,7 +332,7 @@ const Login: React.FC<LoginProps> = ({
           }
 
           console.log('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
-          localStorage.setItem('app_current_user', safeStringify(loggedUser));
+          sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
           
           logAuditEvent({
             user_email: loggedUser.email,
@@ -462,8 +462,12 @@ const Login: React.FC<LoginProps> = ({
 
           const normalizeValue = (val: string) => {
             if (!val) return '';
-            const upper = val.toUpperCase();
-            return (upper === 'DEFAULT' || upper === 'NULL' || upper === '0' || upper === 'default') ? '' : val;
+            const trimmed = val.trim();
+            const upper = trimmed.toUpperCase();
+            if (upper === 'DEFAULT' || upper === 'NULL' || upper === 'UNDEFINED' || upper === 'NULO' || upper === '0' || upper === '') {
+              return '';
+            }
+            return trimmed;
           };
 
           const normalizeArray = (arr: unknown[]) => {
@@ -513,7 +517,6 @@ const Login: React.FC<LoginProps> = ({
               username: loggedUser.username,
               name: loggedUser.name,
               email: loggedUser.email,
-              password: password, // plaintext password Typed by user for offline matching
               role: loggedUser.role,
               is_admin: loggedUser.is_admin ? 1 : 0,
               _tenantid: loggedUser._tenantid,
@@ -572,8 +575,8 @@ const Login: React.FC<LoginProps> = ({
       if (loggedUser) {
         console.log('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
         
-        // Salva no localStorage para persistência (Token Local)
-        localStorage.setItem('app_current_user', safeStringify(loggedUser));
+        // Salva no sessionStorage para persistência (Token Local)
+        sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
         
         // Log de Auditoria Local
         logAuditEvent({
@@ -642,7 +645,7 @@ const Login: React.FC<LoginProps> = ({
   };
 
   return (
-    <div className="p-4 min-h-screen h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-safe pb-safe">
+    <div className="w-full min-h-screen bg-white text-slate-900 flex flex-col justify-start animate-fadeIn overflow-y-auto no-scrollbar pt-safe pb-safe px-6">
       {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
       {!isKeyboardVisible && (
         <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
@@ -659,7 +662,7 @@ const Login: React.FC<LoginProps> = ({
             title="Clique para alternar o ambiente de dados"
           >
             <span className={`w-1.5 h-1.5 rounded-full ${databaseMode === DatabaseMode.INTERNAL ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></span>
-            <span className="text-[7px] font-black text-ink uppercase tracking-wider">
+            <span className="text-[7px] font-black text-slate-900 uppercase tracking-wider">
               {databaseMode === DatabaseMode.INTERNAL ? 'AMBIENTE: MOBILE (LOCAL)' : 'AMBIENTE: NUVEM (ONLINE)'}
             </span>
           </button>
@@ -670,12 +673,12 @@ const Login: React.FC<LoginProps> = ({
             onMouseDown={startPressLogo}
             onMouseUp={endPressLogo}
             onMouseLeave={endPressLogo}
-            className={`w-20 h-20 bg-white border border-slate-100 rounded-full flex items-center justify-center mb-2.5 shadow-md ring-4 ring-bg-main cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
+            className={`w-20 h-20 bg-white border border-slate-100 rounded-full flex items-center justify-center mb-2.5 shadow-md ring-4 ring-white cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
             title="Mantenha pressionado por 3 segundos para contra-medida Carga Expert"
           >
             <div className="flex flex-col items-center justify-center">
               <ShieldCheck size={28} className="text-accent animate-pulse-slow" />
-              <span className="text-[11px] font-black tracking-wider text-ink -mt-0.5">GBR</span>
+              <span className="text-[11px] font-black tracking-wider text-slate-900 -mt-0.5">GBR</span>
             </div>
           </div>
           
@@ -684,14 +687,14 @@ const Login: React.FC<LoginProps> = ({
             onClick={handleTitleClick}
             className="flex flex-col items-center select-none cursor-pointer active:scale-95 transition-all"
           >
-            <h1 className="text-lg font-black text-ink tracking-[0.2em] uppercase leading-none ml-[0.2em]">
+            <h1 className="text-lg font-black text-slate-900 tracking-[0.2em] uppercase leading-none ml-[0.2em]">
               GBR
             </h1>
-            <p className="text-[9px] font-light text-ink-muted uppercase tracking-[0.3em] mt-1 leading-none ml-[0.3em]">
+            <p className="text-[9px] font-light text-slate-500 uppercase tracking-[0.3em] mt-1 leading-none ml-[0.3em]">
               AUDITORIA
             </p>
           </div>
-          <p className="text-ink-muted text-[7px] font-bold uppercase tracking-[0.2em] mt-2.5 opacity-70">
+          <p className="text-slate-500 text-[7px] font-bold uppercase tracking-[0.2em] mt-2.5 opacity-70">
             INVENTÁRIO DE ATIVO IMOBILIZADO
           </p>
         </div>
@@ -700,7 +703,7 @@ const Login: React.FC<LoginProps> = ({
       {/* Se o teclado estiver visível, mostramos uma versão compacta do título */}
       {isKeyboardVisible && (
         <div className="mb-3 text-center animate-slideUp">
-           <h1 className="text-sm font-black text-ink tracking-[0.15em] uppercase">
+           <h1 className="text-sm font-black text-slate-900 tracking-[0.15em] uppercase">
             GBR <span className="text-accent font-extrabold text-xs">AUDITORIA</span>
           </h1>
         </div>
@@ -739,14 +742,14 @@ const Login: React.FC<LoginProps> = ({
         )}
         
         <div className="space-y-1.5">
-          <label className="block text-[10px] font-black text-ink-muted uppercase tracking-widest ml-1">{config.userLabel}</label>
+          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{config.userLabel}</label>
           <div className="relative group">
             <input 
               type="text" 
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className={`w-full pl-11 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm hover:shadow-md text-sm focus:ring-2 focus:ring-accent/10`}
+              className={`w-full pl-11 pr-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm hover:shadow-md text-sm focus:ring-2 focus:ring-accent/10`}
               placeholder={config.userPlaceholder}
             />
             <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-accent transition-colors" size={20} />
@@ -754,14 +757,14 @@ const Login: React.FC<LoginProps> = ({
         </div>
         
         <div className="space-y-1.5 animate-fadeIn">
-          <label className="block text-[10px] font-black text-ink-muted uppercase tracking-widest ml-1">{config.passLabel}</label>
+          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{config.passLabel}</label>
           <div className="relative group">
             <input 
               type={showPassword ? "text" : "password"} 
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={`w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-ink font-bold shadow-sm hover:shadow-md text-sm pr-12 focus:ring-2 focus:ring-accent/10`}
+              className={`w-full px-4 py-3.5 rounded-2xl border border-slate-200 bg-white ${config.focusColor} outline-none transition-all text-slate-900 font-bold shadow-sm hover:shadow-md text-sm pr-12 focus:ring-2 focus:ring-accent/10`}
               placeholder={config.passPlaceholder}
             />
             <button

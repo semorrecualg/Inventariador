@@ -245,7 +245,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                           className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans ${
                             (!unit.hasGps && !((() => { 
                               try { 
-                                const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); 
+                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                                 return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
                               } catch { 
                                 return isAdmin; 
@@ -256,7 +256,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                             e.stopPropagation();
                             if (!unit.hasGps && !((() => { 
                               try { 
-                                const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); 
+                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                                 return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
                               } catch { 
                                 return isAdmin; 
@@ -274,7 +274,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                               : 'bg-gray-50 text-gray-300 border-gray-100'
                           } ${(!unit.hasGps && !((() => { 
                             try { 
-                              const u = JSON.parse(localStorage.getItem('app_current_user') || '{}'); 
+                              const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                               return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
                             } catch { 
                               return isAdmin; 

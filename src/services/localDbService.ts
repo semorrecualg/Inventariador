@@ -17,7 +17,7 @@ export const TABLE_COLUMNS: Record<string, string[]> = {
 
 export const getCurrentTenantId = (): string => {
   try {
-    const userStr = localStorage.getItem('app_current_user');
+    const userStr = sessionStorage.getItem('app_current_user');
     if (userStr) {
       const user = JSON.parse(userStr);
       return user._tenantid || user.tenantid || 'DEMO_DEFAULT';
@@ -28,7 +28,7 @@ export const getCurrentTenantId = (): string => {
 
 const handleDemoAuditIncrement = () => {
   try {
-    const sessionUser = localStorage.getItem('app_current_user');
+    const sessionUser = sessionStorage.getItem('app_current_user');
     if (sessionUser) {
       const parsed = JSON.parse(sessionUser);
       if (parsed && (parsed.role === 'DEMO' || parsed.role === 'usuario_demo')) {

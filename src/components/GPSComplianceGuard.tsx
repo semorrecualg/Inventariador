@@ -34,7 +34,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
     // 2. Pelo seu perfil local no localStorage ou sessionStorage
     try {
-      const userStr = localStorage.getItem('app_current_user') || sessionStorage.getItem('app_current_user');
+      const userStr = sessionStorage.getItem('app_current_user');
       if (userStr) {
         const u = JSON.parse(userStr);
         const uRole = u.role?.toUpperCase();

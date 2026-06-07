@@ -198,7 +198,7 @@ export const startAutonomousTracking = async () => {
             // Tenta resgatar perfil administrativo [Bypass Admin Ativo] para evitar interrupções de rotina
             let isAdmin = false;
             try {
-              const savedUserStr = localStorage.getItem('app_current_user');
+              const savedUserStr = sessionStorage.getItem('app_current_user');
               if (savedUserStr) {
                 const u = JSON.parse(savedUserStr);
                 const r = (u.role || '').toUpperCase();

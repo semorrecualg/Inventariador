@@ -303,11 +303,9 @@ export const signOut = async () => {
     }
   }
   
-  // Limpa o localStorage independente do sucesso do Supabase
-  localStorage.removeItem('app_current_user');
-  localStorage.removeItem('app_database_mode');
-  localStorage.removeItem('app_selected_unit');
-  localStorage.removeItem('app_screen_history');
+  // Limpa o sessionStorage independente do sucesso do Supabase
+  sessionStorage.removeItem('app_current_user');
+  sessionStorage.clear();
   
 // Recarrega para limpar o estado do React
   window.location.href = '/';

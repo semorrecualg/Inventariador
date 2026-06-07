@@ -410,7 +410,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       const roleUpper = user?.role?.toUpperCase();
       if (roleUpper === 'ADMIN' || roleUpper === 'MASTER' || roleUpper === 'GESTOR' || user?.isAdmin || user?.is_admin) return true;
       try {
-        const userStr = localStorage.getItem('app_current_user');
+        const userStr = sessionStorage.getItem('app_current_user');
         if (userStr) {
           const u = JSON.parse(userStr);
           const uRole = u.role?.toUpperCase();

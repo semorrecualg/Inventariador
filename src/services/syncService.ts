@@ -20,6 +20,12 @@ const campaignQueueStore = localforage.createInstance({
 
 const photoQueueStore = queueStore;
 
+const isStringInvalid = (val: unknown): boolean => {
+  if (val === null || val === undefined) return true;
+  const s = String(val).trim().toUpperCase();
+  return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
+};
+
 export interface CampaignSyncItem {
   id: string;
   campaignId: string;
@@ -66,16 +72,32 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
 
 const getUserFromLocalStorage = () => {
   try {
-    const raw = localStorage.getItem('app_current_user');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
+    const raw = sessionStorage.getItem('app_current_user');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed) return parsed;
+    }
+  } catch (e) {
+    console.error('[Sync] Erro decodificando usuário de sessão:', e);
   }
+  return null;
 };
 
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
   const user = getUserFromLocalStorage();
-  if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+  const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+  const rawFilial = sessionStorage.getItem('filial');
+
+  if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
+    if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
+      console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila de campanhas. Interrompendo...");
+      sessionStorage.clear();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+          detail: { message: "Identificador de Contrato ou Filial ausente ou inválido no lote. Por favor, reautentique." }
+        }));
+      }
+    }
     return { success: false, processedCount: 0 };
   }
   const currentMode = localStorage.getItem('app_database_mode');
@@ -141,7 +163,19 @@ export const photoSyncManager = {
    */
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number }> => {
     const user = getUserFromLocalStorage();
-    if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+    const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+    const rawFilial = sessionStorage.getItem('filial');
+
+    if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
+      if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
+        console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila de fotos. Interrompendo...");
+        sessionStorage.clear();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+            detail: { message: "Identificador de Contrato ou Filial ausente ou inválido no lote. Por favor, reautentique." }
+          }));
+        }
+      }
       return { success: false, uploadCount: 0 };
     }
     if (sqliteService.isImportingBatch) {
@@ -241,8 +275,20 @@ export const syncService = {
    */
   processDataSyncQueue: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
     const user = getUserFromLocalStorage();
-    if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
-      return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis." };
+    const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+    const rawFilial = sessionStorage.getItem('filial');
+
+    if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
+      if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
+        console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila de dados. Interrompendo...");
+        sessionStorage.clear();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+            detail: { message: "Identificador de Contrato ou Filial ausente ou inválido no lote. Por favor, reautentique." }
+          }));
+        }
+      }
+      return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis ou inválidos." };
     }
     if (sqliteService.isImportingBatch) {
       return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote ativa." };
@@ -322,10 +368,10 @@ export const syncService = {
       // 3. Casamento de Chaves da Planilha Excel (21 propriedades higienizadas em lowercase/CamelCase)
       const sanitizedAssets = rawAssets.map((asset) => {
         // Mapeamento do tenantId estritamente em caixa alta (uppercase) para assegurar compatibilidade RLS
-        const rawTenantId = asset.tenantId || asset._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
+        const rawTenantId = asset.tenantId || asset._tenantid || sessionStorage.getItem('tenantId') || sessionStorage.getItem('gbr_current_tenant') || '';
         const tId = String(rawTenantId).trim().toUpperCase();
 
-        const rawFilial = asset.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+        const rawFilial = asset.filial || sessionStorage.getItem('filial') || '';
         const fil = String(rawFilial).trim().toUpperCase();
 
         if (!tId || tId === 'UNDEFINED' || tId === 'NULL' || !fil || fil === 'UNDEFINED' || fil === 'NULL') {
@@ -543,7 +589,19 @@ export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
  */
 export const processSyncQueue = async (onProgress?: (pendingCount: number) => void): Promise<void> => {
   const user = getUserFromLocalStorage();
-  if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+  const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+  const rawFilial = sessionStorage.getItem('filial');
+
+  if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
+    if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
+      console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila processSyncQueue. Interrompendo...");
+      sessionStorage.clear();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+          detail: { message: "Identificador de Contrato ou Filial ausente ou inválido no lote. Por favor, reautentique." }
+        }));
+      }
+    }
     return;
   }
   // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
