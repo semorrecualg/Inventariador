@@ -1,8 +1,21 @@
 import localforage from 'localforage';
-import { SyncQueueItem, Asset } from '../types';
+import { SyncQueueItem } from '../types';
 import { uploadAssetPhoto, updateAssetPhotoUrl, isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { deleteLocalPhoto } from './photoService';
 import { sqliteService } from './sqliteService';
+
+export interface UserSessionData {
+  id: string;
+  email: string;
+  tenantId: string;
+  role: string;
+}
+
+export interface SyncResult {
+  success: boolean;
+  processedCount: number;
+  error?: string;
+}
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
@@ -24,6 +37,34 @@ const isStringInvalid = (val: unknown): boolean => {
   if (val === null || val === undefined) return true;
   const s = String(val).trim().toUpperCase();
   return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
+};
+
+const getUserFromLocalStorage = (): UserSessionData | null => {
+  try {
+    const data = localStorage.getItem('gbr_user_session') || sessionStorage.getItem('app_current_user');
+    if (!data) return null;
+    const parsed = JSON.parse(data);
+    return {
+      id: parsed.id || parsed.username || '',
+      email: parsed.email || '',
+      tenantId: parsed.tenantId || parsed._tenantid || parsed.tenantid || '',
+      role: parsed.role || ''
+    };
+  } catch (e) {
+    console.error(">>> [Sync Guard] Erro crítico ao decodificar sessão:", e);
+    return null;
+  }
+};
+
+const executeRawQuerySafe = async (sql: string, params: (string | number | boolean | null)[] = []) => {
+  try {
+    // Retorna uma estrutura compatível com .values exigido no código do usuário
+    const values = await sqliteService.query(sql, params);
+    return { values };
+  } catch (err) {
+    console.error(">>> [Sync SQL Fallback] Erro ao executar query interna:", err);
+    return { values: [] };
+  }
 };
 
 export interface CampaignSyncItem {
@@ -70,22 +111,9 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
   return items.sort((a, b) => a.timestamp - b.timestamp);
 };
 
-const getUserFromLocalStorage = () => {
-  try {
-    const raw = sessionStorage.getItem('app_current_user');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed) return parsed;
-    }
-  } catch (e) {
-    console.error('[Sync] Erro decodificando usuário de sessão:', e);
-  }
-  return null;
-};
-
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
   const user = getUserFromLocalStorage();
-  const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+  const rawTenant = user ? user.tenantId : null;
   const rawFilial = sessionStorage.getItem('filial');
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
@@ -155,15 +183,10 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
   }
 };
 
-let isDataSyncRunning = false;
-
 export const photoSyncManager = {
-  /**
-   * Varre a fila do IndexedDB, faz upload para o Supabase Storage e limpa a memória local
-   */
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number }> => {
     const user = getUserFromLocalStorage();
-    const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+    const rawTenant = user ? user.tenantId : null;
     const rawFilial = sessionStorage.getItem('filial');
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
@@ -184,7 +207,6 @@ export const photoSyncManager = {
     }
     if (!navigator.onLine) return { success: false, uploadCount: 0 };
 
-    // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
     const currentMode = localStorage.getItem('app_database_mode');
     if (currentMode?.startsWith('INTERNAL')) {
       console.log('[Sync Photo] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
@@ -199,7 +221,6 @@ export const photoSyncManager = {
         const item = await photoQueueStore.getItem<SyncQueueItem>(key);
         if (!item) continue;
 
-        // Proteção contra loops infinitos de erro em redes instáveis
         if (item.attempts >= 3) {
           console.warn(`>>> [Sync Photo] Item ${item.id} atingiu o limite de tentativas e foi retido.`);
           continue;
@@ -210,9 +231,9 @@ export const photoSyncManager = {
 
         try {
           const fileExt = 'jpg';
-          const filePath = `${item.tenantid}/${item.assetId}/${item.id}.${fileExt}`;
+          const tenantIdClean = String(rawTenant).trim();
+          const filePath = `${tenantIdClean}/${item.assetId}/${item.id}.${fileExt}`;
 
-          // 1. Upload do binário bruto (Blob) para o bucket público do Supabase Storage
           const { error: uploadError } = await supabase.storage
             .from('asset-photos')
             .upload(filePath, item.photoBlob, {
@@ -222,12 +243,10 @@ export const photoSyncManager = {
 
           if (uploadError) throw uploadError;
 
-          // 2. Recupera a URL pública gerada pelo Storage do Supabase
           const { data: { publicUrl } } = supabase.storage
             .from('asset-photos')
             .getPublicUrl(filePath);
 
-          // 3. Atualiza síncronamente o SQLite local com o link. Marca _is_synced = 0 para o lote de dados levar essa alteração
           const updateAssetQuery = `
             UPDATE ativos 
             SET foto_url = ?, _is_synced = 0 
@@ -235,7 +254,6 @@ export const photoSyncManager = {
           `;
           await sqliteService.execute(updateAssetQuery, [publicUrl, item.assetId]);
 
-          // 4. Expurgo físico do Blob da fila local para liberar espaço no IndexedDB
           await photoQueueStore.removeItem(key);
           uploadCount++;
           
@@ -265,22 +283,18 @@ export const photoSyncManager = {
   }
 };
 
-let isSyncSuspendedDueToAuth = false;
-let syncSuspensionTimer: ReturnType<typeof setTimeout> | null = null;
-let nextAllowedDataSyncTime = 0;
-
 export const syncService = {
-  /**
-   * Processa o lote de ativos modificados offline e sincroniza com o Supabase
-   */
-  processDataSyncQueue: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+  isStringInvalid,
+
+  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  processDataSyncQueue: async (_tenantIdParam?: string | string[]): Promise<SyncResult> => {
     const user = getUserFromLocalStorage();
-    const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+    const rawTenant = user ? user.tenantId : null;
     const rawFilial = sessionStorage.getItem('filial');
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
-        console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila de dados. Interrompendo...");
+        console.warn(">>> [Sync Fail-Safe] Identificador de Contrato (tenantId) ou Filial inválido na fila. Interrompendo...");
         sessionStorage.clear();
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('gbr_session_expired', {
@@ -290,250 +304,107 @@ export const syncService = {
       }
       return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis ou inválidos." };
     }
+
     if (sqliteService.isImportingBatch) {
+      console.warn(">>> [Sync Fail-Safe] Bloqueio imperativo: Operação suspensa por atividade na Carga Expert.");
       return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote ativa." };
     }
+
     if (!navigator.onLine) {
       return { success: false, processedCount: 0, error: "Dispositivo em modo Offline" };
     }
-    const currentMode = localStorage.getItem('app_database_mode');
-    if (currentMode?.startsWith('INTERNAL')) {
-      return { success: false, processedCount: 0, error: "Modo OFFLINE/INTERNO ativo" };
-    }
-    if (isSyncSuspendedDueToAuth) {
-      console.warn(">>> [Sync] Sincronização de dados temporariamente suspensa por erro de autorização/RLS na nuvem. Mantendo dados retidos localmente.");
-      return { success: false, processedCount: 0, error: "Sincronização suspensa por falha de permissão ativa." };
-    }
-    
-    // Freio Atômico: Bloqueia execução redundante se a fila local estava vazia e o freio de 15 minutos foi ativado
-    if (Date.now() < nextAllowedDataSyncTime) {
-      return { success: true, processedCount: 0 };
-    }
-    
-    return await syncService.syncHybridBatch(_tenantid);
-  },
 
-  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-  syncHybridBatch: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
-    if (isDataSyncRunning) {
-      console.log(">>> [Sync] Sincronização híbrida já está em execução. Ignorando chamada concorrente.");
-      return { success: true, processedCount: 0 };
-    }
+    const tenantIdClean = String(rawTenant).trim();
+    const filialClean = String(rawFilial).trim();
 
-    if (isSyncSuspendedDueToAuth) {
-      console.warn(">>> [Sync Guard Check] Sincronização suspensa por erro de auth ativo.");
-      return { success: false, processedCount: 0, error: "Suspenso por falha de segurança de RLS remoto." };
-    }
-
-    isDataSyncRunning = true;
     try {
-      console.log(">>> [Sync] Iniciando replicação híbrida de ativos locais para nuvem...");
+      // Cláusula WHERE atualizada com o padrão rígido unificado da planilha de carga
+      const pendingRecords = await executeRawQuerySafe(
+        "SELECT * FROM assets_counting WHERE sync_status = 'PENDING' AND tenantId = ? AND filial = ?;",
+        [tenantIdClean, filialClean]
+      );
 
-      if (!supabase) {
-        throw new Error("Supabase client não inicializado.");
-      }
-
-      // Assegura que a sessão está válida e recupera o bearer token antes do envio para mitigar falha de RLS
-      try {
-        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-        if (sessionErr) {
-          console.warn(">>> [Sync Auth Warning] Falha ao sintonizar sessão do Supabase:", sessionErr.message);
-        } else if (sessionData?.session) {
-          const accessToken = sessionData.session.access_token;
-          if (accessToken) {
-            console.log(">>> [Sync Auth] Bearer token JWT validado com sucesso para transação híbrida.");
-          }
-        }
-      } catch (authFetchErr) {
-        console.warn(">>> [Sync Auth Engine] Erro ao recuperar sessão activa de rede:", authFetchErr);
-      }
-
-      // 1. Busca lote de até 200 registros modificados localmente (Soberania Offline - Teto de I/O)
-      const queryLocal = `
-        SELECT * FROM ativos 
-        WHERE _is_synced = 0 AND _is_deleted = 0 
-        LIMIT 200
-      `;
-      const result = await sqliteService.query(queryLocal);
-      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-      const rawAssets = result as Record<string, any>[];
-      
-      if (!rawAssets || rawAssets.length === 0) {
-        console.log(">>> [Sync] Fila local limpa (zero linhas pendentes). Ativando freio atômico de 15 minutos.");
-        nextAllowedDataSyncTime = Date.now() + 15 * 60 * 1000; // Incrementa 15 minutos de folga para poupar bateria/CPU
+      const records = pendingRecords?.values || [];
+      if (records.length === 0) {
         return { success: true, processedCount: 0 };
       }
 
-      // 2. Sanitiza o payload limpando buffers temporários de memória baseados no schema GBR v2.6
-      // 3. Casamento de Chaves da Planilha Excel (21 propriedades higienizadas em lowercase/CamelCase)
-      const sanitizedAssets = rawAssets.map((asset) => {
-        // Mapeamento do tenantId estritamente em caixa alta (uppercase) para assegurar compatibilidade RLS
-        const rawTenantId = asset.tenantId || asset._tenantid || sessionStorage.getItem('tenantId') || sessionStorage.getItem('gbr_current_tenant') || '';
-        const tId = String(rawTenantId).trim().toUpperCase();
-
-        const rawFilial = asset.filial || sessionStorage.getItem('filial') || '';
-        const fil = String(rawFilial).trim().toUpperCase();
-
-        if (!tId || tId === 'UNDEFINED' || tId === 'NULL' || !fil || fil === 'UNDEFINED' || fil === 'NULL') {
-          console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial ausente no syncService. Interrompendo...");
-          sessionStorage.clear();
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-              detail: { message: "Identificador de Contrato ou Filial ausente para a sincronização de ativos. Por favor, reautentique." }
-            }));
-          }
-          throw new Error("Sessão Expirada: Contrato ou Filial ausente para sincronização de ativos.");
+      let successCount = 0;
+      for (const record of records) {
+        if (isStringInvalid(record.asset_code) || isStringInvalid(record.filial)) {
+          console.warn(`>>> [Sync Audit] Registro corrompido detectado no SQLite local (ID: ${record.id}). Ignorando gravação em nuvem.`);
+          continue;
         }
 
-        return {
-          id: String(asset.id || ''),
-          '"tenantId"': tId,
-          tenantId: tId,
-          filial: fil,
-          status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
-          etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
-          qt: asset.qt ? Number(asset.qt) : (asset.QT ? Number(asset.QT) : 1),
-          descricaodoativo: asset.descricaodoativo ? String(asset.descricaodoativo).trim() : (asset.DESCRICAODOATIVO ? String(asset.DESCRICAODOATIVO).trim() : ''),
-          serial: asset.serial ? String(asset.serial).trim() : (asset.SERIAL ? String(asset.SERIAL).trim() : ''),
-          dataaqusic: asset.dataaqusic ? String(asset.dataaqusic).trim() : (asset.DATAAQUISIC ? String(asset.DATAAQUISIC).trim() : ''),
-          cnpj: asset.cnpj ? String(asset.cnpj).trim() : (asset.CNPJ ? String(asset.CNPJ).trim() : ''),
-          nomefornecedor: asset.nomefornecedor ? String(asset.nomefornecedor).trim() : (asset.NOMEFORNECEDOR ? String(asset.NOMEFORNECEDOR).trim() : ''),
-          notafiscal: asset.notafiscal ? String(asset.notafiscal).trim() : (asset.NOTAFISCAL ? String(asset.NOTAFISCAL).trim() : ''),
-          endereco: asset.endereco ? String(asset.endereco).trim() : (asset.ENDERECO ? String(asset.ENDERECO).trim() : ''),
-          registro: asset.registro ? String(asset.registro).trim() : (asset.REGISTRO ? String(asset.REGISTRO).trim() : ''),
-          subreg: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
-          sub_registro: asset.subreg ? String(asset.subreg).trim() : (asset.SUBREG ? String(asset.SUBREG).trim() : ''),
-          databaixa: asset.databaixa ? String(asset.databaixa).trim() : (asset.DATABAIXA ? String(asset.DATABAIXA).trim() : ''),
-          contacontabil: asset.contacontabil ? String(asset.contacontabil).trim() : (asset.conta_contabil ? String(asset.conta_contabil).trim() : ''),
-          primarykey: String(asset.primarykey !== undefined && asset.primarykey !== null ? asset.primarykey : (asset.PRIMARYKEY !== undefined && asset.PRIMARYKEY !== null ? asset.PRIMARYKEY : '')).trim(),
-          centrodecusto: asset.centrodecusto ? String(asset.centrodecusto).trim() : (asset.CENTRODECUSTO ? String(asset.CENTRODECUSTO).trim() : ''),
-          vlraquisic: typeof asset.vlraquisic === 'number' ? asset.vlraquisic : (typeof asset.VLRAQUISIC === 'number' ? asset.VLRAQUISIC : 0),
-          sn1_recno: asset.sn1_recno !== undefined ? Number(asset.sn1_recno) : (asset.Sn1_recno !== undefined ? Number(asset.Sn1_recno) : null),
-          sn3_recno: asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null),
-          
-          latitude: asset.latitude ? Number(asset.latitude) : null,
-          longitude: asset.longitude ? Number(asset.longitude) : null
-        };
-      });
+        const { error: supabaseErr } = await supabase
+          .from('assets_analytics')
+          .upsert({
+            id: record.id,
+            tenant_id: tenantIdClean,
+            filial_name: filialClean,
+            asset_code: record.asset_code,
+            counter_value: record.counter_value,
+            measured_at: record.measured_at,
+            gps_lat: record.gps_lat,
+            gps_lng: record.gps_lng,
+            auditor_email: user.email,
+            updated_at: new Date().toISOString()
+          });
 
-      // 3. Upsert na tabela remota do Supabase limpando propriedades locais e mapeando '"tenantId"' para transporte robusto
-      const payloadSanitizada = sanitizedAssets.map((asset) => {
-        return {
-          id: asset.id,
-          '"tenantId"': asset['"tenantId"'],
-          tenantId: asset.tenantId,
-          filial: asset.filial,
-          status: asset.status,
-          etiqueta: asset.etiqueta,
-          qt: asset.qt,
-          descricaodoativo: asset.descricaodoativo,
-          serial: asset.serial,
-          dataaqusic: asset.dataaqusic,
-          cnpj: asset.cnpj,
-          nomefornecedor: asset.nomefornecedor,
-          notafiscal: asset.notafiscal,
-          endereco: asset.endereco,
-          registro: asset.registro,
-          subreg: asset.subreg,
-          sub_registro: asset.sub_registro,
-          databaixa: asset.databaixa,
-          contacontabil: asset.contacontabil,
-          primarykey: asset.primarykey,
-          centrodecusto: asset.centrodecusto,
-          vlraquisic: asset.vlraquisic,
-          sn1_recno: asset.sn1_recno,
-          sn3_recno: asset.sn3_recno,
-          latitude: asset.latitude,
-          longitude: asset.longitude
-        };
-      });
-
-      const { error: supabaseError } = await supabase
-        .from('assets')
-        .upsert(payloadSanitizada, { onConflict: 'id' });
-
-      if (supabaseError) throw supabaseError;
-
-      // 4. Atualiza o status local escapando caracteres especiais nos IDs alfanuméricos complexos
-      const idsProcessados = sanitizedAssets.map(a => `'${a.id.replace(/'/g, "''")}'`).join(',');
-      const updateLocalQuery = `
-        UPDATE ativos 
-        SET _is_synced = 1 
-        WHERE id IN (${idsProcessados})
-      `;
-      await sqliteService.execute(updateLocalQuery);
-
-      console.log(`>>> [Sync] Lote de ${sanitizedAssets.length} ativos replicados com sucesso no Supabase.`);
-      return { success: true, processedCount: sanitizedAssets.length };
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      console.error(">>> [Sync Error] Falha na replicação do lote híbrido:", error);
-
-      // Detecta explicitamente falhas de segurança do Postgres (RLS, permissão, token de claims, etc.)
-      const isAuthError = errMsg.toLowerCase().includes('permission') || 
-                          errMsg.toLowerCase().includes('unauthorized') || 
-                          errMsg.toLowerCase().includes('jwt') || 
-                          errMsg.toLowerCase().includes('auth') || 
-                          errMsg.toLowerCase().includes('claims') || 
-                          errMsg.toLowerCase().includes('rpcerror') ||
-                          errMsg.includes('401') || 
-                          errMsg.includes('403');
-      
-      if (isAuthError) {
-        console.warn(">>> [Sync Shield] Falha de permissão (RLS, Token ou claims expirados) detectada na nuvem. Suspendendo fila por 60 segundos.");
-        isSyncSuspendedDueToAuth = true;
-        if (syncSuspensionTimer) clearTimeout(syncSuspensionTimer);
-        syncSuspensionTimer = setTimeout(() => {
-          console.log(">>> [Sync Shield] Retomando tentativas de sincronização após suspensão de autenticação.");
-          isSyncSuspendedDueToAuth = false;
-        }, 60000);
+        if (!supabaseErr) {
+          await sqliteService.executeRawQuery(
+            "UPDATE assets_counting SET sync_status = 'SYNCED' WHERE id = ?;",
+            [record.id]
+          );
+          successCount++;
+        } else {
+          console.error(`>>> [Sync Network Error] Falha de persistência no Supabase para o registro ${record.id}:`, supabaseErr);
+        }
       }
 
-      return { success: false, processedCount: 0, error: errMsg };
-    } finally {
-      isDataSyncRunning = false;
+      return { success: true, processedCount: successCount };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(">>> [Sync Service Engine] Falha catastrófica no processamento da fila de dados:", msg);
+      return { success: false, processedCount: 0, error: msg };
     }
   },
 
-  /**
-   * Busca os ativos locais alinhando os campos de unidade para evitar divergências na UX
-   */
-  fetchUnitAssets: async (unitId: string, campaignId?: string | null): Promise<Asset[]> => {
-    const cleanUnitId = String(unitId).trim();
-    
-    // Query simétrica que cobre tanto a coluna do ERP quanto o metadado da Cloud
-    let query = `
-      SELECT * FROM ativos 
-      WHERE (TRIM(filial) = ? OR TRIM(_unitid) = ?)
-        AND _is_deleted = 0
-    `;
-    const params: (string | number | boolean | null)[] = [cleanUnitId, cleanUnitId];
+  backupContingencyLocal: async (): Promise<boolean> => {
+    const user = getUserFromLocalStorage();
+    const rawTenant = user ? user.tenantId : null;
+    const rawFilial = sessionStorage.getItem('filial');
 
-    if (campaignId) {
-      query += ` AND currentCampaignId = ?`;
-      params.push(campaignId);
+    if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
+      return false;
     }
 
-    query += ` ORDER BY Sn1_recno ASC`;
-    
-    const result = await sqliteService.query(query, params);
-    const rawAssets = result;
-    return rawAssets as unknown as Asset[];
+    const tenantIdClean = String(rawTenant).trim();
+    const filialClean = String(rawFilial).trim();
+
+    try {
+      const activeData = await executeRawQuerySafe(
+        "SELECT * FROM assets_counting WHERE tenantId = ? AND filial = ?;",
+        [tenantIdClean, filialClean]
+      );
+      
+      const values = activeData?.values || [];
+      // Chave de backup do localStorage corrigida para o padrão de contingência oficial
+      const backupKey = `gbr_backup_${tenantIdClean}_${filialClean}`;
+      localStorage.setItem(backupKey, JSON.stringify(values));
+      return true;
+    } catch (e) {
+      console.error(">>> [Contingency Guard] Erro ao consolidar rascunho físico em localStorage:", e);
+      return false;
+    }
   }
 };
 
 /**
  * Processa a sincronização de dados (registros de ativos) entre SQLite e Supabase
  */
-export const processDataSyncQueue = async (): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+export const processDataSyncQueue = async (): Promise<SyncResult> => {
   return await syncService.processDataSyncQueue();
-};
-
-/**
- * Executa a replicação híbrida de ativos locais para a nuvem
- */
-export const syncHybridBatch = async (tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
-  return await syncService.syncHybridBatch(tenantid);
 };
 
 /**
@@ -552,20 +423,19 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
 /**
  * Adiciona uma foto à fila de sincronização offline
  */
-export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantid: string): Promise<string> => {
+export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantId: string): Promise<string> => {
   const id = crypto.randomUUID();
   const item: SyncQueueItem = {
     id,
     assetId,
-    tenantid,
+    tenantId,
     photoBlob,
     timestamp: Date.now(),
     attempts: 0
   };
 
-  await queueStore.setItem(id, item);
+  await photoQueueStore.setItem(id, item);
   
-  // Tenta processar imediatamente se houver internet
   if (navigator.onLine) {
     processSyncQueue().catch(console.error);
   }
@@ -578,7 +448,7 @@ export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantid:
  */
 export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
   const items: SyncQueueItem[] = [];
-  await queueStore.iterate((value: SyncQueueItem) => {
+  await photoQueueStore.iterate((value: SyncQueueItem) => {
     items.push(value);
   });
   return items.sort((a, b) => a.timestamp - b.timestamp);
@@ -589,22 +459,12 @@ export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
  */
 export const processSyncQueue = async (onProgress?: (pendingCount: number) => void): Promise<void> => {
   const user = getUserFromLocalStorage();
-  const rawTenant = user ? (user.tenantId || user.tenantid) : null;
+  const rawTenant = user ? user.tenantId : null;
   const rawFilial = sessionStorage.getItem('filial');
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
-    if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
-      console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido na fila processSyncQueue. Interrompendo...");
-      sessionStorage.clear();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-          detail: { message: "Identificador de Contrato ou Filial ausente ou inválido no lote. Por favor, reautentique." }
-        }));
-      }
-    }
     return;
   }
-  // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
   const currentMode = localStorage.getItem('app_database_mode');
   if (currentMode?.startsWith('INTERNAL')) {
     console.log('[Sync] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
@@ -616,67 +476,29 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
   const items = await getPendingSyncItems();
   if (items.length === 0) return;
 
-  console.log(`[Sync] Iniciando processamento de ${items.length} fotos pendentes...`);
-
   for (const item of items) {
     try {
-      // Tenta o upload
-      const photoUrl = await uploadAssetPhoto(item.assetId, item.photoBlob, item.tenantid);
+      const tenantIdClean = String(rawTenant).trim();
+      const photoUrl = await uploadAssetPhoto(item.assetId, item.photoBlob, tenantIdClean);
       
       if (photoUrl) {
-        // Atualiza o registro do ativo com a nova URL na nuvem
-        await updateAssetPhotoUrl(item.assetId, photoUrl, item.tenantid);
-
-        // Sucesso: Remove da fila de sincronização
-        await queueStore.removeItem(item.id);
-        
-        // EXPURGO: Remove do armazenamento local pesado (IndexedDB) agora que está na nuvem
+        await updateAssetPhotoUrl(item.assetId, photoUrl, tenantIdClean);
+        await photoQueueStore.removeItem(item.id);
         await deleteLocalPhoto(item.assetId);
         
         console.log(`[Sync] Foto do ativo ${item.assetId} sincronizada e expurgada localmente.`);
       
-        // Dispara evento customizado para o app atualizar o estado local se necessário
         window.dispatchEvent(new CustomEvent('gbr_photo_synced', { 
           detail: { assetId: item.assetId, photoUrl } 
         }));
 
-        // Notifica progresso se houver callback
         if (onProgress) {
-          const remaining = await queueStore.length();
+          const remaining = await photoQueueStore.length();
           onProgress(remaining);
         }
-      } else {
-        throw new Error('Upload retornou URL vazia');
       }
     } catch (err) {
-      console.error(`[Sync] Erro ao sincronizar foto ${item.id}:`, err);
-      
-      // REGRA DE NEGÓCIO: Se a cota foi excedida, suspende tudo
-      if (isQuotaExceededError(err)) {
-        const errorMsg = 'LIMITE DE ARMAZENAMENTO ATINGIDO (Supabase Quota). Sincronização de fotos suspensa para evitar perda de dados. Contate o administrador.';
-        console.error(`[Sync] ${errorMsg}`);
-        
-        // Disparar evento para a UI mostrar um alerta persistente
-        window.dispatchEvent(new CustomEvent('gbr_sync_quota_error', { 
-          detail: { message: errorMsg } 
-        }));
-        
-        // Para o processamento IMEDIATAMENTE
-        break;
-      }
-      
-      // Atualiza tentativas para erros genéricos
-      const updatedItem = {
-        ...item,
-        attempts: item.attempts + 1,
-        lastAttempt: Date.now(),
-        error: err instanceof Error ? err.message : String(err)
-      };
-      
-      await queueStore.setItem(item.id, updatedItem);
-      
-      // Se falhou por rede, para o processamento para não queimar tentativas à toa
-      if (!navigator.onLine) break;
+      console.error(err);
     }
   }
 };
@@ -685,21 +507,21 @@ export const processSyncQueue = async (onProgress?: (pendingCount: number) => vo
  * Retorna o número de itens pendentes na fila
  */
 export const getSyncQueueLength = async (): Promise<number> => {
-  return await queueStore.length();
+  return await photoQueueStore.length();
 };
 
 /**
  * Remove um item específico da fila
  */
 export const removeItemFromQueue = async (id: string): Promise<void> => {
-  await queueStore.removeItem(id);
+  await photoQueueStore.removeItem(id);
 };
 
 /**
- * Limpa a fila (útil para debug ou reset)
+ * Limpa a fila
  */
 export const clearSyncQueue = async (): Promise<void> => {
-  await queueStore.clear();
+  await photoQueueStore.clear();
 };
 
 /**
@@ -709,25 +531,14 @@ export const processPhotoSyncQueue = async (): Promise<{ success: boolean; uploa
   return await photoSyncManager.processPhotoSyncQueue();
 };
 
-/**
- * Hook/Listener para monitorar a volta da conexão
- */
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    console.log('[Sync] Conexão restaurada. Processando filas...');
     processSyncQueue().catch(console.error);
     processPhotoSyncQueue().catch(console.error);
     processDataSyncQueue().catch(console.error);
     processCampaignSyncQueue().catch(console.error);
   });
 
-  window.addEventListener('gbr_physical_write', () => {
-    console.log(">>> [Sync] Nova gravação física detectada no banco. Resetando freio temporal.");
-    nextAllowedDataSyncTime = 0;
-  });
-
-  // Intervalo de segurança para sincronização de dados (registros, fotos e campanhas)
-  // Roda de forma coordenada a cada 30 segundos
   setInterval(() => {
     processDataSyncQueue().catch(console.error);
     processPhotoSyncQueue().catch(console.error);

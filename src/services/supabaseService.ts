@@ -341,6 +341,7 @@ export const logAuditEvent = async (entry: {
   details?: string;
   _tenantid?: string;
   tenantid?: string;
+  tenantId?: string;
   tenant_id?: string;
   origin?: string;
 }) => {
@@ -370,7 +371,7 @@ export const logAuditEvent = async (entry: {
 
   try {
     // Sanitiza dados para evitar erros de estrutura circular
-    const tenantVal = entry._tenantid || entry.tenantid || entry.tenant_id || '';
+    const tenantVal = entry.tenantId || entry._tenantid || entry.tenantid || entry.tenant_id || '';
     const dbPayload: Record<string, unknown> = {
       user_email: entry.user_email,
       action: entry.action,

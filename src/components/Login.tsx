@@ -89,7 +89,7 @@ const Login: React.FC<LoginProps> = ({
             user_email: localUser.email,
             action: 'LOGIN',
             details: 'Login efetuado via Biometria (Local)',
-            _tenantid: localUser._tenantid || localUser.tenantid
+            tenantId: localUser.tenantId
           });
 
           onLogin(localUser);
@@ -167,17 +167,15 @@ const Login: React.FC<LoginProps> = ({
     onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
 
     // Cria usuário especializado local para que o sistema entre no contexto de administrador autorizado
+    // Objeto 100% alinhado com o layout da planilha de carga de dados
     const expertUser: User = {
       id: 'carga_expert_contingency',
       email: 'semorr@gmail.com', // Reconhecido como administrador pelo helper checkIsAdmin
       username: 'carga_expert',
       role: 'ADMIN' as unknown as UserRole,
       isAdmin: true,
-      tenants: 'CICOPAL',
-      tenantid: 'CICOPAL',
-      _tenantid: 'CICOPAL',
-      unitid: 'MATRIZ',
-      _unitid: 'MATRIZ',
+      tenantId: 'CICOPAL',  // Campo 0 da Planilha
+      filial: 'MATRIZ',    // Campo 1 da Planilha
       mustChangePassword: false
     };
 
@@ -300,12 +298,8 @@ const Login: React.FC<LoginProps> = ({
               is_admin: true,
               isAdmin: true,
               mustChangePassword: false,
-              _tenantid: 'DEMO_DEFAULT',
-              _unitid: 'MATRIZ',
-              tenantid: 'DEMO_DEFAULT',
-              unitid: 'MATRIZ',
-              units: ['MATRIZ'],
-              tenants: ['DEMO_DEFAULT']
+              tenantId: 'DEMO_DEFAULT',
+              filial: 'MATRIZ'
             };
           } else {
             // Se for mestre mas não estiver cadastrado no array (ou tabela SQLite ainda vazia), criamos a sessão mestre inicial
@@ -321,12 +315,8 @@ const Login: React.FC<LoginProps> = ({
                 is_admin: true,
                 isAdmin: true,
                 mustChangePassword: false,
-                _tenantid: 'CICOPAL',
-                _unitid: 'MATRIZ',
-                tenantid: 'CICOPAL',
-                unitid: 'MATRIZ',
-                units: ['MATRIZ'],
-                tenants: ['CICOPAL']
+                tenantId: 'CICOPAL',
+                filial: 'MATRIZ'
               };
             }
           }
@@ -338,7 +328,7 @@ const Login: React.FC<LoginProps> = ({
             user_email: loggedUser.email,
             action: 'LOGIN',
             details: `Login efetuado via Barreira Local Offline (SQLite Isolado)`,
-            _tenantid: loggedUser._tenantid || loggedUser.tenantid
+            tenantId: loggedUser.tenantId
           });
 
           onLogin(loggedUser);
@@ -451,9 +441,9 @@ const Login: React.FC<LoginProps> = ({
                 username: authData.user.email?.split('@')[0],
                 role: is_master ? 'ADMIN' : 'AUDITOR',
                 is_admin: is_master,
-                _tenantid: is_master ? 'CICOPAL' : '',
-                _unitid: is_master ? 'MATRIZ' : ''
-              };
+                tenantId: is_master ? 'CICOPAL' : '',
+                filial: is_master ? 'MATRIZ' : ''
+              } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             });
           
           console.log('[Login] Perfil processado.');
@@ -470,16 +460,11 @@ const Login: React.FC<LoginProps> = ({
             return trimmed;
           };
 
-          const normalizeArray = (arr: unknown[]) => {
-            if (!arr) return [];
-            return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
-          };
-
           const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com');
           const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
 
-          let tenantId = normalizeValue(cloudUser._tenantid || cloudUser.tenantid || '');
-          let unitId = normalizeValue(cloudUser._unitid || cloudUser.unitid || '');
+          let tenantId = normalizeValue(cloudUser.tenantId || cloudUser._tenantid || cloudUser.tenantid || '');
+          let unitId = normalizeValue(cloudUser.filial || cloudUser._unitid || cloudUser.unitid || '');
 
           if (is_master) {
             if (!tenantId) tenantId = 'CICOPAL';
@@ -494,12 +479,8 @@ const Login: React.FC<LoginProps> = ({
             is_admin: is_admin,
             isAdmin: is_admin,
             mustChangePassword: false,
-            _tenantid: tenantId,
-            _unitid: unitId,
-            tenantid: tenantId,
-            unitid: unitId,
-            units: normalizeArray(cloudUser.units || (unitId ? [unitId] : [])),
-            tenants: normalizeArray(cloudUser.tenants || (tenantId ? [tenantId] : []))
+            tenantId: tenantId,
+            filial: unitId
           };
 
           if (!tenantId && !is_master) {
@@ -519,8 +500,8 @@ const Login: React.FC<LoginProps> = ({
               email: loggedUser.email,
               role: loggedUser.role,
               is_admin: loggedUser.is_admin ? 1 : 0,
-              _tenantid: loggedUser._tenantid,
-              _unitid: loggedUser._unitid
+              tenantId: loggedUser.tenantId,
+              filial: loggedUser.filial
             };
             console.log('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
             await localDb.users.add(userToPersist as unknown as User);
@@ -583,7 +564,7 @@ const Login: React.FC<LoginProps> = ({
           user_email: loggedUser.email,
           action: 'LOGIN',
           details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno (Isolado)'}`,
-          _tenantid: loggedUser._tenantid || loggedUser.tenantid
+          tenantId: loggedUser.tenantId
         });
 
         onLogin(loggedUser);
