@@ -236,45 +236,48 @@ const App: React.FC = () => {
       if (parsed && parsed.email) {
         // Normalizar admin para semorr@gmail.com
         const lowerEmail = parsed.email.toLowerCase();
+        let isAdmin = parsed.is_admin || parsed.isAdmin || parsed.role === 'ADMIN' || parsed.role === 'MASTER';
+        let role = parsed.role || 'AUDITOR';
         if (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') {
-          parsed.is_admin = true;
-          parsed.isAdmin = true;
-          parsed.role = UserRole.ADMIN;
-          // FORCE CICOPAL for Master User if missing
-          if (!parsed.tenantId || parsed.tenantId === '') {
-            parsed.tenantId = 'CICOPAL';
-          }
-          if (!parsed._unitid || parsed._unitid === '') {
-            parsed._unitid = 'MATRIZ';
-            parsed.unitid = 'MATRIZ';
-          }
+          isAdmin = true;
+          role = 'ADMIN';
         }
-        // Normalizar flags de admin
-        const is_admin = parsed.is_admin || parsed.isAdmin || parsed.role === UserRole.ADMIN || parsed.role === UserRole.MASTER;
-        parsed.is_admin = is_admin;
-        parsed.isAdmin = is_admin;
-        
-        const rawCompanyKey = parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || 'CICOPAL';
-        parsed.tenantId = String(rawCompanyKey).trim().toUpperCase();
 
-        const rawUnitKey = parsed.filial || parsed._unitid || parsed.unitid || 'MATRIZ';
-        parsed.filial = String(rawUnitKey).trim().toUpperCase();
-        parsed.unitid = parsed.filial;
+        const resolvedTenantId = (parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
+        const resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
-        delete parsed._tenantid;
-        delete parsed.tenant_id;
-        delete parsed.tenantid;
-        delete parsed._unitid;
-        
-        if (Array.isArray(parsed.units)) {
-          parsed.units = parsed.units.filter((u: unknown) => {
+        if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedFilial || resolvedFilial === 'NULL' || resolvedFilial === 'UNDEFINED') {
+          console.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user local. Interrompendo.");
+          sessionStorage.clear();
+          setTimeout(() => {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+                detail: { message: "Seu contrato ou filial de trabalho expirou ou está ausente no perfil." }
+              }));
+            }
+          }, 100);
+          return null;
+        }
+
+        const cleanUser: User = {
+          id: parsed.id || 'admin_root',
+          email: parsed.email,
+          username: parsed.username || 'ADMINISTRADOR',
+          name: parsed.name || 'ADMINISTRADOR GLOBAL',
+          role: role as UserRole,
+          is_admin: isAdmin,
+          isAdmin: isAdmin,
+          tenantId: resolvedTenantId,
+          filial: resolvedFilial,
+          units: Array.isArray(parsed.units) ? parsed.units.filter((u: unknown) => {
             if (!u) return false;
             const s = String(u).toUpperCase();
             return s !== 'DEFAULT' && s !== 'NULL' && s !== '0' && s !== '';
-          });
-        }
+          }) : []
+        };
+        return cleanUser;
       }
-      return parsed;
+      return null;
     } catch { return null; }
   });
 
@@ -3263,16 +3266,16 @@ const App: React.FC = () => {
           finalTenant: permissions.tenantId || (permissionsObj.tenantid as string) || ''
         });
         
-        const is_master = (session.user.email?.toLowerCase() === 'semorr@gmail.com' || session.user.email?.toLowerCase() === 'semorr@gmail.com.br');
-        const resolvedTenantId = permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || (is_master ? 'CICOPAL' : 'CICOPAL');
-        const resolvedUnitId = permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || (is_master ? 'MATRIZ' : 'MATRIZ');
+        const resolvedTenantId = (permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
+        const resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
-        if (!resolvedTenantId && !is_master) {
-          console.warn(`[Auth] Usuário logado sem tenantId associado: ${session.user.email}`);
+        if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') {
+          console.warn(`[Auth Fail-Safe] Usuário logado sem tenantId ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
           localStorage.removeItem('app_current_user');
-          setHistory([AppScreen.LOGIN]);
+          sessionStorage.clear();
+          setHistory([AppScreen.LOAD_DATABASE]);
           
           if (supabase) {
             await supabase.auth.signOut();
@@ -3280,8 +3283,8 @@ const App: React.FC = () => {
 
           setModalConfig({
             isOpen: true,
-            title: 'Erro de Configuração',
-            message: 'Erro de Configuração: Perfil de usuário sem vínculo de empresa ativo. Contate o administrador.',
+            title: 'Sessão Expirada',
+            message: 'Identificador de Contrato ou Filial ausente para isolamento do banco RLS. Por favor, reautentique.',
             type: 'error',
             onConfirm: () => {}
           });
@@ -3299,17 +3302,9 @@ const App: React.FC = () => {
           isAdmin: !!permissions.is_admin || session.user.app_metadata?.isAdmin === true || session.user.user_metadata?.isAdmin === true || session.user.app_metadata?.role === 'ADMIN',
           mustChangePassword: false,
           tenantId: resolvedTenantId,
-          _unitid: resolvedUnitId,
-          unitid: resolvedUnitId,
+          filial: resolvedUnitId,
           units: permissions.units || unifiedMetadata.units || (resolvedUnitId ? [resolvedUnitId] : [])
         };
-
-        // Higienizar explicitamente propriedades legadas de tranca multidomínio
-        const userObj = loggedUser as unknown as Record<string, unknown>;
-        delete userObj._tenantid;
-        delete userObj.tenant_id;
-        delete userObj.tenantid;
-        delete userObj.tenants;
 
         // Só atualizamos se houver mudança real para evitar loops de renderização
         const hasChanged = !currentUser || 
@@ -3847,15 +3842,13 @@ const App: React.FC = () => {
     updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
     updates._origemTransacao = origin; // Aplica o código fixo
     
-    // Garantir que tenant e unit estão definidos
-    if (!updates.tenantId) updates.tenantId = user?.tenantId || 'CICOPAL';
-    if (!updates._unitid) updates._unitid = user?.unitid || '';
-    
-    // Higienizar legado
-    const updatesObj = updates as unknown as Record<string, unknown>;
-    delete updatesObj._tenantid;
-    delete updatesObj.tenant_id;
-    delete updatesObj.tenantid;
+    // Garantir que tenant e unit estão definidos de forma dinâmica
+    if (!updates.tenantId) {
+      updates.tenantId = user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
+    }
+    if (!updates._unitid) {
+      updates._unitid = user?.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+    }
     
     // Log de Auditoria
     const index = inventory.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
@@ -4438,15 +4431,13 @@ const App: React.FC = () => {
           _origemTransacao: origin // Aplica o código fixo
         };
         
-        // Garantir que tenant e unit estão definidos
-        if (!updates.tenantId) updates.tenantId = user?.tenantId || 'CICOPAL';
-        if (!updates._unitid) updates._unitid = user?.unitid || '';
-        
-        // Higienizar legado
-        const updatesObj = updates as unknown as Record<string, unknown>;
-        delete updatesObj._tenantid;
-        delete updatesObj.tenant_id;
-        delete updatesObj.tenantid;
+        // Garantir que tenant e unit estão definidos de forma dinâmica
+        if (!updates.tenantId) {
+          updates.tenantId = user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
+        }
+        if (!updates._unitid) {
+          updates._unitid = user?.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+        }
         
         // Log de Auditoria para atualização em lote
         const historyEntry: AuditLogEntry = {
@@ -4454,7 +4445,7 @@ const App: React.FC = () => {
           user: user?.name || user?.username || user?.email || 'SISTEMA',
           action: 'BULK_UPDATE',
           details: `Atualização em lote via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          tenantId: user?.tenantId || 'CICOPAL',
+          tenantId: user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '',
           origin: origin // Aplica o código fixo no log
         };
         updates._history = [...(updates._history || []), historyEntry];

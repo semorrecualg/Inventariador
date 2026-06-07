@@ -402,8 +402,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         const sqlStatements: string[] = [];
 
         for (const row of chunk) {
-          let rTenantId = 'CICOPAL';
-          let rFilial = 'MATRIZ';
+          let rTenantId = (user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
+          let rFilial = (user?.filial || user?.unitid || user?._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
           let rStatus = 'PENDENTE';
           let rEtiqueta = '';
           let rQt = '1';
@@ -437,8 +437,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               continue;
             }
 
-            rTenantId = cleanValue(row[0]) || 'CICOPAL';
-            rFilial = (cleanValue(row[1]) || 'MATRIZ').trim().toUpperCase();
+            rTenantId = (cleanValue(row[0]) || rTenantId).trim().toUpperCase();
+            rFilial = (cleanValue(row[1]) || rFilial).trim().toUpperCase();
             rStatus = cleanValue(row[2]) || 'PENDENTE';
             rEtiqueta = etq;
             rQt = cleanValue(row[4]) || '1';
@@ -476,8 +476,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               continue;
             }
 
-            rTenantId = (cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL').trim().toUpperCase();
-            rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
+            rTenantId = (cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || rTenantId).trim().toUpperCase();
+            rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || rFilial).trim().toUpperCase();
             rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
             rEtiqueta = etq;
             rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
@@ -519,6 +519,20 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
           const normalTenant = rTenantId.replace(/'/g, "''");
           const normalFilial = rFilial.replace(/'/g, "''");
+
+          if (!normalTenant || normalTenant.toUpperCase() === 'NULL' || normalTenant.toUpperCase() === 'UNDEFINED' || !normalFilial || normalFilial.toUpperCase() === 'NULL' || normalFilial.toUpperCase() === 'UNDEFINED') {
+            console.error(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente para a carga local de ativos. Interrompendo.");
+            sessionStorage.clear();
+            sqliteService.isImportingBatch = false;
+            sqliteService.setImportingMode(false);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+                detail: { message: "Identificador de Contrato ou Filial ausente para a importação local de ativos. Operação abortada por segurança." }
+              }));
+            }
+            setStatus('ERROR');
+            throw new Error("Sessão Expirada: Contrato ou Filial ausente para gravação de novos ativos.");
+          }
 
           if (cleanEndereco && cleanEndereco !== '') {
             const locId = `${normalTenant}_${normalFilial}_${cleanEndereco}`.replace(/\s/g, '_').toUpperCase();
@@ -575,8 +589,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           try {
             console.log("Iniciando backup silencioso para o Supabase...");
             const cloudAssets = rowsCopy.map((row) => {
-              let rTenantId = 'CICOPAL';
-              let rFilial = 'MATRIZ';
+              let rTenantId = (user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
+              let rFilial = (user?.filial || user?.unitid || user?._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
               let rStatus = 'PENDENTE';
               let rEtiqueta = '';
               let rQt = '1';
@@ -598,8 +612,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               let rSn3Recno = 0;
 
               if (Array.isArray(row)) {
-                rTenantId = cleanValue(row[0]) || 'CICOPAL';
-                rFilial = (cleanValue(row[1]) || 'MATRIZ').trim().toUpperCase();
+                rTenantId = (cleanValue(row[0]) || rTenantId).trim().toUpperCase();
+                rFilial = (cleanValue(row[1]) || rFilial).trim().toUpperCase();
                 rStatus = cleanValue(row[2]) || 'PENDENTE';
                 rEtiqueta = cleanValue(row[3]);
                 rQt = cleanValue(row[4]) || '1';
@@ -627,8 +641,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                   return key ? rObj[key] : null;
                 };
 
-                rTenantId = cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || 'CICOPAL';
-                rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || 'MATRIZ').trim().toUpperCase();
+                rTenantId = (cleanValue(findVal(['TENANTID', 'EMPRESA', 'TENANT_ID', 'GRUPO_EMPRESARIAL'])) || rTenantId).trim().toUpperCase();
+                rFilial = (cleanValue(findVal(['FILIAL', 'UNIDADE', 'FILIAL_ID'])) || rFilial).trim().toUpperCase();
                 rStatus = cleanValue(findVal(['STATUS', 'TAG_INVENTARIO', 'SITUACAO'])) || 'PENDENTE';
                 rEtiqueta = cleanValue(findVal(['ETIQUETA', 'CODIGO_ATIVO', 'CODIGO', 'PLAQUETA', 'TAG']));
                 rQt = cleanValue(findVal(['QT', 'QUANTIDADE', 'QTD'])) || '1';
@@ -651,7 +665,7 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               }
 
               const pkeyVal = rPrimarykey || rEtiqueta || generateUUID();
-              const rawObject = {
+              const cleanPayload = {
                 id: String(pkeyVal),
                 '"tenantId"': rTenantId,
                 tenantId: rTenantId,
@@ -675,17 +689,8 @@ const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 vlraquisic: rVlrAquisic,
                 sn1_recno: rSn1Recno,
                 sn3_recno: rSn3Recno,
-                _unitid: rFilial,
-                _tenantid: rTenantId,
-                tenant_id: rTenantId
+                _unitid: rFilial
               };
-
-              // Higienização rigorosa e explícita de chaves legadas de acordo com as especificações
-              const cleanPayload = { ...rawObject, tenantId: rawObject.tenantId || 'CICOPAL' };
-              const cleanPayloadObj = cleanPayload as unknown as Record<string, unknown>;
-              delete cleanPayloadObj._tenantid;
-              delete cleanPayloadObj.tenant_id;
-              delete cleanPayloadObj.tenantid;
 
               return cleanPayload;
             });

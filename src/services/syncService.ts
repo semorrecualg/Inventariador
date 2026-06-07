@@ -301,12 +301,28 @@ export const syncService = {
       // 3. Casamento de Chaves da Planilha Excel (21 propriedades higienizadas em lowercase/CamelCase)
       const sanitizedAssets = rawAssets.map((asset) => {
         // Mapeamento do tenantId estritamente em caixa alta (uppercase) para assegurar compatibilidade RLS
-        const tId = (asset.tenantId ? String(asset.tenantId).trim() : (asset._tenantid ? String(asset._tenantid).trim() : 'CICOPAL')).toUpperCase();
+        const rawTenantId = asset.tenantId || asset._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
+        const tId = String(rawTenantId).trim().toUpperCase();
+
+        const rawFilial = asset.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+        const fil = String(rawFilial).trim().toUpperCase();
+
+        if (!tId || tId === 'UNDEFINED' || tId === 'NULL' || !fil || fil === 'UNDEFINED' || fil === 'NULL') {
+          console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial ausente no syncService. Interrompendo...");
+          sessionStorage.clear();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+              detail: { message: "Identificador de Contrato ou Filial ausente para a sincronização de ativos. Por favor, reautentique." }
+            }));
+          }
+          throw new Error("Sessão Expirada: Contrato ou Filial ausente para sincronização de ativos.");
+        }
+
         return {
           id: String(asset.id || ''),
           '"tenantId"': tId,
           tenantId: tId,
-          filial: asset.filial ? String(asset.filial).trim().toUpperCase() : 'MATRIZ',
+          filial: fil,
           status: asset.status ? String(asset.status).trim() : (asset.STATUS ? String(asset.STATUS).trim() : 'PENDENTE'),
           etiqueta: asset.etiqueta ? String(asset.etiqueta).trim() : (asset.ETIQUETA ? String(asset.ETIQUETA).trim() : ''),
           qt: asset.qt ? Number(asset.qt) : (asset.QT ? Number(asset.QT) : 1),

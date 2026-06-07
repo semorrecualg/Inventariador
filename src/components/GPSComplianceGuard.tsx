@@ -71,6 +71,14 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     let watchId: number | null = null;
     let isActive = true;
 
+    // BYPASS SÍNCRONO DE ADMINISTRAÇÃO: Perfis de liderança e testes têm liberação imediata síncrona
+    if (isAdminUser) {
+      setStatus('bypassed');
+      onGpsStatusChange?.(true);
+      setShowAdminToast(true);
+      return;
+    }
+
     // Se estiver fora do modo de campo ou se não houver configuração de coordenada de âncora, assume liberação rápida
     if (!isFieldMode || !unitConfig || !unitConfig.lat || !unitConfig.lng) {
       setStatus('granted');
@@ -79,49 +87,53 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     }
 
     const checkLocation = (lat: number, lng: number) => {
-      try {
-        if (lat === null || lat === undefined || isNaN(lat) || lng === null || lng === undefined || isNaN(lng)) {
-          throw new Error("Coordenadas do dispositivo inválidas.");
-        }
-        
-        if (!unitConfig || !unitConfig.lat || !unitConfig.lng || isNaN(Number(unitConfig.lat)) || isNaN(Number(unitConfig.lng))) {
-          throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
-        }
+      // Cálculo espacial desacoplado de forma assíncrona da thread principal de UI
+      setTimeout(() => {
+        if (!isActive) return;
+        try {
+          if (lat === null || lat === undefined || isNaN(lat) || lng === null || lng === undefined || isNaN(lng)) {
+            throw new Error("Coordenadas do dispositivo inválidas ou nulas.");
+          }
+          
+          if (!unitConfig || !unitConfig.lat || !unitConfig.lng || isNaN(Number(unitConfig.lat)) || isNaN(Number(unitConfig.lng))) {
+            throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
+          }
 
-        const fromPoint = turf.point([lng, lat]);
-        const toPoint = turf.point([Number(unitConfig.lng), Number(unitConfig.lat)]);
-        
-        // Distância em metros via Turf.js com isolamento
-        const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
-        setCurrentDistance(distanceM);
-        setUserLocation({ lat, lng });
+          const fromPoint = turf.point([lng, lat]);
+          const toPoint = turf.point([Number(unitConfig.lng), Number(unitConfig.lat)]);
+          
+          // Distância em metros via Turf.js com isolamento à prova de falhas
+          const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
+          setCurrentDistance(distanceM);
+          setUserLocation({ lat, lng });
 
-        const allowedRadius = Number(unitConfig.radius_meters || 500);
+          const allowedRadius = Number(unitConfig.radius_meters || 500);
 
-        if (distanceM <= allowedRadius) {
-          setStatus('granted');
-          onGpsStatusChange?.(true);
-        } else {
+          if (distanceM <= allowedRadius) {
+            setStatus('granted');
+            onGpsStatusChange?.(true);
+          } else {
+            if (isAdminUser) {
+              setStatus('bypassed');
+              onGpsStatusChange?.(true);
+              setShowAdminToast(true);
+            } else {
+              setStatus('out-of-range');
+              onGpsStatusChange?.(false);
+            }
+          }
+        } catch (err) {
+          console.error('[Geofencing] Erro Turf.js ao calcular perímetro em thread desacoplada:', err);
           if (isAdminUser) {
             setStatus('bypassed');
             onGpsStatusChange?.(true);
             setShowAdminToast(true);
           } else {
-            setStatus('out-of-range');
-            onGpsStatusChange?.(false);
+            setStatus('granted'); // Failsafe para auditores em caso de erro matemático ou leitura espúria
+            onGpsStatusChange?.(true);
           }
         }
-      } catch (err) {
-        console.error('[Geofencing] Erro Turf.js ao calcular perímetro (ativando fallback):', err);
-        if (isAdminUser) {
-          setStatus('bypassed');
-          onGpsStatusChange?.(true);
-          setShowAdminToast(true);
-        } else {
-          setStatus('granted'); // Failsafe para auditores em caso de erro matemático
-          onGpsStatusChange?.(true);
-        }
-      }
+      }, 0);
     };
 
     setStatus('checking');
@@ -385,8 +397,8 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
                 <Unlock size={16} />
               </div>
               <div className="text-left flex-1">
-                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest leading-none mb-1">🔓 Soberania Admin</p>
-                <p className="text-[9px] text-slate-300 font-bold uppercase tracking-wide leading-tight">Perímetro de GPS ignorado para testes/auditoria.</p>
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest leading-none mb-1">🔓 [Bypass Admin Ativo]</p>
+                <p className="text-[9px] text-slate-300 font-bold uppercase tracking-wide leading-tight">Perímetro de GPS liberado para perfil de liderança.</p>
               </div>
             </div>
           </motion.div>
@@ -396,7 +408,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       {status === 'bypassed' && (
         <div className="fixed bottom-4 right-4 z-[9998] pointer-events-auto bg-slate-900/95 backdrop-blur text-white px-3 py-1.5 rounded-full flex items-center gap-2 border border-emerald-500/30 shadow-lg text-[9px] font-bold uppercase tracking-wider animate-fadeIn">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-          <span>Bypass GPS GBR Ativo ({unitConfig?.unit_id || 'Âncora'})</span>
+          <span>[Bypass Admin Ativo] ({unitConfig?.unit_id || 'Âncora'})</span>
         </div>
       )}
 

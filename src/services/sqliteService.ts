@@ -1386,7 +1386,7 @@ class SqliteService {
       status: campaign.status || 'CREATED',
       start_date: campaign.start_date || new Date().toISOString(),
       end_date: campaign.end_date || null,
-      tenant_id: (campaign.tenant_id || campaign._tenantid || campaign.tenantId || 'CICOPAL').trim(),
+      tenant_id: (campaign.tenant_id || campaign._tenantid || campaign.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim(),
       unit_id: (campaign.unit_id || campaign._unitid || '').trim()
     };
     const cols = Object.keys(payload).join(', ');
@@ -1727,7 +1727,7 @@ class SqliteService {
 
   async saveUnitConfigToSql(config: Record<string, unknown>) {
     const unitId = config._unitid || config.unit_id;
-    const tenantId = config._tenantid || config.tenant_id || 'CICOPAL';
+    const tenantId = config._tenantid || config.tenant_id || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
     const lat = Number(config.lat);
     const lng = Number(config.lng);
     const radius = Number(config.radius_meters || 500);
@@ -1769,12 +1769,12 @@ class SqliteService {
     }).filter(val => val !== '');
   }
 
-  async getOperationalUnitsWithStats(tenantId: string = 'CICOPAL'): Promise<{ id: string; name: string; filial: string; total_ativos: number; count: number; total_conferidos: number }[]> {
+  async getOperationalUnitsWithStats(tenantId: string = ''): Promise<{ id: string; name: string; filial: string; total_ativos: number; count: number; total_conferidos: number }[]> {
     const res = await this.query(`
       SELECT 
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS id,
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS name,
-        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') AS filial,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') AS id,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') AS name,
+        COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') AS filial,
         COUNT(id) AS total_ativos,
         SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS total_conferidos
       FROM assets
@@ -1782,8 +1782,8 @@ class SqliteService {
         AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != ''
         AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != 'CICOPAL'
         AND COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') != UPPER(TRIM(?))
-      GROUP BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ')
-      ORDER BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), 'MATRIZ') ASC
+      GROUP BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '')
+      ORDER BY COALESCE(NULLIF(TRIM(UPPER(filial)), ''), '') ASC
     `, [tenantId, tenantId]);
 
     return res.map(row => {
@@ -2014,7 +2014,7 @@ class SqliteService {
   }
 
   async saveUnitConfigSql(config: Record<string, unknown>) {
-    const tenantId = (config._tenantid as string) || 'CICOPAL';
+    const tenantId = (config._tenantid as string) || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
     await this.execute("INSERT OR REPLACE INTO inventory_config (id, _tenantid, data) VALUES (?, ?, ?)", 
       [tenantId, tenantId, JSON.stringify(config)]);
   }
@@ -2127,7 +2127,7 @@ class SqliteService {
   }
 
   async getInventoryConfig(tenantId?: string): Promise<InventoryState | null> {
-    const tid = tenantId || localStorage.getItem('app_last_tenant') || 'CICOPAL';
+    const tid = tenantId || localStorage.getItem('app_last_tenant') || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
     const res = await this.query("SELECT data FROM inventory_config WHERE _tenantid = ?", [tid]);
     if (res.length > 0 && res[0].data) {
       try {

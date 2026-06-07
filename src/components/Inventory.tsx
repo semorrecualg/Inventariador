@@ -21,6 +21,7 @@ import { localDb } from '../services/localDbService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 import { BufferIndicator } from './BufferIndicator';
+import { assetRepository } from '../services/assetRepository';
 
 import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
@@ -239,6 +240,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [lastActivityTime, setLastActivityTime] = useState(Date.now());
   const [isScannerPaused, setIsScannerPaused] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
+  const [isPersistingScan, setIsPersistingScan] = useState(false);
 
   // Monitoramento de Telemetria (Native Module Simulation)
   useEffect(() => {
@@ -434,8 +436,8 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [onUpdateSearchMode]);
 
   const handleScan = useCallback(async (result: string) => {
-    // Se estiver em cooldown térmico ou bloqueado, ignora
-    if (isCoolingDown || isThermalBlocked || isScannerPaused) return;
+    // Se estiver em cooldown térmico, bloqueado ou persistindo uma leitura anterior, ignora
+    if (isCoolingDown || isThermalBlocked || isScannerPaused || isPersistingScan) return;
 
     // Se já houver algum modal aberto, ignora novas leituras para evitar sobreposição
     if (isModalOpenRef.current) return;
@@ -447,6 +449,9 @@ const Inventory: React.FC<InventoryProps> = ({
     lastScanTime.current = now;
     lastScanResult.current = result;
     resetActivity();
+
+    // Trava imediatamente contra cliques duplos e concorrência de hardware
+    setIsPersistingScan(true);
 
     // Resfriamento: Pausa de 500ms entre leituras
     setIsCoolingDown(true);
@@ -504,8 +509,10 @@ const Inventory: React.FC<InventoryProps> = ({
       setIsHierarchyLoading(false);
       setScannedResult(result); // Fallback
       alert(`Erro na busca hierárquica de ativos: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsPersistingScan(false);
     }
-  }, [normalizeKey]);
+  }, [normalizeKey, isCoolingDown, isThermalBlocked, isScannerPaused, isPersistingScan, torch, user]);
 
   const handlePerformGlobalSearch = async () => {
     if (!showGlobalSearchResolution) return;
@@ -787,6 +794,10 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
+    
+    // SOBERANIA DE FILIAL: Filtra estritamente pela filial recuperada da session/local ou do prop
+    const activeFilial = (localStorage.getItem('filial') || sessionStorage.getItem('filial') || selectedUnit || user?.filial || '').trim().toUpperCase();
+
     const term = normalizeKeyFast(committedSearch);
     const searchUpper = committedSearch.toUpperCase().trim();
 
@@ -794,6 +805,10 @@ const Inventory: React.FC<InventoryProps> = ({
       const result = [];
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
+
+        // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
+        const assetFilial = (a.filial || '').trim().toUpperCase();
+        if (assetFilial !== activeFilial) continue;
 
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
@@ -829,6 +844,10 @@ const Inventory: React.FC<InventoryProps> = ({
     for (let i = 0; i < targetAssets.length; i++) {
         const a = targetAssets[i];
 
+        // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
+        const assetFilial = (a.filial || '').trim().toUpperCase();
+        if (assetFilial !== activeFilial) continue;
+
         const etq = normalizeKeyFast(a.ETIQUETA || '');
         const descText = String(a.DESCRICAODOATIVO || '').toUpperCase();
 
@@ -850,7 +869,7 @@ const Inventory: React.FC<InventoryProps> = ({
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedUnit]);
+  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedUnit, user]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
@@ -1263,93 +1282,114 @@ const Inventory: React.FC<InventoryProps> = ({
 
                 <div className="flex space-x-3 pt-2">
                   <button 
+                    disabled={isPersistingScan}
                     onClick={() => setScannedAsset(null)} 
-                    className="flex-1 py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                    className="flex-1 py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Cancelar
                   </button>
                   <button 
-                    onClick={() => {
-                      const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
-                      const currentCompKey = normalizeKey(selectedUnit || '');
-                      const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
-                      const currentLocKey = normalizeKey(selectedLocation || '');
-                      
-                      let updatedAsset: Asset;
+                    disabled={isPersistingScan}
+                    onClick={async () => {
+                      if (isPersistingScan) return;
+                      setIsPersistingScan(true);
+                      try {
+                        const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
+                        const currentCompKey = normalizeKey(selectedUnit || '');
+                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                        const currentLocKey = normalizeKey(selectedLocation || '');
+                        
+                        let updatedAsset: Asset;
 
-                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                        updatedAsset = { 
-                          ...scannedAsset, 
-                          filial: selectedUnit || scannedAsset.filial,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
-                      } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
-                        updatedAsset = {
-                          ...scannedAsset,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.ADOTADO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
-                      } else {
-                        updatedAsset = {
-                          ...scannedAsset,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.CONFERIDO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
+                        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                          updatedAsset = { 
+                            ...scannedAsset, 
+                            filial: selectedUnit || scannedAsset.filial,
+                            _conferido: true,
+                            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
+                          updatedAsset = {
+                            ...scannedAsset,
+                            _conferido: true,
+                            TAG_INVENTARIO: TagInventario.ADOTADO,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        } else {
+                          updatedAsset = {
+                            ...scannedAsset,
+                            _conferido: true,
+                            TAG_INVENTARIO: TagInventario.CONFERIDO,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        }
+
+                        const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
+                        await onUpdateAsset(cleanAsset);
+                        setScannedAsset(null);
+                        onSelectAsset(cleanAsset); // Abre detalhes para foto
+                      } catch (err) {
+                        console.error('>>> Erro na persistência de ativo com foto:', err);
+                        alert('Falha crítica na persistência: ' + (err instanceof Error ? err.message : String(err)));
+                      } finally {
+                        setIsPersistingScan(false);
                       }
-
-                      const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
-                      onUpdateAsset(cleanAsset);
-                      setScannedAsset(null);
-                      onSelectAsset(cleanAsset); // Abre detalhes para foto
                     }} 
-                    className="flex-1 py-4 bg-emerald-500 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
+                    className="flex-1 py-4 bg-emerald-500 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Camera size={14} className="mb-1" />
                     <span>Confirmar + Foto</span>
                   </button>
                   <button 
-                    onClick={() => {
-                      const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
-                      const currentCompKey = normalizeKey(selectedUnit || '');
-                      const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
-                      const currentLocKey = normalizeKey(selectedLocation || '');
-                      
-                      let updatedAsset: Asset;
-                      if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                        // Caso seja de outra empresa, adota como externo
-                        updatedAsset = { 
-                          ...scannedAsset, 
-                          filial: selectedUnit || scannedAsset.filial,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
-                      } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
-                        // Caso seja da mesma empresa mas outro endereço, adota como sobra física
-                        updatedAsset = {
-                          ...scannedAsset,
-                          _conferido: true,
-                          TAG_INVENTARIO: TagInventario.ADOTADO,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
-                      } else {
-                        // Caso seja do mesmo endereço
-                        updatedAsset = {
-                          ...scannedAsset,
-                          _conferido: true,
-                          _localMaster: selectedLocation || scannedAsset.ENDERECO
-                        };
+                    disabled={isPersistingScan}
+                    onClick={async () => {
+                      if (isPersistingScan) return;
+                      setIsPersistingScan(true);
+                      try {
+                        const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
+                        const currentCompKey = normalizeKey(selectedUnit || '');
+                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                        const currentLocKey = normalizeKey(selectedLocation || '');
+                        
+                        let updatedAsset: Asset;
+                        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+                          // Caso seja de outra empresa, adota como externo
+                          updatedAsset = { 
+                            ...scannedAsset, 
+                            filial: selectedUnit || scannedAsset.filial,
+                            _conferido: true,
+                            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
+                          // Caso seja da mesma empresa mas outro endereço, adota como sobra física
+                          updatedAsset = {
+                            ...scannedAsset,
+                            _conferido: true,
+                            TAG_INVENTARIO: TagInventario.ADOTADO,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        } else {
+                          // Caso seja do mesmo endereço
+                          updatedAsset = {
+                            ...scannedAsset,
+                            _conferido: true,
+                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                          };
+                        }
+                        
+                        const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
+                        await onUpdateAsset(cleanAsset);
+                        setScannedAsset(null);
+                      } catch (err) {
+                        console.error('>>> Erro na persistência síncrona de ativo:', err);
+                        alert('Falha crítica na persistência: ' + (err instanceof Error ? err.message : String(err)));
+                      } finally {
+                        setIsPersistingScan(false);
                       }
-                      
-                      const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
-                      onUpdateAsset(cleanAsset);
-                      setScannedAsset(null);
                     }} 
-                    className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none"
+                    className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all flex flex-col items-center justify-center leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Check size={14} className="mb-1" />
                     <span>Confirmar</span>
@@ -1693,15 +1733,17 @@ const Inventory: React.FC<InventoryProps> = ({
                 type="text" 
                 readOnly
                 inputMode="none"
-                onClick={() => setShowNumericKeypad(true)}
+                disabled={isPersistingScan}
+                onClick={() => !isPersistingScan && setShowNumericKeypad(true)}
                 value={displayValue} 
-                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all cursor-pointer" 
-                placeholder="ESCANEIE OU DIGITE..." 
+                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" 
+                placeholder={isPersistingScan ? "GRAVANDO LEITURA..." : "ESCANEIE OU DIGITE..."} 
               />
               <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
                 <button 
+                  disabled={isPersistingScan}
                   onClick={triggerSmartOCR}
-                  className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all"
+                  className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Busca por Foto (OCR)"
                 >
                   <Camera size={20} />

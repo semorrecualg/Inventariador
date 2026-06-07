@@ -689,9 +689,9 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   // 2. Se não encontrou ou deu timeout, tenta criar/atualizar (Upsert) com timeout
   console.log('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
   
-  const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || '').trim();
+  const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
   const is_admin_new = (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br');
-  const fallbackTenant = defaultTenant || (is_admin_new ? 'CICOPAL' : '');
+  const fallbackTenant = defaultTenant;
   
   const insertData = {
     email: lowerEmail,
@@ -700,7 +700,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
     tenant_id: fallbackTenant,
-    _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || '').trim(),
+    _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim(),
     ...(userId ? { id: userId } : {})
   };
 
@@ -2292,7 +2292,16 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
       try {
         // 1. Localiza a campanha no SQLite
         // Buscamos o tenantId preferencial do localStorage ou um fallback
-        const tenantId = localStorage.getItem('app_last_tenant') || 'CICOPAL';
+        const tenantId = (localStorage.getItem('app_last_tenant') || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
+        if (!tenantId || tenantId === 'undefined' || tenantId === 'null') {
+          console.error('>>> [SQLite] TenantId ausente para o snapshot da campanha.');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+              detail: { message: "Identificador de Contrato ausente para congelamento de laudo. Sessão encerrada." }
+            }));
+          }
+          return false;
+        }
         const allCampaigns = await sqliteService.getCampaigns(tenantId);
         const currentCampaign = allCampaigns.find(c => c.id === campaignId) || null;
 
@@ -2440,7 +2449,7 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
           metadata: JSON.parse(row.metadata as string),
           snapshot_date: (row.closed_at || row.snapshot_date) as string,
           closed_by: row.closed_by as string,
-          _tenantid: (row._tenantid || 'CICOPAL') as string
+          _tenantid: (row._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '') as string
         } as CampaignSnapshot;
       } catch (err) {
         console.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
@@ -2693,7 +2702,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       if (data && !error) {
         data.forEach(item => {
           const _tenantid = item.tenantId || item._tenantid || (item.data && (item.data._tenantid || item.data.tenant_id)) || tenantid;
-          const _unitid = item.filial || item._unitid || (item.data && (item.data._unitid || item.data.unit_id)) || 'MATRIZ';
+          const _unitid = item.filial || item._unitid || (item.data && (item.data._unitid || item.data.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
           
           configs[_unitid] = {
             ...(item.data || {}),
@@ -2708,7 +2717,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         const updatedLocal = { ...localData };
         data.forEach(item => { 
           const cloudTime = new Date(item.updated_at || 0).getTime();
-          const itemKey = item.filial || item.unit_key || `${item.tenantId || tenantid}_${item.filial || 'MATRIZ'}`;
+          const itemKey = item.filial || item.unit_key || `${item.tenantId || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`;
           const localItem = localData[itemKey];
           const localTime = localItem ? new Date(localItem.updated_at || 0).getTime() : 0;
           
