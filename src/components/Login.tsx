@@ -445,7 +445,7 @@ const Login: React.FC<LoginProps> = ({
           const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
             .catch(err => {
               console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
-              const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com' || authData.user.email?.toLowerCase() === 'semorr@gmail.com.br');
+              const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com');
               return {
                 email: authData.user.email,
                 username: authData.user.email?.split('@')[0],
@@ -471,7 +471,7 @@ const Login: React.FC<LoginProps> = ({
             return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
           };
 
-          const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com' || cloudUser.email.toLowerCase() === 'semorr@gmail.com.br');
+          const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com');
           const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
 
           let tenantId = normalizeValue(cloudUser._tenantid || cloudUser.tenantid || '');

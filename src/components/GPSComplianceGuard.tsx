@@ -45,8 +45,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           uRole === 'GESTOR' || 
           u.isAdmin === true || 
           u.is_admin === true ||
-          uEmail === 'semorr@gmail.com' ||
-          uEmail === 'semorr@gmail.com.br'
+          uEmail === 'semorr@gmail.com'
         ) {
           return true;
         }

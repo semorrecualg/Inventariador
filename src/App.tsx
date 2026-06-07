@@ -77,7 +77,6 @@ import { demoService } from './services/demoService';
 import { checkPastPermissions } from './services/permissionsService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
-const ADMIN_EMAIL_ALT = "semorr@gmail.com.br";
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -104,9 +103,7 @@ const checkIsAdmin = (u: User | null | undefined) => {
          roleStr === 'GESTOR' || 
          !!isAdm || 
          email === ADMIN_EMAIL.toLowerCase() || 
-         email === ADMIN_EMAIL_ALT.toLowerCase() ||
-         email === 'semorr@gmail.com' ||
-         email === 'semorr@gmail.com.br';
+         email === 'semorr@gmail.com';
 };
 
 // Error Boundary Component
@@ -238,7 +235,7 @@ const App: React.FC = () => {
         const lowerEmail = parsed.email.toLowerCase();
         let isAdmin = parsed.is_admin || parsed.isAdmin || parsed.role === 'ADMIN' || parsed.role === 'MASTER';
         let role = parsed.role || 'AUDITOR';
-        if (lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br') {
+        if (lowerEmail === 'semorr@gmail.com') {
           isAdmin = true;
           role = 'ADMIN';
         }
@@ -992,7 +989,7 @@ const App: React.FC = () => {
                         const parsed = JSON.parse(currentUserStr);
                         const lowerEmail = (parsed.email || '').toLowerCase();
                         const lowerUsername = (parsed.username || '').toLowerCase();
-                        if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                        if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
                           isLocal = true;
                         }
                       } catch { /* ignore */ }
@@ -1029,7 +1026,7 @@ const App: React.FC = () => {
                       const parsed = JSON.parse(currentUserStr);
                       const lowerEmail = (parsed.email || '').toLowerCase();
                       const lowerUsername = (parsed.username || '').toLowerCase();
-                      if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                      if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
                         isLocal = true;
                       }
                     } catch { /* ignore */ }
@@ -3443,7 +3440,7 @@ const App: React.FC = () => {
               const parsed = JSON.parse(currentUserStr);
               const lowerEmail = (parsed.email || '').toLowerCase();
               const lowerUsername = (parsed.username || '').toLowerCase();
-              if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+              if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
                 isLocal = true;
               }
             } catch { /* ignore */ }
@@ -3481,7 +3478,7 @@ const App: React.FC = () => {
             const parsed = JSON.parse(currentUserStr);
             const lowerEmail = (parsed.email || '').toLowerCase();
             const lowerUsername = (parsed.username || '').toLowerCase();
-            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
               isLocal = true;
             }
           } catch { /* ignore */ }
@@ -3524,7 +3521,7 @@ const App: React.FC = () => {
             const parsed = JSON.parse(currentUserStr);
             const lowerEmail = (parsed.email || '').toLowerCase();
             const lowerUsername = (parsed.username || '').toLowerCase();
-            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
               isLocalUser = true;
             }
           }
@@ -5415,7 +5412,7 @@ const App: React.FC = () => {
     if (!user) return false;
     const lowerEmail = (user.email || '').toLowerCase();
     const lowerUsername = (user.username || '').toLowerCase();
-    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || lowerEmail === 'semorr@gmail.com.br' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
+    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
   }, [user]);
 
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)

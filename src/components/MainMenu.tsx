@@ -188,7 +188,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     }
   };
 
-  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === "semorr@gmail.com") || (user?.email && user.email.toLowerCase() === "semorr@gmail.com.br");
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === "semorr@gmail.com");
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);

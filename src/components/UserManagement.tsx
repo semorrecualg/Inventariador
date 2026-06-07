@@ -191,8 +191,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       email,
       password,
       role: newRole,
-      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
-      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br'),
+      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
+      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
       mustChangePassword: true,
       _tenantid: normTenantId,
       _unitid: normUnitId,
@@ -315,7 +315,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
     };
 
-    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com' || email.toLowerCase() === 'semorr@gmail.com.br');
+    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com');
     const normTenantId = normalizeValue(editTenantId);
     const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
     const normUnits = normalizeArray(editUnits);
@@ -362,7 +362,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   };
 
   const removeUser = (email: string) => {
-    if (email.toLowerCase() === "semorr@gmail.com" || email.toLowerCase() === "semorr@gmail.com.br") {
+    if (email.toLowerCase() === "semorr@gmail.com") {
       showModal("Operação Negada", "O administrador mestre não pode ser excluído.", "warning");
       return;
     }
@@ -422,7 +422,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
           data={users.filter(u => {
             // Admin global vê tudo
-            if (currentUser?.email === "semorr@gmail.com" || currentUser?.email === "semorr@gmail.com.br" || currentUser?.role === UserRole.ADMIN) return true;
+            if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
             if (currentUser?.role === UserRole.MASTER) {
               return u.tenantid === currentUser.tenantid || (u.tenants && u.tenants.includes(currentUser.tenantid || ''));
