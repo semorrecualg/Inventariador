@@ -957,6 +957,12 @@ class SqliteService {
 
       return await Promise.race([physicalSetup(), timeoutPromise]);
     } catch (error: unknown) {
+      if (Capacitor.isNativePlatform()) {
+        console.error(">>> [Database Bootstrap FATAL] Falha catastrófica ao tentar ler/gravar no SQLite físico local do dispositivo nativo!", error);
+        // Em aplicativo nativo nativo, nunca mascara a falha física com fallback na memória volátil. Re-lança para diagnósticos detalhados.
+        throw error;
+      }
+
       console.warn(">>> [Database Bootstrap] Falha crítica de conexão com banco físico SQLite. Ativando Motor de Memória Fallback Resiliente.", error);
       
       // Fallback Engine!

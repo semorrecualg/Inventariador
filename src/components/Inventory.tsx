@@ -227,6 +227,84 @@ const Inventory: React.FC<InventoryProps> = ({
       filial: cleanFilial
     } as Asset;
   };
+
+  // MECANISMO DE PERSISTÊNCIA ESPELHADA (DUPLO GRAVADOR)
+  const handleUpdateAssetWithBackup = useCallback(async (cleanAsset: Asset) => {
+    try {
+      const activeTenantId = String(cleanAsset.tenantId || user?.tenantId || 'CICOPAL').trim().toUpperCase();
+      const activeFilial = String(cleanAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
+      const backupKey = `gbr_backup_${activeTenantId}_${activeFilial}`;
+      
+      const rawBackup = localStorage.getItem(backupKey);
+      let backupArray: Asset[] = [];
+      if (rawBackup) {
+        try {
+          backupArray = JSON.parse(rawBackup);
+          if (!Array.isArray(backupArray)) {
+            backupArray = [];
+          }
+        } catch {
+          backupArray = [];
+        }
+      }
+      
+      backupArray = backupArray.filter(a => String(a.id) !== String(cleanAsset.id));
+      backupArray.push(cleanAsset);
+      
+      localStorage.setItem(backupKey, JSON.stringify(backupArray));
+      console.log(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.ETIQUETA}) espelhado com sucesso no localStorage.`);
+    } catch (e) {
+      console.warn(">>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:", e);
+    }
+    
+    await onUpdateAsset(cleanAsset);
+  }, [onUpdateAsset, user, selectedUnit]);
+
+  const hasRecoveredRef = useRef(false);
+
+  // ROTINA AUTÔNOMA DE RETOMADA (RECOVERY BOOT)
+  useEffect(() => {
+    const runRecoveryBoot = async () => {
+      if (hasRecoveredRef.current) return;
+      hasRecoveredRef.current = true;
+      
+      const activeTenantId = String(user?.tenantId || 'CICOPAL').trim().toUpperCase();
+      const activeFilial = String(selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
+      const backupKey = `gbr_backup_${activeTenantId}_${activeFilial}`;
+      
+      const rawBackup = localStorage.getItem(backupKey);
+      if (!rawBackup) return;
+      
+      try {
+        const backupArray: Asset[] = JSON.parse(rawBackup);
+        if (!Array.isArray(backupArray) || backupArray.length === 0) return;
+        
+        console.log(`>>> [Recovery Boot] Encontrados ${backupArray.length} registros remanescentes de contingência no localStorage.`);
+        
+        let recoveredCount = 0;
+        for (const backedAsset of backupArray) {
+          const currentLocalObj = allAssetsRef.current.find(a => String(a.id) === String(backedAsset.id));
+          const isAlreadyConferido = currentLocalObj && (currentLocalObj._conferido || String(currentLocalObj.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+          
+          if (!isAlreadyConferido) {
+            console.log(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.ETIQUETA})`);
+            await onUpdateAsset(backedAsset);
+            recoveredCount++;
+          }
+        }
+        
+        console.log(`>>> [Recovery Boot] Rotina concluída. ${recoveredCount} ativos recuperados e reinseridos.`);
+        localStorage.removeItem(backupKey);
+      } catch (err) {
+        console.warn('>>> [Recovery Boot] Erro durante processamento da rotina autônoma de retomada:', err);
+        hasRecoveredRef.current = false;
+      }
+    };
+    
+    if (isInventorying && allAssets.length > 0) {
+      runRecoveryBoot();
+    }
+  }, [isInventorying, allAssets.length, onUpdateAsset, user, selectedUnit]);
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -377,7 +455,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const allAssetsRef = useRef(allAssets);
   const selectedLocationRef = useRef(selectedLocation);
   const selectedUnitRef = useRef(selectedUnit);
-  const onUpdateAssetRef = useRef(onUpdateAsset);
+  const onUpdateAssetRef = useRef(handleUpdateAssetWithBackup);
   const autoConfirmOnScanRef = useRef(autoConfirmOnScan);
   const scanFeedbackModeRef = useRef(scanFeedbackMode);
   const lastScanTime = useRef<number>(0);
@@ -387,7 +465,7 @@ const Inventory: React.FC<InventoryProps> = ({
   useEffect(() => { allAssetsRef.current = allAssets; }, [allAssets]);
   useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
   useEffect(() => { selectedUnitRef.current = selectedUnit; }, [selectedUnit]);
-  useEffect(() => { onUpdateAssetRef.current = onUpdateAsset; }, [onUpdateAsset]);
+  useEffect(() => { onUpdateAssetRef.current = handleUpdateAssetWithBackup; }, [handleUpdateAssetWithBackup]);
   useEffect(() => { autoConfirmOnScanRef.current = autoConfirmOnScan; }, [autoConfirmOnScan]);
   useEffect(() => { scanFeedbackModeRef.current = scanFeedbackMode; }, [scanFeedbackMode]);
   
@@ -925,13 +1003,13 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
     
-    await onUpdateAsset({
+    await handleUpdateAssetWithBackup({
       ...asset,
       _conferido: true,
       _localMaster: selectedLocation || asset.ENDERECO
     });
     setDisplayValue('');
-  }, [allAssets, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
+  }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
     setShowNumericKeypad(false);
@@ -948,7 +1026,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      await onUpdateAsset({ 
+      await handleUpdateAssetWithBackup({ 
         ...asset, 
         filial: selectedUnit || asset.filial || asset._unitid,
         _conferido: true,
@@ -974,7 +1052,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, onUpdateAsset, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
+  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -1103,7 +1181,7 @@ const Inventory: React.FC<InventoryProps> = ({
     
     const newAsset = cleanAndCapitalizeAsset(rawAsset);
     
-    onUpdateAsset(newAsset);
+    handleUpdateAssetWithBackup(newAsset);
     setIsManualEntryOpen(false);
     setCommittedSearch('');
     setDisplayValue('');
@@ -1326,7 +1404,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         }
 
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
-                        await onUpdateAsset(cleanAsset);
+                        await handleUpdateAssetWithBackup(cleanAsset);
                         setScannedAsset(null);
                         onSelectAsset(cleanAsset); // Abre detalhes para foto
                       } catch (err) {
@@ -1380,7 +1458,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         }
                         
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
-                        await onUpdateAsset(cleanAsset);
+                        await handleUpdateAssetWithBackup(cleanAsset);
                         setScannedAsset(null);
                       } catch (err) {
                         console.error('>>> Erro na persistência síncrona de ativo:', err);
@@ -2056,7 +2134,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     }
                     
                     const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
-                    onUpdateAsset(cleanAsset);
+                    handleUpdateAssetWithBackup(cleanAsset);
                     setScannedAsset(null);
                   }} 
                   className="flex-1 py-4 bg-accent text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"

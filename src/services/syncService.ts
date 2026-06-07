@@ -64,7 +64,20 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
   return items.sort((a, b) => a.timestamp - b.timestamp);
 };
 
+const getUserFromLocalStorage = () => {
+  try {
+    const raw = localStorage.getItem('app_current_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
+  const user = getUserFromLocalStorage();
+  if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+    return { success: false, processedCount: 0 };
+  }
   const currentMode = localStorage.getItem('app_database_mode');
   if (currentMode?.startsWith('INTERNAL')) {
     return { success: false, processedCount: 0 };
@@ -127,6 +140,10 @@ export const photoSyncManager = {
    * Varre a fila do IndexedDB, faz upload para o Supabase Storage e limpa a memória local
    */
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number }> => {
+    const user = getUserFromLocalStorage();
+    if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+      return { success: false, uploadCount: 0 };
+    }
     if (sqliteService.isImportingBatch) {
       console.log('[Sync Photo] Sincronização suspensa: Importação em lote ativa.');
       return { success: false, uploadCount: 0 };
@@ -223,6 +240,10 @@ export const syncService = {
    * Processa o lote de ativos modificados offline e sincroniza com o Supabase
    */
   processDataSyncQueue: async (_tenantid?: string | string[]): Promise<{ success: boolean; processedCount: number; error?: string }> => {
+    const user = getUserFromLocalStorage();
+    if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+      return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis." };
+    }
     if (sqliteService.isImportingBatch) {
       return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote ativa." };
     }
@@ -521,6 +542,10 @@ export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
  * Processa a fila de sincronização de fotos
  */
 export const processSyncQueue = async (onProgress?: (pendingCount: number) => void): Promise<void> => {
+  const user = getUserFromLocalStorage();
+  if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+    return;
+  }
   // BLOQUEIO: Se estiver em modo INTERNO, não tenta sincronizar nada com a nuvem
   const currentMode = localStorage.getItem('app_database_mode');
   if (currentMode?.startsWith('INTERNAL')) {

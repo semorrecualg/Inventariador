@@ -694,6 +694,10 @@ const App: React.FC = () => {
   // Agendador Automático Oculto (Background Sync Timer)
   useEffect(() => {
     const triggerBackgroundSync = async () => {
+      // Barreira de guarda declarativa rigorosa:
+      if (!user || (!user.tenantId && !user.tenantid) || !sessionStorage.getItem('filial')) {
+        return;
+      }
       // Se o dispositivo estiver offline ou uma sincronização já estiver ativa, aborta o ciclo
       if (!navigator.onLine || isSyncRunningRef.current) {
         return;
@@ -736,7 +740,7 @@ const App: React.FC = () => {
       clearInterval(syncIntervalId);
       window.removeEventListener('online', handleNetworkReconnection);
     };
-  }, []);
+  }, [user]);
 
   // Rastreamento Autônomo v24.50
   useEffect(() => {
