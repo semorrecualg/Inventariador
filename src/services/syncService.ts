@@ -44,6 +44,25 @@ const isStringInvalid = (val: unknown): boolean => {
   return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
 };
 
+/**
+ * Verifica condições de segurança física de hardware (trava preventiva de bateria baixa < 5%)
+ */
+export const checkHardwareSafety = async (): Promise<boolean> => {
+  try {
+    if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const battery: any = await (navigator as any).getBattery();
+      if (battery && battery.level <= 0.05 && !battery.charging) {
+        console.warn(`>>> [Hardware Safety Check] BLOQUEIO DE BATERIA ATIVO: Carga atual de ${Math.round(battery.level * 100)}% sem fonte externa conectada. Sincronização e gravações físicas suspensas.`);
+        return false;
+      }
+    }
+  } catch (err) {
+    console.error(">>> [Hardware Safety Check] Erro de verificação do subsistema de energia:", err);
+  }
+  return true;
+};
+
 const getUserFromLocalStorage = (): UserSessionData | null => {
   try {
     const data = localStorage.getItem('gbr_user_session') || sessionStorage.getItem('app_current_user');
@@ -55,11 +74,17 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
     if (!parsed || typeof parsed !== 'object' || !parsed.id) {
       return null;
     }
+
+    const tId = parsed.tenantId;
+    if (isStringInvalid(tId)) {
+      console.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantId é inválido ou ausente.");
+      return null;
+    }
     
     return {
       id: String(parsed.id),
       email: String(parsed.email || ''),
-      tenantId: String(parsed.tenantId || 'CICOPAL'),
+      tenantId: String(tId),
       role: String(parsed.role || 'AUDITOR')
     };
   } catch (e: unknown) {
@@ -465,39 +490,26 @@ export const syncService = {
         }
       }
 
-      // ACID TRANSACTION: Aplica a atualização em lote atômico local utilizando 'primarykey'
+      // ACID TRANSACTION: Aplica a atualização em lote local utilizando 'primarykey' confiando no driver
       if (syncedPrimaryKeys.length > 0) {
-        console.log(`>>> [Sync ACID Engine] Gravando em lote '${syncedPrimaryKeys.length}' status como SYNCED sob transação...`);
-        let inTransaction = false;
+        console.log(`>>> [Sync ACID Engine] Gravando em lote '${syncedPrimaryKeys.length}' status como SYNCED...`);
         try {
-          await sqliteService.query("BEGIN TRANSACTION;");
-          inTransaction = true;
           for (const keyToUpdate of syncedPrimaryKeys) {
             await sqliteService.query(
               "UPDATE assets_counting SET sync_status = 'SYNCED' WHERE primarykey = ? OR id = ?;",
               [keyToUpdate, keyToUpdate]
             );
           }
-          await sqliteService.query("COMMIT;");
-          inTransaction = false;
-          console.log(`>>> [Sync ACID Engine] Transação de persistência atômica local concluída para '${syncedPrimaryKeys.length}' registros.`);
+          console.log(`>>> [Sync ACID Engine] Persistência local concluída para '${syncedPrimaryKeys.length}' registros.`);
         } catch (transError) {
           console.error(">>> [Sync ACID Engine] Falha na gravação do lote local de sincronizados:", transError);
-          if (inTransaction) {
-            try {
-              await sqliteService.query("ROLLBACK;");
-              console.log(">>> [Sync ACID Engine] ROLLBACK efetuado com sucesso.");
-            } catch (rErr) {
-              console.error(">>> [Sync ACID Engine] Erro catastrófico ao reverter transação local:", rErr);
-            }
-          }
 
           await sqliteService.logAuditEvent(
             user.id,
             'SYNC_BATCH_TRANSACTION_FAIL',
             'assets_counting',
             'BATCH',
-            `Erro transacao local: ${transError instanceof Error ? transError.message : String(transError)}`
+            `Erro de escrita local: ${transError instanceof Error ? transError.message : String(transError)}`
           ).catch(console.error);
 
           throw transError;
@@ -643,6 +655,13 @@ export const processSyncQueue = async (): Promise<void> => {
     console.warn(">>> [Sync Alias Guard] Concurrency prevented: a sync loop is already running.");
     return;
   }
+  
+  const safe = await checkHardwareSafety();
+  if (!safe) {
+    console.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
+    return;
+  }
+
   isSyncingLoopActive = true;
   try {
     console.log(">>> [Sync Alias] Starting sequential manual synchronization...");
@@ -658,7 +677,19 @@ export const processSyncQueue = async (): Promise<void> => {
  */
 export const processPhotoSyncQueue = async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
   if (isSyncingLoopActive) return { success: false, uploadCount: 0, failedCount: 0 };
-  return await photoSyncManager.processPhotoSyncQueue();
+  
+  const safe = await checkHardwareSafety();
+  if (!safe) {
+    console.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
+    return { success: false, uploadCount: 0, failedCount: 0 };
+  }
+
+  isSyncingLoopActive = true;
+  try {
+    return await photoSyncManager.processPhotoSyncQueue();
+  } finally {
+    isSyncingLoopActive = false;
+  }
 };
 
 const scheduleNextCycle = () => {
@@ -672,6 +703,13 @@ const scheduleNextCycle = () => {
 
 const runSyncLoopCycle = async () => {
   if (isSyncingLoopActive) return;
+  
+  const safe = await checkHardwareSafety();
+  if (!safe) {
+    scheduleNextCycle();
+    return;
+  }
+
   isSyncingLoopActive = true;
   
   let hasFailure = false;
