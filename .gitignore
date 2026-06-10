@@ -34,3 +34,10 @@ ios/
 capacitor.config.json
 capacitor.config.js
 # Note: package-lock.json should NOT be ignored
+
+# Bancos de dados locais físicos (SQLite GBR)
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
