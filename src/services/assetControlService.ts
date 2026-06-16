@@ -1,11 +1,18 @@
+import { validateHardwareSafetyForWrite } from '../../hardwareService';
 import { Asset, AssetGroup, AssetMovement, ChartOfAccount, DepreciationHistory, NCMClassifier } from '../types';
-import { validateHardwareSafetyForWrite } from './hardwareService';
 import { supabase } from './supabaseService';
 
 // Mutex de isolamento de carga para impedir interferências de trackDelta ou logs de background
 let isImportingBatch = false;
 
 export const assetControlService = {
+  /**
+   * Retorna se o modo de importação em lote está ativo
+   */
+  isBatchImportActive(): boolean {
+    return isImportingBatch;
+  },
+
   /**
    * Ativa ou desativa o estado de isolamento exclusivo de disco
    */

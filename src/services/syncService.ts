@@ -1,8 +1,8 @@
 import localforage from 'localforage';
+import { validateHardwareSafetyForWrite } from '../../hardwareService';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { sqliteService } from './sqliteService';
-import { validateHardwareSafetyForWrite } from './hardwareService';
+import { isQuotaExceededError, registerCampaignSyncQueueDelegate, supabase } from './supabaseService';
 
 export interface UserSessionData {
  id: string;
@@ -30,10 +30,6 @@ export interface CampaignSyncItem {
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
 
-let isSyncingLoopActive = false;
-let consecutiveFailures = 0;
-const MAX_CONSECUTIVE_FAILURES = 5;
-
 const queueStore = localforage.createInstance({
  name: 'GBR_Audit_v24',
  storeName: PHOTO_QUEUE_STORE
@@ -52,17 +48,58 @@ const isStringInvalid = (val: unknown): boolean => {
  return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
 };
 
+export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantId: string): Promise<string> => {
+  const id = crypto.randomUUID();
+  const item: SyncQueueItem = {
+    id,
+    assetId,
+    tenantId,
+    photoBlob,
+    timestamp: Date.now(),
+    attempts: 0
+  };
+  await photoQueueStore.setItem(id, item);
+  // Tenta processar imediatamente quando online
+  if (navigator.onLine) {
+    photoSyncManager.processPhotoSyncQueue().catch(console.error);
+  }
+  return id;
+};
+
+export const getPendingSyncItems = async (): Promise<SyncQueueItem[]> => {
+  const items: SyncQueueItem[] = [];
+  await photoQueueStore.iterate((value: SyncQueueItem) => {
+    items.push(value);
+  });
+  return items.sort((a, b) => a.timestamp - b.timestamp);
+};
+
+export const removeItemFromQueue = async (id: string): Promise<void> => {
+  await photoQueueStore.removeItem(id);
+};
+
+export const clearSyncQueue = async (): Promise<void> => {
+  const keys = await photoQueueStore.keys();
+  for (const k of keys) {
+    await photoQueueStore.removeItem(k as string);
+  }
+};
+
+export const processSyncQueue = async (): Promise<{ success: boolean; uploadCount?: number; failedCount?: number }> => {
+  return await photoSyncManager.processPhotoSyncQueue();
+};
+
 export const validateAdministrativeEmail = (email: string): boolean => {
- const sanitized = email.trim().toLowerCase();
- if (sanitized.endsWith('.com.br')) {
-   console.error(">>> [Governança GBR] ERRO FATAL: O sufixo '.com.br' foi banido para contas master.");
-   return false;
- }
- if (sanitized === 'semorr@gmail.com') {
-   console.log(">>> [Governança GBR] Bypass de geocerca ativo para homologação.");
-   return true;
- }
- return true;
+  const sanitized = email.trim().toLowerCase();
+  if (sanitized.endsWith('.com.br')) {
+    console.error(">>> [Governança GBR] ERRO FATAL: O sufixo '.com.br' foi banido para contas master.");
+    return false;
+  }
+  if (sanitized === 'semorr@gmail.com') {
+    console.log(">>> [Governança GBR] Bypass de geocerca ativo para homologação.");
+    return true;
+  }
+  return true;
 };
 
 const getUserFromSessionStorage = (): UserSessionData | null => {
@@ -156,7 +193,7 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
  try {
    await validateHardwareSafetyForWrite();
- } catch (hwError: unknown) {
+ } catch {
    console.warn(">>> [Sync Campaign] Cancelado por restrição rígida de hardware.");
    return { success: false, processedCount: 0 };
  }
@@ -218,7 +255,7 @@ export const photoSyncManager = {
  processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
    try {
      await validateHardwareSafetyForWrite();
-   } catch (hwError: unknown) {
+   } catch {
      console.warn(">>> [Sync Photo] Cancelado por restrição rígida de hardware.");
      return { success: false, uploadCount: 0, failedCount: 0 };
    }
@@ -302,10 +339,10 @@ export const photoSyncManager = {
 
 export const syncService = {
  isStringInvalid,
- processDataSyncQueue: async (_tenantIdParam?: string | string[]): Promise<SyncResult> => {
+ processDataSyncQueue: async (): Promise<SyncResult> => {
    try {
      await validateHardwareSafetyForWrite();
-   } catch (hwError: unknown) {
+   } catch {
      return { success: false, processedCount: 0, error: "Bloqueio preventivo de bateria móvel ativo (< 5%)." };
    }
 
@@ -397,7 +434,7 @@ export const syncService = {
            failedPrimaryKeys.push(String(pKey));
            await sqliteService.logAuditEvent(user.id, 'SYNC_RECORD_FAIL', 'assets_counting', String(pKey), `Erro: ${JSON.stringify(supabaseErr)}`).catch(console.error);
          }
-       } catch (individualError) {
+       } catch {
          failedPrimaryKeys.push(String(pKey));
        }
      }
@@ -445,12 +482,28 @@ export const processDataSyncQueue = async (): Promise<SyncResult> => {
 };
 
 export const getUnsyncedAssetsCount = async (): Promise<number> => {
- try {
-   const user = getUserFromSessionStorage();
-   const rawTenant = user ? user.tenantId : null;
-   const rawFilial = sessionStorage.getItem('filial');
+  try {
+    const user = getUserFromSessionStorage();
+    const rawTenant = user ? user.tenantId : null;
+    const rawFilial = sessionStorage.getItem('filial');
 
-   let sql = "SELECT COUNT(*) as total FROM assets_counting WHERE sync_status = 'PENDING'";
-   const params: (string | number)[] = [];
+    let sql = "SELECT COUNT(*) as total FROM assets_counting WHERE sync_status = 'PENDING'";
+    const params: (string | number)[] = [];
 
-   if (user && !isStringInvalid(rawTenant) && !isStringInvalid(rawFilial)) {
+    if (user && !isStringInvalid(rawTenant) && !isStringInvalid(rawFilial)) {
+      const tenantIdClean = String(rawTenant).trim();
+      const filialClean = String(rawFilial).trim();
+      sql += " AND tenantId = ? AND filial = ?";
+      params.push(tenantIdClean, filialClean);
+    }
+
+    const result = await executeRawQuerySafe(sql, params);
+    const rows = result?.values || [];
+    const first = rows[0] || {};
+    const total = Number(first.total || first.TOTAL || first.count || 0);
+    return total;
+  } catch (err: unknown) {
+    console.error('>>> [Sync Count] Falha ao obter contagem:', err);
+    return 0;
+  }
+};
