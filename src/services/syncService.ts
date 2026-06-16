@@ -44,7 +44,8 @@ const photoQueueStore = queueStore;
 
 const isStringInvalid = (val: unknown): boolean => {
  if (val === null || val === undefined) return true;
- const s = String(val).trim().toUpperCase();
+ const strVal = typeof val === 'string' ? val : typeof val === 'object' ? JSON.stringify(val) : String(val);
+ const s = strVal.trim().toUpperCase();
  return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
 };
 
@@ -81,7 +82,7 @@ export const removeItemFromQueue = async (id: string): Promise<void> => {
 export const clearSyncQueue = async (): Promise<void> => {
   const keys = await photoQueueStore.keys();
   for (const k of keys) {
-    await photoQueueStore.removeItem(k as string);
+    await photoQueueStore.removeItem(String(k));
   }
 };
 
@@ -129,7 +130,12 @@ const getUserFromSessionStorage = (): UserSessionData | null => {
      role: String(parsed.role || 'AUDITOR')
    };
  } catch (e: unknown) {
-   const errorMsg = e instanceof Error ? e.message : String(e);
+   let errorMsg = 'Erro desconhecido';
+   if (e instanceof Error) {
+     errorMsg = e.message;
+   } else if (typeof e === 'string') {
+     errorMsg = e;
+   }
    console.error(">>> [Sync Guard] Falha catastrófica ao decodificar sessionStorage:", errorMsg);
 
    sqliteService.logAuditEvent(
@@ -273,9 +279,13 @@ export const photoSyncManager = {
      return { success: false, uploadCount: 0, failedCount: 0 };
    }
 
-   if (!navigator.onLine) return { success: false, uploadCount: 0, failedCount: 0 };
+   if (!navigator.onLine) {
+     return { success: false, uploadCount: 0, failedCount: 0 };
+   }
    const currentMode = localStorage.getItem('app_database_mode');
-   if (currentMode?.startsWith('INTERNAL')) return { success: false, uploadCount: 0, failedCount: 0 };
+   if (currentMode?.startsWith('INTERNAL')) {
+     return { success: false, uploadCount: 0, failedCount: 0 };
+   }
 
    let uploadCount = 0;
    let failedCount = 0;
@@ -317,13 +327,13 @@ export const photoSyncManager = {
          await sqliteService.query(updateAssetQuery, [publicUrl, item.assetId, item.assetId]);
          await photoQueueStore.removeItem(key);
          uploadCount++;
-       } catch (uploadFail) {
-         const uploadFailMsg = uploadFail instanceof Error ? uploadFail.message : String(uploadFail);
+       } catch (error_) {
+         const uploadFailMsg = error_ instanceof Error ? error_.message : String(error_);
          item.error = uploadFailMsg || "Erro no Storage";
          await photoQueueStore.setItem(key, item);
          failedCount++;
 
-         if (isQuotaExceededError(uploadFail)) {
+         if (isQuotaExceededError(error_)) {
            window.dispatchEvent(new CustomEvent('gbr_sync_quota_error', { detail: { message: "Quota excedida no Supabase." } }));
            break;
          }
@@ -401,9 +411,9 @@ export const syncService = {
            .upsert({
              tenantId: tenantIdClean,
              filial: filialClean,
-             status: record.status || '',
+             status: record.status ?? '',
              etiqueta: record.etiqueta || '',
-             qt: Number(record.qt || (record.counter_value !== undefined ? record.counter_value : 1)),
+             qt: Number(record.counter_value !== undefined && record.counter_value !== null ? record.counter_value : record.qt ?? 1),
              descricaodoativo: record.descricaodoativo || '',
              serial: record.serial || '',
              dataaqusic: record.dataaqusic || '',
@@ -428,9 +438,11 @@ export const syncService = {
              updated_at: new Date().toISOString()
            });
 
-         if (!supabaseErr) {
-           syncedPrimaryKeys.push(String(pKey));
+         if (supabaseErr) {
+           failedPrimaryKeys.push(String(pKey));
+           await sqliteService.logAuditEvent(user.id, 'SYNC_RECORD_FAIL', 'assets_counting', String(pKey), `Erro: ${JSON.stringify(supabaseErr)}`).catch(console.error);
          } else {
+           syncedPrimaryKeys.push(String(pKey));
            failedPrimaryKeys.push(String(pKey));
            await sqliteService.logAuditEvent(user.id, 'SYNC_RECORD_FAIL', 'assets_counting', String(pKey), `Erro: ${JSON.stringify(supabaseErr)}`).catch(console.error);
          }
@@ -448,7 +460,11 @@ export const syncService = {
        }
      }
 
-     return { success: failedPrimaryKeys.length === 0, processedCount: syncedPrimaryKeys.length, failedCount: failedPrimaryKeys.length };
+     return {
+       success: failedPrimaryKeys.length === 0,
+       processedCount: syncedPrimaryKeys.length,
+       failedCount: failedPrimaryKeys.length
+     };
    } catch (err: unknown) {
      return { success: false, processedCount: 0, error: err instanceof Error ? err.message : String(err) };
    }

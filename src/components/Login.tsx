@@ -76,6 +76,51 @@ const Login: React.FC<LoginProps> = ({
     }
   };
 
+  const attemptLocalLogin = async (normalizedUsername: string): Promise<User | null> => {
+    let matchedLocalUser = users.find(u => (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && u.password === password);
+    if (!matchedLocalUser) {
+      try {
+        const dbUsers = await localDb.users.toArray();
+        matchedLocalUser = dbUsers.find(u => (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && u.password === password);
+      } catch (err) {
+        console.warn('[Login] SQLite inacessível', err);
+      }
+    }
+    return matchedLocalUser ?? null;
+  };
+
+  const attemptSupabaseLogin = async (normalizedUsername: string): Promise<User | null> => {
+    if (!navigator.onLine || databaseMode !== DatabaseMode.SUPABASE || !supabase) return null;
+
+    let loginEmail = normalizedUsername;
+    if (!loginEmail.includes('@')) {
+      const foundEmail = await getEmailByUsername(username.trim());
+      if (!foundEmail) throw new Error('Username não encontrado na nuvem.');
+      loginEmail = foundEmail;
+    }
+
+    const authResult = await supabase.auth.signInWithPassword({ email: loginEmail, password });
+    if (authResult.error) throw authResult.error;
+    if (!authResult.data.user) throw new Error('Falha ao recuperar dados do usuário.');
+
+    const cloudUser = await ensureUserProfile(authResult.data.user.id, authResult.data.user.email ?? '', authResult.data.user.user_metadata);
+    const finalUsername = cloudUser.username || authResult.data.user.email!.split('@')[0];
+    const isMasterCloud = cloudUser.email.toLowerCase() === 'semorr@gmail.com';
+
+    return {
+      id: authResult.data.user.id,
+      username: finalUsername,
+      name: cloudUser.name || finalUsername,
+      email: cloudUser.email,
+      role: cloudUser.role as UserRole,
+      is_admin: cloudUser.role === 'ADMIN' || isMasterCloud,
+      isAdmin: cloudUser.role === 'ADMIN' || isMasterCloud,
+      mustChangePassword: false,
+      tenantId: isMasterCloud ? 'CICOPAL' : cloudUser.tenantId || '',
+      filial: isMasterCloud ? 'MATRIZ' : cloudUser.filial || ''
+    };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -90,68 +135,26 @@ const Login: React.FC<LoginProps> = ({
       const normalizedUsername = username.trim().toLowerCase();
       if (!validateEmailGovernance(normalizedUsername)) {
         setError('Erro de Governança: .com.br proibido.');
-        clearTimeout(loginTimeout);
-        setIsLoading(false);
         return;
       }
 
-      // Tentativa local
-      let matchedLocalUser = users.find(u => (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && u.password === password);
-      if (!matchedLocalUser) {
-        try {
-          const dbUsers = await localDb.users.toArray();
-          matchedLocalUser = dbUsers.find(u => (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && u.password === password);
-        } catch (err) {
-          console.warn('[Login] SQLite inacessível', err);
-        }
-      }
-
-      if (matchedLocalUser) {
-        sessionStorage.setItem('app_current_user', safeStringify(matchedLocalUser));
-        logAuditEvent({ user_email: matchedLocalUser.email, action: 'LOGIN', details: 'Local', tenantId: matchedLocalUser.tenantId });
-        onLogin(matchedLocalUser);
-        clearTimeout(loginTimeout);
-        setIsLoading(false);
+      const localUser = await attemptLocalLogin(normalizedUsername);
+      if (localUser) {
+        sessionStorage.setItem('app_current_user', safeStringify(localUser));
+        logAuditEvent({ user_email: localUser.email, action: 'LOGIN', details: 'Local', tenantId: localUser.tenantId });
+        onLogin(localUser);
         return;
       }
 
-      // Supabase (nuvem)
-      if (navigator.onLine && databaseMode === DatabaseMode.SUPABASE && supabase) {
-        let loginEmail = normalizedUsername;
-        if (!loginEmail.includes('@')) {
-          const foundEmail = await getEmailByUsername(username.trim());
-          if (!foundEmail) throw new Error('Username não encontrado na nuvem.');
-          loginEmail = foundEmail;
-        }
-
-        const authResult = await supabase.auth.signInWithPassword({ email: loginEmail, password });
-        if (authResult.error) throw authResult.error;
-        if (!authResult.data.user) throw new Error('Falha ao recuperar dados do usuário.');
-
-        const cloudUser = await ensureUserProfile(authResult.data.user.id, authResult.data.user.email!, authResult.data.user.user_metadata);
-        const finalUsername = cloudUser.username || authResult.data.user.email!.split('@')[0];
-        const isMasterCloud = cloudUser.email.toLowerCase() === 'semorr@gmail.com';
-        const finalTenant = isMasterCloud ? 'CICOPAL' : cloudUser.tenantId || '';
-        const finalFilial = isMasterCloud ? 'MATRIZ' : cloudUser.filial || '';
-        const loggedUserCloud: User = {
-          id: authResult.data.user.id,
-          username: finalUsername,
-          name: cloudUser.name || finalUsername,
-          email: cloudUser.email,
-          role: cloudUser.role as UserRole,
-          is_admin: cloudUser.role === 'ADMIN' || isMasterCloud,
-          isAdmin: cloudUser.role === 'ADMIN' || isMasterCloud,
-          mustChangePassword: false,
-          tenantId: finalTenant,
-          filial: finalFilial
-        };
-
-        sessionStorage.setItem('app_current_user', safeStringify(loggedUserCloud));
-        clearTimeout(loginTimeout);
-        onLogin(loggedUserCloud);
-      } else {
-        setError('Dispositivo offline e credenciais não encontradas no SQLite.');
+      const cloudUser = await attemptSupabaseLogin(normalizedUsername);
+      if (cloudUser) {
+        sessionStorage.setItem('app_current_user', safeStringify(cloudUser));
+        logAuditEvent({ user_email: cloudUser.email, action: 'LOGIN', details: 'Supabase', tenantId: cloudUser.tenantId });
+        onLogin(cloudUser);
+        return;
       }
+
+      setError('Dispositivo offline e credenciais não encontradas no SQLite.');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro ao autenticar.');
     } finally {
@@ -166,13 +169,13 @@ const Login: React.FC<LoginProps> = ({
       {error && <div className="mb-3 text-red-600">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium">Usuário ou e-mail</label>
-          <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-3 py-2 border rounded" />
+          <label htmlFor="username" className="block text-sm font-medium">Usuário ou e-mail</label>
+          <input id="username" type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-3 py-2 border rounded" />
         </div>
         <div>
-          <label className="block text-sm font-medium">Senha</label>
+          <label htmlFor="password" className="block text-sm font-medium">Senha</label>
           <div className="relative">
-            <input type={showPassword ? 'text' : 'password'} required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <input id="password" type={showPassword ? 'text' : 'password'} required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded" />
             <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-2">
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
