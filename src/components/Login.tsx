@@ -103,7 +103,11 @@ const Login: React.FC<LoginProps> = ({
     if (authResult.error) throw authResult.error;
     if (!authResult.data.user) throw new Error('Falha ao recuperar dados do usuário.');
 
-    const cloudUser = await ensureUserProfile(authResult.data.user.id, authResult.data.user.email ?? '', authResult.data.user.user_metadata);
+    const unifiedMetadata = {
+      ...(authResult.data.user.user_metadata || {}),
+      ...(authResult.data.user.app_metadata || {})
+    };
+    const cloudUser = await ensureUserProfile(authResult.data.user.email ?? '', unifiedMetadata, authResult.data.user.id);
     const finalUsername = cloudUser.username || authResult.data.user.email!.split('@')[0];
     const isMasterCloud = cloudUser.email.toLowerCase() === 'semorr@gmail.com';
 
@@ -116,8 +120,8 @@ const Login: React.FC<LoginProps> = ({
       is_admin: cloudUser.role === 'ADMIN' || isMasterCloud,
       isAdmin: cloudUser.role === 'ADMIN' || isMasterCloud,
       mustChangePassword: false,
-      tenantId: isMasterCloud ? 'CICOPAL' : cloudUser.tenantId || '',
-      filial: isMasterCloud ? 'MATRIZ' : cloudUser.filial || ''
+      tenantId: isMasterCloud ? 'CICOPAL' : (cloudUser.tenantId || cloudUser._tenantid || ''),
+      filial: isMasterCloud ? 'MATRIZ' : (cloudUser.filial || cloudUser._unitid || '')
     };
   };
 

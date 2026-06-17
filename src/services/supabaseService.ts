@@ -1,11 +1,11 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
+import { Asset, AuditLogEntry, CampaignSnapshot, CampaignStatus, InventoryCampaign, InventoryState, UnitConfig, User, UserRole } from '../types';
+import { compressImage } from '../utils/imageUtils';
 import { getAppBaseUrl } from '../utils/urlUtils';
-import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
 import { sqliteService } from './sqliteService';
-import { compressImage } from '../utils/imageUtils';
+import { sanitizeForSupabase } from './utils';
 
 export interface ProvisionResult {
   user?: unknown;
@@ -36,11 +36,11 @@ export const getDatabaseMode = () => {
 export const testSupabaseConnection = async () => {
   if (getDatabaseMode() === 'INTERNAL') return false;
   if (!rawSupabaseUrl || !rawSupabaseAnonKey) return false;
-  
+
   try {
     const restTest = await fetch(`${supabaseUrl}/rest/v1/`, { headers: { 'apikey': supabaseAnonKey } });
     console.log(`%c[Supabase] Conectividade REST: ${restTest.status === 200 ? 'OK' : 'ERRO ' + restTest.status}`, restTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
-    
+
     const authTest = await fetch(`${supabaseUrl}/auth/v1/health`, { headers: { 'apikey': supabaseAnonKey } });
     console.log(`%c[Supabase] Conectividade AUTH: ${authTest.status === 200 ? 'OK' : 'ERRO ' + authTest.status}`, authTest.status === 200 ? "color: #3ecf8e;" : "color: #ef4444;");
     return true;
@@ -101,7 +101,7 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
 
   for (const item of items) {
     if (typeof item !== 'object' || item === null) continue;
-    
+
     const itemKeys = Object.keys(item);
     for (const key of itemKeys) {
       if (item[key] === undefined) {
@@ -124,7 +124,7 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
   const mapped = items.map(item => {
     if (typeof item !== 'object' || item === null) return item;
     const copy = { ...item };
-    
+
     // Map tenant keys to tenantId / "tenantId" delimited
     const tenantKeys = ['_tenantid', 'tenant_id', 'tenantid', 'tenantId', '"tenantId"'];
     for (const k of tenantKeys) {
@@ -193,7 +193,7 @@ function createSupabaseInterceptor(originalClient: any) {
             if (prop === 'insert' || prop === 'update' || prop === 'upsert') {
               const payload = args[0];
               const check = mapPayloadKeysAndValidate(payload, tableName);
-              
+
               if (!check.valid) {
                 console.error(`>>> [Supabase Interceptor] Bloqueado preventivamente na tabela '${tableName}':`, check.reason);
                 return Promise.resolve({
@@ -302,11 +302,11 @@ export const signOut = async () => {
       console.error('[Supabase] Erro ao deslogar da nuvem:', err);
     }
   }
-  
+
   // Limpa o sessionStorage independente do sucesso do Supabase
   sessionStorage.removeItem('app_current_user');
   sessionStorage.clear();
-  
+
 // Recarrega para limpar o estado do React
   window.location.href = '/';
 };
@@ -466,13 +466,13 @@ export const logAssetChange = async (entry: {
 export const getLocations = async (tenantid: string) => {
   if (getDatabaseMode() === 'INTERNAL') return [];
   if (!supabase) return [];
-  
+
   try {
     const { data, error } = await supabase
       .from('locations')
       .select('*')
       .eq('tenantId', tenantid);
-      
+
     if (error) {
       console.error('Erro ao buscar localidades:', error);
       return [];
@@ -496,14 +496,14 @@ export const saveLocation = async (location: {
 }) => {
   if (getDatabaseMode() === 'INTERNAL') return null;
   if (!supabase) return null;
-  
+
   try {
     const { data, error } = await supabase
       .from('locations')
       .upsert([location], { onConflict: 'name, _tenantid' })
       .select()
       .single();
-      
+
     if (error) {
       console.error('Erro ao salvar localidade:', error);
       throw error;
@@ -518,7 +518,7 @@ export const saveLocation = async (location: {
 export const signUp = async (email: string, password: string, username: string, tenantid: string, role: string = 'ADMIN', name?: string, unitid?: string, units?: string[]) => {
   if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite cadastro na nuvem.");
   if (!supabase) throw new Error("Supabase não configurado.");
-  
+
   // 1. Cria o usuário no Supabase Auth
   console.log(`[Supabase] Cadastrando usuário ${email} com tenant ${tenantid}...`);
   const { data, error } = await supabase.auth.signUp({
@@ -536,7 +536,7 @@ export const signUp = async (email: string, password: string, username: string, 
       },
     },
   });
-  
+
   if (error) {
     console.error('[Supabase] Erro no signUp:', error);
     if (error.message.includes('already registered')) {
@@ -544,7 +544,7 @@ export const signUp = async (email: string, password: string, username: string, 
     }
     throw error;
   }
-  
+
   console.log(`[Supabase] Usuário cadastrado com sucesso no Auth:`, data.user?.email);
 
   // 2. Cria o perfil na tabela user_permissions para garantir sincronia
@@ -564,7 +564,7 @@ export const signUp = async (email: string, password: string, username: string, 
         units: units || (unitid ? [unitid] : []),
         tenants: [tenantid]
       }], { onConflict: 'email' });
-      
+
     if (permError) {
       console.error('[Supabase] Erro ao sincronizar perfil:', permError);
       console.warn("Erro ao criar permissões, mas usuário foi criado no Auth:", permError);
@@ -608,12 +608,12 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     };
   }
   if (!supabase) throw new Error("Supabase não configurado.");
-  
+
   const lowerEmail = email.toLowerCase();
-  
+
   // 1. Busca perfil existente com timeout estrito
   console.log(`[Supabase] Buscando perfil para ${lowerEmail}...`);
-  
+
   const fetchPromise = supabase
     .from('user_permissions')
     .select('*')
@@ -627,24 +627,24 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     console.warn('[Supabase] Timeout ou erro na busca de perfil:', err.message);
     return { data: null, error: { message: err.message } };
   }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  
+
   const profile = result.data;
-    
+
   if (profile) {
     console.log(`[Supabase] Perfil encontrado para ${lowerEmail}:`, profile);
-    
+
     // Sincronização de ID em background (não aguarda)
     if (userId && profile.id !== userId) {
       supabase.from('user_permissions').update({ id: userId }).eq('email', lowerEmail).then();
     }
 
-    const is_admin = (profile.is_admin === true || profile.isadmin === true || 
-                     (profile.role && profile.role.trim().toUpperCase() === 'ADMIN') || 
+    const is_admin = (profile.is_admin === true || profile.isadmin === true ||
+                     (profile.role && profile.role.trim().toUpperCase() === 'ADMIN') ||
                      (profile.role && profile.role.trim().toUpperCase() === 'MASTER') ||
                      (lowerEmail === 'semorr@gmail.com'));
-    
+
     const finalRole = (profile.role || 'AUDITOR').trim().toUpperCase();
-    
+
     const parseArray = (val: unknown) => {
       if (Array.isArray(val)) return val;
       if (typeof val === 'string') {
@@ -667,6 +667,9 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       return val ? [val] : [];
     };
 
+    const resolvedTenant = (profile.tenant_id || profile._tenantid || profile.tenantid || profile.tenantId || '').trim();
+    const resolvedUnit = (profile._unitid || profile.unitid || profile.unitId || profile.filial || '').trim();
+
     const finalProfile = {
       id: profile.id,
       email: profile.email,
@@ -675,8 +678,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       role: finalRole,
       is_admin: is_admin,
       isAdmin: is_admin,
-      _tenantid: (profile.tenant_id || profile._tenantid || profile.tenantid || profile.tenantId || '').trim(),
-      _unitid: (profile._unitid || profile.unitid || profile.unitId || '').trim(),
+      tenantId: resolvedTenant,
+      filial: resolvedUnit,
+      _tenantid: resolvedTenant,
+      _unitid: resolvedUnit,
       units: parseArray(profile.units || profile.unitid || profile._unitid),
       tenants: parseArray(profile.tenants || profile.tenant_id || profile.tenantid || profile._tenantid)
     };
@@ -687,11 +692,11 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 
   // 2. Se não encontrou ou deu timeout, tenta criar/atualizar (Upsert) com timeout
   console.log('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
-  
+
   const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
   const is_admin_new = (lowerEmail === 'semorr@gmail.com');
   const fallbackTenant = defaultTenant;
-  
+
   const insertData = {
     email: lowerEmail,
     username: (metadata?.username || lowerEmail.split('@')[0]).trim(),
@@ -716,11 +721,15 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 
   if (upsertResult && !upsertResult.error && upsertResult.data) {
     const d = upsertResult.data;
+    const resolvedTenant = (d.tenant_id || d._tenantid || fallbackTenant || '').trim();
+    const resolvedUnit = (d._unitid || d.unitid || d.unitId || d.filial || '').trim();
     return {
       ...d,
       isAdmin: d.is_admin,
-      _tenantid: d.tenant_id || d._tenantid || fallbackTenant,
-      _unitid: d._unitid || ''
+      tenantId: resolvedTenant,
+      filial: resolvedUnit,
+      _tenantid: resolvedTenant,
+      _unitid: resolvedUnit
     };
   }
 
@@ -732,6 +741,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
     isAdmin: is_admin_new,
+    tenantId: fallbackTenant,
+    filial: '',
     _tenantid: fallbackTenant,
     _unitid: '',
     units: [],
@@ -746,11 +757,11 @@ export const signIn = async (email: string, password: string) => {
     email,
     password,
   });
-  
+
   if (data?.user) {
     console.log(`[Supabase] Login realizado para ${email}. Metadados:`, data.user.user_metadata);
   }
-  
+
   if (error) throw error;
   return data;
 };
@@ -758,7 +769,7 @@ export const signIn = async (email: string, password: string) => {
 export const signInWithMagicLink = async (email: string) => {
   if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite login na nuvem.");
   if (!supabase) throw new Error("Supabase não configurado.");
-  
+
   const redirectTo = getAppBaseUrl();
   console.log('[Supabase] Solicitando Magic Link para:', email, 'Redirect:', redirectTo);
 
@@ -771,7 +782,7 @@ export const signInWithMagicLink = async (email: string) => {
     }),
     new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 10000))
   ]).catch(err => ({ data: null, error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  
+
   if (error) {
     console.error('[Supabase] Erro ou Timeout no signInWithOtp:', error);
     throw new Error(error.message === "AUTH_TIMEOUT" ? "O servidor de autenticação não respondeu a tempo. Tente novamente." : error.message);
@@ -787,21 +798,21 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
-  
+
   const CHUNK_SIZE = 200; // Tamanho consolidado para estabilidade do hardware (v25)
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
 
   for (let i = 0; i < total; i += CHUNK_SIZE) {
     const chunk = assets.slice(i, i + CHUNK_SIZE);
-    
+
     // Preparação de dados (Sanitização rígida anti-PGRST204)
     const assetsWithTenant = chunk.map(a => {
       const cleanAsset = { ...a };
       if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
         delete cleanAsset._photoUrl;
       }
-      
+
       const assetGrupo = (cleanAsset.tenantId || cleanAsset._tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
       let finalTenantId = '';
       if (tenantid) {
@@ -886,7 +897,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       } catch (err: unknown) {
         const error = err as { message?: string, code?: string };
         const isNetworkError = error.message?.includes('Failed to fetch') || error.message?.includes('network') || error.code === 'ERR_NAME_NOT_RESOLVED';
-        
+
         if (isNetworkError) {
           retryCount++;
           if (retryCount <= MAX_RETRIES) {
@@ -902,7 +913,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         }
       }
     }
-    
+
     // Se falhou definitivamente após retries, interrompemos a sincronização da nuvem mas mantemos o local estável
     if (!success) break;
   }
@@ -913,18 +924,18 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
   if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase || !navigator.onLine) return;
-  
+
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
   // IMPORTANTE: battery_saver é omitido para garantir compatibilidade estrita até que o backend processe a nova estrutura
   const allowedKeys = [
-    'id', 
-    'companies', 
-    'last_updated', 
+    'id',
+    'companies',
+    'last_updated',
     'status',
-    'editable_fields', 
-    'qr_code_fields', 
-    'scanner_mode', 
-    'scan_feedback_mode', 
+    'editable_fields',
+    'qr_code_fields',
+    'scanner_mode',
+    'scan_feedback_mode',
     'inventory_search_mode',
     'immersive_mode',
     'dark_mode',
@@ -969,12 +980,12 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     return; // Interrompe a operação de sync
   }
   const configId = `config_${cleanTenant}`;
-  
-  const payload: Record<string, unknown> = { 
+
+  const payload: Record<string, unknown> = {
     id: configId,
     _tenantid: cleanTenant
   };
-  
+
   // Mapeamento de camelCase para snake_case
   const mapping: Record<string, string> = {
     'lastUpdated': 'last_updated',
@@ -1123,14 +1134,14 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         }
       }
     });
-    
+
     if (error) {
       console.warn(`[Supabase] Erro no signUp de provisionamento para ${email}:`, error);
-      // Se o usuário já existe, não falhamos o processo inteiro, 
+      // Se o usuário já existe, não falhamos o processo inteiro,
       // tentamos apenas atualizar as permissões na tabela
       if (error.message.includes('already registered') || error.status === 422) {
         console.log(`[Supabase] Usuário já registrado no Auth. Tentando atualizar permissões para ${email}...`);
-        
+
         if (supabase) {
           const { error: permError } = await supabase
             .from('user_permissions')
@@ -1145,7 +1156,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
               units: units || (unitid ? [unitid] : []),
               tenants: tenants || (tenantid ? [tenantid] : [])
             }], { onConflict: 'email' });
-            
+
           if (permError) {
             console.error('[Supabase] Falha ao sincronizar permissões para usuário existente:', permError);
             throw permError;
@@ -1153,7 +1164,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
           return { user: { email }, existing: true };
         }
       }
-      
+
       console.error('[Supabase] Erro definitivo no signUp do Supabase:', error);
       throw error;
     }
@@ -1194,7 +1205,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
       const { error: permError } = await supabase
         .from('user_permissions')
         .upsert([currentPayload], { onConflict: 'email' });
-        
+
       if (permError) {
         console.warn("⚠️ Usuário criado no Auth, mas erro ao criar permissões:", permError);
       } else {
@@ -1252,7 +1263,7 @@ export const syncUsersToCloud = async (users: User[]) => {
       console.error('Erro ao sincronizar usuários com Supabase:', error);
       throw error;
     }
-    
+
     console.log(`[Supabase] Sincronização de ${usersToSync.length} usuários concluída.`);
   } catch (err) {
     console.error('Erro inesperado na sincronização de usuários:', err);
@@ -1266,13 +1277,13 @@ export const syncUsersToCloud = async (users: User[]) => {
 export const deleteUserFromCloud = async (email: string) => {
   if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase) return;
-  
+
   try {
     const { error } = await supabase
       .from('user_permissions')
       .delete()
       .eq('email', email.toLowerCase().trim());
-      
+
     if (error) {
       console.error('Erro ao deletar usuário do Supabase:', error);
       throw error;
@@ -1293,7 +1304,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
   try {
     console.log(`[Supabase] Buscando usuários da nuvem (Tenant: ${tenantid || 'todos'})...`);
     let query = supabase.from('user_permissions').select('*');
-    
+
     if (tenantid && tenantid !== '') {
       query = query.eq('tenant_id', tenantid);
     }
@@ -1306,7 +1317,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     }
 
     console.log(`[Supabase] ${data?.length || 0} usuários encontrados na nuvem.`);
-    
+
     if (data && data.length > 0) {
       const felipe = data.find(u => u.email.toLowerCase() === 'felipe.messias@gmail.com');
       if (felipe) {
@@ -1368,11 +1379,11 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
       .from('assets')
       .select('*')
       .eq('ETIQUETA', tag.toUpperCase().trim());
-    
+
     // Tenta filtrar por _is_deleted se a coluna existir (soft delete)
     // Se falhar, o Supabase retornará erro 42703 (undefined_column)
     query = query.or('_is_deleted.is.null,_is_deleted.eq.false');
-    
+
     if (tenantid) {
       query = query.eq('tenantId', tenantid);
     }
@@ -1386,11 +1397,11 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           .from('assets')
           .select('*')
           .eq('ETIQUETA', tag.toUpperCase().trim());
-        
+
         if (tenantid) {
           retryQuery = retryQuery.eq('tenantId', tenantid);
         }
-        
+
         const { data: retryData, error: retryError } = await retryQuery.single();
         if (retryError && retryError.code !== 'PGRST116') {
           console.error('Erro ao buscar ativo por etiqueta (retry):', retryError);
@@ -1413,7 +1424,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
 };
 
 export const fetchFullInventory = async (
-  tenantid?: string | string[], 
+  tenantid?: string | string[],
   unitid?: string,
   onProgress?: (processed: number, total: number) => void,
   onComplete?: (config: Partial<InventoryState>) => void
@@ -1455,19 +1466,19 @@ export const fetchFullInventory = async (
         .from('assets')
         .select('*')
         .range(from, from + PAGE_SIZE - 1);
-      
+
       if (resolvedTenantId) {
         if (Array.isArray(resolvedTenantId)) assetsQuery = assetsQuery.in('tenantId', resolvedTenantId);
         else assetsQuery = assetsQuery.eq('tenantId', resolvedTenantId);
       }
-      
+
       if (unitid && unitid !== '') {
         const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
         assetsQuery = assetsQuery.eq('_unitid', cleanUnitId);
       }
 
       const { data: pageData, error: assetsError } = await assetsQuery;
-      
+
       if (assetsError) {
         console.error(`[Supabase] Erro em fetchFullInventory (Paginação ${from}): ${assetsError.code} - ${assetsError.message}`, assetsError);
         throw assetsError;
@@ -1482,14 +1493,14 @@ export const fetchFullInventory = async (
           tenantid: a._tenantid as string, // Legado
           unitid: a._unitid as string      // Legado
         })) as Asset[];
-        
+
         assets = [...assets, ...mappedPage];
         console.log(`>>> [Supabase] Carregados ${assets.length} ativos...`);
 
         if (onProgress) {
           onProgress(assets.length, 12636);
         }
-        
+
         if (pageData.length < PAGE_SIZE) {
           hasMore = false;
         } else {
@@ -1505,15 +1516,15 @@ export const fetchFullInventory = async (
     console.log(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
     // 2. Busca a configuração
-    const rawTenantid = resolvedTenantId 
+    const rawTenantid = resolvedTenantId
       ? (Array.isArray(resolvedTenantId) ? resolvedTenantId[0] : resolvedTenantId)
       : '';
     // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
     const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
     const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
-    
+
     console.log(`>>> [Supabase] Buscando config para ID: ${configId}`);
-    
+
     let config = {};
     const { data: configData, error: configError } = await supabase
       .from('inventory_config')
@@ -1621,7 +1632,7 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         table: 'assets'
       },
       (payload) => {
-        // Filtra por tenantid no lado do cliente se necessário, 
+        // Filtra por tenantid no lado do cliente se necessário,
         // embora o ideal seja o RLS do Supabase já filtrar se o usuário estiver logado.
         // No entanto, para canais de broadcast/realtime, às vezes precisamos de filtros extras.
         const newAsset = payload.new as Asset;
@@ -1630,10 +1641,10 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
 
         if (targetAsset && tenantid) {
           const assetTenant = targetAsset._tenantid || targetAsset.tenantId;
-          const isAllowed = Array.isArray(tenantid) 
+          const isAllowed = Array.isArray(tenantid)
             ? tenantid.includes(assetTenant || '')
             : (assetTenant || '') === tenantid;
-          
+
           if (isAllowed) {
             onUpdate(payload);
           }
@@ -1653,13 +1664,13 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
 
   try {
     console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantid || 'GLOBAL'}`);
-    
+
     // 1. Limpa os ativos
     let query = supabase.from('assets').delete({ count: 'exact' });
-    
+
     try {
       if (tenantid) query = query.eq('tenantId', tenantid);
-      
+
       if (companyToClear) {
         if (Array.isArray(companyToClear)) {
           const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
@@ -1686,7 +1697,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
       if (assetsError.code === '42703' || assetsError.code === 'PGRST204') {
         console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallbacks...');
         let retryQuery = supabase.from('assets').delete({ count: 'exact' });
-        
+
         // Se houver empresa, tenta filial
         if (companyToClear) {
           if (Array.isArray(companyToClear)) {
@@ -1701,14 +1712,14 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
            console.warn('[Supabase] Fallback de limpeza global sem tenantid. Abortando por segurança.');
            return;
         }
-        
+
         const { error: retryError, count: retryCount } = await retryQuery;
         if (retryError) {
           // Se ainda falhar, tenta o delete mais radical (sem filtros de coluna)
           console.warn('[Supabase] Fallback falhou. Tentando delete radical...');
           // Tenta filtrar por algo que funcione tanto para UUID quanto para BigInt
           const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).filter('id', 'not.is', null);
-          
+
           if (finalError) throw finalError;
           console.log(`[Supabase] Limpeza radical concluída. Afetados: ${finalCount}`);
           return;
@@ -1716,7 +1727,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
         console.log(`[Supabase] Limpeza concluída via fallback. Afetados: ${retryCount}`);
         return;
       }
-      
+
       // Se o erro for de tipo (22P02), tentamos um filtro genérico
       if (assetsError.code === '22P02') {
         console.warn('[Supabase] Erro de tipo detectado (bigint vs uuid). Tentando filtro genérico...');
@@ -1729,7 +1740,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
       console.error('Erro ao limpar ativos na nuvem:', assetsError);
       throw assetsError;
     }
-    
+
     console.log(`[Supabase] Limpeza de ativos concluída. Registros afetados: ${count || 'desconhecido'}`);
 
     // 2. Limpa a configuração (apenas se estiver limpando TUDO)
@@ -1737,7 +1748,7 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
       const rawTenantid = tenantid ? (Array.isArray(tenantid) ? tenantid[0] : tenantid) : '';
       const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
       const configId = cleanTenant ? `config_${cleanTenant}` : 'global_config';
-      
+
       // Para o delete, tentamos ser o mais simples possível.
       // Se falhar por causa do cache do schema, ignoramos o erro de configuração
       // pois o objetivo principal (limpar ativos) já foi tentado.
@@ -1770,8 +1781,8 @@ export const isQuotaExceededError = (err: any): boolean => {
   const msg = (err.message || '').toLowerCase();
   const code = String(err.code || '');
   return (
-    msg.includes('quota exceeded') || 
-    msg.includes('storage quota') || 
+    msg.includes('quota exceeded') ||
+    msg.includes('storage quota') ||
     msg.includes('payload too large') ||
     msg.includes('insufficient storage') ||
     err.status === 413 ||
@@ -1790,7 +1801,7 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
   try {
     // 1. Compressão de Imagem (Escalabilidade de Storage)
     let fileToUpload = file;
-    
+
     // Só comprime se for uma imagem e tiver tamanho considerável
     if (file instanceof File || file instanceof Blob) {
       try {
@@ -1809,7 +1820,7 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
 
     // Verificação de Bucket
     const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    
+
     if (bucketsError) {
       console.warn('[Storage] Não foi possível verificar buckets:', bucketsError.message);
     } else {
@@ -1859,7 +1870,7 @@ export const deleteAssetPhoto = async (photoUrl: string): Promise<boolean> => {
     // Ex: https://.../storage/v1/object/public/asset-photos/photos/tenant/id/123.jpg
     const urlParts = photoUrl.split('/asset-photos/');
     if (urlParts.length < 2) return false;
-    
+
     const filePath = urlParts[1];
 
     const { error } = await supabase.storage
@@ -1956,18 +1967,18 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
  */
 export const findAssetGlobally = async (etiqueta: string, tenantid: string): Promise<Asset | null> => {
   if (!supabase) return null;
-  
+
   const rawTerm = etiqueta.trim();
   const upperTerm = rawTerm.toUpperCase();
-  
+
   // Tenta variações (original, upper, e com zero-padding se for apenas números)
   const variations = [upperTerm];
   if (/^\d+$/.test(rawTerm) && rawTerm.length < 6) {
     variations.push(rawTerm.padStart(6, '0'));
   }
-  
+
   console.log(`>>> [Supabase] Busca Global Iniciada: ${variations.join(' | ')} (Tenant: ${tenantid})`);
-  
+
   const { data, error } = await supabase
     .from('assets')
     .select('*')
@@ -2009,7 +2020,7 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
     }
     return true;
   }
-  
+
   try {
     const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
     if (error) {
@@ -2024,7 +2035,7 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
       await campaignSyncQueueDelegate(campaignId, 'DELETE').catch(console.error);
     }
   }
-  
+
   return true;
 };
 
@@ -2086,7 +2097,7 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
       .from('campaigns')
       .select('*')
       .eq('tenant_id', cleanTenantId);
-    
+
     if (unitid) {
       query = query.or(`unit_id.eq.${unitid},unit_id.is.null`);
     }
@@ -2148,7 +2159,7 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   try {
     console.log(">>> [Local-First] Persistindo campanha no SQLite antes da nuvem...");
     await sqliteService.saveCampaign(newCampaign);
-    await sqliteService.persist(); 
+    await sqliteService.persist();
   } catch (err) {
     console.error(">>> [Local-First] Erro ao salvar localmente. Abortando.", err);
     return null;
@@ -2173,7 +2184,7 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       const { error } = await supabase
         .from('campaigns')
         .insert([payload]);
-      
+
       if (error) {
         console.warn(">>> [Supabase] Aviso ao inserir campanha na nuvem (será sincronizada depois):", error);
       } else {
@@ -2200,7 +2211,7 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   let localFound = false;
   try {
     const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]);
-    
+
     if (allRows && allRows.length > 0) {
       const row = allRows[0];
       const currentCampaign: InventoryCampaign = {
@@ -2211,12 +2222,12 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
         _unitid: row.unit_id || row._unitid
       };
 
-      const updated: InventoryCampaign = { 
-        ...currentCampaign, 
-        status, 
+      const updated: InventoryCampaign = {
+        ...currentCampaign,
+        status,
         end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || null)
       };
-      
+
       await sqliteService.saveCampaign(updated);
       await sqliteService.persist();
       localFound = true;
@@ -2238,9 +2249,9 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   }
 
   try {
-    const updateData: Partial<InventoryCampaign> = { 
-      status, 
-      end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : undefined 
+    const updateData: Partial<InventoryCampaign> = {
+      status,
+      end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : undefined
     };
 
     if (status === CampaignStatus.CLOSED && closedBy) {
@@ -2255,7 +2266,7 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       .from('campaigns')
       .update(updateData)
       .eq('id', campaignId);
-    
+
     if (error) {
       console.warn('>>> [Supabase] Erro ao atualizar status da campanha na nuvem. Empilhando na fila delta:', error);
       if (campaignSyncQueueDelegate) {
@@ -2410,12 +2421,12 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         // 5. Atualiza a campanha com o status do snapshot
         await supabase
             .from('campaigns')
-            .update({ 
-                closure_details: { 
-                    ...(campaign.closure_details || {}), 
+            .update({
+                closure_details: {
+                    ...(campaign.closure_details || {}),
                     snapshot_status: 'COMPLETED',
-                    snapshot_size: assets.length 
-                } 
+                    snapshot_size: assets.length
+                }
             })
             .eq('id', campaignId);
 
@@ -2439,7 +2450,7 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
       try {
         const res = await sqliteService.query("SELECT * FROM campaign_snapshots WHERE campaign_id = ? ORDER BY closed_at DESC LIMIT 1", [campaignId]);
         if (res.length === 0) return null;
-        
+
         const row = res[0];
         return {
           id: row.id as string,
@@ -2457,7 +2468,7 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
     }
 
     if (!supabase) return null;
-    
+
     try {
         const { data, error } = await supabase
             .from('campaign_snapshots')
@@ -2478,14 +2489,14 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
  */
 export const fetchCampaignStats = async (campaignId: string, tenantid: string) => {
   if (!supabase) return null;
-  
+
   try {
     // Total de ativos no tenant
     const { count: totalCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantId', tenantid);
-      
+
     // Ativos inventariados nesta campanha
     const { count: inventoriedCount } = await supabase
       .from('assets')
@@ -2520,7 +2531,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   try {
     const mode = localStorage.getItem('app_database_mode');
     const isInternal = mode === 'INTERNAL';
-    
+
     // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
     try {
       const { sqliteService } = await import('./sqliteService');
@@ -2532,7 +2543,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 
     const tenantIdRaw = (config._tenantid || config.tenant_id || config.tenantId || localStorage.getItem('tenantId') || '').toString().trim();
     const cleanTenantIdRaw = tenantIdRaw !== 'undefined' && tenantIdRaw !== 'null' ? tenantIdRaw : '';
-    
+
     const unitIdRaw = (config._unitid || config.unit_id || config.filial || localStorage.getItem('filial') || '').toString().trim();
     const cleanUnitIdRaw = unitIdRaw !== 'undefined' && unitIdRaw !== 'null' ? unitIdRaw : '';
 
@@ -2545,11 +2556,11 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       }
       return false; // Interrompe a operação
     }
-    
+
     const tenantId = cleanTenantIdRaw;
     const unitId = cleanUnitIdRaw;
     const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
-    
+
     const payload = {
       _unitid: unitId,
       _tenantid: tenantId,
@@ -2638,13 +2649,13 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
-  
+
   try {
     const configs: Record<string, UnitConfig> = {};
 
     // 1. Carrega do LocalStorage (Sempre disponível)
     const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
-    
+
     // Se o localStorage estiver vazio, tenta recuperar do Dexie
     if (Object.keys(localData).length === 0) {
       console.log('>>> [Persistence] LocalStorage de GPS vazio. Tentando Dexie...');
@@ -2690,7 +2701,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     }
 
     if (!supabase) return Object.values(configs);
-    
+
     // 2. Tenta carregar da Nuvem (inventory_config) para atualizar o local
     try {
       const { data, error } = await supabase
@@ -2702,7 +2713,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         data.forEach(item => {
           const _tenantid = item.tenantId || item._tenantid || (item.data && (item.data._tenantid || item.data.tenant_id)) || tenantid;
           const _unitid = item.filial || item._unitid || (item.data && (item.data._unitid || item.data.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
-          
+
           configs[_unitid] = {
             ...(item.data || {}),
             _tenantid,
@@ -2711,18 +2722,18 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
             unit_id: _unitid
           };
         });
-        
+
         // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach(item => { 
+        data.forEach(item => {
           const cloudTime = new Date(item.updated_at || 0).getTime();
           const itemKey = item.filial || item.unit_key || `${item.tenantId || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`;
           const localItem = localData[itemKey];
           const localTime = localItem ? new Date(localItem.updated_at || 0).getTime() : 0;
-          
+
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {
-            updatedLocal[itemKey] = item.data || item; 
+            updatedLocal[itemKey] = item.data || item;
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
