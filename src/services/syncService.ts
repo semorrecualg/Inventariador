@@ -681,6 +681,15 @@ const runSyncLoopCycle = async () => {
     return;
   }
 
+  // Barreira de guarda para evitar loops infinitos de sincronização antes do operador estar logado
+  const user = getUserFromLocalStorage();
+  const rawFilial = sessionStorage.getItem('filial');
+  if (!user || isStringInvalid(rawFilial)) {
+    // Retorna silenciosamente e agenda o próximo ciclo sem incrementar falhas
+    scheduleNextCycle();
+    return;
+  }
+
   isSyncingLoopActive = true;
   
   let hasFailure = false;

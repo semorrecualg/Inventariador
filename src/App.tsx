@@ -310,24 +310,9 @@ const App: React.FC = () => {
     return (saved as AppModule) || null;
   });
 
-  const [isInitializing, setIsInitializing] = useState(() => {
-    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
-    return !hasFilial;
-  });
-  const [dbInitialized, setDbInitialized] = useState(() => {
-    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
-    return !!hasFilial;
-  });
-  const [authLoading, setAuthLoading] = useState(() => {
-    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
-    return !hasFilial;
-  });
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [dbInitialized, setDbInitialized] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isSessionValid, setIsSessionValid] = useState(() => {
     const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
     const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
@@ -1347,6 +1332,10 @@ const App: React.FC = () => {
       if (!dbInitialized || sqliteStatus.loading) {
         return;
       }
+      if (!user) {
+        if (active) setActiveUnitAssetCount(0);
+        return;
+      }
       if (databaseMode !== DatabaseMode.INTERNAL) {
         if (active) {
           setActiveUnitAssetCount(filteredAssetsByUnit.length);
@@ -1402,7 +1391,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [selectedUnit, inventory.currentCampaignId, databaseMode, refreshVersion, sqliteStatus, filteredAssetsByUnit.length]);
+  }, [selectedUnit, inventory.currentCampaignId, databaseMode, refreshVersion, sqliteStatus, filteredAssetsByUnit.length, user]);
 
   useEffect(() => {
     if (selectedUnit) {
@@ -1419,6 +1408,11 @@ const App: React.FC = () => {
     const fetchUnitAssets = async () => {
       if (!dbInitialized || sqliteStatus.loading) {
         console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
+        return;
+      }
+      if (!user) {
+        console.log("⏸️ [Bootstrap Guard] Aguardando login do operador antes de buscar dados locais...");
+        if (active) setSqliteUnitAssets([]);
         return;
       }
       if (!currentUnit || currentUnit.toUpperCase().trim() === 'CARREGANDO...' || currentUnit.toUpperCase().trim() === 'CARREGANDO') {
@@ -1497,7 +1491,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId, selectedAddress]);
+  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId, selectedAddress, user]);
 
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
@@ -2665,7 +2659,7 @@ const App: React.FC = () => {
         // permaneçam ativos até que a busca e os 12.636 ativos sejam concluídos de fato!
         const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
         const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
-        if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared) {
+        if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared && user) {
           console.log('>>> [Boot Loader] Base local vazia detectada. Baixando 12.636 ativos via busca paginada antes de dispensar o splash...');
           // Define flag indicando gravação em andamento para bloquear salvamentos parciais fast path
           if (typeof window !== 'undefined') {
@@ -2733,7 +2727,7 @@ const App: React.FC = () => {
         }
 
         // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background) - Apenas se não acabamos de baixar
-        if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine) {
+        if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && user) {
           try {
             // Se já inicializamos acima com sucesso, não precisamos buscar de novo, apenas agenda se houver update pendente
             const currentAssetsCount = savedInventory?.assets?.length || 0;
