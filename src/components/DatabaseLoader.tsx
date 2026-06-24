@@ -116,6 +116,8 @@ interface DatabaseLoaderProps {
   onClearDatabase: () => Promise<void>;
   onDataLoaded: (assets?: Asset[], companies?: string[]) => void;
   isDatabaseLoaded: boolean;
+  currentUnitId?: string | null;
+  currentTenantId?: string | null;
 }
 
 export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
@@ -126,7 +128,9 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   user,
   onCargaInicial,
   onClearDatabase,
-  onDataLoaded
+  onDataLoaded,
+  currentUnitId,
+  currentTenantId
 }) => {
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -181,8 +185,8 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     setProcessedDetails({ processed: 0, total: 0, percentage: 0 });
 
     try {
-      const tenantId = user?._tenantid || user?.tenantId || 'CICOPAL';
-      const unitId = user?._unitid || user?.filial || 'GERAL';
+      const tenantId = currentTenantId || user?._tenantid || user?.tenantId || 'CICOPAL';
+      const unitId = currentUnitId || user?._unitid || user?.filial || 'CICOPAL_FILIAL_DEFAULT';
 
       // Executa o processador industrial com fatiamento rígido de 200 itens
       // O databaseLoaderService deve retornar o total real processado

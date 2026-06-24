@@ -132,7 +132,7 @@ export class DatabaseLoaderService {
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, 'filial') || unitId || 'GERAL').trim();
+          const finalFilial = String(getRowValue(row, 'filial') || unitId).trim();
           const itemDesc = String(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
           ).trim();
@@ -155,8 +155,10 @@ export class DatabaseLoaderService {
           const databaixaVal = String(getRowValue(row, 'databaixa') || '').trim();
           const primarykeyVal = String(getRowValue(row, 'primarykey') || '').trim();
           const centrodecustoVal = String(getRowValue(row, 'centrodecusto', 'centro_custo') || '').trim();
-          const sn1RecnoVal = getRowValue(row, 'sn1_recno');
-          const sn3RecnoVal = getRowValue(row, 'sn3_recno');
+          const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
+          const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
+          const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
+          const sn3RecnoVal = (sn3RecnoRaw !== undefined && sn3RecnoRaw !== null && !isNaN(Number(sn3RecnoRaw))) ? Number(sn3RecnoRaw) : null;
 
           // HIGIENIZAÇÃO CONTÁBIL EXIGIDA PELO LAUDO SRE: Higienização de Valor de Aquisição
           let vlrAquisicSanitizado = 0;
