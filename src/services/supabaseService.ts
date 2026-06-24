@@ -865,16 +865,16 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         finalTenantId = assetGrupo || (localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
       }
 
-      const finalFilial = (cleanAsset.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+      const finalFilial = (cleanAsset.filial || cleanAsset.FILIAL || cleanAsset._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || 'GERAL').trim().toUpperCase();
 
-      if (!finalTenantId || finalTenantId === 'undefined' || finalTenantId === 'null' || !finalFilial || finalFilial === 'undefined' || finalFilial === 'null') {
-        console.warn(">>> [Session] Falha crítica de isolamento em syncAssetsToCloud: Contrato ou Filial ausente.");
+      if (!finalTenantId || finalTenantId === 'undefined' || finalTenantId === 'null') {
+        console.warn(">>> [Session] Falha crítica de isolamento em syncAssetsToCloud: Contrato ausente.");
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-            detail: { message: "Sua sessão expirou ou o identificador de Contrato/Filial foi perdido. Sincronização de ativos abortada." }
+            detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. Sincronização de ativos abortada." }
           }));
         }
-        throw new Error("Sessão Expirada: Contrato ou Filial ausente para sincronização.");
+        throw new Error("Sessão Expirada: Contrato ausente para sincronização.");
       }
 
       const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : (cleanAsset.PRIMARYKEY !== undefined && cleanAsset.PRIMARYKEY !== null ? cleanAsset.PRIMARYKEY : '')).trim() || String(cleanAsset.id || '');
@@ -910,8 +910,18 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           const parsed = Number(rawVal);
           return isNaN(parsed) ? 0 : parsed;
         })(),
-        sn1_recno: cleanAsset.sn1_recno !== undefined ? Number(cleanAsset.sn1_recno) : (cleanAsset.Sn1_recno !== undefined ? Number(cleanAsset.Sn1_recno) : null),
-        sn3_recno: cleanAsset.sn3_recno !== undefined ? Number(cleanAsset.sn3_recno) : (cleanAsset.Sn3_recno !== undefined ? Number(cleanAsset.Sn3_recno) : null),
+        sn1_recno: (() => {
+          const val = cleanAsset.sn1_recno !== undefined ? cleanAsset.sn1_recno : cleanAsset.Sn1_recno;
+          if (val === undefined || val === null || val === '') return null;
+          const num = Number(val);
+          return isNaN(num) ? null : num;
+        })(),
+        sn3_recno: (() => {
+          const val = cleanAsset.sn3_recno !== undefined ? cleanAsset.sn3_recno : cleanAsset.Sn3_recno;
+          if (val === undefined || val === null || val === '') return null;
+          const num = Number(val);
+          return isNaN(num) ? null : num;
+        })(),
         _conferido: Boolean(cleanAsset._conferido)
       };
     });
@@ -972,11 +982,9 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
   ).toString().trim();
 
   const cleanTenantIdRaw = resolvedTenantId !== 'undefined' && resolvedTenantId !== 'null' ? resolvedTenantId : '';
-  const currentFilial = (localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').toString().trim();
-  const cleanFilialRaw = currentFilial !== 'undefined' && currentFilial !== 'null' ? currentFilial : '';
 
-  if (!cleanTenantIdRaw || !cleanFilialRaw) {
-    console.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantId ou filial ausente.");
+  if (!cleanTenantIdRaw) {
+    console.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantId ausente.");
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('gbr_session_expired', {
         detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
@@ -1691,43 +1699,53 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
   try {
     console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantid}`);
     
-    // 1. Limpa os ativos
-    let query = supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid);
-    
-    try {
+    const executeDelete = async (colName: string) => {
       if (companyToClear) {
         if (Array.isArray(companyToClear)) {
           const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
-          query = query.in('_unitid', normalizedCompanies);
+          if (normalizedCompanies.length > 50) {
+            console.warn(`[Supabase] Array de unidades muito grande (${normalizedCompanies.length}). Dividindo em lotes...`);
+            for (let i = 0; i < normalizedCompanies.length; i += 50) {
+              const chunk = normalizedCompanies.slice(i, i + 50);
+              const chunkQuery = supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).in(colName, chunk);
+              const { error: chunkError } = await chunkQuery;
+              if (chunkError) throw chunkError;
+            }
+            return { error: null, count: null };
+          } else {
+            return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).in(colName, normalizedCompanies);
+          }
         } else {
           const normalized = companyToClear.toUpperCase().trim();
-          query = query.eq('_unitid', normalized);
+          return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).eq(colName, normalized);
         }
+      } else {
+         return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid);
       }
-    } catch (e) {
-      console.warn('[Supabase] Erro ao construir query de limpeza:', e);
-    }
+    };
 
-    const { error: assetsError, count } = await query;
+    let assetsError, count;
+    try {
+       const res = await executeDelete('_unitid');
+       assetsError = res.error;
+       count = res.count;
+    } catch (e: any) {
+       assetsError = e;
+    }
 
     if (assetsError) {
       // Se o erro for coluna inexistente (_unitid ou _tenantid), tentamos fallbacks
       if (assetsError.code === '42703' || assetsError.code === 'PGRST204') {
-        console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallbacks...');
-        let retryQuery = supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid);
-        
-        // Se houver empresa, tenta filial
-        if (companyToClear) {
-          if (Array.isArray(companyToClear)) {
-            const normalizedCompanies = companyToClear.map(c => c.toUpperCase().trim());
-            retryQuery = retryQuery.or(`filial.in.(${normalizedCompanies.join(',')})`);
-          } else {
-            const normalized = companyToClear.toUpperCase().trim();
-            retryQuery = retryQuery.or(`filial.eq.${normalized}`);
-          }
+        console.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallback para filial...');
+        let retryError, retryCount;
+        try {
+          const res = await executeDelete('filial');
+          retryError = res.error;
+          retryCount = res.count;
+        } catch (e: any) {
+          retryError = e;
         }
         
-        const { error: retryError, count: retryCount } = await retryQuery;
         if (retryError) {
           // Se ainda falhar, tenta o delete mais radical (sem filtros de coluna)
           console.warn('[Supabase] Fallback falhou. Tentando delete radical...');
