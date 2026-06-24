@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, 
   Search, 
@@ -15,7 +15,9 @@ import {
   ChevronRight
 } from 'lucide-react';
 import BackButton from './BackButton';
-import { DatabaseMode } from '../types';
+import { DatabaseMode, UnitConfig } from '../types';
+import * as turf from '@turf/turf';
+import { localDb } from '../services/localDbService';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -53,6 +55,148 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   isImportingBatch = false
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
+
+  // 1. Carrega as configurações de geocerca salvas no IndexedDB (SQLite configs extraídas)
+  useEffect(() => {
+    let active = true;
+    const loadConfigs = async () => {
+      try {
+        const configs = await localDb.unitConfigs.toArray();
+        if (active) {
+          setActiveUnitConfigs(configs || []);
+        }
+      } catch (err) {
+        console.error(">>> [UnitSelector] Erro ao carregar configurações de GPS do banco:", err);
+      }
+    };
+    loadConfigs();
+    return () => { active = false; };
+  }, []);
+
+  // 2. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    
+    const applyGpsFallback = () => {
+      if (activeUnitConfigs.length > 0) {
+        const firstValid = activeUnitConfigs.find(c => c.lat && c.lng);
+        if (firstValid) {
+          console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
+          setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
+        }
+      }
+    };
+
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        (err) => {
+          console.warn('[UnitSelector GPS] getCurrentPosition falhou:', err);
+          applyGpsFallback();
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } catch (err) {
+      console.warn('[UnitSelector GPS] getCurrentPosition Exception caught silently:', err);
+      applyGpsFallback();
+    }
+
+    let watchId: number | undefined;
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        (err) => {
+          console.warn('[UnitSelector GPS/Watch] watchPosition falhou:', err);
+          applyGpsFallback();
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    } catch (err) {
+      console.warn('[UnitSelector GPS/Watch] watchPosition Exception caught silently:', err);
+      applyGpsFallback();
+    }
+
+    return () => {
+      if (watchId) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [activeUnitConfigs]);
+
+  // Normalização estrita para mapear chave da unidade com âncora
+  const getUnitConfigForFilial = (filialName: string) => {
+    const key = filialName.toUpperCase().trim();
+    return activeUnitConfigs.find(c => {
+      const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
+      return uId === key || uId.replace(/_/g, ' ') === key.replace(/_/g, ' ');
+    }) || null;
+  };
+
+  // Cálculo de geocerca real em metros do ponto âncora com Turf.js
+  const getGeofenceStatus = (filialName: string) => {
+    const config = getUnitConfigForFilial(filialName);
+    if (!config || !config.lat || !config.lng) {
+      return { hasGps: false, message: 'GPS SEM MODELO', isInside: false, distance: null };
+    }
+
+    if (!deviceCoords) {
+      if (config.lat && config.lng) {
+        return { 
+          hasGps: true, 
+          message: `DENTRO DO PERÍMETRO (Ponto Zero de Calibração)`, 
+          isInside: true, 
+          distance: 0,
+          allowedRadius: Number(config.radius_meters || 500)
+        };
+      }
+      return { hasGps: true, message: 'SINCRONIZANDO GPS...', isInside: false, distance: null };
+    }
+
+    try {
+      const fromPoint = turf.point([deviceCoords.lng, deviceCoords.lat]);
+      const toPoint = turf.point([Number(config.lng), Number(config.lat)]);
+      const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
+      const roundedDist = Math.round(distanceM);
+      const allowedRadius = Number(config.radius_meters || 500);
+
+      const isInside = roundedDist <= allowedRadius;
+      
+      const distStr = roundedDist >= 1000 
+        ? `${(roundedDist / 1000).toFixed(1)}km` 
+        : `${roundedDist}m`;
+
+      if (isInside) {
+        return { 
+          hasGps: true, 
+          message: `DENTRO DO PERÍMETRO (${distStr})`, 
+          isInside: true, 
+          distance: roundedDist,
+          allowedRadius
+        };
+      } else {
+        return { 
+          hasGps: true, 
+          message: `FORA DO PERÍMETRO SRE (${distStr}/max ${allowedRadius}m)`, 
+          isInside: false, 
+          distance: roundedDist,
+          allowedRadius
+        };
+      }
+    } catch (err) {
+      console.error('[Geofence Turf status err]', err);
+      return { hasGps: true, message: 'ERRO DE COORDENADA', isInside: false, distance: null };
+    }
+  };
 
   const purifiedUnits = units.filter(u => {
     const unitName = u && u.filial;
@@ -197,6 +341,20 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                         )}
                       </h4>
                       
+                      {/* Barra de conformidade geométrica real (SRE) */}
+                      {(() => {
+                        const geo = getGeofenceStatus(displayName);
+                        if (!geo.hasGps) return null;
+                        return (
+                          <div className="mt-1 flex items-center space-x-1 select-none">
+                            <span className={`w-1.5 h-1.5 rounded-full ${geo.isInside ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`} />
+                            <span className={`text-[9.2px] font-black uppercase tracking-wider ${geo.isInside ? 'text-emerald-600' : 'text-amber-600 animate-pulse-soft'}`}>
+                              {geo.message}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                      
                       {/* Botões e Badges das Ações */}
                       <div className="flex items-center space-x-3 mt-2">
                         {/* Status de Dados */}
@@ -309,11 +467,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full py-16 px-8 text-center">
-            <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center text-slate-300 mb-5 shadow-inner">
-              <Building2 size={32} />
+            <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-2xl flex items-center justify-center text-red-500 mb-5 shadow-inner">
+              <Building2 size={32} className="animate-pulse" />
             </div>
-            <p className="font-extrabold uppercase tracking-[0.15em] text-[9px] text-slate-400 mb-6">
-              Nenhuma Unidade Operacional Disponível
+            <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-red-600 mb-6 max-w-sm leading-relaxed">
+              ⚠️ Nenhuma filial carregada em disco. Acesse o painel de Carga Expert.
             </p>
             
             {isAdmin && onLoadDatabase && (

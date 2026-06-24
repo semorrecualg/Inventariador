@@ -8,7 +8,7 @@ import { Filesystem } from '@capacitor/filesystem';
  * Essencial para cumprir regras da App Store/Google Play sem causar travamentos em tempo de login.
  */
 export const checkPastPermissions = async (): Promise<boolean> => {
-  if (Capacitor.getPlatform() === 'web') {
+  if (Capacitor.getPlatform() === 'web' || !Capacitor.isNativePlatform()) {
     return true;
   }
   try {

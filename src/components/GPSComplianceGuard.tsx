@@ -396,8 +396,8 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
                 <Unlock size={16} />
               </div>
               <div className="text-left flex-1">
-                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest leading-none mb-1">🔓 [Bypass Admin Ativo]</p>
-                <p className="text-[9px] text-slate-300 font-bold uppercase tracking-wide leading-tight">Perímetro de GPS liberado para perfil de liderança.</p>
+                <p className="text-[9.2px] font-black text-emerald-400 uppercase tracking-wider leading-none mb-1">🔓 BYPASS SÍNCRONO IMEDIATO ATIVO</p>
+                <p className="text-[8.5px] text-slate-300 font-bold uppercase tracking-wide leading-normal">STATUS DE HOMOLOGAÇÃO: LIBERADO PARA TESTE DE MESA NO AI STUDIO PERIMETER.</p>
               </div>
             </div>
           </motion.div>

@@ -102,7 +102,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     const loadLogs = async () => {
       setLoading(true);
       try {
-        const tenantId = user?._tenantid || user?.tenantid;
+        const tenantId = user?._tenantid || user?.tenantId || user?.tenantid;
         if (databaseMode.startsWith('SUPABASE') && tenantId) {
           const data = logType === 'SYSTEM' 
             ? await fetchAuditLogs(tenantId)

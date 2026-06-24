@@ -35,9 +35,9 @@ capacitor.config.json
 capacitor.config.js
 # Note: package-lock.json should NOT be ignored
 
-# Bancos de dados locais físicos (SQLite GBR)
-*.sqlite
-*.sqlite3
+# Database and Storage Security
 *.db
 *.db-journal
-*.db-wal
+*.sqlite
+*.sqlite3
+mock_databases/

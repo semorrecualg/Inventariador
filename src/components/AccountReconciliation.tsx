@@ -148,6 +148,13 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
     return baseColors;
   }, [visualStatus, isBaixado, isConferido]);
 
+  const isValueZeroForAsset = useMemo(() => {
+    const val = asset.VLRAQUISIC || asset.vlraquisic;
+    if (val === undefined || val === null) return true;
+    const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[R$\s]/gi, ''));
+    return isNaN(num) || num <= 0;
+  }, [asset.VLRAQUISIC, asset.vlraquisic]);
+
   const fullDescription = [
     asset.QT || '1',
     asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
@@ -200,10 +207,20 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
                   {isSixDigit ? 'USAR TELA INVENTÁRIO' : 'USAR TELA ETIQUETAR'}
                 </span>
               </div>
-            ) : asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
-              <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
-                <Zap size={10} className="text-white fill-white" />
-                <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
+            ) : (
+              <div className="flex gap-1">
+                {asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO' && (
+                  <div className="px-2 py-1 bg-amber-500 rounded-lg flex items-center space-x-1 shadow-md">
+                    <Zap size={10} className="text-white fill-white" />
+                    <span className="text-[8px] font-bold text-white uppercase tracking-widest">LOTE</span>
+                  </div>
+                )}
+                {isValueZeroForAsset && (
+                  <div className="px-2 py-1 bg-rose-50 border border-rose-205 text-rose-700 rounded-lg flex items-center space-x-1 shadow-sm">
+                    <AlertTriangle size={10} className="text-rose-600" />
+                    <span className="text-[7px] font-black uppercase tracking-widest leading-none">AQUISIÇÃO ZERO</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -287,19 +304,32 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     });
   }, []);
 
-  const handleBulkReconcile = useCallback(() => {
+  const handleBulkReconcile = useCallback(async () => {
     if (selectedAssetIds.size === 0) return;
-    onBulkUpdateAssets(Array.from(selectedAssetIds), {
-      _conferido: true,
-      TAG_INVENTARIO: TagInventario.CONFERIDO,
-      _dataLeitura: new Date().toISOString()
-    });
+    
+    const TAMANHO_LOTE_SRE = 200;
+    const allIdsArray = Array.from(selectedAssetIds);
+    
+    console.log(`[SRE AUDIT] Iniciando conciliação em lote fracionada para ${allIdsArray.length} itens.`);
+    
+    for (let i = 0; i < allIdsArray.length; i += TAMANHO_LOTE_SRE) {
+      const chunkIds = allIdsArray.slice(i, i + TAMANHO_LOTE_SRE);
+      
+      await onBulkUpdateAssets(chunkIds, {
+        _conferido: true,
+        TAG_INVENTARIO: TagInventario.CONFERIDO,
+        _dataLeitura: new Date().toISOString()
+      });
+      
+      console.log(`[SRE AUDIT] Bloco de conciliação de ${i} até ${i + chunkIds.length} despachado.`);
+    }
+
     setSelectedAssetIds(new Set());
   }, [selectedAssetIds, onBulkUpdateAssets]);
 
   // Get unique accounts and their stats
   const accountStats = useMemo(() => {
-    const stats: Record<string, { total: number; checked: number }> = {};
+    const stats: Record<string, { total: number; checked: number; totalValue: number; itemsWithZeroValue: number }> = {};
     assets.forEach(asset => {
       const statusUpper = String(asset.STATUS || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
@@ -309,11 +339,24 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
 
       const account = asset.conta_contabil || 'SEM CONTA';
       if (!stats[account]) {
-        stats[account] = { total: 0, checked: 0 };
+        stats[account] = { total: 0, checked: 0, totalValue: 0, itemsWithZeroValue: 0 };
       }
       stats[account].total++;
       if (asset._conferido) {
         stats[account].checked++;
+      }
+
+      // Validador de Balanço Patrimonial: Identifica valor zero ou corrompido
+      const val = asset.VLRAQUISIC || asset.vlraquisic;
+      const num = val !== undefined && val !== null 
+        ? (typeof val === 'number' ? val : parseFloat(String(val).replace(/[R$\s]/gi, ''))) 
+        : 0;
+      const cleanNum = isNaN(num) || num <= 0 ? 0 : num;
+      
+      if (cleanNum === 0) {
+        stats[account].itemsWithZeroValue++;
+      } else {
+        stats[account].totalValue += cleanNum;
       }
     });
     return stats;
@@ -457,10 +500,12 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                     const allSelectableIds = filteredAssets
                       .filter(a => {
                         const etq = String(a.ETIQUETA || '').toUpperCase().trim();
-                        return !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
+                        const isSixDigit = /^\d{6}$/.test(etq);
+                        const isLabeling = etq === 'ETIQUETAR';
+                        return !(isSixDigit || isLabeling);
                       })
                       .map(a => String(a.id));
-                    
+
                     setSelectedAssetIds(prev => {
                       const next = new Set(prev);
                       const allSelected = allSelectableIds.every(id => next.has(id));
@@ -477,11 +522,13 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                   {filteredAssets.length > 0 && filteredAssets
                     .filter(a => {
                       const etq = String(a.ETIQUETA || '').toUpperCase().trim();
-                      return !isSixDigitNumeric(etq) && etq !== 'ETIQUETAR';
+                      const isSixDigit = /^\d{6}$/.test(etq);
+                      const isLabeling = etq === 'ETIQUETAR';
+                      return !(isSixDigit || isLabeling);
                     })
-                    .every(a => selectedAssetIds.has(String(a.id))) 
-                      ? "Desmarcar Todos" 
-                      : "Selecionar Todos os Pendentes"
+                    .every(a => selectedAssetIds.has(String(a.id)))
+                    ? "Desmarcar Todos"
+                    : "Selecionar Todos os Pendentes"
                   }
                 </button>
                 {selectedAssetIds.size > 0 && (
@@ -613,6 +660,15 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                     <span className="text-[9px] font-black text-slate-400 uppercase">
                       {progress}% CONCLUÍDO
                     </span>
+                    <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase">
+                      R$ {stats.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    {stats.itemsWithZeroValue > 0 && (
+                      <span className="text-[9px] font-black text-rose-600 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded flex items-center space-x-1 animate-pulse">
+                        <AlertTriangle size={10} />
+                        <span>{stats.itemsWithZeroValue} ZERO</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

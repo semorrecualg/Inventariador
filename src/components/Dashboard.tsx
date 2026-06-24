@@ -262,7 +262,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
     const wsData = filtered.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {
-        'TENANT': a._tenantid || user?.tenantid || '',
+        'TENANT': a._tenantid || user?.tenantId || user?.tenantid || '',
         'UNIDADE': a._unitid || user?.unitid || '',
       };
       
@@ -364,7 +364,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       {/* Header */}
       <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Dashboard" subLabel={`${user?.tenantid || 'S/ TENANT'}`} />
+          <BackButton onClick={onBack} label="Dashboard" subLabel={`${user?.tenantId || user?.tenantid || 'S/ TENANT'}`} />
           {currentCampaignId && (
             <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">
               <Activity size={10} className="text-accent animate-pulse" />

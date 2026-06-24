@@ -358,6 +358,39 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     setSearching(true);
     try {
+      // 🚀 PRIMEIRO PASSO: Soberania Local-First. Busca de endereços/localidades na tabela local assets_counting / ativos
+      console.log(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
+      const { default: sqliteService } = await import('../services/sqliteService');
+      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantId || user?.tenantid || 'CICOPAL');
+      
+      const exactMatch = localAddresses.find(
+        addr => (addr.endereco && addr.endereco.toUpperCase().includes(searchQuery.toUpperCase())) || 
+                (addr.filial && addr.filial.toUpperCase().includes(searchQuery.toUpperCase()))
+      );
+
+      if (exactMatch && exactMatch.lat !== undefined && exactMatch.lng !== undefined && !isNaN(exactMatch.lat) && !isNaN(exactMatch.lng)) {
+        console.log(`>>> [Local-First Search] Sucesso local! Encontrado ponto físico persistido no Lote 0: Lat ${exactMatch.lat}, Lng ${exactMatch.lng}`);
+        const newLat = exactMatch.lat;
+        const newLng = exactMatch.lng;
+        
+        setMapCenter([newLat, newLng]);
+        if (selectedUnit) {
+          setCurrentConfig(prev => ({ 
+            ...prev, 
+            lat: newLat, 
+            lng: newLng 
+          }));
+        }
+        setMessage({ 
+          text: `COORDENADAS LOCAIS ENCONTRADAS (LOTE 0): ${exactMatch.filial} - ${exactMatch.endereco}`, 
+          type: 'success' 
+        });
+        setSearching(false);
+        return;
+      }
+
+      // Se não encontrou localmente ou não tem coordenadas válidas, tenta georreferenciamento de nuvem Nominatim
+      console.log(">>> [Local-First Search] Nenhuma coordenada local correspondente. Recorrendo à nuvem...");
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
 
@@ -473,9 +506,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
 
     const configData: UnitConfig = {
-      _tenantid: user?._tenantid || user?.tenantid || 'CICOPAL',
+      _tenantid: user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL',
       _unitid: selectedUnit,
-      tenant_id: user?._tenantid || user?.tenantid || 'CICOPAL',
+      tenant_id: user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL',
       unit_id: selectedUnit,
       lat: Number(l_lat),
       lng: Number(l_lng),

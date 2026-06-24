@@ -18,6 +18,7 @@ import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { localDb } from '../services/localDbService';
+import { sqliteService } from '../services/sqliteService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 import { BufferIndicator } from './BufferIndicator';
@@ -199,6 +200,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
+  const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
   const cleanAndCapitalizeAsset = (rawAsset: Asset): Asset => {
     const cleanTenantId = String(rawAsset.tenantId || user?.tenantId || 'CICOPAL').trim().toUpperCase();
@@ -310,6 +312,25 @@ const Inventory: React.FC<InventoryProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
+
+  // BARREIRA DE PROTEÇÃO CONTRA REFRESH (F5 SEGURO)
+  const [isDbReady, setIsDbReady] = useState(sqliteService.getIsInitialized());
+
+  useEffect(() => {
+    let checkTimer: NodeJS.Timeout | null = null;
+    const verifyDatabaseInit = () => {
+      const initialized = sqliteService.getIsInitialized();
+      if (initialized) {
+        setIsDbReady(true);
+      } else {
+        checkTimer = setTimeout(verifyDatabaseInit, 100);
+      }
+    };
+    verifyDatabaseInit();
+    return () => {
+      if (checkTimer) clearTimeout(checkTimer);
+    };
+  }, []);
 
   // Telemetria e Hardware
   const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
@@ -430,7 +451,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   useEffect(() => {
     const performSearch = async () => {
-      if (!selectedUnit) return;
+      if (!isDbReady || !selectedUnit) return;
       setIsLocSearching(true);
       try {
         const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedLocTerm);
@@ -443,7 +464,7 @@ const Inventory: React.FC<InventoryProps> = ({
     };
 
     performSearch();
-  }, [debouncedLocTerm, selectedUnit, allAssets.length]);
+  }, [debouncedLocTerm, selectedUnit, allAssets.length, isDbReady]);
 
   const handleRangeChanged = useCallback((range: { startIndex: number }) => {
     if (range.startIndex > 0) {
@@ -1535,6 +1556,22 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
+  if (!isDbReady) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[100dvh] bg-slate-900 text-emerald-400 font-mono p-6">
+        <div className="text-center space-y-4">
+          <div className="text-2xl font-black uppercase tracking-tight animate-pulse">⚙️ RE-INICIALIZANDO SISTEMA GBR</div>
+          <p className="text-xs text-slate-400 max-w-xs uppercase tracking-widest leading-relaxed">
+            Soberania Nativa Ativa: Aguardando reestabelecimento seguro do motor primordial SQLite MemoryDb-Engine...
+          </p>
+          <div className="w-16 h-1 mx-auto bg-emerald-800 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-400" style={{ width: '60%' }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
       {!isInventorying ? (
@@ -1642,10 +1679,13 @@ const Inventory: React.FC<InventoryProps> = ({
                 const code = parts[0];
                 const name = parts.slice(1).join(' ') || locStr;
               
+                const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+                const isDisabled = !unitConfig && !isBypass;
+              
                 return (
                   <button 
                     key={loc.locKey} 
-                    disabled={!unitConfig}
+                    disabled={isDisabled}
                     onClick={() => { 
                       setSelectedLocation(loc.displayName); 
                       setIsInventorying(true); 
@@ -1653,7 +1693,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         onToggleFullscreen();
                       }
                     }} 
-                    className="w-full bg-white rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group"
+                    className={`w-full bg-white rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group ${isDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <div className="flex items-start space-x-4 mb-4">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${isCompleted ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#2563EB]/15 text-[#2563EB]'}`}>
@@ -1704,14 +1744,20 @@ const Inventory: React.FC<InventoryProps> = ({
 
           {/* FAB - Criar Nova Localidade */}
           <div className="fixed bottom-8 left-0 right-0 px-6 flex justify-center pointer-events-none">
-            <button 
-              disabled={!unitConfig}
-              onClick={() => setIsNewLocationModalOpen(true)} 
-              className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${!unitConfig ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
-            >
-              <Plus size={20} strokeWidth={3} />
-              <span>Nova Localidade</span>
-            </button>
+            {(() => {
+              const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+              const isDisabled = !unitConfig && !isBypass;
+              return (
+                <button 
+                  disabled={isDisabled}
+                  onClick={() => setIsNewLocationModalOpen(true)} 
+                  className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${isDisabled ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
+                >
+                  <Plus size={20} strokeWidth={3} />
+                  <span>Nova Localidade</span>
+                </button>
+              );
+            })()}
           </div>
         </div>
       ) : (
@@ -1766,11 +1812,19 @@ const Inventory: React.FC<InventoryProps> = ({
           <div className="space-y-4">
             {/* Sensors Row */}
             <div className="flex items-center justify-between bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
-              <div className="flex items-center space-x-2 px-2 flex-1 min-w-0">
-                <MapPin size={14} className="text-accent shrink-0" />
-                <span className="text-[10px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
-                  {selectedLocation || 'SELECIONE O LOCAL'}
-                </span>
+              <div className="flex-1 min-w-0 px-2">
+                {currentSelectedAddress && (
+                  <div className="flex items-center space-x-1.5 mb-1 select-none">
+                    <span className="text-[7.5px] font-black text-accent uppercase tracking-widest leading-none">Endereço:</span>
+                    <span className="text-[9px] font-extrabold text-slate-700 uppercase tracking-tight leading-none truncate">{currentSelectedAddress}</span>
+                  </div>
+                )}
+                <div className="flex items-center space-x-2">
+                  <MapPin size={12} className={currentSelectedAddress ? "text-accent shrink-0" : "text-slate-400 shrink-0"} />
+                  <span className="text-[9px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
+                    {selectedLocation || 'TODAS AS LOCALIDADES'}
+                  </span>
+                </div>
               </div>
               
               <div className="flex items-center space-x-3 pr-2">

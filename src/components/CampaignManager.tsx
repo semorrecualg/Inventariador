@@ -81,7 +81,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const fetchLocalCampaignsOnScreen = async () => {
     setIsRefreshing(true);
     try {
-      const currentTenant = (propsTenantId || user?._tenantid || user?.tenantid || 'CICOPAL').trim();
+      const currentTenant = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
       const currentFilial = (initialUnit || '').trim();
       
       console.log(`>>> [SQLite Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
@@ -186,7 +186,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
     
     const isAdmin = !!(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
-    let tenantId = (propsTenantId || user?._tenantid || user?.tenantid || '').trim();
+    let tenantId = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || '').trim();
     if (!tenantId && isAdmin) tenantId = 'CICOPAL';
 
     if (!tenantId || tenantId === 'N/A') {
@@ -274,7 +274,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     setIsSaving(true);
     try {
-      const tenantId = (propsTenantId || user?._tenantid || user?.tenantid || 'CICOPAL').trim();
+      const tenantId = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
       const filial = (initialUnit || '').trim();
 
       console.log(`>>> [SQLite] Executando comando SQL DELETE estrito para ID=${campaignId}, Tenant=${tenantId}, Filial=${filial}`);
@@ -358,7 +358,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    let tenantId = user?._tenantid || user?.tenantid;
+    let tenantId = user?._tenantid || user?.tenantId || user?.tenantid;
     const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
     if (!tenantId && isAdmin) tenantId = 'CICOPAL';
 

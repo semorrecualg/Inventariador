@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo ">>> [GBR SRE Guard] Executando validação pré-commit obrigatória..."
+
+# 1. Executa TypeScript check completo sem emitir arquivos
+echo ">>> [1/2] Verificando integridade de tipagem (TypeScript)..."
+npx tsc --noEmit
+
+# 2. Executa Linter estrito com --max-warnings 0
+echo ">>> [2/2] Validando regras de formatação e linter (ESLint)..."
+npm run lint
+
+echo ">>> [GBR SRE Guard] Código homologado de primeira com sucesso para commit!"

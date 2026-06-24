@@ -75,95 +75,9 @@ export enum ConservationState {
   INSERVIVEL = 'INSERVIVEL'
 }
 
-export interface Asset {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any; 
-  id: string | number;
-  
-  // As duas colunas em destaque e prioritárias do novo formato
-  tenantId: string;           // 1ª Coluna: ID do Tenant / Controle Global (with uppercase I!)
-  filial?: string;            // 2ª Coluna: Unidade Operacional (filial)
-  
-  // Estrutura Mestre v24 (Nomenclatura de Negócio)
-  _unitid?: string;   // Unidade Operacional (Campo Unificado)
-  GRUPO_EMPRESARIAL?: string; // Identificador da Empresa/Grupo
-  ETIQUETA?: string;
-  QT?: string | number;
-  DESCRICAODOATIVO?: string;
-  SERIAL?: string;
-  DATAAQUISIC?: string;
-  CNPJ?: string;
-  NOMEFORNECEDOR?: string;
-  NOTAFISCAL?: string;
-  ENDERECO?: string;
-  REGISTRO?: string;
-  SUBREG?: string;
-  DATABAIXA?: string;
-  conta_contabil?: string; // Novo padrão v25
-  PRIMARYKEY?: string;
-  CENTRODECUSTO?: string;
-  VLRAQUISIC?: string | number;
-  Sn1_recno?: number; // Identificador único do registro no Protheus (Tabela SN1)
-  Sn3_recno?: number; // Identificador único do registro no Protheus (Tabela SN3 - Centro de Custo)
+import { Asset } from './types/inventory';
 
-  // Campos de Controle Interno
-  _conferido?: boolean;
-  _plaquetado?: boolean; // Novo campo para separar do inventário físico
-  _plaquetaMaster?: string; 
-  _localMaster?: string;    
-  _empresaNormalizada?: string;
-  _descricaoMaster?: string;
-  _baseSinteticaLoc?: string[];
-  _camposAlterados?: string[]; 
-  _valoresOriginais?: Record<string, string | number | boolean | string[] | null | undefined>;
-  
-  // Tags de Auditoria
-  TAG_DUPLICIDADE?: 'ÚNICO' | 'ETIQUETA+1REGISTRO' | 'DUPLICIDADE EXTERNA' | 'SEM IDENTIFICAÇÃO';
-  TAG_INVENTARIO?: TagInventario;
-  ESTADO_CONSERVACAO?: ConservationState;
-  _isNew?: boolean;
-  _dataLeitura?: string;
-  _auditor?: string;
-  _history?: AuditLogEntry[];
-  _photoUrl?: string;
-  latitude?: number;  // Novo padrão v25
-  longitude?: number; // Novo padrão v25
-  _altitude_metros?: number; // Altitude para mapeamento vertical
-  _id_andar?: number; // Andar calculado (0=Térreo, 1=1º...)
-  _aprovado?: boolean;
-  _dataAprovacao?: string;
-  _aprovador?: string;
-  _assinatura?: string; // Base64 da assinatura
-  currentCampaignId?: string; // Novo padrão v25
-  _version?: number; // Controle de versão para concorrência otimista
-  _is_deleted?: boolean; // Soft delete para auditoria
-  _is_synced?: boolean; // Controle de sincronização local-first
-  _parent_id?: string | number; // ID do ativo pai em caso de unitarização
-  _is_unitized?: boolean; // Indica se o ativo foi desmembrado/unitarizado
-  _is_divergent_baixa?: boolean; // Regra de Ouro: ATIVO com DATABAIXA preenchida
-  DE_PARA?: string;
-  AUDITOR_STATUS_CONFERENCIA?: string;
-  _origemTransacao?: TransactionOrigin;
-
-  // Novos Campos Módulo Controle de Ativo (Contábil)
-  _valor_aquisicao?: number;
-  _valor_residual?: number;
-  _depreciacao_acumulada?: number;
-  _data_aquisicao?: string;
-  _data_inicio_depreciacao?: string;
-  _vida_util_meses?: number;
-  _taxa_depreciacao_anual?: number;
-  _status_contabil?: 'ATIVO' | 'BAIXADO' | 'VENDIDO';
-  _conta_contabil?: string;
-  _centro_custo?: string;
-  _ncm_code?: string;
-  // Campos Teste de Impairment (CPC 01)
-  _valor_recuperavel?: number;
-  _valor_justo?: number;
-  _valor_em_uso?: number;
-  _perda_impairment?: number;
-  _data_impairment?: string;
-}
+export type { Asset };
 
 export interface NCMClassifier {
   id: string;
@@ -276,6 +190,7 @@ export enum AppScreen {
   LABELING = 'LABELING', // Nova tela independente
   CONSULTATION = 'CONSULTATION',
   UNIT_SELECTION = 'UNIT_SELECTION',
+  ADDRESS_SELECTION = 'ADDRESS_SELECTION',
   USER_MANAGEMENT = 'USER_MANAGEMENT',
   CHANGE_PASSWORD = 'CHANGE_PASSWORD',
   FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR',

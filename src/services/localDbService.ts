@@ -227,13 +227,32 @@ export const localDb = {
 
       sql += ` GROUP BY displayName ORDER BY displayName COLLATE NOCASE`;
       
-      const results = await sqliteService.query(sql, params) as { displayName: string; total: number; checked: number }[];
-      return results.map(r => ({
-        displayName: r.displayName,
-        total: r.total,
-        checked: r.checked,
-        locKey: r.displayName.toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
-      }));
+      const results = await sqliteService.query(sql, params) as Record<string, string | number | boolean | null>[];
+      
+      return (results || []).map(r => {
+        // Encontra a chave de maneira case-insensitive (ex: displayName vs displayname vs DISPLAYNAME)
+        const findValue = (obj: Record<string, string | number | boolean | null>, keys: string[]) => {
+          if (!obj) return undefined;
+          const objKeys = Object.keys(obj);
+          for (const k of keys) {
+            const match = objKeys.find(ok => ok.toLowerCase() === k.toLowerCase());
+            if (match !== undefined) return obj[match];
+          }
+          return undefined;
+        };
+
+        const rawDisplayName = findValue(r, ['displayName', 'displayname']) || 'GERAL - NÃO ESPECIFICADO';
+        const displayNameVal = String(rawDisplayName);
+        const totalVal = Number(findValue(r, ['total']) ?? 0);
+        const checkedVal = Number(findValue(r, ['checked']) ?? 0);
+
+        return {
+          displayName: displayNameVal,
+          total: totalVal,
+          checked: checkedVal,
+          locKey: displayNameVal.toUpperCase().replace(/[^A-Z0-9]/g, '')
+        };
+      });
     },
     getLabelingAssets: async (unitId?: string): Promise<Asset[]> => {
       const ctx = await sqliteService.obterContextoAtivo();
@@ -354,6 +373,7 @@ export const localDb = {
         ...row,
         is_admin: row.is_admin === 1,
         isAdmin: row.is_admin === 1,
+        tenantId: row.tenantId || row._tenantid || row.tenantid || 'CICOPAL',
       })) as unknown as User[];
     },
     clear: async () => {

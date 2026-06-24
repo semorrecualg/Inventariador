@@ -1,40 +1,12 @@
 
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 console.log(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
-import { Capacitor } from '@capacitor/core';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import AccountReconciliation from './components/AccountReconciliation';
-import ActiveSearch from './components/ActiveSearch';
-import AssetControlModule from './components/AssetControlModule';
-import AssetDetail from './components/AssetDetail';
-import AssetMap from './components/AssetMap';
-import ChangePassword from './components/ChangePassword';
-import Consultation from './components/Consultation';
-import Dashboard from './components/Dashboard';
-import DatabaseLoader from './components/DatabaseLoader';
-import FieldConfigurator from './components/FieldConfigurator';
-import GlobalPerformance from './components/GlobalPerformance';
-import GPSComplianceGuard from './components/GPSComplianceGuard';
-import ImpairmentReport from './components/ImpairmentReport';
-import Inventory from './components/Inventory';
-import Labeling from './components/Labeling';
-import Login from './components/Login';
-import MainMenu from './components/MainMenu';
-import Modal from './components/Modal';
-import ModuleSelector from './components/ModuleSelector';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PermissionGate } from './components/PermissionGate';
-import PublicKardex from './components/PublicKardex';
-import QrCodeConfigurator from './components/QrCodeConfigurator';
-import Register from './components/Register';
-import Signature from './components/Signature';
-import SoftDeleteReport from './components/SoftDeleteReport';
-import UnitSelector from './components/UnitSelector';
-import UserManagement from './components/UserManagement';
-import { checkRuntimeIntegrity, startSecurityMonitor } from './services/securityService';
-import { AppModule, AppScreen, Asset, AuditLogEntry, DatabaseMode, DatabaseStatus, InventoryCampaign, InventorySearchMode, InventoryState, ModalConfig, NavigationParams, ScanFeedbackMode, ScannerMode, SearchFilters, TagInventario, TransactionOrigin, UnitConfig, User, UserRole } from './types';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
-import { processarRoteamentoPosLoginSaas, SupabaseUserProfile } from './utils/routingUtils';
-import { getAssetUnit, matchUnitKeys, normalizeKey } from './utils/schema';
+import { Capacitor } from '@capacitor/core';
+import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
+import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
+import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -43,38 +15,67 @@ declare global {
     clickResetTimeout?: ReturnType<typeof setTimeout>;
   }
 }
+import Modal from './components/Modal';
+import Login from './components/Login';
+import Register from './components/Register';
+import MainMenu from './components/MainMenu';
+import DatabaseLoader from './components/DatabaseLoader';
+import BaseManagerPanel from './components/BaseManagerPanel';
+import AssetDetail from './components/AssetDetail';
+import SoftDeleteReport from './components/SoftDeleteReport';
+import ImpairmentReport from './components/ImpairmentReport';
+import Inventory from './components/Inventory';
+import Labeling from './components/Labeling'; 
+import GPSComplianceGuard from './components/GPSComplianceGuard';
+import Signature from './components/Signature';
+import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import UnitSelector from './components/UnitSelector';
+import AddressSelector from './components/AddressSelector';
+import Dashboard from './components/Dashboard';
+import UserManagement from './components/UserManagement';
+import PublicKardex from './components/PublicKardex';
+import ChangePassword from './components/ChangePassword';
+import FieldConfigurator from './components/FieldConfigurator';
+import QrCodeConfigurator from './components/QrCodeConfigurator';
+import GlobalPerformance from './components/GlobalPerformance';
+import AccountReconciliation from './components/AccountReconciliation';
+import Consultation from './components/Consultation';
+import AssetMap from './components/AssetMap';
+import ActiveSearch from './components/ActiveSearch';
+import ModuleSelector from './components/ModuleSelector';
+import AssetControlModule from './components/AssetControlModule';
+import { processarRoteamentoPosLoginSaas, SupabaseUserProfile } from './utils/routingUtils';
 // import TrustOnboarding from './components/TrustOnboarding';
-import AssetPrintView from './components/AssetPrintView';
 import AuditLogs from './components/AuditLogs';
-import BiometricRegistration from './components/BiometricRegistration';
 import CampaignManager from './components/CampaignManager';
 import FloatingHelp from './components/FloatingHelp';
-import OnboardingWizard from './components/OnboardingWizard';
 import PrivacyCenter from './components/PrivacyCenter';
-import StressTestManager from './components/StressTestManager';
-import SyncBadge from './components/SyncBadge';
-import SyncManager from './components/SyncManager';
+import OnboardingWizard from './components/OnboardingWizard';
+import BiometricRegistration from './components/BiometricRegistration';
 import ThemePalette from './components/ThemePalette';
+import AssetPrintView from './components/AssetPrintView';
+import SyncManager from './components/SyncManager';
+import SyncBadge from './components/SyncBadge';
 import UnitConfigurator from './components/UnitConfigurator';
+import StressTestManager from './components/StressTestManager';
 
-import { Session } from '@supabase/supabase-js';
-import { Activity, AlertTriangle, Building2, CheckCircle2, Cloud, Database, FileText, HardDrive, Loader2, RefreshCw, ShieldAlert, ShieldCheck, Sparkles, X } from 'lucide-react';
-import { motion } from 'motion/react';
-import * as XLSX from 'xlsx';
-import AIAssistant from './components/AIAssistant';
-import { APP_LOGO } from './constants';
-import { auditService } from './services/auditService';
-import { hasBiometricRegistered, isBiometricSupported } from './services/biometricService';
-import { backupInventory, clearInventory, clearMultipleInventories, loadInventory, restoreInventory, saveConfigOnly, saveInventory } from './services/persistenceService';
 import { sqliteService } from './services/sqliteService';
-import { clearCloudInventory, ensureUserProfile, fetchCampaigns, fetchFullInventory, fetchUnitConfigs, fetchUsersFromCloud, getAssetByTag, isInternalMode, logAuditEvent, saveUnitConfig, subscribeToAssetChanges, subscribeToInventoryChanges, supabase, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud } from './services/supabaseService';
-import { getPendingSyncItems, photoSyncManager, processSyncQueue, syncService } from './services/syncService';
+import { auditService } from './services/auditService';
 import { telemetryService } from './services/telemetryService';
+import AIAssistant from './components/AIAssistant';
+import { motion } from 'motion/react';
+import { APP_LOGO } from './constants';
+import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
+import { Session } from '@supabase/supabase-js';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, saveUnitConfig, isInternalMode } from './services/supabaseService';
+import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
+import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
+import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
-import { localDb, requestPersistentStorage } from './services/localDbService';
-import { checkPastPermissions } from './services/permissionsService';
 
 const ADMIN_EMAIL = "semorr@gmail.com";
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
@@ -98,11 +99,11 @@ const checkIsAdmin = (u: User | null | undefined) => {
   }
 
   const roleStr = String(role || '').toUpperCase();
-  return roleStr === 'ADMIN' ||
-         roleStr === 'MASTER' ||
-         roleStr === 'GESTOR' ||
-         !!isAdm ||
-         email === ADMIN_EMAIL.toLowerCase() ||
+  return roleStr === 'ADMIN' || 
+         roleStr === 'MASTER' || 
+         roleStr === 'GESTOR' || 
+         !!isAdm || 
+         email === ADMIN_EMAIL.toLowerCase() || 
          email === 'semorr@gmail.com';
 };
 
@@ -123,9 +124,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
       return (
         <div className="h-screen w-full flex flex-col items-center justify-center p-8 bg-bg-main text-center">
           <div className="w-32 h-32 bg-white border border-border rounded-full flex items-center justify-center mb-6 shadow-2xl shadow-red-500/10 overflow-hidden p-1">
-            <img
-              src={APP_LOGO}
-              alt="GBR Auditoria Logo"
+            <img 
+              src={APP_LOGO} 
+              alt="GBR Auditoria Logo" 
               className="w-full h-full object-cover rounded-full"
               referrerPolicy="no-referrer"
             />
@@ -135,17 +136,17 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
             Ocorreu um erro inesperado na interface. Tente reiniciar o aplicativo ou limpar o cache.
           </p>
           <div className="space-y-3 w-full max-w-xs">
-            <button
-              onClick={() => window.location.reload()}
+            <button 
+              onClick={() => window.location.reload()} 
               className="w-full py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
             >
               Recarregar App
             </button>
-            <button
+            <button 
               onClick={() => {
                 localStorage.clear();
                 window.location.href = '/';
-              }}
+              }} 
               className="w-full py-4 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all"
             >
               Limpar Tudo e Sair
@@ -161,10 +162,10 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
-  assets: [],
-  companies: [],
-  lastUpdated: null,
+const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({ 
+  assets: [], 
+  companies: [], 
+  lastUpdated: null, 
   status: DatabaseStatus.EMPTY,
   editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
   qrCodeFields: ['ETIQUETA'],
@@ -187,8 +188,9 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
 // App Component
 const App: React.FC = () => {
   const [sqliteStatus, setSqliteStatusState] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
+    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return {
       connected: !!hasFilial,
       loading: !hasFilial,
@@ -208,12 +210,14 @@ const App: React.FC = () => {
   const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
     const s = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
     if (s) {
-      try {
-        const parsed = JSON.parse(s);
-        if (parsed) return parsed;
-      } catch (err) {
-        console.warn(">>> [Boot] JSON.parse falhou para selectedUnit. Assumindo string literal:", s, err);
-        return s; // Assuma a string literal diretamente como o valor válido!
+      const cleaned = s.replace(/%22|%2522|"/g, '').trim();
+      if (cleaned) {
+        try {
+          const parsed = JSON.parse(cleaned);
+          if (parsed) return typeof parsed === 'string' ? parsed.replace(/%22|%2522|"/g, '').trim() : parsed;
+        } catch {
+          return cleaned;
+        }
       }
     }
     return "CARREGANDO...";
@@ -307,23 +311,27 @@ const App: React.FC = () => {
   });
 
   const [isInitializing, setIsInitializing] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !hasFilial;
   });
   const [dbInitialized, setDbInitialized] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !!hasFilial;
   });
   const [authLoading, setAuthLoading] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !hasFilial;
   });
   const [isSessionValid, setIsSessionValid] = useState(() => {
-    const storedFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
-    const hasFilial = storedFilial && storedFilial !== "CARREGANDO...";
+    const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
+    const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
+    const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !!hasFilial;
   });
   const [initError, setInitError] = useState<string | null>(null);
@@ -370,6 +378,16 @@ const App: React.FC = () => {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedAddress, setSelectedAddressState] = useState<string | null>(() => sessionStorage.getItem('current_selected_address') || null);
+
+  const setSelectedAddress = useCallback((addr: string | null) => {
+    if (addr) {
+      sessionStorage.setItem('current_selected_address', addr);
+    } else {
+      sessionStorage.removeItem('current_selected_address');
+    }
+    setSelectedAddressState(addr);
+  }, []);
 
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
 
@@ -462,18 +480,18 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem('app_users');
       const userList: User[] = saved ? JSON.parse(saved) : [];
-
+      
       // Admin Padrão
       const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
       if (adminIndex === -1) {
-        userList.push({
-          username: "ADMINISTRADOR",
+        userList.push({ 
+          username: "ADMINISTRADOR", 
           name: "ADMINISTRADOR GLOBAL",
-          email: ADMIN_EMAIL,
-          password: "admin",
+          email: ADMIN_EMAIL, 
+          password: "admin", 
           role: UserRole.ADMIN,
           is_admin: true,
-          isAdmin: true,
+          isAdmin: true, 
           mustChangePassword: false,
           tenantId: 'CICOPAL'
         });
@@ -481,7 +499,7 @@ const App: React.FC = () => {
         userList[adminIndex].password = "Glaucio@1970";
         userList[adminIndex].mustChangePassword = false;
       }
-
+      
       return userList;
     } catch { return []; }
   });
@@ -552,21 +570,21 @@ const App: React.FC = () => {
   const handleReconnectFile = async () => {
     if (isReconnecting) return;
     setIsReconnecting(true);
-
+    
     try {
       console.log(">>> [DBA] Iniciando processo de reconexão manual...");
       const success = await sqliteService.requestFilePermission();
-
+      
       if (success) {
         // ESSENCIAL: Aguarda o serviço ler os dados do arquivo físico recém-liberado
         await sqliteService.init(true);
-
+        
         // Aguarda um pequeno delay para o OS processar a permissão
         await new Promise(r => setTimeout(r, 800));
-
+        
         // Recarrega os dados do inventário para o estado do React
         const loaded = await loadInventory(databaseMode);
-
+        
         // v25.01: Se carregou dados (mesmo que do cache), atualizamos o estado
         if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
           // Garantir que empresas estão extraídas
@@ -576,14 +594,14 @@ const App: React.FC = () => {
                return (a.filial || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
           }
-
+          
           if (loaded.assets.length > 0 && loaded.companies.length === 0) {
             console.error(">>> [DBA] CRÍTICO: Ativos carregados mas nenhuma unidade operacional mapeada!");
             alert("Atenção: Os dados foram carregados, mas nenhuma 'Unidade Operacional' foi identificada. Verifique se as colunas da planilha Excel estão corretas (Ex: UNIDADE, LOCAL, FILIAL).");
           } else {
             console.log(">>> [DBA] Carga de unidades OK: " + loaded.companies.length + " encontradas.");
           }
-
+          
           // v24.50.1: Refresh unit list using optimized query
           if (loaded.assets.length > 0) {
              const units = await sqliteService.getOperationalUnits();
@@ -592,12 +610,12 @@ const App: React.FC = () => {
                 loaded.companies = units;
              }
           }
-
+          
           setInventory(loaded);
           setIsDataLoaded(true);
           setShowReconnectOverlay(false);
-          setIntegrityFailed(false);
-
+          setIntegrityFailed(false); 
+          
           // v24.50.5: Tenta extrair unidades mesmo que o fallback de assets tenha falhado
           const units = await sqliteService.getOperationalUnits();
           if (units && units.length > 0) {
@@ -606,7 +624,7 @@ const App: React.FC = () => {
           } else {
              console.warn(">>> [DBA] Nenhuma unidade encontrada via Query após reconexão.");
           }
-
+          
           if (loaded.assets.length > 0 || units.length > 0) {
             setSqliteStatus('ACTIVE');
             await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
@@ -639,7 +657,7 @@ const App: React.FC = () => {
   useEffect(() => {
     // 🚀 CORREÇÃO DE ENGENHARIA CONTRA RACE CONDITION:
     // Bloqueia a execução se o SQLite local não estiver fisicamente pronto na memória
-    if (!dbInitialized || sqliteStatus.loading) {
+    if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
       return;
     }
 
@@ -700,10 +718,10 @@ const App: React.FC = () => {
       try {
         // 1. Processa primeiro o lote de metadados de ativos (Até 200 registros por loop)
         const dataResult = await syncService.processDataSyncQueue();
-
+        
         // 2. Na sequência, processa sequencialmente as imagens pendentes da fila
         const photoResult = await photoSyncManager.processPhotoSyncQueue();
-
+        
         if (dataResult.processedCount > 0 || photoResult.uploadCount > 0) {
           console.log(`>>> [Background Sync Completed] Dados: ${dataResult.processedCount}, Fotos: ${photoResult.uploadCount}`);
         }
@@ -758,7 +776,7 @@ const App: React.FC = () => {
           if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
             console.warn('[Supabase] Sessão inválida detectada. Limpando...');
             sessionStorage.removeItem('app_current_user');
-
+            
             const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
             if (!hasReloaded) {
               sessionStorage.setItem('app_session_error_reloaded', 'true');
@@ -804,18 +822,13 @@ const App: React.FC = () => {
 
     const initApp = async () => {
       try {
-        console.log(">>> [App] Verificando permissões prévias (Soberania Mobile - Não Bloqueante)...");
-        const granted = await checkPastPermissions();
-        setPermissionsGranted(granted);
-        sqliteService.setPermissionsGranted(granted);
-
-        if (Capacitor.isNativePlatform() && !granted) {
-          console.log(">>> [App] Permissões pendentes detectadas. Serão solicitadas sob demanda nas telas operacionais.");
-        }
-
+        // Remoção física absoluta de qualquer chamada ao sensor ou checkPastPermissions no boot
+        setPermissionsGranted(true);
+        sqliteService.setPermissionsGranted(true);
+        
         let success = false;
         const isNative = Capacitor.isNativePlatform();
-
+        
         if (!isNative) {
           console.log(">>> [App] Ambiente WEB / iFrame detectado. Forçando desvio INSTANTÂNEO de MEMORY_FALLBACK para blindagem total contra restrições de sandbox.");
           await sqliteService.forceMemoryFallback();
@@ -824,7 +837,7 @@ const App: React.FC = () => {
           let attempts = 0;
           const maxAttempts = 3;
           const timeoutDuration = 30000;
-
+          
           while (attempts < maxAttempts && !success) {
             attempts++;
             try {
@@ -853,13 +866,13 @@ const App: React.FC = () => {
 
         if (success) {
           console.log(">>> [App] SQLite pronto ou emulado com sucesso em ambiente seguro. Agendando carregamento de UI pós-boot...");
-
+          
           // REQUISITO 1: Adotamos um setTimeout pós-determinação de inicialização para desvincular o fluxo
           // de montagem reativa da UI principal de qualquer Toast de Soberania Nativa ou conflito de thread/bridge no Android
           setTimeout(async () => {
             if (!isMounted) return;
             console.log(">>> [MOBILE-SHIELD] Iniciando carregamento assíncrono pós-boot do banco de dados de forma desacoplada.");
-
+            
             try {
               const fileStatus = await sqliteService.getFileStatus();
               const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
@@ -892,11 +905,11 @@ const App: React.FC = () => {
                       status: DatabaseStatus.LOADED
                     }));
                   }
-
+                  
                   const activeSession = await sqliteService.obterContextoAtivo();
                   let recoveredUnit = activeSession.selectedUnit;
                   let recoveredCampaign = activeSession.currentCampaignId;
-
+                  
                   if (!recoveredUnit) {
                     const tid = parsedUser?.tenantId || 'CICOPAL';
                     const sqlConfigs = await sqliteService.getUnitConfigs(tid);
@@ -905,11 +918,11 @@ const App: React.FC = () => {
                       recoveredCampaign = sqlConfigs[0].currentCampaignId as string | null;
                     }
                   }
-
+                  
                   if (recoveredUnit) {
                     console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
                     setSelectedUnit(recoveredUnit);
-
+                    
                     if (recoveredCampaign) {
                       setInventory(prev => ({
                         ...prev,
@@ -917,7 +930,7 @@ const App: React.FC = () => {
                         status: DatabaseStatus.LOADED
                       }));
                     }
-
+                    
                     if (parsedUser && recoveredUnit && recoveredCampaign) {
                       console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
                       setHistory([AppScreen.MAIN_MENU]);
@@ -936,47 +949,76 @@ const App: React.FC = () => {
                   setInitError(bootErr instanceof Error ? bootErr.message : String(bootErr));
                 }
               }
-            } catch (sqliteErr) {
-              console.error(">>> [App - SQLite Access Error] Erro ao consultar tabelas físicas (modo contingência ativado):", sqliteErr);
-              setInitError(sqliteErr instanceof Error ? sqliteErr.message : String(sqliteErr));
-            } finally {
-              setIsInitializing(false);
-            }
 
-            // REQUISITO 2: Encadeamento Seguro de Autenticação (Soberania de Nuvem) pós-boot
-            if (!isInternalMode) {
-              const currentUserStr = sessionStorage.getItem('app_current_user');
-              const hasCachedUser = !!currentUserStr;
-              const isNetworkOffline = !navigator.onLine;
+              // REQUISITO 2: Encadeamento Seguro de Autenticação (Soberania de Nuvem) pós-boot
+              if (!isInternalMode) {
+                const currentUserStr = sessionStorage.getItem('app_current_user');
+                const hasCachedUser = !!currentUserStr;
+                const isNetworkOffline = !navigator.onLine;
 
-              if (isNetworkOffline && hasCachedUser) {
-                console.log(">>> [Boot Offline Bypass] Conexão indisponível mas usuário em cache detectado. Efetuando bypass na nuvem!");
-                try {
-                  const parsed = JSON.parse(currentUserStr || '');
-                  setUser(parsed);
-                } catch (e) {
-                  console.warn("Falha ao carregar usuário temporário:", e);
-                }
-                setIsSessionValid(true);
-                setAuthLoading(false);
-              } else {
-                try {
-                  setAuthLoading(true);
-                  console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+                if (isNetworkOffline && hasCachedUser) {
+                  console.log(">>> [Boot Offline Bypass] Conexão indisponível mas usuário em cache detectado. Efetuando bypass na nuvem!");
+                  try {
+                    const parsed = JSON.parse(currentUserStr || '');
+                    setUser(parsed);
+                  } catch (e) {
+                    console.warn("Falha ao carregar usuário temporário:", e);
+                  }
+                  setIsSessionValid(true);
+                } else {
+                  try {
+                    console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+                    
+                    const sessionPromise = supabase.auth.getSession();
+                    const timeoutPromise = new Promise<{ data: { session: null } }>(resolve => 
+                      setTimeout(() => resolve({ data: { session: null } }), 3500)
+                    );
+                    
+                    const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
+                    
+                    // REQUISITO 1: Checagem Estrita do Objeto de Sessão
+                    const isValid = !!session && !!session.user && typeof session.user.id === "string";
+                    setIsSessionValid(isValid);
+                    
+                    if (!isValid) {
+                      // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
+                      let isLocal = false;
+                      if (currentUserStr) {
+                        try {
+                          const parsed = JSON.parse(currentUserStr);
+                          const lowerEmail = (parsed.email || '').toLowerCase();
+                          const lowerUsername = (parsed.username || '').toLowerCase();
+                          if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                            isLocal = true;
+                          }
+                        } catch { /* ignore */ }
+                      }
 
-                  const sessionPromise = supabase.auth.getSession();
-                  const timeoutPromise = new Promise<{ data: { session: null } }>(resolve =>
-                    setTimeout(() => resolve({ data: { session: null } }), 3500)
-                  );
+                      if (isLocal) {
+                        console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
+                        setIsSessionValid(true);
+                        if (currentUserStr) {
+                          try {
+                            const parsed = JSON.parse(currentUserStr);
+                            setUser(parsed);
+                          } catch (e) {
+                            console.warn("Erro ao fazer parse de currentUserStr:", e);
+                          }
+                        }
+                      } else {
+                        console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                        setUser(null);
+                        sessionStorage.removeItem('app_current_user');
+                        setHistory([AppScreen.LOGIN]);
+                      }
+                    } else {
+                      console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+                    }
+                  } catch (jwtErr) {
+                    console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
+                    const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
+                    const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
 
-                  const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
-
-                  // REQUISITO 1: Checagem Estrita do Objeto de Sessão
-                  const isValid = !!session && !!session.user && typeof session.user.id === "string";
-                  setIsSessionValid(isValid);
-
-                  if (!isValid) {
-                    // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
                     let isLocal = false;
                     if (currentUserStr) {
                       try {
@@ -989,67 +1031,36 @@ const App: React.FC = () => {
                       } catch { /* ignore */ }
                     }
 
-                    if (isLocal) {
-                      console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
-                      setIsSessionValid(true);
+                    if (isLocal || isNetworkError) {
+                      console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
                       if (currentUserStr) {
                         try {
                           const parsed = JSON.parse(currentUserStr);
                           setUser(parsed);
                         } catch (e) {
-                          console.warn("Erro ao fazer parse de currentUserStr:", e);
+                          console.warn("Falha no parse ao reter sessão local:", e);
                         }
                       }
+                      setIsSessionValid(true);
                     } else {
-                      console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                      // REQUISITO 3: Purga de Cache de Inicialização
+                      setIsSessionValid(false);
                       setUser(null);
                       sessionStorage.removeItem('app_current_user');
                       setHistory([AppScreen.LOGIN]);
                     }
-                  } else {
-                    console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
                   }
-                } catch (jwtErr) {
-                  console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
-                  const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
-                  const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
-
-                  let isLocal = false;
-                  if (currentUserStr) {
-                    try {
-                      const parsed = JSON.parse(currentUserStr);
-                      const lowerEmail = (parsed.email || '').toLowerCase();
-                      const lowerUsername = (parsed.username || '').toLowerCase();
-                      if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
-                        isLocal = true;
-                      }
-                    } catch { /* ignore */ }
-                  }
-
-                  if (isLocal || isNetworkError) {
-                    console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
-                    if (currentUserStr) {
-                      try {
-                        const parsed = JSON.parse(currentUserStr);
-                        setUser(parsed);
-                      } catch (e) {
-                        console.warn("Falha no parse ao reter sessão local:", e);
-                      }
-                    }
-                    setIsSessionValid(true);
-                  } else {
-                    // REQUISITO 3: Purga de Cache de Inicialização
-                    setIsSessionValid(false);
-                    setUser(null);
-                    sessionStorage.removeItem('app_current_user');
-                    setHistory([AppScreen.LOGIN]);
-                  }
-                } finally {
-                  setAuthLoading(false);
                 }
               }
-            } else {
+            } catch (asyncErr) {
+              console.error(">>> [App - Async Boot Error] Erro crítico no fluxo assíncrono pós-boot:", asyncErr);
+              setInitError(asyncErr instanceof Error ? asyncErr.message : String(asyncErr));
+            } finally {
+              // GARANTIA SRE REQUISITO 2: Assegura desativação das flags de loading em QUALQUER cenário assíncrono
+              setIsInitializing(false);
               setAuthLoading(false);
+              setDbInitialized(true);
+              setSqliteStatus('ACTIVE');
             }
           }, 100);
         } else {
@@ -1059,6 +1070,9 @@ const App: React.FC = () => {
         console.error(">>> [App] Erro fatal na inicialização:", err);
         if (isMounted) {
           setInitError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (isMounted) {
           setIsInitializing(false);
           setAuthLoading(false);
           setDbInitialized(true);
@@ -1088,10 +1102,10 @@ const App: React.FC = () => {
     const handleSessionExpired = (e: Event) => {
       try {
         console.warn(">>> [Session] Evento de Sessão Expirada capturado. Inicializando canal assíncrono de proteção de hardware...");
-
+        
         const eventDetail = (e as CustomEvent)?.detail;
         const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
-
+        
         // Fila de Expiração Assíncrona e Proteção de Hardware
         const waitBatchAndSave = () => {
           return new Promise<void>((resolve) => {
@@ -1122,8 +1136,6 @@ const App: React.FC = () => {
         waitBatchAndSave().then(() => {
           // Limpa estados e chaves de sessão síncronas após a segurança dos arquivos ser assegurada
           setUser(null);
-          setIsAdmin(false);
-          setRole(null);
           sessionStorage.clear();
 
           setModalConfig({
@@ -1137,8 +1149,6 @@ const App: React.FC = () => {
         }).catch((err) => {
           console.error(">>> [Session] Erro inesperado na segurança física de expiração:", err);
           setUser(null);
-          setIsAdmin(false);
-          setRole(null);
           sessionStorage.clear();
           setHistory([AppScreen.LOGIN]);
         });
@@ -1169,7 +1179,7 @@ const App: React.FC = () => {
     const monitorId = startSecurityMonitor((threats) => {
       setIsSafeMode(false);
       setSecurityThreats(threats);
-
+      
       if (threats.includes('DEBUGGER_DETECTED') || threats.includes('SUSPICIOUS_SCRIPTS')) {
         setModalConfig({
           isOpen: true,
@@ -1199,7 +1209,7 @@ const App: React.FC = () => {
         if (databaseMode === DatabaseMode.INTERNAL) {
           // Garante a existência da tabela SYSTEM_CONTEXT
           await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-
+          
           // Busca a unidade selecionada
           const uRows = await sqliteService.query("SELECT value FROM SYSTEM_CONTEXT WHERE key = 'selected_unit'");
           if (uRows && uRows.length > 0) {
@@ -1220,15 +1230,15 @@ const App: React.FC = () => {
       }
 
       // Tratamento com coalescência elegante prático
-      const finalUnit = recoveredUnit ||
-                        sessionStorage.getItem('filial') ||
-                        localStorage.getItem('filial') ||
-                        sessionStorage.getItem('selectedUnit') ||
+      const finalUnit = recoveredUnit || 
+                        sessionStorage.getItem('filial') || 
+                        localStorage.getItem('filial') || 
+                        sessionStorage.getItem('selectedUnit') || 
                         localStorage.getItem('app_selected_unit') || null;
       setSelectedUnit(finalUnit);
 
-      const finalCampaign = recoveredCampaign ||
-                            sessionStorage.getItem('activeCampaignId') ||
+      const finalCampaign = recoveredCampaign || 
+                            sessionStorage.getItem('activeCampaignId') || 
                             localStorage.getItem('app_current_campaign') || null;
       if (finalUnit) {
         localStorage.setItem('app_selected_unit', finalUnit);
@@ -1301,7 +1311,7 @@ const App: React.FC = () => {
       console.warn(">>> [Bootstrap Failsafe] sqliteStatus não está totalmente inicializado/conectado ainda. Retornando array vazio.");
       return [];
     }
-    if (!selectedUnit) return inventory.assets;
+    if (!selectedUnit) return inventory.assets; 
 
     // v24.50: No modo interno SQLite, as duas fontes de verdade estão perfeitamente sincronizadas de forma indexada
     if (databaseMode === DatabaseMode.INTERNAL) {
@@ -1316,9 +1326,9 @@ const App: React.FC = () => {
       const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
       const assetTenant = normalizeKey(a.tenantId || a.GRUPO_EMPRESARIAL || '');
-
-      if (assetFilial === selKey ||
-          assetUnitId === selKey ||
+      
+      if (assetFilial === selKey || 
+          assetUnitId === selKey || 
           assetTenant === selKey) {
         const statusUpper = String(a.STATUS || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
@@ -1443,12 +1453,22 @@ const App: React.FC = () => {
 
         queryStr += ")";
 
+        const currentAddr = sessionStorage.getItem('current_selected_address') || selectedAddress;
+        if (currentAddr && currentAddr.trim() !== '') {
+          if (currentAddr === 'GERAL - NÃO ESPECIFICADO') {
+            queryStr += " AND (ENDERECO IS NULL OR TRIM(ENDERECO) = '' OR TRIM(UPPER(ENDERECO)) = 'GERAL - NÃO ESPECIFICADO' OR endereco IS NULL OR TRIM(endereco) = '' OR TRIM(UPPER(endereco)) = 'GERAL - NÃO ESPECIFICADO')";
+          } else {
+            queryStr += " AND (TRIM(UPPER(ENDERECO)) = ? OR TRIM(UPPER(endereco)) = ?)";
+            params.push(currentAddr.toUpperCase().trim(), currentAddr.toUpperCase().trim());
+          }
+        }
+
         if (inventory.currentCampaignId) {
           queryStr += " AND currentCampaignId = ?";
           params.push(inventory.currentCampaignId);
         }
         const results = await sqliteService.query(queryStr, params) as Record<string, unknown>[];
-
+        
         const parsedAssets = results.map(row => {
           const asset = { ...row } as Record<string, unknown>;
           ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
@@ -1466,7 +1486,7 @@ const App: React.FC = () => {
 
         if (active) {
           setSqliteUnitAssets(parsedAssets);
-          console.log(`>>> [KARDEK] Sucesso: ${parsedAssets.length} ativos carregados do SQLite indexado.`);
+          console.log(`>>> [KARDEK] Sucesso: ${parsedAssets.length} ativos carregados do SQLite indexado para o endereço "${currentAddr || 'TODOS'}".`);
         }
       } catch (e) {
         console.error(">>> [KARDEK] Erro ao carregar ativos para a unidade via SQLite:", e);
@@ -1477,22 +1497,22 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId]);
+  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId, selectedAddress]);
 
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
     const setupKeyboardListeners = async () => {
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
-
+        
         const showListener = await Keyboard.addListener('keyboardWillShow', () => {
           setIsKeyboardVisible(true);
         });
-
+        
         const hideListener = await Keyboard.addListener('keyboardWillHide', () => {
           setIsKeyboardVisible(false);
         });
-
+        
         return () => {
           showListener.remove();
           hideListener.remove();
@@ -1502,10 +1522,10 @@ const App: React.FC = () => {
         return undefined;
       }
     };
-
+    
     let cleanup: (() => void) | undefined;
     setupKeyboardListeners().then(cb => { cleanup = cb; });
-
+    
     return () => {
       if (cleanup) cleanup();
     };
@@ -1516,12 +1536,12 @@ const App: React.FC = () => {
   const currentTenantId = useMemo(() => {
     // 1. Prioridade: Tenant do usuário logado
     let t = (user?.tenantId || '').trim();
-
+    
     // 2. Fallback: Se for Admin/Gestor e não tiver tenant, assume CICOPAL
     const isAdmin = !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
     if (!t && isAdmin) t = 'CICOPAL';
-
-    // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados,
+    
+    // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados, 
     // tenta extrair o tenant do primeiro ativo válido para manter o contexto
     if (!t && inventory.assets.length > 0) {
       const firstValid = inventory.assets.find(a => a.tenantId || a.GRUPO_EMPRESARIAL);
@@ -1552,16 +1572,16 @@ const App: React.FC = () => {
 
         const result = await sqliteService.getFileStatus();
         if (result.status === 'busy') return; // Ignora pacificamente se houver gravação em curso
-
+        
         setFileStatus(result as { status: string; path: string; fileName?: string });
-
+        
         const isRestricted = result.status === 'permission_denied' || result.status === 'prompt' || result.status === 'expired';
-
+        
         if (isRestricted && !isReconnecting) {
           // Só abrimos o overlay se NÃO houver dados carregados ou se estivermos em Dashboard (onde integridade é vital)
           // v24.5.1: Se o sistema JA está inicializado (isInitialized), ignoramos status 'prompt' temporários do navegador
           const isReallyDisconnected = !sqliteService.getIsInitialized() || result.status === 'permission_denied' || result.status === 'expired';
-
+          
           if (!showReconnectOverlay && isReallyDisconnected && (!isDataLoaded || inventoryRef.current.assets.length === 0 || screen === 'DASHBOARD')) {
             console.warn(`>>> [DBA] Vínculo expirado ou inacessível (${result.status}). Abrindo overlay.`);
             setShowReconnectOverlay(true);
@@ -1571,7 +1591,7 @@ const App: React.FC = () => {
             console.log(">>> [DBA] Vínculo reestabelecido. Fechando overlay.");
             setShowReconnectOverlay(false);
           }
-
+          
           // Sincronização reativa e proteção contra UI vazia
           if (!isDataLoaded || inventoryRef.current.assets.length === 0) {
             const status = sqliteService.getDbStatus();
@@ -1588,7 +1608,7 @@ const App: React.FC = () => {
           }
         }
       };
-
+      
       checkFileStatus();
       const interval = setInterval(checkFileStatus, 5000); // Polling mais frequente (5s) para melhor UX
       return () => clearInterval(interval);
@@ -1599,13 +1619,13 @@ const App: React.FC = () => {
 
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
-    if (!dbInitialized || sqliteStatus.loading) {
+    if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
       console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
       return;
     }
     let tenantId = currentTenantId;
     const unitId = currentUnitId;
-
+    
     // Fallback de segurança para Tenant caso o useMemo esteja em delay
     if (!tenantId) {
       tenantId = (user?.tenantId || '').trim();
@@ -1616,7 +1636,7 @@ const App: React.FC = () => {
 
     console.log(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
     console.log(`>>> [Governance] Contexto: Tenant=${tenantId}, Unidade=${unitId || 'TODAS'}, Modo=${databaseMode}`);
-
+    
     if (!tenantId) {
       console.warn(">>> [Governance] refreshCampaigns ABORTADO: Sem TenantID!");
       return;
@@ -1650,7 +1670,7 @@ const App: React.FC = () => {
       const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
       console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
       setLastQueryLog(resultMsg);
-
+      
       setCampaigns([...(campaignData || [])]);
 
       // v24.50: Busca Unidades Operacionais via SQL para performance
@@ -1678,7 +1698,7 @@ const App: React.FC = () => {
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
-    if (!dbInitialized || sqliteStatus.loading) {
+    if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
       return;
     }
     if (user?.tenantId) {
@@ -1700,12 +1720,12 @@ const App: React.FC = () => {
   // Sincronização Reativa Obrigatória no Foco (Governança GBR)
   useEffect(() => {
     const criticalScreens = [
-      AppScreen.MAIN_MENU,
-      AppScreen.UNIT_SELECTION,
+      AppScreen.MAIN_MENU, 
+      AppScreen.UNIT_SELECTION, 
       AppScreen.CAMPAIGN_MANAGEMENT,
       AppScreen.DASHBOARD
     ];
-
+    
     if (criticalScreens.includes(screen)) {
       console.log(`>>> [Governance] Re-leitura obrigatória do banco ao focar: ${screen}`);
       refreshCampaigns();
@@ -1724,7 +1744,7 @@ const App: React.FC = () => {
       if (lastImportingState && !currentState) {
         console.log(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
         const tenantId = user?.tenantId || 'CICOPAL';
-
+        
         // Se for Mobile Nativo, força salvar para flush total
         const { Capacitor } = await import('@capacitor/core');
         if (Capacitor.isNativePlatform()) {
@@ -1735,7 +1755,7 @@ const App: React.FC = () => {
             console.error(">>> [Re-calibração Mobile] Erro ao salvar banco:", e);
           }
         }
-
+        
         // Sincroniza os contadores
         try {
           const sqlUnits = await sqliteService.getOperationalUnitsWithStats(tenantId);
@@ -1744,7 +1764,7 @@ const App: React.FC = () => {
         } catch (e) {
           console.error(">>> [Re-calibração Mobile] Erro ao refrescar unidades de contagem:", e);
         }
-
+        
         setRefreshVersion(prev => prev + 1);
         await refreshCampaigns();
       }
@@ -1765,7 +1785,7 @@ const App: React.FC = () => {
       AppScreen.UNIT_CONFIGURATOR,
       AppScreen.CAMPAIGN_MANAGEMENT
     ];
-
+    
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
       // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
@@ -1806,7 +1826,7 @@ const App: React.FC = () => {
 
   const handleUpdateUnitConfig = async (unitId: string, lat: number, lng: number) => {
     if (!user) return;
-
+    
     const configToSave: UnitConfig = {
       tenantId: user.tenantId || 'CICOPAL',
       _unitid: unitId,
@@ -1820,10 +1840,10 @@ const App: React.FC = () => {
     };
 
     console.log('>>> [App] Atualizando Âncora GPS para Unidade:', unitId);
-
+    
     try {
       await saveUnitConfig(configToSave);
-
+      
       // Atualiza o estado local imediatamente para refletir a mudança
       const updatedConfigs = await fetchUnitConfigs(user.tenantId);
       setInventory(prev => ({
@@ -1831,7 +1851,7 @@ const App: React.FC = () => {
         unitConfigs: updatedConfigs,
         lastUpdated: new Date().toISOString()
       }));
-
+      
       // Se estiver em modo interno, força salvamento no SQLite físico
       if (databaseMode === DatabaseMode.INTERNAL) {
         saveInventory({
@@ -1859,17 +1879,17 @@ const App: React.FC = () => {
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
     if (!skipLoadingState && isSyncing) return;
     if (databaseMode === DatabaseMode.INTERNAL) return;
-
+    
     // GUARD: Check if online
     if (!navigator.onLine) {
       console.log('Push ignorado: Dispositivo offline.');
       return;
     }
-
+    
     const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (!hasSupabase) return;
 
-    const effectiveTenantId = user?.tenantid;
+    const effectiveTenantId = user?.tenantId || user?.tenantid;
 
     const dirtyIds = Array.from(dirtyAssetsRef.current);
     if (dirtyIds.length === 0) return;
@@ -1881,7 +1901,7 @@ const App: React.FC = () => {
       try {
         // Sincroniza os ativos e recebe os IDs processados com sucesso (Push)
         const syncedIds = await syncAssetsToCloud(dirtyAssets, effectiveTenantId);
-
+        
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
         // @ts-expect-error - assets is removed for sync
@@ -1890,7 +1910,7 @@ const App: React.FC = () => {
 
         // Remove apenas os que foram sincronizados com sucesso (Resiliência)
         syncedIds.forEach(id => dirtyAssetsRef.current.delete(id));
-
+        
         if (syncedIds.length === dirtyAssets.length) {
           setLastSyncTime(new Date().toISOString());
           setSyncError(null);
@@ -1921,12 +1941,12 @@ const App: React.FC = () => {
     const next = !isFieldMode;
     setIsFieldMode(next);
     localStorage.setItem('app_field_mode', String(next));
-
+    
     setModalConfig({
       isOpen: true,
       title: next ? 'Modo de Campo Ativado' : 'Modo de Campo Desativado',
-      message: next
-        ? 'O Modo de Campo (Offline) foi ativado. O sistema priorizará o uso local e suspenderá tentativas automáticas de sincronização até que você retorne.'
+      message: next 
+        ? 'O Modo de Campo (Offline) foi ativado. O sistema priorizará o uso local e suspenderá tentativas automáticas de sincronização até que você retorne.' 
         : 'O Modo de Campo foi desativado. O sistema retomará a sincronização automática com a nuvem.',
       type: 'info'
     });
@@ -1934,7 +1954,7 @@ const App: React.FC = () => {
 
   const syncFromCloud = useCallback(async (explicitTenantId?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
     if (isSyncing) return;
-
+    
     const mode = explicitMode || databaseMode;
     const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
@@ -1942,7 +1962,7 @@ const App: React.FC = () => {
       console.log('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
       return;
     }
-
+    
     // BLINDAGEM TOTAL: Se o modo for INTERNAL, não permite nenhuma chamada de rede
     if (mode === DatabaseMode.INTERNAL) {
       console.log('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
@@ -1966,10 +1986,10 @@ const App: React.FC = () => {
       console.log('Sincronização ignorada: Usuário não autenticado.');
       return;
     }
-
+    
     const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const rawTenantId = explicitTenantId || user?.tenantId;
-
+    
     // O tenantid agora segue estritamente o perfil do usuário ou o ID explícito fornecido
     const tenantid = Array.isArray(rawTenantId) ? rawTenantId : (rawTenantId ? [rawTenantId] : undefined);
 
@@ -1997,9 +2017,9 @@ const App: React.FC = () => {
       }
       return;
     }
-
+    
     console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
-
+    
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
     try {
@@ -2007,12 +2027,12 @@ const App: React.FC = () => {
       // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
       // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
       try {
-        await pushLocalChanges(true);
+        await pushLocalChanges(true); 
         await processSyncQueue();
       } catch (pushErr) {
         console.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
       }
-
+      
       const pendingItems = await getPendingSyncItems();
       setPendingPhotosCount(pendingItems.length);
 
@@ -2028,8 +2048,8 @@ const App: React.FC = () => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
           const cloudAssets = cloudData.assets || [];
-
-          // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais,
+          
+          // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais, 
           // e não foi um erro de rede, pode ser um problema de tenantid.
           // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
           if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
@@ -2040,7 +2060,7 @@ const App: React.FC = () => {
           // MERGE: Preserva alterações locais que ainda não foram sincronizadas
           const mergedAssets = [...cloudAssets];
           const dirtyIds = Array.from(dirtyAssetsRef.current);
-
+          
           if (dirtyIds.length > 0) {
             console.log(`>>> [Sync] Mesclando ${dirtyIds.length} alterações locais pendentes no pull da nuvem.`);
             dirtyIds.forEach(id => {
@@ -2049,10 +2069,10 @@ const App: React.FC = () => {
                 const index = mergedAssets.findIndex(a => String(a.id) === id);
                 if (index !== -1) {
                   const cloudAsset = mergedAssets[index];
-
+                  
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = cloudAsset._conferido &&
-                                   cloudAsset._auditor &&
+                  const isConflict = cloudAsset._conferido && 
+                                   cloudAsset._auditor && 
                                    cloudAsset._auditor !== (user?.email || 'unknown') &&
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
 
@@ -2090,7 +2110,7 @@ const App: React.FC = () => {
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
-
+          
           // Log de Auditoria na Nuvem
           if (mode === DatabaseMode.SUPABASE) {
             logAuditEvent({
@@ -2129,11 +2149,11 @@ const App: React.FC = () => {
       const err = error as Record<string, unknown>;
       console.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
       const errMsg = String(err?.message || error || '').toLowerCase();
-      const isSuspendedNetwork = errMsg.includes('suspended') ||
-                                errMsg.includes('io') ||
-                                errMsg.includes('network') ||
-                                errMsg.includes('failed to fetch') ||
-                                errMsg.includes('fetch') ||
+      const isSuspendedNetwork = errMsg.includes('suspended') || 
+                                errMsg.includes('io') || 
+                                errMsg.includes('network') || 
+                                errMsg.includes('failed to fetch') || 
+                                errMsg.includes('fetch') || 
                                 errMsg.includes('timeout') ||
                                 errMsg.includes('abort') ||
                                 errMsg.includes('load failed') ||
@@ -2141,7 +2161,7 @@ const App: React.FC = () => {
 
       if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
         console.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
-
+        
         // Chaveia estados para operação offline integrada
         setDatabaseMode(DatabaseMode.INTERNAL);
         localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
@@ -2173,7 +2193,7 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [databaseMode, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
+  }, [databaseMode, user?.tenantId, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
 
   const runCargaInicialLocal = useCallback(async () => {
     if (isSyncing) return;
@@ -2207,7 +2227,7 @@ const App: React.FC = () => {
 
     try {
       // Usaremos o tenantid do usuário mestre para baixar os dados do cliente correto
-      const tid = user?.tenants || user?.tenantid || 'CICOPAL';
+      const tid = user?.tenants || user?.tenantId || user?.tenantid || 'CICOPAL';
       const tenantidList = Array.isArray(tid) ? tid : [tid];
 
       console.log('>>> [Carga Inicial] Chamando fetchFullInventory para tenants:', tenantidList);
@@ -2301,7 +2321,7 @@ const App: React.FC = () => {
     };
 
     window.addEventListener('gbr_photo_synced', handlePhotoSynced);
-
+    
     // Expose map opener for Dashboard
     (window as unknown as { onOpenMap: () => void }).onOpenMap = () => pushScreen(AppScreen.ASSET_MAP);
 
@@ -2320,15 +2340,15 @@ const App: React.FC = () => {
       }
     });
 
-    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantid || '', (payload) => {
+    const assetSubscription = subscribeToAssetChanges(user?.tenants || user?.tenantId || user?.tenantid || '', (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
-
+      
       setInventory(prev => {
         let updatedAssets = [...prev.assets];
         let hasChanges = false;
-
+        
         if (eventType === 'INSERT') {
           if (!updatedAssets.find(a => String(a.id) === String(newAsset.id))) {
             updatedAssets.push(newAsset);
@@ -2354,7 +2374,7 @@ const App: React.FC = () => {
             hasChanges = true;
           }
         }
-
+        
         if (!hasChanges) return prev;
 
         const newState = { ...prev, assets: updatedAssets };
@@ -2419,7 +2439,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const body = document.body;
     body.classList.remove('theme-internal', 'theme-supabase', 'theme-dark');
-
+    
     if (inventory.darkMode) {
       body.classList.add('theme-dark');
     } else {
@@ -2440,13 +2460,13 @@ const App: React.FC = () => {
     const init = async () => {
       // Solicita persistência durável para evitar perda de dados em limpeza de cache
       await requestPersistentStorage();
-
+      
       console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
       let savedInventory: InventoryState | null = null;
       try {
         savedInventory = await loadInventory(databaseMode);
         const saved = savedInventory;
-
+        
         // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
         // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso
         // if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
@@ -2459,17 +2479,27 @@ const App: React.FC = () => {
           try {
             const count = await sqliteService.getAssetCount();
             console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
-
+            
             if (savedInventory.status === DatabaseStatus.ERROR) {
               console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
               setShowReconnectOverlay(true);
-              return;
+              return; 
             }
 
             // Discrepância real: O loadInventory trouxe dados (do cache?) mas o banco físico executado agora reporta 0
             if (count === 0 && savedInventory.assets.length > 0) {
-              console.warn(">>> [Auditoria] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO.");
-              setIntegrityFailed(true);
+              console.warn(">>> [Auditoria SRE] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO. Iniciando Autorreparação de Emergência...");
+              try {
+                // Inserir os ativos cacheados diretamente no banco físico SQLite de alta performance
+                await sqliteService.bulkInsertAssets(savedInventory.assets);
+                await sqliteService.saveInventoryConfig(savedInventory);
+                const countPosReparo = await sqliteService.getAssetCount();
+                console.log(`>>> [Auditoria SRE] Autorreparação concluída! Registros reinseridos na camada nativa: ${countPosReparo}`);
+                setIntegrityFailed(false);
+              } catch (reparoErr) {
+                console.error(">>> [Auditoria SRE ERR] Falha gravíssima ao autorreparar barramento SQL físico com cache local:", reparoErr);
+                setIntegrityFailed(true);
+              }
             } else if (count > 0) {
               // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade se houver.
               if (integrityFailed) {
@@ -2548,7 +2578,7 @@ const App: React.FC = () => {
                 hasChanges = true;
                 return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
               }
-
+              
               // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
               if (!a._conferido) {
                 hasChanges = true;
@@ -2573,10 +2603,10 @@ const App: React.FC = () => {
             inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
             immersiveMode: saved.immersiveMode ?? prev.immersiveMode
           }));
-
+          
           // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
           if (!recoverySource) setRecoverySource('CACHE');
-
+          
           setShowRecoveryToast(true);
           setTimeout(() => setShowRecoveryToast(false), 5000);
         } else {
@@ -2589,7 +2619,7 @@ const App: React.FC = () => {
               // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
               const todayStr = '2026-03-16';
               const yesterdayStr = '2026-03-15T12:00:00Z';
-
+              
               parsed.assets = parsed.assets.map((a: Asset) => {
                 const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
                 if (isConferido) {
@@ -2642,9 +2672,9 @@ const App: React.FC = () => {
             ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = true;
           }
           const cloudData = await fetchFullInventory(
-            user?.tenantid,
-            undefined,
-            undefined,
+            user?.tenantId || user?.tenantid, 
+            undefined, 
+            undefined, 
             async (loadedConfig) => {
               // Mova a chamada de persistência de configuração para ser executada uma única vez, de forma atômica, junto ao método onComplete() no final de toda a paginação de registros
               try {
@@ -2676,8 +2706,8 @@ const App: React.FC = () => {
             ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
           }
         }
-      } catch (e) {
-        console.error("Data load failed", e);
+      } catch (e) { 
+        console.error("Data load failed", e); 
       } finally {
         console.log("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
@@ -2687,7 +2717,7 @@ const App: React.FC = () => {
           localStorage.setItem('isDatabaseLoaded', 'true');
           setIsDatabaseLoaded(true);
         }
-
+        
         // Sinaliza que a busca foi concluída
         if (typeof window !== 'undefined') {
           ((window as unknown) as { gbr_search_concluded?: boolean }).gbr_search_concluded = true;
@@ -2709,14 +2739,14 @@ const App: React.FC = () => {
             const currentAssetsCount = savedInventory?.assets?.length || 0;
             if (currentAssetsCount === 0) {
               const cloudData = await Promise.race([
-                fetchFullInventory(user?.tenantid),
+                fetchFullInventory(user?.tenantId || user?.tenantid),
                 new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
               ]).catch(() => null);
 
               if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
                 const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
                 const localTime = savedInventory?.lastUpdated ? new Date(savedInventory.lastUpdated).getTime() : 0;
-
+                
                 const isLocalEmptySec = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
                 const justClearedSec = sessionStorage.getItem('app_just_cleared_data') === 'true';
 
@@ -2736,8 +2766,8 @@ const App: React.FC = () => {
                   setShowRecoveryToast(true);
                   setTimeout(() => setShowRecoveryToast(false), 5000);
                 } else if (isLocalEmptySec && (!cloudData.assets || cloudData.assets.length === 0)) {
-                  console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantid}`);
-                  if (!user?.tenantid) {
+                  console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantId || user?.tenantid}`);
+                  if (!(user?.tenantId || user?.tenantid)) {
                     setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
                   } else {
                     setSyncError(`Erro ao sincronizar dados da nuvem.`);
@@ -2749,10 +2779,11 @@ const App: React.FC = () => {
             } else {
               // Se já temos ativos locais, apenas verifica em background se a nuvem é mais nova sem puxar todos os ativos de novo
               // de uma só vez (otimização)
+              const tenantIdStr = user?.tenantId || user?.tenantid || '';
               const { data: configData } = await supabase
                 .from('inventory_config')
                 .select('last_updated')
-                .eq('id', user?.tenantid ? `config_${user.tenantid}` : 'global_config')
+                .eq('id', tenantIdStr ? `config_${tenantIdStr}` : 'global_config')
                 .maybeSingle();
 
               if (configData && configData.last_updated) {
@@ -2799,7 +2830,7 @@ const App: React.FC = () => {
         setPublicAsset(foundLocal);
       } else {
         // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam, user?.tenantid).then(foundCloud => {
+        getAssetByTag(etqParam, user?.tenantId || user?.tenantid).then(foundCloud => {
           if (foundCloud) {
             setPublicAsset(foundCloud);
           }
@@ -2843,7 +2874,7 @@ const App: React.FC = () => {
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(users));
-
+    
     if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       if (isAdmin) {
@@ -2867,7 +2898,7 @@ const App: React.FC = () => {
           setUsers(prev => {
             // Criamos um mapa dos usuários locais para preservar dados locais (como senhas e nomes recém editados)
             const localMap = new Map(prev.map(u => [u.email.toLowerCase(), u]));
-
+            
             // Mesclamos: prioridade para a nuvem em permissões, mas preservamos dados locais se existirem
             const merged = cloudUsers.map(cloud => {
               const local = localMap.get(cloud.email.toLowerCase());
@@ -2875,16 +2906,16 @@ const App: React.FC = () => {
                 return {
                   ...cloud,
                   // Se o nome local for diferente do da nuvem, pode ser uma edição recente
-                  // Mas a nuvem deve ser a verdade eventual.
+                  // Mas a nuvem deve ser a verdade eventual. 
                   // Para evitar o "revert" imediato, poderíamos preferir o local se for diferente.
                   // No entanto, syncUsersToCloud já deve ter enviado o local para a nuvem.
-                  password: local.password,
+                  password: local.password, 
                   mustChangePassword: local.mustChangePassword
                 };
               }
               return cloud;
             });
-
+            
             // Adicionamos usuários locais que ainda não estão na nuvem
             const cloudEmails = new Set(cloudUsers.map(u => u.email.toLowerCase()));
             prev.forEach(local => {
@@ -2892,7 +2923,7 @@ const App: React.FC = () => {
                 merged.push(local);
               }
             });
-
+            
             return merged;
           });
         }
@@ -2917,9 +2948,9 @@ const App: React.FC = () => {
           msFullscreenEnabled?: boolean;
         };
 
-        const isFullscreenEnabled = doc.fullscreenEnabled ||
-                                   doc.webkitFullscreenEnabled ||
-                                   doc.mozFullScreenEnabled ||
+        const isFullscreenEnabled = doc.fullscreenEnabled || 
+                                   doc.webkitFullscreenEnabled || 
+                                   doc.mozFullScreenEnabled || 
                                    doc.msFullscreenEnabled;
 
         if (!isFullscreenEnabled) {
@@ -2934,7 +2965,7 @@ const App: React.FC = () => {
           mozRequestFullScreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
           msRequestFullscreen?: (options?: { navigationUI: 'hide' }) => Promise<void>;
         };
-
+        
         const options = { navigationUI: 'hide' as const };
 
         if (docEl.requestFullscreen) {
@@ -2948,7 +2979,7 @@ const App: React.FC = () => {
         } else if (docEl.msRequestFullscreen) {
           docEl.msRequestFullscreen(options);
         }
-
+        
         setInventory(prev => ({ ...prev, immersiveMode: true }));
       } else {
         const doc = document as Document & {
@@ -2965,7 +2996,7 @@ const App: React.FC = () => {
         } else if (doc.msExitFullscreen) {
           doc.msExitFullscreen();
         }
-
+        
         setInventory(prev => ({ ...prev, immersiveMode: false }));
       }
     } catch (e) {
@@ -2985,7 +3016,7 @@ const App: React.FC = () => {
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     };
   }, []);
-
+  
   // Estados para Modal de Duplicidade
 
   useEffect(() => {
@@ -3009,12 +3040,12 @@ const App: React.FC = () => {
     const stats: Record<string, { total: number; checked: number; displayName: string }> = {};
     const locationsSet = new Set<string>(manualLocations);
     const centrosDeCustoSet = new Set<string>();
-
+    
     const currentCompKey = selectedUnit ? normalizeKey(selectedUnit) : '';
-
+    
     for (let i = 0; i < inventory.assets.length; i++) {
       const a = inventory.assets[i];
-
+      
       // Centro de Custo
       if (a.CENTRODECUSTO) {
         centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
@@ -3023,11 +3054,11 @@ const App: React.FC = () => {
       const assetFilial = normalizeKey(a.filial || '');
       const assetUnitId = normalizeKey(a._unitid || '');
       const assetTenant = normalizeKey(a.tenantId || a.GRUPO_EMPRESARIAL || '');
-
+      
       // Se houver unidade selecionada, o ativo deve pertencer a ela (por ID ou Nome)
-      if (currentCompKey &&
-          assetFilial !== currentCompKey &&
-          assetUnitId !== currentCompKey &&
+      if (currentCompKey && 
+          assetFilial !== currentCompKey && 
+          assetUnitId !== currentCompKey && 
           assetTenant !== currentCompKey) {
         continue;
       }
@@ -3036,26 +3067,26 @@ const App: React.FC = () => {
       const effectiveLoc = a._localMaster || a.ENDERECO || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
-
+      
       if (locDisplay) locationsSet.add(locDisplay);
 
       const statusUpper = String(a.STATUS || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
-
+      
       if (isBaixado && !isConferido) continue;
 
       if (!stats[locKey]) stats[locKey] = { total: 0, checked: 0, displayName: locDisplay };
-
+      
       if (!isBaixado) stats[locKey].total++;
-
+      
       if (isConferido) {
         stats[locKey].checked++;
         if (isBaixado) stats[locKey].total++;
       }
     }
 
-    return {
-      locationsWithStats: stats,
+    return { 
+      locationsWithStats: stats, 
       allLocations: Array.from(locationsSet).sort(),
       uniqueCentrosDeCusto: Array.from(centrosDeCustoSet).sort()
     };
@@ -3066,11 +3097,11 @@ const App: React.FC = () => {
     const statusUpper = String(asset.STATUS || '').toUpperCase();
     const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
     const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-
+    
     // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA ou Status de Baixa
     const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.DATABAIXA;
     asset._is_divergent_baixa = isGoldenRuleDivergent;
-
+    
     // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
     const originalEtq = normalizeKey(asset._plaquetaMaster || '');
     const needsLabel = originalEtq === 'ETIQUETAR';
@@ -3084,7 +3115,7 @@ const App: React.FC = () => {
 
     // 2. BAIXADO (Se não conferido)
     if (isBaixado && !isConferido) return TagInventario.BAIXADO;
-
+    
     // 3. ADOTADO EXTERNO (Empresa diferente)
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || asset.tenantId || asset.GRUPO_EMPRESARIAL || '');
     const currentCompKey = normalizeKey(selectedUnit || '');
@@ -3108,7 +3139,7 @@ const App: React.FC = () => {
     }
 
     const targetLocKey = normalizeKey(targetLocation);
-    const originalLocKey = normalizeKey(asset.ENDERECO || "");
+    const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
     const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
 
     // 1) CONFERIDO: Localizado exatamente no ENDERECO original
@@ -3129,18 +3160,18 @@ const App: React.FC = () => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
       if (isSyncing) return;
-
+      
       try {
         if (isDataLoaded) {
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           const dirtyAssets = dirtyIds.map(id => inventory.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
-
+          
           const hasSupabase = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-
+          
           // Sincroniza se houver ativos sujos OU se a config mudou (lastUpdated mudou)
           // APENAS se estiver em modo SUPABASE e houver conexão configurada
           const shouldSyncCloud = hasSupabase && databaseMode === DatabaseMode.SUPABASE && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
-
+          
           if (shouldSyncCloud) {
             setIsSyncing(true);
             try {
@@ -3164,7 +3195,7 @@ const App: React.FC = () => {
               console.log(">>> [Persistence] Ignorando persistência Fast Path de configuração durante importação massiva/ingestão.");
             }
           }
-
+          
           dirtyAssetsRef.current.clear();
         }
         localStorage.setItem('app_screen_history', safeStringify(history));
@@ -3212,7 +3243,7 @@ const App: React.FC = () => {
         console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
         await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [unitIdToPersist]);
-
+        
         if (params?.campaign) {
           await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [params.campaign.id]);
         }
@@ -3242,25 +3273,26 @@ const App: React.FC = () => {
 
   // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
   useEffect(() => {
-    if (!dbInitialized || !user) return;
+    if (!dbInitialized || !sqliteService.getIsInitialized() || !user) return;
 
     const checkDatabaseEmptiness = async () => {
       try {
         const count = databaseMode === DatabaseMode.INTERNAL ? await sqliteService.getAssetCount() : inventory.assets.length;
         const isReallyEmpty = count === 0;
-
-        if (isReallyEmpty) {
+        
+        const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+        if (isReallyEmpty && !isBypass) {
           const exemptScreens = [
-            AppScreen.LOGIN,
-            AppScreen.LOAD_DATABASE,
-            AppScreen.REGISTER,
+            AppScreen.LOGIN, 
+            AppScreen.LOAD_DATABASE, 
+            AppScreen.REGISTER, 
             AppScreen.CHANGE_PASSWORD,
             AppScreen.DATABASE_MANAGER,
             AppScreen.UNIT_SELECTION,
             AppScreen.UNIT_CONFIGURATOR,
             AppScreen.CAMPAIGN_MANAGEMENT
           ];
-
+          
           if (!exemptScreens.includes(screen)) {
             console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Carga Inicial.");
             pushScreen(AppScreen.LOAD_DATABASE);
@@ -3270,7 +3302,7 @@ const App: React.FC = () => {
         console.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
       }
     };
-
+    
     checkDatabaseEmptiness();
   }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, pushScreen]);
 
@@ -3281,9 +3313,9 @@ const App: React.FC = () => {
     // Função para processar o login a partir de uma sessão
     const processSession = async (session: Session) => {
       if (!session?.user) return;
-
+      
       const currentUser = userRef.current;
-
+      
       // Se já temos um usuário no estado e é o mesmo, e já tem tenantid válido, não fazemos nada para evitar loop
       if (currentUser && currentUser.email === session.user.email && currentUser.tenantId) return;
 
@@ -3292,19 +3324,19 @@ const App: React.FC = () => {
         // Garante que o usuário tenha um perfil na tabela user_permissions
         // Passamos os metadados para garantir que o tenantId e role sejam preservados
         // Unificamos user_metadata e app_metadata para garantir que o tenantid seja encontrado
-        const unifiedMetadata = {
-          ...(session.user.user_metadata || {}),
-          ...(session.user.app_metadata || {})
+        const unifiedMetadata = { 
+          ...(session.user.user_metadata || {}), 
+          ...(session.user.app_metadata || {}) 
         };
         const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
         const permissionsObj = permissions as unknown as Record<string, unknown>;
         const unifiedMetadataObj = unifiedMetadata as unknown as Record<string, unknown>;
-        console.log(`[Auth] Perfil carregado para ${session.user.email}:`, {
-          dbTenant: permissions.tenantId || (permissionsObj.tenantid as string),
+        console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
+          dbTenant: permissions.tenantId || (permissionsObj.tenantid as string), 
           metaTenant: unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string),
           finalTenant: permissions.tenantId || (permissionsObj.tenantid as string) || ''
         });
-
+        
         const resolvedTenantId = (permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
         const resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
@@ -3315,7 +3347,7 @@ const App: React.FC = () => {
           sessionStorage.removeItem('app_current_user');
           sessionStorage.clear();
           setHistory([AppScreen.LOAD_DATABASE]);
-
+          
           if (supabase) {
             await supabase.auth.signOut();
           }
@@ -3346,16 +3378,16 @@ const App: React.FC = () => {
         };
 
         // Só atualizamos se houver mudança real para evitar loops de renderização
-        const hasChanged = !currentUser ||
-                          currentUser.email !== loggedUser.email ||
-                          currentUser.tenantId !== loggedUser.tenantId ||
+        const hasChanged = !currentUser || 
+                          currentUser.email !== loggedUser.email || 
+                          currentUser.tenantId !== loggedUser.tenantId || 
                           currentUser.role !== loggedUser.role;
 
         if (hasChanged) {
           setUser(loggedUser);
           sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
         }
-
+        
         // Log de Auditoria na Nuvem
         logAuditEvent({
           user_email: loggedUser.email,
@@ -3363,7 +3395,7 @@ const App: React.FC = () => {
           details: `Usuário logado no sistema (${loggedUser.role})`,
           tenantId: loggedUser.tenantId
         });
-
+        
         // Se logou via Supabase, garante que o modo está correto
         if (databaseMode !== DatabaseMode.SUPABASE) {
           setDatabaseMode(DatabaseMode.SUPABASE);
@@ -3374,7 +3406,7 @@ const App: React.FC = () => {
         if (screen === AppScreen.LOGIN) {
           pushScreen(AppScreen.MODULE_SELECTION);
         }
-
+        
         // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
         syncFromCloud(loggedUser.tenantId, DatabaseMode.SUPABASE);
       } catch (err) {
@@ -3401,7 +3433,7 @@ const App: React.FC = () => {
     const handleUrlErrors = () => {
       const hash = window.location.hash;
       const search = window.location.search;
-
+      
       let errorCode: string | null = null;
       let errorDescription: string | null = null;
 
@@ -3414,7 +3446,7 @@ const App: React.FC = () => {
         errorCode = params.get('error_code');
         errorDescription = params.get('error_description');
       }
-
+      
       if (errorCode) {
         // Se o usuário já estiver logado, ignoramos erros de OTP expirado (clique redundante)
         if (userRef.current && (errorCode === 'otp_expired' || errorDescription?.includes('expired'))) {
@@ -3509,7 +3541,7 @@ const App: React.FC = () => {
         console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
         const errMsg = String(err instanceof Error ? err.message : err);
         const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
-
+        
         let isLocal = false;
         if (currentUserStr) {
           try {
@@ -3547,7 +3579,7 @@ const App: React.FC = () => {
       console.log('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
       const isValid = !!session && !!session.user && typeof session.user.id === "string";
       setIsSessionValid(isValid);
-
+      
       if (isValid && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         processSession(session);
       } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED' || !isValid) {
@@ -3606,7 +3638,7 @@ const App: React.FC = () => {
     const now = new Date();
     const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
     const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
-
+    
     // Backup de segurança antes da limpeza em massa
     const backupFileName = `INVENTARIO_MOBILE+KBP+LIMPEZA_MASSA+${dateStr}+${timeStr}`;
     await backupInventory(databaseMode, backupFileName);
@@ -3619,17 +3651,17 @@ const App: React.FC = () => {
       // 2. Se estiver no modo Supabase, limpa a nuvem também em uma única operação
       if (databaseMode === DatabaseMode.SUPABASE) {
         const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantid;
+        const effectiveTenantId = isGlobalAdmin ? undefined : (user?.tenantId || user?.tenantid);
         await clearCloudInventory(companiesToClear, effectiveTenantId);
-
+        
         // Atualiza o timestamp na nuvem - envolvemos em try/catch para não falhar a limpeza se apenas o log falhar
         try {
           const configToSync = { ...inventory };
           // @ts-expect-error - assets is removed for sync
           delete configToSync.assets;
-          await syncConfigToCloud({
-            ...configToSync,
-            lastUpdated: new Date().toISOString()
+          await syncConfigToCloud({ 
+            ...configToSync, 
+            lastUpdated: new Date().toISOString() 
           } as Omit<InventoryState, 'assets'>, effectiveTenantId);
         } catch (syncErr) {
           console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
@@ -3649,11 +3681,11 @@ const App: React.FC = () => {
       sessionStorage.setItem('app_just_cleared_data', 'true');
       const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
       const remainingAssets = inventory.assets.filter(a => !normalizedToClear.includes((a.filial || '').toUpperCase().trim()));
-
+      
       setInventory(prev => {
         const normalizedToClear = companiesToClear.map(c => c.toUpperCase().trim());
         const remainingCompanies = prev.companies.filter(c => !normalizedToClear.includes(c.toUpperCase().trim()));
-
+        
         return {
           ...prev,
           assets: remainingAssets,
@@ -3671,7 +3703,7 @@ const App: React.FC = () => {
       });
     } catch (error: unknown) {
       console.error('Erro na limpeza em massa:', error);
-
+      
       let errorMessage = 'Erro desconhecido';
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -3697,21 +3729,21 @@ const App: React.FC = () => {
     try {
       console.log('>>> [Integrity] Iniciando verificação manual...');
       const loaded = await loadInventory(databaseMode);
-
+      
       if (!loaded) {
         return { success: false, message: "Não foi possível carregar os dados para verificação." };
       }
 
       if (loaded._integrity_failed) {
-        return {
-          success: false,
-          message: "ALERTA: A integridade dos dados foi comprometida! O checksum SHA-256 atual não corresponde ao gravado. Isso pode indicar corrupção de dados ou alteração externa não autorizada."
+        return { 
+          success: false, 
+          message: "ALERTA: A integridade dos dados foi comprometida! O checksum SHA-256 atual não corresponde ao gravado. Isso pode indicar corrupção de dados ou alteração externa não autorizada." 
         };
       }
 
-      return {
-        success: true,
-        message: `Integridade verificada com sucesso! Todos os ${loaded.assets.length} ativos correspondem ao checksum SHA-256 gravado no último salvamento.`
+      return { 
+        success: true, 
+        message: `Integridade verificada com sucesso! Todos os ${loaded.assets.length} ativos correspondem ao checksum SHA-256 gravado no último salvamento.` 
       };
     } catch (error) {
       console.error('Erro ao verificar integridade:', error);
@@ -3742,7 +3774,7 @@ const App: React.FC = () => {
       // 3. Tenta carregar o estado do novo modo do IndexedDB
       console.log(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
       const loaded = await loadInventory(mode);
-
+      
       if (loaded && loaded.assets && loaded.assets.length > 0) {
         console.log(`>>> [ModeSwitch] Dados encontrados para ${mode}. Restaurando...`);
         setInventory(loaded);
@@ -3750,23 +3782,23 @@ const App: React.FC = () => {
         console.log(`>>> [ModeSwitch] Nenhum dado local para ${mode}. Iniciando base limpa.`);
         const cleanState = getInitialInventoryState(mode);
         setInventory(cleanState);
-
+        
         // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
         if (mode.startsWith('SUPABASE') && user) {
           console.log(`>>> [ModeSwitch] Modo Nuvem detectado. Iniciando sincronização automática...`);
           await syncFromCloud(undefined, mode);
         }
       }
-
+      
       setModalConfig({
         isOpen: true,
         title: 'Modo Alterado',
-        message: mode === DatabaseMode.INTERNAL
-          ? 'O sistema agora está operando em Modo INTERNO (Mobile Puro). Todas as conexões com a nuvem foram suspensas para garantir estabilidade máxima.'
+        message: mode === DatabaseMode.INTERNAL 
+          ? 'O sistema agora está operando em Modo INTERNO (Mobile Puro). Todas as conexões com a nuvem foram suspensas para garantir estabilidade máxima.' 
           : 'O sistema agora está operando em Modo NUVEM (Supabase). A sincronização automática foi reativada.',
         type: 'success',
         onConfirm: () => {
-          // Recarrega a página para garantir que todos os serviços (Supabase, Sync, etc)
+          // Recarrega a página para garantir que todos os serviços (Supabase, Sync, etc) 
           // sejam reinicializados com as novas flags de blindagem técnica.
           sessionStorage.setItem('__gbr_allow_reload', 'true');
           window.location.reload();
@@ -3797,8 +3829,8 @@ const App: React.FC = () => {
 
   const handleToggleGpsBypass = (val: boolean) => {
     localStorage.setItem('gbr_gps_bypass', String(val));
-    updateConfig({ isFieldMode: val });
-    window.location.reload();
+    updateConfig({ isFieldMode: val }); 
+    window.location.reload(); 
   };
 
   const popScreen = useCallback(() => {
@@ -3822,11 +3854,11 @@ const App: React.FC = () => {
   const completeOnboarding = useCallback(() => {
     try {
       console.log("Finalizando onboarding - Início da função");
-
+      
       // 1. Persistência imediata
       localStorage.setItem('app_onboarding_completed', 'true');
       console.log("Finalizando onboarding - LocalStorage persistido");
-
+      
       // 2. Atualização de estado
       setInventory(prev => {
         console.log("Finalizando onboarding - Atualizando estado do inventário");
@@ -3834,7 +3866,7 @@ const App: React.FC = () => {
         saveInventory(newState).catch(e => console.error('Erro ao salvar no IndexedDB:', e));
         return newState;
       });
-
+      
       // 3. Navegação forçada se necessário
       const currentScreen = history[history.length - 1];
       if (currentScreen === AppScreen.ONBOARDING || currentScreen === AppScreen.LOGIN) {
@@ -3849,7 +3881,7 @@ const App: React.FC = () => {
 
   const commitAssetUpdate = useCallback(async (updatedAsset: Asset) => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
-
+    
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
     let origin: TransactionOrigin | undefined;
     const currentScreen = history[history.length - 1];
@@ -3866,10 +3898,10 @@ const App: React.FC = () => {
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     const targetLoc = isReconciliationWorkflow
       ? (updatedAsset.ENDERECO || "")
-      : (inventoryLocation
-          ? inventoryLocation.toUpperCase().trim()
+      : (inventoryLocation 
+          ? inventoryLocation.toUpperCase().trim() 
           : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
-
+    
     const updates = { ...updatedAsset } as Asset;
     // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
     if (updates._conferido === undefined) {
@@ -3880,7 +3912,7 @@ const App: React.FC = () => {
     }
     updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
     updates._origemTransacao = origin; // Aplica o código fixo
-
+    
     // Garantir que tenant e unit estão definidos de forma dinâmica
     if (!updates.tenantId) {
       updates.tenantId = user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
@@ -3888,7 +3920,7 @@ const App: React.FC = () => {
     if (!updates._unitid) {
       updates._unitid = user?.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
     }
-
+    
     // Log de Auditoria
     const index = inventory.assets.findIndex(a => String(a.id) === String(updatedAsset.id));
     const historyEntry: AuditLogEntry = {
@@ -3896,18 +3928,18 @@ const App: React.FC = () => {
       user: user?.name || user?.username || user?.email || 'SISTEMA',
       action: index === -1 ? 'CREATE' : 'UPDATE',
       details: `Item ${index === -1 ? 'criado' : 'atualizado'} no local ${targetLoc} via ${currentScreen}`,
-      tenantid: user?.tenantid || '',
+      tenantid: user?.tenantId || user?.tenantid || '',
       origin: origin // Aplica o código fixo no log
     };
     updates._history = [...(updates._history || []), historyEntry];
-
+    
     const alteredFields = new Set<string>(updates._camposAlterados || []);
     const existingAsset = index !== -1 ? inventory.assets[index] : null;
     const originalValues = { ...(existingAsset?._valoresOriginais || {}) };
 
     if (existingAsset) {
-      const wasLabelingCandidate =
-        String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') ||
+      const wasLabelingCandidate = 
+        String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
         String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
         existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
         existingAsset._plaquetado === true;
@@ -3982,10 +4014,10 @@ const App: React.FC = () => {
             const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
             Object.keys(updates).forEach(key => {
               if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
-
+              
               const oldValue = existingAsset[key as keyof Asset];
               const newValue = updates[key as keyof Asset];
-
+              
               if (String(oldValue || '') !== String(newValue || '')) {
                 changedFields.push({
                   field: key,
@@ -4019,7 +4051,7 @@ const App: React.FC = () => {
     } else {
       setIsProcessing(true);
       try {
-        await syncAssetsToCloud([updates], user?.tenantid);
+        await syncAssetsToCloud([updates], user?.tenantId || user?.tenantid);
         setRefreshVersion(prev => prev + 1);
         console.log(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
       } catch (err) {
@@ -4039,8 +4071,8 @@ const App: React.FC = () => {
       const oldEtiqueta = String(existing?.ETIQUETA || '').trim().toUpperCase();
 
       if (newEtiqueta !== oldEtiqueta) {
-        const duplicate = inventory.assets.find(a =>
-          String(a.id) !== String(updatedAsset.id) &&
+        const duplicate = inventory.assets.find(a => 
+          String(a.id) !== String(updatedAsset.id) && 
           String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
         );
         if (duplicate) {
@@ -4053,7 +4085,7 @@ const App: React.FC = () => {
     }
 
     const assetWithGps = { ...updatedAsset };
-
+    
     const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
     const isNew = !existing;
 
@@ -4066,10 +4098,10 @@ const App: React.FC = () => {
       user: user?.email || 'unknown',
       action: isNew ? 'INSERT' : 'UPDATE',
       details: isNew ? 'Criação de novo item' : `Alteração de campos: ${Object.keys(updatedAsset).filter(k => !k.startsWith('_')).join(', ')}`,
-      tenantid: user?.tenantid,
+      tenantid: user?.tenantId || user?.tenantid,
       origin: updatedAsset._origemTransacao
     };
-
+    
     const assetWithHistory = {
       ...assetWithGps,
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
@@ -4082,14 +4114,14 @@ const App: React.FC = () => {
     // Captura GPS de forma ASSÍNCRONA mas PRIORITÁRIA para o primeiro commit
     if (updatedAsset._conferido) {
       console.log(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
-
+      
       try {
         const metrics = await telemetryService.getDeviceMetrics();
         console.log(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
-
+        
         const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
         const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
-
+        
         let loc = { lat: 0, lng: 0, altitude: 0 };
         if (isAdmin || isGpsBypassed) {
           console.log('>>> [GPS] Perfis administrativos/bypass detectado de forma síncrona: bypass imediato da malha de captura física.');
@@ -4117,16 +4149,16 @@ const App: React.FC = () => {
         }
 
         console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
-
+        
         // Injeta GPS no objeto e no registro da auditoria
         assetWithHistory.latitude = loc.lat;
         assetWithHistory.longitude = loc.lng;
-
+        
         // GBR v25: Processamento Vertical (Z-Axis)
         assetWithHistory._altitude_metros = loc.altitude || 0;
         const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
         assetWithHistory._id_andar = convertAltitudeToFloor(loc.altitude);
-
+        
         // Atualiza a última entrada da trilha com a posição exata
         const lastIndex = assetWithHistory._history.length - 1;
         if (lastIndex >= 0) {
@@ -4139,7 +4171,7 @@ const App: React.FC = () => {
 
     // Commit definitivo com ou sem GPS (fallback garantido acima)
     await commitAssetUpdate(assetWithHistory);
-
+    
     // Adiciona à lista de sujos para garantir sync
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
   }, [inventory.assets, commitAssetUpdate, user, databaseMode, history, currentUnitConfig]);
@@ -4168,7 +4200,7 @@ const App: React.FC = () => {
         // Rateio por Percentual
         const pct = pcts[index] / 100;
         const val = Math.round(total * pct * 100) / 100;
-
+        
         if (index === units - 1) {
           // Ajuste fino na última unidade para bater o total exato
           let sumPrevious = 0;
@@ -4211,7 +4243,7 @@ const App: React.FC = () => {
     // 2. Criar os filhos com rateio de valores
     for (let i = 0; i < numberOfUnits; i++) {
       const childId = `UNIT-${parentAsset.id}-${i + 1}-${Date.now()}`;
-
+      
       // Inicializa o objeto do filho
       const child: Asset = {
         ...parentAsset,
@@ -4244,10 +4276,10 @@ const App: React.FC = () => {
       });
 
       // Rateia VLRAQUISIC (se for numérico ou string conversível)
-      const vlrAquisicTotal = typeof parentAsset.VLRAQUISIC === 'number'
-        ? parentAsset.VLRAQUISIC
+      const vlrAquisicTotal = typeof parentAsset.VLRAQUISIC === 'number' 
+        ? parentAsset.VLRAQUISIC 
         : parseFloat(String(parentAsset.VLRAQUISIC || '0').replace(',', '.'));
-
+      
       if (!isNaN(vlrAquisicTotal) && vlrAquisicTotal > 0) {
         const splitVlr = calculateSplit(vlrAquisicTotal, numberOfUnits, i, percentages);
         child.VLRAQUISIC = typeof parentAsset.VLRAQUISIC === 'number' ? splitVlr : splitVlr.toFixed(2);
@@ -4260,10 +4292,10 @@ const App: React.FC = () => {
     setIsProcessing(true);
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
-        // No modo interno salvamos os novos ativos
+        // No modo interno salvamos os novos ativos 
         await sqliteService.bulkInsertAssets([updatedParent, ...newAssets]);
       } else {
-        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantid || '');
+        await syncAssetsToCloud([updatedParent, ...newAssets], user?.tenantId || user?.tenantid || '');
       }
 
       setInventory(prev => ({
@@ -4315,7 +4347,7 @@ const App: React.FC = () => {
     }));
 
     if (databaseMode === DatabaseMode.SUPABASE) {
-      await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
+      await syncAssetsToCloud([restoredAsset], user?.tenantId || user?.tenantid || '');
     }
   }, [inventory.assets, user, databaseMode]);
 
@@ -4333,7 +4365,7 @@ const App: React.FC = () => {
         .from('assets')
         .delete()
         .eq('id', assetId);
-
+      
       if (error) console.error('Erro ao excluir permanentemente:', error);
     }
   }, [databaseMode]);
@@ -4351,7 +4383,7 @@ const App: React.FC = () => {
 
   const deleteAsset = useCallback(async (assetId: string) => {
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-
+    
     if (!isAdmin) {
       alert("Apenas administradores podem excluir ativos.");
       return;
@@ -4375,7 +4407,7 @@ const App: React.FC = () => {
       user: user?.email || 'unknown',
       action: 'DELETE',
       details: 'Exclusão lógica (Soft Delete) do ativo',
-      tenantid: user?.tenantid
+      tenantid: user?.tenantId || user?.tenantid
     };
     deletedAsset._history = [...(deletedAsset._history || []), auditEntry];
 
@@ -4388,7 +4420,7 @@ const App: React.FC = () => {
       } else {
         // No modo Supabase, sincronizamos o flag _is_deleted
         await syncAssetsToCloud([deletedAsset], user?.tenantId);
-
+        
         // Log de Auditoria Global
         await logAuditEvent({
           user_email: user?.email || 'unknown',
@@ -4412,7 +4444,7 @@ const App: React.FC = () => {
       if (history[history.length - 1] === AppScreen.ASSET_DETAIL) {
         popScreen();
       }
-
+      
       console.log(`>>> [DATABASE] Exclusão confirmada para id: ${assetId}`);
     } catch (err) {
       console.error('>>> [DATABASE] Falha ao excluir ativo:', err);
@@ -4425,7 +4457,7 @@ const App: React.FC = () => {
   const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
-
+    
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
     let origin: TransactionOrigin | undefined;
     const currentScreen = history[history.length - 1];
@@ -4462,14 +4494,14 @@ const App: React.FC = () => {
     const updatedAssetsList: Asset[] = [];
     const allAssets = inventory.assets.map(a => {
       if (idSet.has(String(a.id))) {
-        const updates = {
-          ...a,
-          ...(manualUpdates || {}),
-          latitude: gpsCoords.lat,
+        const updates = { 
+          ...a, 
+          ...(manualUpdates || {}), 
+          latitude: gpsCoords.lat, 
           longitude: gpsCoords.lng,
           _origemTransacao: origin // Aplica o código fixo
         };
-
+        
         // Garantir que tenant e unit estão definidos de forma dinâmica
         if (!updates.tenantId) {
           updates.tenantId = user?.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '';
@@ -4477,7 +4509,7 @@ const App: React.FC = () => {
         if (!updates._unitid) {
           updates._unitid = user?.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
         }
-
+        
         // Log de Auditoria para atualização em lote
         const historyEntry: AuditLogEntry = {
           timestamp: new Date().toISOString(),
@@ -4488,20 +4520,20 @@ const App: React.FC = () => {
           origin: origin // Aplica o código fixo no log
         };
         updates._history = [...(updates._history || []), historyEntry];
-
+        
         // REGRA DE OURO: Respeita o local do inventário se houver
         const targetLoc = isReconciliationWorkflow
           ? (a.ENDERECO || "")
-          : (inventoryLocation
-              ? inventoryLocation.toUpperCase().trim()
+          : (inventoryLocation 
+              ? inventoryLocation.toUpperCase().trim() 
               : (updates.ENDERECO || "").toString().toUpperCase().trim());
 
         updates._conferido = true;
         updates._dataLeitura = new Date().toISOString();
         updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-
-        const wasLabelingCandidate =
-          String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') ||
+        
+        const wasLabelingCandidate = 
+          String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
           String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
           a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
           a._plaquetado === true;
@@ -4525,7 +4557,7 @@ const App: React.FC = () => {
             }
           });
         }
-
+        
         if (!isReconciliationWorkflow && normalizeKey(String(a.ENDERECO || '')) !== normalizeKey(String(targetLoc || ''))) {
           alteredFields.add('ENDERECO');
           if (originalValues['ENDERECO'] === undefined) {
@@ -4533,10 +4565,10 @@ const App: React.FC = () => {
           }
         }
         updates._localMaster = targetLoc;
-
+        
         const hasChanges = alteredFields.size > 0;
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
-
+        
         updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
         updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
         updates._camposAlterados = Array.from(alteredFields);
@@ -4557,7 +4589,7 @@ const App: React.FC = () => {
         await sqliteService.bulkInsertAssets(updatedAssetsList);
       } else {
         await syncAssetsToCloud(updatedAssetsList, user?.tenantId);
-
+        
         logAuditEvent({
           user_email: user?.email || 'unknown',
           action: 'BULK_UPDATE',
@@ -4577,10 +4609,10 @@ const App: React.FC = () => {
       }));
       setLastLocalSave(new Date().toISOString());
       setRefreshVersion(prev => prev + 1);
-
+      
       // MARCA IDs como sujos para back-sync
       ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
-
+      
       console.log(`>>> [DATABASE] Operação em lote concluída com sucesso.`);
     } catch (err) {
       console.error('>>> [DATABASE] Falha Crítica no Lote:', err);
@@ -4623,9 +4655,9 @@ const App: React.FC = () => {
     if (inventory.assets.length === 0) return;
     const wsData = inventory.assets.map(a => {
       const res: { [key: string]: string | number | boolean | null | undefined } = {};
-
+      
       // Mapeia campos normais (PARA)
-      Object.keys(a).forEach(k => {
+      Object.keys(a).forEach(k => { 
         if (!k.startsWith('_') && k !== 'id') {
           const val = a[k];
           const colName = `PARA_${k}`;
@@ -4638,7 +4670,7 @@ const App: React.FC = () => {
           res[k] = res[colName];
         }
       });
-
+      
       // Mapeia campos originais (DE)
       const originalValues = a._valoresOriginais;
       if (originalValues) {
@@ -4817,10 +4849,10 @@ const App: React.FC = () => {
   // --- Handlers de Transição e Workflow ---
   const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
     console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
-
+    
     // 1. Unidades (Usamos as já calculadas via SQL pelo Loader para performance)
     let finalCompanies = (companies && companies.length > 0) ? companies : [];
-
+    
     // Regra v25.01: Se as empresas vieram vazias mas há ativos, tentamos extrair por Query SQL "Limpa"
     if (finalCompanies.length === 0 && assets.length > 0) {
       console.warn('>>> [App] handleDataLoaded: Unidades vazias. Tentando extração de emergência via SQL...');
@@ -4844,14 +4876,14 @@ const App: React.FC = () => {
     }
 
     // 2. Atualização de Estado
-    const newInventory: InventoryState = {
-      ...inventory,
-      assets,
+    const newInventory: InventoryState = { 
+      ...inventory, 
+      assets, 
       companies: finalCompanies,
       lastUpdated: new Date().toISOString(),
       status: DatabaseStatus.LOADED
     };
-
+    
     setInventory(newInventory);
     setIsDataLoaded(true);
     sessionStorage.setItem('isDatabaseLoaded', 'true');
@@ -4859,7 +4891,7 @@ const App: React.FC = () => {
     setIsDatabaseLoaded(true);
     setSqliteStatus('ACTIVE');
     setRefreshVersion(prev => prev + 1);
-
+    
     // 3. Persistência de Segurança (Cache) - Importante para o modo Interno
     try {
       await saveInventory(newInventory, assets);
@@ -4873,11 +4905,11 @@ const App: React.FC = () => {
     // 4. Loop Guard: Evita que o redirect de "base vazia" dispare imediatamente ao voltar
     sessionStorage.setItem('app_just_finished_load', 'true');
     sessionStorage.removeItem('app_just_cleared_data');
-
+    
     // 5. Navegação: Sempre retorna para a seleção de unidade (fluxo padrão)
     console.log('>>> [App] Iniciando transição de pós-carga...');
     setStartWithDataMenu(false);
-
+    
     // Defer para permitir que o sistema processe o estado grande
     setTimeout(() => {
       console.log('>>> [App] Executando redirecionamento para Seleção de Unidade.');
@@ -4910,23 +4942,23 @@ const App: React.FC = () => {
       const dateStr = now.toLocaleDateString('pt-BR').replace(/\//g, '');
       const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '');
       const unitName = selectedUnit ? selectedUnit.toUpperCase().trim() : 'GERAL';
-
+      
       // Nome do arquivo conforme especificação: [INVENTARIO_MOBILE+KBP+DADOS+NOMEUNIDADEOPERACIONAL+DATA+HORA]
       const backupFileName = `INVENTARIO_MOBILE+KBP+DADOS+${unitName}+${dateStr}+${timeStr}`;
-
+      
       // 1. Realiza backup automático antes de limpar
       await backupInventory(databaseMode, backupFileName);
-
+      
       // 2. Limpa localmente (apenas a unidade selecionada se houver)
-      await clearInventory(databaseMode, selectedUnit || undefined);
-
+      await clearInventory(databaseMode, selectedUnit || undefined); 
+      
       // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
       if (databaseMode === DatabaseMode.SUPABASE) {
         try {
           const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
           const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantId;
           await clearCloudInventory(selectedUnit || undefined, effectiveTenantId);
-
+          
           // Log de Auditoria na Nuvem
           logAuditEvent({
             user_email: user?.email || 'unknown',
@@ -4941,9 +4973,9 @@ const App: React.FC = () => {
             const configToSync = { ...inventory };
             // @ts-expect-error - assets is removed for sync
             delete configToSync.assets;
-            await syncConfigToCloud({
-              ...configToSync,
-              lastUpdated: new Date().toISOString()
+            await syncConfigToCloud({ 
+              ...configToSync, 
+              lastUpdated: new Date().toISOString() 
             } as Omit<InventoryState, 'assets'>, effectiveTenantId);
           } catch (syncErr) {
             console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
@@ -4963,26 +4995,26 @@ const App: React.FC = () => {
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
       sessionStorage.setItem('app_just_cleared_data', 'true');
-
+      
       // GBR v25: Reset de alertas e sanitização se for limpeza total
       if (!selectedUnit) {
         localStorage.setItem('app_excluded_accounts', '[]');
         sessionStorage.removeItem('isDatabaseLoaded');
         localStorage.removeItem('isDatabaseLoaded');
         setIsDatabaseLoaded(false);
-        setInventory(prev => ({
-          ...prev,
-          assets: [],
-          companies: [],
+        setInventory(prev => ({ 
+          ...prev, 
+          assets: [], 
+          companies: [], 
           excludedAccounts: [],
-          status: DatabaseStatus.EMPTY
+          status: DatabaseStatus.EMPTY 
         }));
         setIntegrityFailed(false);
         setIsDataLoaded(false);
       } else {
         const normalizedSel = selectedUnit.toUpperCase().trim();
         const remainingAssets = inventory.assets.filter(a => (a.filial || '').toUpperCase().trim() !== normalizedSel);
-
+        
         setInventory(prev => ({
           ...prev,
           assets: remainingAssets,
@@ -4999,7 +5031,7 @@ const App: React.FC = () => {
           await sqliteService.setSystemStatus(DatabaseStatus.EMPTY);
         }
       }
-
+      
       setModalConfig({
         isOpen: true,
         title: 'Limpeza Concluída',
@@ -5026,9 +5058,6 @@ const App: React.FC = () => {
   };
 
   const isAdmin = useMemo(() => checkIsAdmin(user), [user]);
-  const canAccessDatabaseLoader = useMemo(() => {
-    return isAdmin || (databaseMode === DatabaseMode.INTERNAL && !isDatabaseLoaded);
-  }, [isAdmin, databaseMode, isDatabaseLoaded]);
 
   // filteredAssetsByUnit defined above to avoid hosting temporal dead zone issues
 
@@ -5090,18 +5119,18 @@ const App: React.FC = () => {
       });
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
-
+  
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
       console.log('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
       return [];
     }
 
-    const userTenant = user?.tenantid || '';
+    const userTenant = user?.tenantId || user?.tenantid || '';
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
     const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
     const assets = inventory.assets;
-
+    
     if (assets.length === 0) {
       console.log('>>> [fullCompaniesWithStatus] Inventory assets is empty.');
     } else {
@@ -5117,7 +5146,7 @@ const App: React.FC = () => {
     // 1. Agrupar estatísticas e campanhas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
     const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
-
+    
     // v24.50: Se temos unidades via SQL (Modo Interno), usamos elas como base prioritária
     if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
       sqliteOperationalUnits.forEach(u => {
@@ -5137,21 +5166,21 @@ const App: React.FC = () => {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
       if (!company || company === 'CICOPAL' || normalizeKey(company) === 'CICOPAL' || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
-
+      
       let stats = companyStatsMap.get(company);
       if (!stats) {
         stats = { hasData: true, hasActiveAssets: false, unitIds: new Set(), hasAssetCampaign: false };
         companyStatsMap.set(company, stats);
       }
-
+      
       const status = String(a.STATUS || '').toUpperCase();
       // REGRA v25.01: Consideramos como ativo qualquer item que não esteja baixado ou que seja 'PENDENTE' (padrão de carga)
       const isActiveStatus = status === '' || status === 'PENDENTE' || status.includes('ATIVO') || status.includes('USO') || status.includes('NOVO') || status.includes('CONFERIDO');
-
+      
       if (!stats.hasActiveAssets && isActiveStatus) {
         stats.hasActiveAssets = true;
       }
-
+      
       if (a._unitid) {
         stats.unitIds.add(normalizeKey(a._unitid));
       }
@@ -5194,9 +5223,9 @@ const App: React.FC = () => {
       inventory.companies.forEach(c => baseCompaniesSet.add(c.toUpperCase().replace(/_/g, ' ').trim()));
     }
     for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
-
+    
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-
+    
     // Se for auditor ou admin e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
     // mesmo que ainda não existam ativos locais para elas
     if ((isAuditor || isAdmin) && inventory.databaseMode !== DatabaseMode.INTERNAL) {
@@ -5207,7 +5236,7 @@ const App: React.FC = () => {
         }
       }
     }
-
+    
     const baseCompanies = Array.from(baseCompaniesSet);
 
     // 3. Normalizar unidades do usuário para busca rápida
@@ -5219,30 +5248,30 @@ const App: React.FC = () => {
     baseCompanies.forEach(company => {
       const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
       if (!rawName || rawName === 'CICOPAL') return;
-
+      
       const norm = normalizeKey(rawName);
       if (!norm || norm === 'CICOPAL') return;
 
       // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
-      const isAllowed = !isAuditor ||
-                      inventory.databaseMode === DatabaseMode.INTERNAL ||
-                      userUnits.length === 0 ||
+      const isAllowed = !isAuditor || 
+                      inventory.databaseMode === DatabaseMode.INTERNAL || 
+                      userUnits.length === 0 || 
                       normalizedUserUnits.includes(norm) ||
                       (normalizedUserUnits.length === 1 && normalizedUserUnits[0] === '');
-
+      
       const stats = companyStatsMap.get(rawName);
-
+      
       if (isAllowed) {
         const existing = mergedCompanies.get(norm);
-
+        
         // Critérios para escolher o "melhor" nome de exibição:
         // 1. Preferir nomes SEM underscores (mais legíveis)
         // 2. Preferir nomes com espaços
         // 3. Preferir o nome que está na lista de unidades do usuário
         const hasUnderscore = rawName.includes('_');
         const existingHasUnderscore = existing ? existing.name.includes('_') : false;
-
-        const isBetterName = !existing ||
+        
+        const isBetterName = !existing || 
           (existingHasUnderscore && !hasUnderscore) ||
           (rawName.includes(' ') && !existing.name.includes(' ')) ||
           (userUnits.includes(rawName) && !userUnits.includes(existing.name));
@@ -5275,7 +5304,7 @@ const App: React.FC = () => {
 
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
-
+      
       // Cache reativo duplo para evitar "pisca-pisca" visual do botão CAMPANHA
       const cachedActive = localStorage.getItem(`kardek_campanha_ativa_${norm}`) === 'true';
       const hasDirectCampaign = unitsWithDirectCampaign.has(norm) || cachedActive;
@@ -5306,7 +5335,7 @@ const App: React.FC = () => {
       };
     });
 
-    // REGRA DE OURO v25.01: Se o banco físico carregou ativos (assets.length > 0) mas a lista
+    // REGRA DE OURO v25.01: Se o banco físico carregou ativos (assets.length > 0) mas a lista 
     // de empresas resultou vazia (talvez por filtro de permissão equivocado), forçamos
     // a inclusão de todas as unidades encontradas nos ativos para evitar o bloqueio do app.
     if (result.length === 0 && assets.length > 0) {
@@ -5319,11 +5348,11 @@ const App: React.FC = () => {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
       }
-
+      
       if (emergencyUnits.size > 0) {
         return Array.from(emergencyUnits).map(name => {
           const norm = normalizeKey(name);
-          const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL
+          const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL 
             ? (sqlCountsMap.get(norm) || 0)
             : (localCountsMap.get(norm) || 0);
           return {
@@ -5338,20 +5367,29 @@ const App: React.FC = () => {
       }
     }
 
-    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${result.length}`);
-    return result;
+    const finalResult = result.filter(r => {
+      const nameUpper = r.name.toUpperCase().trim();
+      if (nameUpper === 'MATRIZ') {
+        const otherUnitsExist = result.some(o => o.name.toUpperCase().trim() !== 'MATRIZ');
+        if (otherUnitsExist) return false;
+      }
+      return true;
+    });
+
+    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
+    return finalResult;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion, isImportingBatchState]);
 
   const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
   const unitsByTenant = useMemo(() => {
     const map = new Map<string, Set<string>>();
-
+    
     // 1. De Ativos (Fonte mais confiável de relação: filial real)
     inventory.assets.forEach(a => {
       const t = (a.tenantId || a.GRUPO_EMPRESARIAL || '').toUpperCase();
       const u = a.filial; // Usar apenas a unidade operacional real da base
-
+      
       if (u && u.toUpperCase() !== 'DEFAULT' && u.toUpperCase() !== 'NULL' && u !== '0') {
         if (!map.has(t)) map.set(t, new Set());
         map.get(t)!.add(u);
@@ -5393,12 +5431,12 @@ const App: React.FC = () => {
       if (u.units) t.push(...u.units);
       return t;
     }).filter(Boolean);
-
+    
     const allUnits = Array.from(new Set([...fromAssets, ...fromCompanies, ...fromUsers])) as string[];
-
+    
     // Se a base estiver vazia, mostramos todas para permitir atribuição inicial
     if (inventory.assets.length === 0) return allUnits;
-
+    
     // Filtrar apenas unidades que possuem ativos com status "ATIVO"
     return allUnits.filter(unit => {
       // Procurar na lista de empresas com status
@@ -5447,7 +5485,7 @@ const App: React.FC = () => {
     AppScreen.AUDIT_LOGS,
     AppScreen.SIGNATURE
   ].includes(screen);
-
+  
   // SOBERANIA OFFLINE: Se temos o objeto user e seu perfil é local/offline, a sessão é considerada válida por padrão.
   const isProfileLocal = useMemo(() => {
     if (!user) return false;
@@ -5499,8 +5537,8 @@ const App: React.FC = () => {
     return (
       <div className="w-full min-h-screen bg-white flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
         <div className="flex-1 w-full relative z-[500] no-scrollbar flex flex-col">
-          <Login
-            users={users}
+          <Login 
+            users={users} 
             databaseMode={databaseMode}
             isDatabaseEmpty={inventory.assets.length === 0}
             isKeyboardVisible={isKeyboardVisible}
@@ -5508,18 +5546,18 @@ const App: React.FC = () => {
             onUpdateScreen={(s) => setHistory([s])}
             onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
             onUpdateDatabaseMode={handleUpdateDatabaseMode}
-            onLogin={async (u) => {
-              setUser(u);
+            onLogin={async (u) => { 
+              setUser(u); 
               sessionStorage.setItem('app_current_user', safeStringify(u));
-
+              
               if (databaseMode !== DatabaseMode.INTERNAL) {
                 setDatabaseMode(DatabaseMode.SUPABASE);
               }
 
-              // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
-              const defaultTenant = String(u.tenantId || u.tenants || u.tenantid || u._tenantid || 'CICOPAL').toUpperCase().trim();
-              const defaultUnit = String(u.filial || u._unitid || u.unitid || 'MATRIZ').toUpperCase().trim();
-
+              // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta no contexto para evitar 400 / placeholders
+              const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
+              const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
+              
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantId', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
@@ -5530,7 +5568,7 @@ const App: React.FC = () => {
               }
 
               // Prepara objeto SupabaseUserProfile
-              const activeTenant = u.tenantId || u.tenantid || u._tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
+              const activeTenant = u.tenantId || u.tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
               const profile: SupabaseUserProfile = {
                 userId: u.id || '',
                 email: u.email,
@@ -5541,25 +5579,22 @@ const App: React.FC = () => {
               // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
               const customNavigate = (path: string) => {
                 console.log('[App] customNavigate interceptou rota:', path);
-
-                const shouldForceLoadDatabase = databaseMode === DatabaseMode.INTERNAL && !isDatabaseLoaded && inventory.assets.length === 0;
-                if (shouldForceLoadDatabase) {
-                  console.log('[App] Banco local vazio detectado no login. Forçando abertura do modal de carga inicial.');
-                  sessionStorage.removeItem('carga_inicial_prompted');
+                
+                if (u.mustChangePassword) { 
+                  pushScreen(AppScreen.CHANGE_PASSWORD); 
+                } else if (path === '/load-database') {
                   pushScreen(AppScreen.LOAD_DATABASE);
-                  return;
-                }
-
-                const isMasterAdminWithEmptyDb = (u.email && u.email.toLowerCase() === 'semorr@gmail.com') && (inventory.assets.length === 0);
-                if (isMasterAdminWithEmptyDb) {
-                  console.log('[App] Admin mestre logado com banco de dados físico vazio. Forçando abertura do modal de carga inicial.');
-                  sessionStorage.removeItem('carga_inicial_prompted');
-                  pushScreen(AppScreen.LOAD_DATABASE);
-                } else if (u.mustChangePassword) {
-                  pushScreen(AppScreen.CHANGE_PASSWORD);
+                } else if (path === '/auditor/aguardando-carga') {
+                  pushScreen(AppScreen.UNIT_SELECTION);
+                  setModalConfig({
+                    isOpen: true,
+                    title: 'Aguardando Carga Inicial',
+                    message: 'A base local do SQLite está vazia. Aguarde o Administrador ou Master realizar a carga de banco no dispositivo para iniciar os trabalhos de auditoria de campo imobilizado.',
+                    type: 'warning'
+                  });
                 } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
                   pushScreen(AppScreen.MODULE_SELECTION);
-                } else if (path === '/auditor/selecionar-filial') {
+                } else if (path === '/auditor/selecionar-filial' || path === '/auditor/selecionar-unidade') {
                   pushScreen(AppScreen.UNIT_SELECTION);
                 } else if (path === '/dashboard-demo') {
                   setInventory(prev => ({
@@ -5608,7 +5643,7 @@ const App: React.FC = () => {
                   }
                 }
               }
-            }}
+            }} 
           />
         </div>
       </div>
@@ -5626,8 +5661,8 @@ const App: React.FC = () => {
           <AlertTriangle size={44} className="text-red-500 mx-auto mb-4 animate-bounce" />
           <h2 className="text-sm font-black uppercase tracking-[0.2em] text-red-400 mb-2">Demonstração Expirada</h2>
           <p className="text-[11px] text-slate-300 leading-relaxed mb-6 uppercase tracking-wider font-semibold">
-            {status.reason === 'days'
-              ? 'Seu período de degustação de 7 dias expirou.'
+            {status.reason === 'days' 
+              ? 'Seu período de degustação de 7 dias expirou.' 
               : `Você atingiu o limite de 30 auditorias no modo demonstração (${status.auditsCount}/30).`}
             <br />
             Para continuar utilizando o GBR Kardex de maneira profissional no galpão, realize o upgrade do seu licenciamento.
@@ -5688,14 +5723,14 @@ const App: React.FC = () => {
           <p className="text-[9px] text-yellow-200/50 uppercase tracking-wider">Abaixo, escolha recarregar a página ou executar uma limpeza geral do motor local.</p>
         </div>
         <div className="flex flex-col gap-4 w-full max-w-[240px]">
-          <button
+          <button 
             onClick={() => window.location.reload()}
             className="bg-slate-950 border border-slate-850 text-white w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-slate-900"
           >
             Recarregar Aplicativo
           </button>
-
-          <button
+          
+          <button 
             onClick={async () => {
               if (window.confirm("Aviso de Segurança: Esta operação realizará uma limpeza completa nos bancos e esquemas locais para resolver conflitos de DDL e dados corrompidos. Suas alterações não sincronizadas serão removidas. Prosseguir com a RE-SINCRONIZAÇÃO LIMPA do aplicativo?")) {
                 try {
@@ -5723,12 +5758,12 @@ const App: React.FC = () => {
   if (showAccessRequest) {
     return (
       <div className="flex flex-col min-h-screen">
-        <PermissionGate
+        <PermissionGate 
           onPermissionsGranted={() => {
             setPermissionsGranted(true);
             setShowAccessRequest(false);
-          }}
-          setBootError={setInitError}
+          }} 
+          setBootError={setInitError} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
           <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
@@ -5740,14 +5775,14 @@ const App: React.FC = () => {
   if (publicAsset) {
     return (
       <ErrorBoundary>
-        <PublicKardex
-          asset={publicAsset}
+        <PublicKardex 
+          asset={publicAsset} 
           onClose={() => {
             setPublicAsset(null);
             const url = new URL(window.location.href);
             url.searchParams.delete('etq');
             window.history.replaceState({}, document.title, url.pathname + url.search);
-          }}
+          }} 
         />
       </ErrorBoundary>
     );
@@ -5773,12 +5808,12 @@ const App: React.FC = () => {
                    {selectedUnit}
                  </h2>
                </div>
-
+               
                <div className="flex items-center space-x-2">
                  <SyncBadge />
                  <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
-                  <div
-                    className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`}
+                  <div 
+                    className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg border transition-all ${isSafeMode ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`} 
                     title={isSafeMode ? "Banco de Dados Protegido" : `Ameaças Detectadas: ${securityThreats.join(', ')}`}
                   >
                     <ShieldCheck size={10} />
@@ -5787,7 +5822,7 @@ const App: React.FC = () => {
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
                     <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v2.6</span>
                   </div>
-                  <div
+                  <div 
                     onClick={() => setIsAIAssistantOpen(true)}
                     className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
                   >
@@ -5821,13 +5856,13 @@ const App: React.FC = () => {
                 <span>←</span>
                 <span className="text-[10px] uppercase tracking-wider font-extrabold font-sans">Voltar</span>
               </button>
-
+              
               <div className="flex-1 text-center font-sans px-4">
                 <span className="text-xs font-black text-slate-700 uppercase tracking-tight">
                   {selectedUnit}
                 </span>
               </div>
-
+              
               <div className="flex items-center shrink-0">
                 <span className="px-2.5 py-1 bg-slate-900 border border-slate-950 rounded-lg text-white font-extrabold text-[8px] uppercase tracking-widest shadow-sm font-sans">
                   GBR v2.6
@@ -5836,7 +5871,7 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-
+        
         <div className="flex-1 w-full flex flex-col relative overflow-y-auto z-[500] no-scrollbar min-h-0">
           {integrityFailed && (
         <div className="fixed top-20 left-4 right-4 z-[100] bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-white/20 animate-bounce flex items-center space-x-3">
@@ -5856,12 +5891,12 @@ const App: React.FC = () => {
               {recoverySource === 'PHYSICAL' ? <FileText size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
               <div className="flex flex-col">
                 <span className="text-[10px] font-black uppercase tracking-widest text-center">
-                  {recoverySource === 'PHYSICAL' ? 'Banco de Dados Blindado' :
+                  {recoverySource === 'PHYSICAL' ? 'Banco de Dados Blindado' : 
                    recoverySource === 'CLOUD' ? 'Sincronização com Nuvem' :
                    'Base de Dados Recuperada'}
                 </span>
                 <span className="text-[8px] opacity-80 font-medium text-center">
-                  {recoverySource === 'PHYSICAL' ? 'Conectado diretamente ao arquivo .db do usuário' :
+                  {recoverySource === 'PHYSICAL' ? 'Conectado diretamente ao arquivo .db do usuário' : 
                    recoverySource === 'CLOUD' ? 'Dados baixados e sincronizados com sucesso' :
                    recoverySource === 'LEGACY' ? 'Restaurado do cache legado local' : 'Dados carregados do cache seguro'}
                 </span>
@@ -5869,14 +5904,14 @@ const App: React.FC = () => {
             </div>
           )}
           {screen === AppScreen.STRESS_TEST && (
-            <StressTestManager
-              onBack={() => setHistory([AppScreen.LOGIN])}
+            <StressTestManager 
+              onBack={() => setHistory([AppScreen.LOGIN])} 
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
             />
           )}
           {screen === AppScreen.LOGIN && (
-            <Login
-              users={users}
+            <Login 
+              users={users} 
               databaseMode={databaseMode}
               isDatabaseEmpty={inventory.assets.length === 0}
               isKeyboardVisible={isKeyboardVisible}
@@ -5884,8 +5919,8 @@ const App: React.FC = () => {
               onUpdateScreen={(s) => setHistory([s])}
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
-              onLogin={async (u) => {
-                setUser(u);
+              onLogin={async (u) => { 
+                setUser(u); 
                 sessionStorage.setItem('app_current_user', safeStringify(u));
 
                 // Se logou via Supabase, garante que o modo está correto
@@ -5893,10 +5928,10 @@ const App: React.FC = () => {
                   setDatabaseMode(DatabaseMode.SUPABASE);
                 }
 
-                // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta (ex: MATRIZ) no contexto para evitar 400 / placeholders
+                // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta no contexto para evitar 400 / placeholders
                 const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
-                const defaultUnit = String(u.filial || u.unitid || u._unitid || 'MATRIZ').toUpperCase().trim();
-
+                const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
+                
                 setSelectedUnit(defaultUnit);
                 sessionStorage.setItem('tenantId', defaultTenant);
                 sessionStorage.setItem('filial', defaultUnit);
@@ -5921,20 +5956,22 @@ const App: React.FC = () => {
                 // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
                 const customNavigate = (path: string) => {
                   console.log('[App] customNavigate interceptou rota:', path);
-
-                  const shouldForceLoadDatabase = databaseMode === DatabaseMode.INTERNAL && !isDatabaseLoaded && inventory.assets.length === 0;
-                  if (shouldForceLoadDatabase) {
-                    console.log('[App] Banco local vazio detectado no login. Forçando abertura do modal de carga inicial.');
-                    sessionStorage.removeItem('carga_inicial_prompted');
+                  
+                  if (u.mustChangePassword) { 
+                    pushScreen(AppScreen.CHANGE_PASSWORD); 
+                  } else if (path === '/load-database') {
                     pushScreen(AppScreen.LOAD_DATABASE);
-                    return;
-                  }
-
-                  if (u.mustChangePassword) {
-                    pushScreen(AppScreen.CHANGE_PASSWORD);
+                  } else if (path === '/auditor/aguardando-carga') {
+                    pushScreen(AppScreen.UNIT_SELECTION);
+                    setModalConfig({
+                      isOpen: true,
+                      title: 'Aguardando Carga Inicial',
+                      message: 'A base local do SQLite está vazia. Aguarde o Administrador ou Master realizar a carga de banco no dispositivo para iniciar os trabalhos de auditoria de campo imobilizado.',
+                      type: 'warning'
+                    });
                   } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
                     pushScreen(AppScreen.MODULE_SELECTION);
-                  } else if (path === '/auditor/selecionar-filial') {
+                  } else if (path === '/auditor/selecionar-filial' || path === '/auditor/selecionar-unidade') {
                     pushScreen(AppScreen.UNIT_SELECTION);
                   } else if (path === '/dashboard-demo') {
                     setInventory(prev => ({
@@ -5984,12 +6021,12 @@ const App: React.FC = () => {
                     }
                   }
                 }
-              }}
+              }} 
             />
           )}
           {screen === AppScreen.BIOMETRIC_REGISTRATION && (
-            <BiometricRegistration
-              username={user?.username || user?.email || ''}
+            <BiometricRegistration 
+              username={user?.username || user?.email || ''} 
               onComplete={() => {
                 // Após completar, removemos a tela de biometria do histórico
                 // e deixamos o usuário na tela que estava por baixo (definida no onLogin)
@@ -6001,19 +6038,19 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.REGISTER && (
-            <Register
+            <Register 
               databaseMode={databaseMode}
-              onRegister={() => {
+              onRegister={() => { 
                 pushScreen(AppScreen.LOGIN);
-              }}
-              onGoToLogin={popScreen}
+              }} 
+              onGoToLogin={popScreen} 
             />
           )}
           {screen === AppScreen.CHANGE_PASSWORD && (
-            <ChangePassword
-              onPasswordChanged={(p) => {
-                const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u);
-                setUsers(upd);
+            <ChangePassword 
+              onPasswordChanged={(p) => { 
+                const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); 
+                setUsers(upd); 
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
                 const isEmpty = inventory.assets.length === 0;
 
@@ -6021,45 +6058,45 @@ const App: React.FC = () => {
                   setStartWithDataMenu(true);
                   pushScreen(AppScreen.MAIN_MENU);
                 } else {
-                  pushScreen(AppScreen.UNIT_SELECTION);
+                  pushScreen(AppScreen.UNIT_SELECTION); 
                 }
-              }}
+              }} 
             />
           )}
           {screen === AppScreen.MAIN_MENU && (
-            <MainMenu
+            <MainMenu 
               onOpenHelp={() => setIsHelpMenuOpen(true)}
-              onNavigate={pushScreen}
-              onLogout={() => {
-                setSelectedUnit(null);
+              onNavigate={pushScreen} 
+              onLogout={() => { 
+                setSelectedUnit(null); 
                 setStartWithDataMenu(false);
-                pushScreen(AppScreen.UNIT_SELECTION);
-              }}
+                pushScreen(AppScreen.UNIT_SELECTION); 
+              }} 
               onChangeUnit={() => {
                 setSelectedUnit(null);
                 pushScreen(AppScreen.UNIT_SELECTION);
               }}
-              onExport={handleExport}
+              onExport={handleExport} 
               onBackup={handleBackup}
               onDownloadCloudData={handleDownloadCloudData}
               onRestore={handleRestore}
-              onClearDatabase={handleClearDatabase}
+              onClearDatabase={handleClearDatabase} 
               onClearMultipleUnits={handleClearMultipleCompanies}
               showModal={showModal}
-              user={user}
+              user={user} 
               units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
               databaseMode={databaseMode}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
-              inventoryInfo={{
-                count: activeUnitAssetCount,
-                totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length,
-                date: inventory.lastUpdated
-              }}
-              autoConfirmOnScan={inventory.autoConfirmOnScan || false}
-              onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })}
-              isFullscreen={isFullscreen}
-              onToggleFullscreen={toggleFullscreen}
-              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
+              inventoryInfo={{ 
+                count: activeUnitAssetCount, 
+                totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, 
+                date: inventory.lastUpdated 
+              }} 
+              autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+              onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })} 
+              isFullscreen={isFullscreen} 
+              onToggleFullscreen={toggleFullscreen} 
+              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
               onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
               initialDataMenuOpen={startWithDataMenu}
               selectedUnit={selectedUnit}
@@ -6109,10 +6146,10 @@ const App: React.FC = () => {
 
           {/* Permission Modal removed in favor of PermissionGate */}
           {screen === AppScreen.LOAD_DATABASE && (
-            canAccessDatabaseLoader ? (
-              <DatabaseLoader
+            isAdmin ? (
+              <DatabaseLoader 
                 onOpenHelp={() => setIsHelpMenuOpen(true)}
-                onBack={popScreen}
+                onBack={popScreen} 
                 isSyncing={isSyncing}
                 syncProgress={syncProgress}
                 excludedAccounts={inventory.excludedAccounts}
@@ -6126,7 +6163,7 @@ const App: React.FC = () => {
                   popScreen();
                 }}
                 onClearDatabase={handleClearDatabase}
-                onDataLoaded={handleDataLoaded}
+                onDataLoaded={handleDataLoaded} 
                 isDatabaseLoaded={isDatabaseLoaded}
               />
             ) : (
@@ -6135,7 +6172,7 @@ const App: React.FC = () => {
                 <ShieldAlert size={48} className="text-red-500 mb-4" />
                 <p className="text-ink-muted uppercase font-black tracking-widest mb-2">Acesso Restrito</p>
                 <p className="text-[10px] text-ink-muted uppercase font-bold mb-6">Você não tem permissão para acessar esta área.</p>
-                <button
+                <button 
                   onClick={() => pushScreen(AppScreen.UNIT_SELECTION)}
                   className="px-6 py-3 bg-accent text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all"
                 >
@@ -6145,8 +6182,8 @@ const App: React.FC = () => {
             )
           )}
           {screen === AppScreen.INVENTORY && (
-            <GPSComplianceGuard
-              userRole={user?.role}
+            <GPSComplianceGuard 
+              userRole={user?.role} 
               unitConfig={currentUnitConfig}
               isFieldMode={isFieldMode}
             >
@@ -6157,10 +6194,10 @@ const App: React.FC = () => {
                   </div>
                   <h2 className="text-xl font-bold text-ink uppercase tracking-tight mb-2">Sistema Bloqueado</h2>
                   <p className="text-xs text-ink-muted uppercase font-bold tracking-widest mb-8 max-w-xs leading-relaxed">
-                    Fila de sincronização excedeu o limite de segurança ({MAX_SYNC_QUEUE_SIZE} itens).
+                    Fila de sincronização excedeu o limite de segurança ({MAX_SYNC_QUEUE_SIZE} itens). 
                     Aguarde a conclusão do upload para continuar.
                   </p>
-                  <button
+                  <button 
                     onClick={popScreen}
                     className="w-full max-w-xs py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
                   >
@@ -6168,31 +6205,31 @@ const App: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <Inventory
-                  assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit}
-                  allAssets={inventory.assets}
-                  onBack={popScreen}
-                  onUpdateAsset={updateAsset}
-                  onBulkUpdateAssets={bulkUpdateAssets}
-                  onSelectAsset={handleSelectAsset}
-                  selectedLocation={inventoryLocation}
-                  setSelectedLocation={setInventoryLocation}
-                  isInventorying={isInventorying}
-                  setIsInventorying={setIsInventorying}
-                  selectedUnit={selectedUnit}
-                  onAddNewLocation={addNewLocation}
-                  locationsWithStats={locationsWithStats}
-                  scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
-                  onUpdateScannerMode={handleUpdateScannerMode}
-                  searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL}
-                  onUpdateSearchMode={handleUpdateSearchMode}
-                  autoConfirmOnScan={inventory.autoConfirmOnScan || false}
-                  scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
-                  onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }}
+                <Inventory 
+                  assets={inventoryLocation ? filteredAssetsByLocation : filteredAssetsByUnit} 
+                  allAssets={inventory.assets} 
+                  onBack={popScreen} 
+                  onUpdateAsset={updateAsset} 
+                  onBulkUpdateAssets={bulkUpdateAssets} 
+                  onSelectAsset={handleSelectAsset} 
+                  selectedLocation={inventoryLocation} 
+                  setSelectedLocation={setInventoryLocation} 
+                  isInventorying={isInventorying} 
+                  setIsInventorying={setIsInventorying} 
+                  selectedUnit={selectedUnit} 
+                  onAddNewLocation={addNewLocation} 
+                  locationsWithStats={locationsWithStats} 
+                  scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+                  onUpdateScannerMode={handleUpdateScannerMode} 
+                  searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL} 
+                  onUpdateSearchMode={handleUpdateSearchMode} 
+                  autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
+                  scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+                  onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }} 
                   onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
-                  inventorySearchValue={inventorySearchValue}
-                  clearInventorySearchValue={() => setInventorySearchValue(null)}
-                  immersiveMode={inventory.immersiveMode || false}
+                  inventorySearchValue={inventorySearchValue} 
+                  clearInventorySearchValue={() => setInventorySearchValue(null)} 
+                  immersiveMode={inventory.immersiveMode || false} 
                   onToggleFullscreen={toggleFullscreen}
                   batterySaver={inventory.batterySaver || false}
                   databaseMode={inventory.databaseMode}
@@ -6206,35 +6243,35 @@ const App: React.FC = () => {
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.LABELING && (
-            <GPSComplianceGuard
+            <GPSComplianceGuard 
               userRole={user?.role}
               isFieldMode={isFieldMode}
             >
-              <Labeling
-                assets={filteredAssetsByUnit}
+              <Labeling 
+                assets={filteredAssetsByUnit} 
                 selectedUnit={selectedUnit}
-                onBack={popScreen}
-                onUpdateAsset={updateAsset}
-                onBulkUpdateAssets={bulkUpdateAssets}
-                onSelectAsset={handleSelectAsset}
-                uniqueCentrosDeCusto={uniqueCentrosDeCusto}
-                scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
-                onUpdateScannerMode={handleUpdateScannerMode}
-                scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
+                onBack={popScreen} 
+                onUpdateAsset={updateAsset} 
+                onBulkUpdateAssets={bulkUpdateAssets} 
+                onSelectAsset={handleSelectAsset} 
+                uniqueCentrosDeCusto={uniqueCentrosDeCusto} 
+                scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+                onUpdateScannerMode={handleUpdateScannerMode} 
+                scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
               />
             </GPSComplianceGuard>
           )}
           {screen === AppScreen.CONSULTATION && (
-            <Consultation
-              assets={filteredAssetsByUnit}
-              onBack={() => { setIsConsultationFromInventory(false); popScreen(); }}
-              onSelectAsset={handleSelectAsset}
-              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']}
-              scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
-              onUpdateScannerMode={handleUpdateScannerMode}
-              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
-              isReturnMode={isConsultationFromInventory}
-              onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }}
+            <Consultation 
+              assets={filteredAssetsByUnit} 
+              onBack={() => { setIsConsultationFromInventory(false); popScreen(); }} 
+              onSelectAsset={handleSelectAsset} 
+              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
+              scannerMode={inventory.scannerMode || ScannerMode.BARCODE} 
+              onUpdateScannerMode={handleUpdateScannerMode} 
+              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
+              isReturnMode={isConsultationFromInventory} 
+              onReturnToInventory={(etq) => { setInventorySearchValue(etq); setIsConsultationFromInventory(false); popScreen(); }} 
               filters={consultationFilters}
               onUpdateFilters={setConsultationFilters}
               committedFilters={committedConsultationFilters}
@@ -6242,29 +6279,29 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.ASSET_DETAIL && selectedAssets.length > 0 && (
-            <AssetDetail
-              assets={selectedAssets}
-              onBack={popScreen}
-              onUpdate={updateAsset}
+            <AssetDetail 
+              assets={selectedAssets} 
+              onBack={popScreen} 
+              onUpdate={updateAsset} 
               onDelete={isAdmin ? deleteAsset : undefined}
               onUnitize={unitizeAsset}
-              onBulkUpdate={bulkUpdateAssets}
-              editableFields={inventory.editableFields || []}
-              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']}
-              uniqueEnderecos={allLocations}
-              uniqueCentrosDeCusto={uniqueCentrosDeCusto}
+              onBulkUpdate={bulkUpdateAssets} 
+              editableFields={inventory.editableFields || []} 
+              qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} 
+              uniqueEnderecos={allLocations} 
+              uniqueCentrosDeCusto={uniqueCentrosDeCusto} 
               readOnly={isReadOnlyDetail}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               protheusApiUrl={inventory.protheusApiUrl || ''}
-              tenantid={user?.tenantid || ''}
+              tenantid={user?.tenantId || user?.tenantid || ''}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
               databaseMode={databaseMode}
             />
           )}
           {screen === AppScreen.ASSET_REPORT_PRINT && (
-            <AssetPrintView
-              assets={screenParams?.assets || filteredAssetsByUnit}
+            <AssetPrintView 
+              assets={screenParams?.assets || filteredAssetsByUnit} 
               unitName={screenParams?.unitName || selectedUnit || 'UNIDADE GERAL'}
               onBack={popScreen}
               campaign={screenParams?.campaign}
@@ -6273,7 +6310,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.SOFT_DELETE_REPORT && (
-            <SoftDeleteReport
+            <SoftDeleteReport 
               assets={inventory.assets}
               onBack={popScreen}
               onRestore={restoreAsset}
@@ -6282,7 +6319,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.IMPAIRMENT_REPORT && (
-            <ImpairmentReport
+            <ImpairmentReport 
               assets={inventory.assets}
               onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])}
               onSelectAsset={(asset) => {
@@ -6292,30 +6329,26 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.DATABASE_MANAGER && (
-            <DatabaseLoader
-              onBack={popScreen}
-              databaseMode={databaseMode}
-              user={user}
-              onCargaInicial={runCargaInicialLocal}
-              onOpenHelp={() => setIsHelpMenuOpen(true)}
-              showModal={(title, message, type) => setModalConfig({
-                isOpen: true, title, message, type,
-                showCancel: false, confirmText: 'OK'
-              })}
-              campaigns={campaigns}
-              excludedAccounts={inventory.excludedAccounts}
-              isSyncing={isSyncing}
-              syncProgress={syncProgress}
-              onRestore={(state) => {
-                setInventory(state);
-                popScreen();
+            <BaseManagerPanel 
+              onBack={popScreen} 
+              onGoToCargaExpert={() => {
+                setHistory(prev => {
+                  const filtered = prev.filter(s => s !== AppScreen.DATABASE_MANAGER);
+                  return [...filtered, AppScreen.LOAD_DATABASE];
+                });
               }}
-              onClearDatabase={handleClearDatabase}
-              onDataLoaded={handleDataLoaded}
+              onResetDatabase={async () => {
+                await sqliteService.executeRaw("DROP TABLE IF EXISTS ativos; DROP TABLE IF EXISTS AUDIT_LOG;");
+                localStorage.removeItem('app_database_mode');
+                const newHistory = [AppScreen.MODULE_SELECTION, AppScreen.LOAD_DATABASE];
+                localStorage.setItem('app_screen_history', JSON.stringify(newHistory));
+                sessionStorage.setItem('app_just_cleared_data', 'true');
+                window.location.reload();
+              }} 
             />
           )}
           {screen === AppScreen.SIGNATURE && (
-            <Signature
+            <Signature 
               assets={filteredAssetsByUnit.filter(a => a._conferido)}
               onBack={popScreen}
               onConfirm={handleSignatureConfirm}
@@ -6323,59 +6356,39 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.UNIT_SELECTION && (
-            <UnitSelector
-              isAdmin={
-                user?.role === UserRole.ADMIN ||
-                user?.role === UserRole.MASTER ||
-                user?.is_admin ||
-                user?.isAdmin ||
-                (user?.email && user.email.toLowerCase() === ADMIN_EMAIL)
-              }
-              onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
-              databaseMode={databaseMode}
-              units={
-                fullCompaniesWithStatus
-                  .filter((c) => {
-                    // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
-                    // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
-                    // No modo local, mostramos todas as unidades encontradas na base
-                    const isAdmin =
-                      user?.role === UserRole.ADMIN ||
-                      user?.role === UserRole.MASTER ||
-                      user?.is_admin ||
-                      user?.isAdmin ||
-                      (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                    const isAuditor =
-                      user?.role === UserRole.AUDITOR ||
-                      user?.role === UserRole.AUXILIARY_AUDITOR;
+            <UnitSelector 
+              isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL)}
+   onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
+   databaseMode={databaseMode}
+   units={fullCompaniesWithStatus
+     .filter(c => {
+       // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
+       // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
+       // No modo local, mostramos todas as unidades encontradas na base
+       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
+                  const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+                  
+                  if (isAdmin) return true; // Admin vê tudo que foi detectado
+                  
+                  if (isAuditor) {
+                    const authorizedUnits = user?.units || (user?.unitid ? [user.unitid] : []);
+                    const normCName = normalizeKey(c.name);
+                    return authorizedUnits.some(au => normalizeKey(au) === normCName);
+                  }
 
-                    if (isAdmin) return true;
-
-                    if (isAuditor) {
-                      const authorizedUnits =
-                        user?.units || (user?.unitid ? [user.unitid] : []);
-                      const normCName = normalizeKey(c.name);
-                      return authorizedUnits.some(
-                        (au) => normalizeKey(au) === normCName
-                      );
-                    }
-
-                    return true;
-                  })
-                  .map((c) => ({
-                    filial: c.name,
-                    // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
-                    hasData:
-                      databaseMode !== DatabaseMode.INTERNAL
-                        ? true
-                        : c.hasActiveAssets,
-                    isDownloaded: false,
-                    hasCampaign: c.hasCampaign,
-                    hasGps: c.hasGps,
-                    assetCount: (c as { assetCount?: number }).assetCount,
-                  }))
-              }
-              onSelect={(u) => {
+                  return true;
+                })
+                .map(c => ({ 
+                  filial: c.name,
+                  // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
+                  hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
+                  isDownloaded: false,
+                  hasCampaign: c.hasCampaign,
+                  hasGps: c.hasGps,
+                  assetCount: (c as { assetCount?: number }).assetCount
+                }))
+              } 
+              onSelect={(u) => { 
                 const tid = user?.tenantId;
                 if (!tid) {
                   setModalConfig({
@@ -6392,11 +6405,11 @@ const App: React.FC = () => {
                 sessionStorage.setItem('selectedUnit', u);
                 sessionStorage.setItem('app_selected_unit', u);
                 localStorage.setItem('app_selected_unit', u);
-
+                
                 // Unified GBR v2.6 Keys
                 sessionStorage.setItem('filial', u);
                 localStorage.setItem('filial', u);
-
+                
                 sessionStorage.setItem('tenantId', validatedTenant);
                 localStorage.setItem('tenantId', validatedTenant);
 
@@ -6405,10 +6418,10 @@ const App: React.FC = () => {
                 setInventoryLocation(null);
                 sessionStorage.removeItem('app_just_finished_load');
 
-                // 2º: Redirecionar imediatamente para o Dashboard Principal (Auditoria Inteligente).
-                pushScreen(AppScreen.INVENTORY);
-              }}
-              onBack={async () => {
+                // 2º: Redirecionar imediatamente para a Seleção de Endereço Físico (Nova Ancora de Rota).
+                pushScreen(AppScreen.ADDRESS_SELECTION); 
+              }} 
+              onBack={async () => { 
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
                 if (isAdmin) {
                   setCurrentModule(null);
@@ -6424,11 +6437,11 @@ const App: React.FC = () => {
                     });
                     await supabase.auth.signOut();
                   }
-                  setUser(null);
-                  setSelectedUnit(null);
-                  pushScreen(AppScreen.LOGIN);
+                  setUser(null); 
+                  setSelectedUnit(null); 
+                  pushScreen(AppScreen.LOGIN); 
                 }
-              }}
+              }} 
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
@@ -6443,8 +6456,19 @@ const App: React.FC = () => {
               isImportingBatch={isImportingBatchState}
             />
           )}
+          {screen === AppScreen.ADDRESS_SELECTION && selectedUnit && (
+            <AddressSelector 
+              selectedUnit={selectedUnit}
+              onSelect={(addr) => {
+                setSelectedAddress(addr);
+                pushScreen(AppScreen.INVENTORY);
+              }}
+              onBack={popScreen}
+              isImportingBatch={isImportingBatchState}
+            />
+          )}
           {screen === AppScreen.UNIT_CONFIGURATOR && user && (
-            <UnitConfigurator
+            <UnitConfigurator 
               user={user}
               units={unitNames}
               onBack={popScreen}
@@ -6454,11 +6478,11 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.DASHBOARD && (
-            <Dashboard
-              assets={filteredAssetsByUnit}
+            <Dashboard 
+              assets={filteredAssetsByUnit} 
               allAssets={inventory.assets}
               currentCampaignId={inventory.currentCampaignId}
-              onBack={() => setHistory([AppScreen.MAIN_MENU])}
+              onBack={() => setHistory([AppScreen.MAIN_MENU])} 
               onChangeUnit={() => {
                 setSelectedUnit(null);
                 pushScreen(AppScreen.UNIT_SELECTION);
@@ -6473,10 +6497,10 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.ASSET_MAP && (
-            <AssetMap
-              assets={selectedUnit ? filteredAssetsByUnit : inventory.assets}
-              onBack={popScreen}
-              databaseMode={databaseMode}
+            <AssetMap 
+              assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} 
+              onBack={popScreen} 
+              databaseMode={databaseMode} 
               onSelectLocation={(loc) => {
                 setInventoryLocation(loc);
                 pushScreen(AppScreen.INVENTORY);
@@ -6484,19 +6508,20 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.ACTIVE_SEARCH && (
-            <ActiveSearch
-              assets={filteredAssetsByUnit}
-              onBack={popScreen}
+            <ActiveSearch 
+              assets={filteredAssetsByUnit} 
+              onBack={popScreen} 
               onSelectAsset={(asset) => {
                 handleSelectAsset(asset);
               }}
             />
           )}
           {screen === AppScreen.MODULE_SELECTION && (
-            <ModuleSelector
+            <ModuleSelector 
               username={user?.username || ''}
               userRole={user?.role}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
+              onOpenDatabaseLoader={() => pushScreen(AppScreen.LOAD_DATABASE)}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({
@@ -6530,7 +6555,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.ASSET_CONTROL_HOME && (
-            <AssetControlModule
+            <AssetControlModule 
               username={user?.username || ''}
               tenantId={user?.tenantId || 'CICOPAL'}
               databaseMode={databaseMode}
@@ -6546,9 +6571,9 @@ const App: React.FC = () => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} databaseMode={databaseMode} />}
           {screen === AppScreen.CAMPAIGN_MANAGEMENT && (
-            <CampaignManager
-              user={user}
-              onBack={popScreen}
+            <CampaignManager 
+              user={user} 
+              onBack={popScreen} 
               onActivate={async (id) => {
                 // Unified v2.6 Keys & Session Metadata
                 const tid = (user?.tenantId || 'CICOPAL').toString().trim();
@@ -6574,10 +6599,10 @@ const App: React.FC = () => {
                   localStorage.setItem(`kardek_campanha_ativa_${normUnit}`, 'true');
                 }
 
-                setInventory(prev => ({
-                  ...prev,
+                setInventory(prev => ({ 
+                  ...prev, 
                   currentCampaignId: id,
-                  status: DatabaseStatus.LOADED
+                  status: DatabaseStatus.LOADED 
                 }));
                 // Força atualização das estatísticas e estado reactivo antes de navegar
                 await refreshCampaigns();
@@ -6596,8 +6621,8 @@ const App: React.FC = () => {
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
           {screen === AppScreen.SYNC_MANAGER && (
-            <SyncManager
-              onBack={popScreen}
+            <SyncManager 
+              onBack={popScreen} 
               onSyncSuccess={async () => {
                 const items = await getPendingSyncItems();
                 setPendingPhotosCount(items.length);
@@ -6611,14 +6636,14 @@ const App: React.FC = () => {
             <OnboardingWizard onComplete={completeOnboarding} onCancel={popScreen} />
           )}
         </div>
-
-        {/* FloatingHelp agora é renderizado sempre que os termos forem aceitos,
+  
+        {/* FloatingHelp agora é renderizado sempre que os termos forem aceitos, 
             permitindo acesso ao onboarding manual mesmo que não tenha sido completado automaticamente. */}
-        <FloatingHelp
-          currentScreen={screen}
+        <FloatingHelp 
+          currentScreen={screen} 
           onCloseOnboarding={() => {
             localStorage.setItem('app_show_onboarding', 'false');
-          }}
+          }} 
           onOpenOnboarding={() => {
             pushScreen(AppScreen.ONBOARDING);
           }}
@@ -6628,19 +6653,19 @@ const App: React.FC = () => {
           onToggle={setIsHelpMenuOpen}
         />
 
-        <PrivacyCenter
-          isOpen={isPrivacyCenterOpen}
-          onClose={() => setIsPrivacyCenterOpen(false)}
+        <PrivacyCenter 
+          isOpen={isPrivacyCenterOpen} 
+          onClose={() => setIsPrivacyCenterOpen(false)} 
         />
 
         {/* Indicador de Banco de Dados Local (Soberania) */}
         {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || fileStatus?.status === 'expired') && !isKeyboardVisible && (
-          <motion.div
+          <motion.div 
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-[max(1.5rem,env(safe-area-inset-left))] z-[60] flex flex-col gap-2"
           >
-            <div
+            <div 
               onClick={handleReconnectFile}
               className="bg-[#1e293b]/95 backdrop-blur-xl px-4 py-3 rounded-2xl border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-center gap-3 cursor-pointer hover:bg-[#334155] transition-all group scale-95 md:scale-100"
             >
@@ -6653,7 +6678,7 @@ const App: React.FC = () => {
                   <Database size={18} className="text-red-400" />
                 )}
                 {sqliteService.getStorageSource() === 'PHYSICAL' && (
-                  <motion.div
+                  <motion.div 
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     className="absolute -top-1 -right-1"
@@ -6662,10 +6687,10 @@ const App: React.FC = () => {
                   </motion.div>
                 )}
               </div>
-
+              
               <div className="flex flex-col min-w-[80px]">
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
-                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA NATIVA' :
+                  {sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA NATIVA' : 
                    sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
                   {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
@@ -6673,8 +6698,8 @@ const App: React.FC = () => {
                 </span>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-[8px] font-bold text-white/50 uppercase tracking-tighter truncate max-w-[120px]">
-                    {sqliteService.getStorageSource() === 'PHYSICAL'
-                      ? 'Disco Android (Nativo)'
+                    {sqliteService.getStorageSource() === 'PHYSICAL' 
+                      ? 'Disco Android (Nativo)' 
                       : sqliteService.getStorageSource() === 'CACHE' ? 'MOTOR LOCAL INDEPENDENTE' : 'Aguardando Arquivo .db'}
                   </span>
                   {lastQueryLog && (
@@ -6704,7 +6729,7 @@ const App: React.FC = () => {
 
         {/* Indicador de Sincronização Offline (Fotos) */}
         {syncQueueLength > 0 && !isKeyboardVisible && (
-          <motion.div
+          <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-[50] bg-ink text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 backdrop-blur-md"
@@ -6727,12 +6752,12 @@ const App: React.FC = () => {
 
       {isPaletteOpen && (
         <div className="fixed inset-0 z-[2000] bg-bg-main/80 backdrop-blur-xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-          <motion.div
+          <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white border border-border rounded-[2.5rem] shadow-2xl w-full max-w-5xl relative max-h-[90vh] overflow-y-auto"
           >
-            <button
+            <button 
               onClick={() => setIsPaletteOpen(false)}
               className="absolute top-6 right-6 z-[2001] p-3 bg-white border border-border text-ink rounded-full shadow-lg active:scale-95 transition-all"
             >
@@ -6743,9 +6768,9 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <AIAssistant
-        isOpen={isAIAssistantOpen}
-        onClose={() => setIsAIAssistantOpen(false)}
+      <AIAssistant 
+        isOpen={isAIAssistantOpen} 
+        onClose={() => setIsAIAssistantOpen(false)} 
       />
 
       <Modal
@@ -6827,21 +6852,21 @@ const App: React.FC = () => {
             ) : (
               <HardDrive className="text-white relative z-10" size={48} />
             )}
-            <motion.div
+            <motion.div 
               animate={{ rotate: 360 }}
               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
               className="absolute inset-0 border-[8px] border-white/20 border-t-white/80 rounded-full"
             />
           </div>
-
+          
           <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">
             {isProcessing ? 'Persistindo no Banco SQL...' : 'Reconectando ao Banco de Dados Local...'}
           </h2>
-
+          
           <p className="text-slate-400 text-sm max-w-md mb-10 leading-relaxed font-medium">
             {isProcessing ? (
               <>
-                GBR Governança: Aguardando o <span className="text-blue-400 font-bold">COMMIT</span> físico no SQLite para garantir a integridade da auditoria.
+                GBR Governança: Aguardando o <span className="text-blue-400 font-bold">COMMIT</span> físico no SQLite para garantir a integridade da auditoria. 
                 Sua interface será liberada somente após o sucesso operacional.
               </>
             ) : (
@@ -6859,14 +6884,14 @@ const App: React.FC = () => {
               )
             )}
           </p>
-
+          
           <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 mb-8 max-w-sm">
              <p className="text-[10px] text-slate-400 leading-normal text-left">
                <span className="text-blue-400 font-black">SEGURANÇA DO NAVEGADOR:</span> Por restrições de privacidade (&quot;Sandbox&quot;), o navegador não revela o caminho absoluto do seu disco (Ex: C:\Usuarios\...). Ele identifica apenas o nome da pasta selecionada por você. O vínculo permanece intacto no diretório que você mapeou originalmente.
              </p>
           </div>
-
-          <button
+          
+          <button 
             onClick={handleReconnectFile}
             disabled={isReconnecting}
             className="w-full max-w-xs py-5 bg-blue-600 text-white rounded-[1.5rem] font-bold uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
@@ -6880,8 +6905,8 @@ const App: React.FC = () => {
               </>
             )}
           </button>
-
-          <button
+          
+          <button 
             onClick={async () => {
                if (window.confirm("Isso removerá o vínculo com a pasta atual. Você precisará vincular novamente. Deseja prosseguir?")) {
                   await sqliteService.hardResetDatabase();
@@ -6892,7 +6917,7 @@ const App: React.FC = () => {
           >
             Desvincular e Reiniciar Sistema
           </button>
-
+          
           <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest opacity-50">
             Soberania de Dados Ativa (Modo Interno)
           </p>

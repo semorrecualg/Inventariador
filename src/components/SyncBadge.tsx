@@ -37,6 +37,12 @@ export const SyncBadge: React.FC = () => {
     checkCounters();
     const interval = setInterval(checkCounters, 5000); // Atualiza a cada 5s discretamente
 
+    const handlePhysicalWrite = () => {
+      console.log(">>> [SyncBadge] Reatividade Física SRE acionada. Recalculando contadores...");
+      checkCounters();
+    };
+
+    window.addEventListener('gbr_physical_write', handlePhysicalWrite);
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -45,6 +51,7 @@ export const SyncBadge: React.FC = () => {
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener('gbr_physical_write', handlePhysicalWrite);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
