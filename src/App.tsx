@@ -4842,13 +4842,14 @@ const App: React.FC = () => {
 
   // --- Handlers de Transição e Workflow ---
   const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
-    console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assets.length);
+    const assetsArray = Array.isArray(assets) ? assets : [];
+    console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assetsArray.length);
     
     // 1. Unidades (Usamos as já calculadas via SQL pelo Loader para performance)
     let finalCompanies = (companies && companies.length > 0) ? companies : [];
     
     // Regra v25.01: Se as empresas vieram vazias mas há ativos, tentamos extrair por Query SQL "Limpa"
-    if (finalCompanies.length === 0 && assets.length > 0) {
+    if (finalCompanies.length === 0 && assetsArray.length > 0) {
       console.warn('>>> [App] handleDataLoaded: Unidades vazias. Tentando extração de emergência via SQL...');
       try {
         const sqlUnits = await sqliteService.getOperationalUnits();
@@ -4857,7 +4858,7 @@ const App: React.FC = () => {
         } else {
           // Fallback total se a query falhar: Extração direta dos objetos
           const unitSet = new Set<string>();
-          assets.forEach(a => {
+          assetsArray.forEach(a => {
             const unit = (a.filial || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
             if (unit && unit !== 'NULL') unitSet.add(unit);
           });
@@ -4872,7 +4873,7 @@ const App: React.FC = () => {
     // 2. Atualização de Estado
     const newInventory: InventoryState = { 
       ...inventory, 
-      assets, 
+      assets: assetsArray, 
       companies: finalCompanies,
       lastUpdated: new Date().toISOString(),
       status: DatabaseStatus.LOADED
@@ -4888,7 +4889,7 @@ const App: React.FC = () => {
     
     // 3. Persistência de Segurança (Cache) - Importante para o modo Interno
     try {
-      await saveInventory(newInventory, assets);
+      await saveInventory(newInventory, assetsArray);
       await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
       console.log('>>> [App] Sincronizando estado de campanhas e contadores locais...');
       await refreshCampaigns();
@@ -4949,9 +4950,15 @@ const App: React.FC = () => {
       // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
       if (databaseMode === DatabaseMode.SUPABASE) {
         try {
-          const isGlobalAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-          const effectiveTenantId = isGlobalAdmin ? undefined : user?.tenantId;
-          await clearCloudInventory(selectedUnit || undefined, effectiveTenantId);
+          // Tranca invisível de segurança injetada no método de remoção remoto:
+          // .delete().eq('_tenantid', currentTenantId)
+          const currentTenantId = user?.tenantId || user?._tenantid || '';
+          if (!currentTenantId) {
+            console.warn(">>> [Security Guard] Abortando handleClearDatabase: currentTenantId nulo ou indefinido para evitar 'DELETE requires a WHERE clause'");
+            return;
+          }
+          
+          await clearCloudInventory(selectedUnit || undefined, currentTenantId);
           
           // Log de Auditoria na Nuvem
           logAuditEvent({
@@ -4970,7 +4977,7 @@ const App: React.FC = () => {
             await syncConfigToCloud({ 
               ...configToSync, 
               lastUpdated: new Date().toISOString() 
-            } as Omit<InventoryState, 'assets'>, effectiveTenantId);
+            } as Omit<InventoryState, 'assets'>, currentTenantId);
           } catch (syncErr) {
             console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
           }
