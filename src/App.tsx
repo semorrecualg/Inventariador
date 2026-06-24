@@ -221,6 +221,8 @@ const removerLoaderEstatico = () => {
   }
 };
 
+let iframeNavigationLocked = false;
+
 // App Component
 const App: React.FC = () => {
   // 🚀 INJEÇÃO DE SESSÃO PERMANENTE COM CONTEXTO FÍSICO (AI Studio iFrame)
@@ -392,6 +394,10 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [history, setHistoryVal] = useState<AppScreen[]>(() => {
+    if (typeof window !== 'undefined' && window.self !== window.top) {
+      iframeNavigationLocked = true;
+      return [AppScreen.LOAD_DATABASE];
+    }
     try {
       const saved = localStorage.getItem('app_screen_history');
       if (saved) {
@@ -403,6 +409,9 @@ const App: React.FC = () => {
   });
 
   const [screen, setScreenState] = useState<AppScreen>(() => {
+    if (typeof window !== 'undefined' && window.self !== window.top) {
+      return AppScreen.LOAD_DATABASE;
+    }
     try {
       const saved = localStorage.getItem('app_screen_history');
       if (saved) {
@@ -414,6 +423,10 @@ const App: React.FC = () => {
   });
 
   const setHistory = useCallback((update: AppScreen[] | ((prev: AppScreen[]) => AppScreen[])) => {
+    if (iframeNavigationLocked) {
+      console.warn(">>> [GBR-Compliance] Sandbox Guard: setHistory ignorado (Modo Imutável).");
+      return;
+    }
     setHistoryVal(prev => {
       const nextHistory = typeof update === 'function' ? update(prev) : update;
       const finalHistory = Array.isArray(nextHistory) && nextHistory.length > 0 ? nextHistory : [AppScreen.LOGIN];
@@ -2263,17 +2276,6 @@ const App: React.FC = () => {
 
   const runCargaInicialLocal = useCallback(async () => {
     if (isSyncing) return;
-    if (isDatabaseLoaded) {
-      console.log('>>> [Carga Inicial] Bloqueado: Base já carregada e protegida contra reinicialização.');
-      setModalConfig({
-        isOpen: true,
-        title: 'Base Protegida',
-        message: 'A base local SQLite já está carregada e ativa. Carga inicial bloqueada para evitar conflitos ou reinicialização de dados.',
-        type: 'warning',
-        confirmText: 'Entendido'
-      });
-      return;
-    }
 
     if (!navigator.onLine) {
       setModalConfig({
@@ -2297,7 +2299,19 @@ const App: React.FC = () => {
       const tenantidList = Array.isArray(tid) ? tid : [tid];
 
       console.log('>>> [Carga Inicial] Chamando fetchFullInventory para tenants:', tenantidList);
-      const cloudData = await fetchFullInventory(tenantidList);
+      const cloudData = await fetchFullInventory(
+        tenantidList,
+        undefined,
+        undefined,
+        async (loadedConfig) => {
+          try {
+            console.log(">>> [onComplete] Persistindo configuração fail-safe de forma única e atômica no IndexedDB.");
+            await saveConfigOnly(loadedConfig);
+          } catch (e) {
+            console.warn(">>> [onComplete Error] Falha ao persistir a configuração fail-safe:", e);
+          }
+        }
+      );
 
       if (!cloudData || !cloudData.assets || cloudData.assets.length === 0) {
         throw new Error('Nenhum ativo encontrado na nuvem para este projeto/tenant.');
@@ -2354,7 +2368,76 @@ const App: React.FC = () => {
       setIsSyncing(false);
       setSyncProgress(null);
     }
-  }, [isSyncing, inventory, user]);
+  }, [isSyncing, inventory, user, isDatabaseLoaded]);
+
+  const executarSincroniaNuvem = useCallback(async () => {
+    if (!navigator.onLine) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Dispositivo Offline',
+        message: 'Você precisa de conexão ativa com a internet para sincronizar com a nuvem.',
+        type: 'error',
+        showCancel: false,
+        confirmText: 'Entendido'
+      });
+      return;
+    }
+    
+    try {
+      console.log('>>> [App] Iniciando Sincronia Nuvem explícita...');
+      const rawAssets = await sqliteService.getAllAssets();
+      const assets = Array.isArray(rawAssets) ? rawAssets : [];
+      const totalAtivos = assets.length;
+
+      // 1. COMPLIANCE DE CONTAGEM REAL: Barreira física estrita
+      if (totalAtivos <= 0) {
+        console.warn('>>> [App] Sincronia Abortada: Banco SQLite local vazio (0 ativos).');
+        setModalConfig({
+          isOpen: true,
+          title: 'Ação Bloqueada',
+          message: 'Não há ativos gravados no disco local para espelhamento Delta. Realize a carga inicial da planilha Excel no painel Expert.',
+          type: 'warning',
+          showCancel: false,
+          confirmText: 'Entendido'
+        });
+        return;
+      }
+
+      setIsSyncing(true);
+      setSyncError(null);
+      
+      const tid = user?.tenantId || user?.tenantid || user?.tenants || 'CICOPAL';
+      const tenantidList = Array.isArray(tid) ? tid[0] : tid;
+      
+      await syncAssetsToCloud(assets, tenantidList, (processed, total) => {
+        setSyncProgress({
+          processed,
+          total,
+          percentage: Math.min(Math.round((processed / total) * 100), 100),
+          label: `Sincronizando ${processed} de ${total} ativos...`
+        });
+      });
+      console.log('>>> [App] Sincronia Nuvem concluída com sucesso.');
+      
+      setModalConfig({
+        isOpen: true,
+        title: 'Sincronização Concluída',
+        message: 'Todos os ativos locais foram sincronizados com a nuvem com sucesso.',
+        type: 'success'
+      });
+      
+    } catch (err) {
+      console.error('>>> [App] Erro na Sincronia Nuvem:', err);
+      setModalConfig({
+        isOpen: true,
+        title: 'Erro de Sincronização',
+        message: err instanceof Error ? err.message : 'Houve uma falha ao tentar sincronizar os dados com a nuvem.',
+        type: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user]);
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
@@ -3285,6 +3368,14 @@ const App: React.FC = () => {
   }, []);
 
   const pushScreen = useCallback(async (s: AppScreen, params?: NavigationParams) => {
+    if (iframeNavigationLocked && (s === AppScreen.ADDRESS_SELECTION || s === AppScreen.UNIT_SELECTION)) {
+      console.warn(`>>> [GBR-Compliance] Sandbox Guard: Bloqueando push para tela desnecessária em modo iFrame: ${s}`);
+      return;
+    }
+    if (s === AppScreen.LOAD_DATABASE && typeof window !== 'undefined' && window.self !== window.top) {
+      iframeNavigationLocked = true;
+      console.log(">>> [GBR-Compliance] Guard Ativado: Interface congelada no painel administrativo.");
+    }
     if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
       setModalConfig({
         isOpen: true,
@@ -3897,6 +3988,10 @@ const App: React.FC = () => {
   };
 
   const popScreen = useCallback(() => {
+    if (iframeNavigationLocked) {
+      console.warn(">>> [GBR-Compliance] Sandbox Guard: Pop history bloqueado. Navegação imutável ativada.");
+      return;
+    }
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
       const newScreen = newHistory[newHistory.length - 1];
@@ -4970,25 +5065,10 @@ const App: React.FC = () => {
     sessionStorage.setItem('app_just_finished_load', 'true');
     sessionStorage.removeItem('app_just_cleared_data');
     
-    // 5. Navegação: Sempre retorna para a seleção de unidade (fluxo padrão)
-    console.log('>>> [App] Iniciando transição de pós-carga...');
+    // 5. Conclusão do processamento
+    console.log('>>> [App] Carga finalizada em RAM, aguardando clique em Confirmar e Voltar para transição explícita.');
     setStartWithDataMenu(false);
-    
-    // Defer para permitir que o sistema processe o estado grande
-    setTimeout(() => {
-      console.log('>>> [App] Executando redirecionamento para Seleção de Unidade.');
-      if (history.includes(AppScreen.LOAD_DATABASE) || history.includes(AppScreen.DATABASE_MANAGER)) {
-        const newHistory = history.filter(s => s !== AppScreen.LOAD_DATABASE && s !== AppScreen.DATABASE_MANAGER);
-        if (newHistory[newHistory.length - 1] !== AppScreen.UNIT_SELECTION) {
-          newHistory.push(AppScreen.UNIT_SELECTION);
-        }
-        setHistory(newHistory);
-        localStorage.setItem('app_screen_history', safeStringify(newHistory));
-      } else {
-        pushScreen(AppScreen.UNIT_SELECTION);
-      }
-    }, 150);
-  }, [history, pushScreen, refreshCampaigns]);
+  }, [refreshCampaigns]);
 
   const handleClearDatabase = async () => {
     if (localStorage.getItem('is_system_locked') === 'true') {
@@ -6227,6 +6307,7 @@ const App: React.FC = () => {
                 user={user}
                 databaseMode={databaseMode}
                 onCargaInicial={runCargaInicialLocal}
+                onExecutarSincroniaNuvem={executarSincroniaNuvem}
                 showModal={showModal}
                 currentUnitId={selectedUnit}
                 currentTenantId={user?.tenantId || sessionStorage.getItem('tenantId') || ''}
@@ -6236,6 +6317,18 @@ const App: React.FC = () => {
                 }}
                 onClearDatabase={handleClearDatabase}
                 onDataLoaded={handleDataLoaded} 
+                onConfirmSuccess={() => {
+                  console.log(">>> [GBR-Compliance] Transição explícita pós-carga iniciada.");
+                  if (typeof window !== 'undefined') {
+                    iframeNavigationLocked = false;
+                  }
+                  
+                  // Chaveamento explícito e imutável de estado para o DASHBOARD
+                  const nextHistory = [AppScreen.MAIN_MENU, AppScreen.DASHBOARD];
+                  setHistoryVal(nextHistory);
+                  setScreenState(AppScreen.DASHBOARD);
+                  localStorage.setItem('app_screen_history', JSON.stringify(nextHistory));
+                }}
                 isDatabaseLoaded={isDatabaseLoaded}
               />
             ) : (
@@ -6517,6 +6610,9 @@ const App: React.FC = () => {
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
+              onForceToggleView={() => {
+                pushScreen(AppScreen.LOAD_DATABASE);
+              }}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
                 pushScreen(AppScreen.UNIT_CONFIGURATOR);

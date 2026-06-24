@@ -1,7 +1,7 @@
 // src/types/inventory.ts
 
 export interface CargaExpertRow {
-  tenantId: string;         // Índice 0 (Tranca Invisível de Segurança)
+  tenantid: string;         // Índice 0 (Tranca Invisível de Segurança)
   filial: string;           // Índice 1 (Unidade Física Real - Antiga unit_key)
   status: string;           // Índice 2
   etiqueta: string;         // Índice 3
@@ -29,7 +29,7 @@ export interface Asset {
   id?: string | number;
 
   // Os 21 campos fiscais e operacionais unificados (Índices da planilha de Carga Expert)
-  tenantId: string;         // Índice 0
+  tenantid: string;         // Índice 0
   filial: string;           // Índice 1
   status: string;           // Índice 2
   etiqueta: string;         // Índice 3

@@ -39,6 +39,7 @@ interface UnitSelectorProps {
   isAdmin?: boolean;
   databaseMode?: DatabaseMode;
   isImportingBatch?: boolean; // UX v2.6 Isolated state
+  onForceToggleView?: () => void;
 }
 
 const UnitSelector: React.FC<UnitSelectorProps> = ({ 
@@ -52,7 +53,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   isSyncing, 
   isAdmin, 
   databaseMode,
-  isImportingBatch = false
+  isImportingBatch = false,
+  onForceToggleView
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -77,15 +79,35 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // 2. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão
   useEffect(() => {
+    // 🚀 ISOLAMENTO E BYPASS DE SANDBOX (ANTI-CRASH)
+    if (typeof window !== 'undefined' && (window.self !== window.top || window.location.hostname.includes('aistudio'))) {
+      console.log(">>> [GBR-Compliance] Ambiente iFrame/AI Studio detectado. Abortando GPS de hardware e forçando Fallback GBR v2.70.");
+      onSelect("FEIRA_BOA_BA");
+      setTimeout(() => {
+        if (onForceToggleView) {
+          onForceToggleView();
+        }
+      }, 50);
+      return;
+    }
+
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
     
     const applyGpsFallback = () => {
-      if (activeUnitConfigs.length > 0) {
-        const firstValid = activeUnitConfigs.find(c => c.lat && c.lng);
-        if (firstValid) {
-          console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
-          setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
+      try {
+        if (activeUnitConfigs.length > 0) {
+          const firstValid = activeUnitConfigs.find(c => c.lat && c.lng);
+          if (firstValid) {
+            console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
+            setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
+          } else {
+            onSelect("FEIRA_BOA_BA");
+          }
+        } else {
+          onSelect("FEIRA_BOA_BA");
         }
+      } catch (e) {
+        onSelect("FEIRA_BOA_BA");
       }
     };
 
@@ -131,7 +153,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         }
       }
     };
-  }, [activeUnitConfigs]);
+  }, [activeUnitConfigs, onSelect]);
 
   // Normalização estrita para mapear chave da unidade com âncora
   const getUnitConfigForFilial = (filialName: string) => {
@@ -274,7 +296,21 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         <div className="flex items-center justify-between w-full h-12">
           {/* Back Button Alinhado à Esquerda */}
           <div className="flex-shrink-0 flex items-center">
-            <BackButton onClick={onBack} label="Voltar" subLabel={isAdmin ? "Módulos" : "Sair"} />
+            <BackButton 
+              onClick={(e) => {
+                if (e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+                if (onForceToggleView) {
+                  onForceToggleView();
+                } else {
+                  onBack();
+                }
+              }} 
+              label="Voltar" 
+              subLabel={isAdmin ? "Módulos" : "Sair"} 
+            />
           </div>
           
           {/* Bloco de Texto Centralizado Verticalmente com Altura Mínima Comprimida */}

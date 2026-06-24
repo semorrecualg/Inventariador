@@ -23,7 +23,7 @@ export interface AtivoPlanilha {
 }
 
 const COLUNAS_OBRIGATORIAS: string[] = [
-  'tenantId', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 
+  'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 
   'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 
   'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey', 
   'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno'
@@ -70,7 +70,7 @@ export async function processarEInjetarPlanilha(
     };
 
     const asset: Asset = {
-      tenantId: String(getSafeValue('tenantId') || '').trim(),
+      tenantid: String(getSafeValue('tenantid') || '').trim(),
       filial: String(getSafeValue('filial') || '').trim(),
       status: String(getSafeValue('status') || 'ATIVO').trim(),
       etiqueta: String(getSafeValue('etiqueta') || '').trim(),
@@ -114,7 +114,9 @@ interface DatabaseLoaderProps {
   showModal?: (config: Record<string, unknown>) => void;
   onRestore?: (state: unknown) => void;
   onClearDatabase: () => Promise<void>;
+  onExecutarSincroniaNuvem?: () => Promise<void>;
   onDataLoaded: (assets?: Asset[], companies?: string[]) => void;
+  onConfirmSuccess?: () => void;
   isDatabaseLoaded: boolean;
   currentUnitId?: string | null;
   currentTenantId?: string | null;
@@ -128,7 +130,9 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   user,
   onCargaInicial,
   onClearDatabase,
+  onExecutarSincroniaNuvem,
   onDataLoaded,
+  onConfirmSuccess,
   currentUnitId,
   currentTenantId
 }) => {
@@ -185,25 +189,30 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     setProcessedDetails({ processed: 0, total: 0, percentage: 0 });
 
     try {
-      const tenantId = currentTenantId || user?._tenantid || user?.tenantId || 'CICOPAL';
+      // FECHAMENTO VIOLENTO E PURGA DE THREAD LOCKS NO INÍCIO DA CARGA
+      await sqliteService.forcePurgeAndConnect();
+
+      const tenantid = currentTenantId || user?._tenantid || user?.tenantId || 'CICOPAL';
       const unitId = currentUnitId || user?._unitid || user?.filial || 'CICOPAL_FILIAL_DEFAULT';
 
       // Executa o processador industrial com fatiamento rígido de 200 itens
       // O databaseLoaderService deve retornar o total real processado
       const totalCount = await databaseLoaderService.processExcelFile(
         file,
-        tenantId,
+        tenantid,
         unitId,
         (batchIndex, insertedCount, totalInserted, finalPlanilhaTotal) => {
           // Correção da Fórmula: Progresso real baseado no tamanho total absoluto da planilha
           const totalEstimado = finalPlanilhaTotal && finalPlanilhaTotal > 0 ? finalPlanilhaTotal : 12637;
-          const pctCalculada = Math.min(Math.round((totalInserted / totalEstimado) * 100), 99);
           
-          setProcessedDetails({
-            processed: totalInserted,
-            total: totalEstimado,
-            percentage: pctCalculada
-          });
+          if (totalInserted % 1000 === 0 || totalInserted === totalEstimado) {
+            const pctCalculada = Math.min(Math.round((totalInserted / totalEstimado) * 100), 99);
+            setProcessedDetails({
+              processed: totalInserted,
+              total: totalEstimado,
+              percentage: pctCalculada
+            });
+          }
         }
       );
 
@@ -213,6 +222,15 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         total: totalCount,
         percentage: 100
       });
+      
+      // ACIONAMENTO DO COMMITT FÍSICO EM DISCO ANTES DA VALIDAÇÃO
+      await sqliteService.saveDatabase();
+      
+      // TRAVA ANTIMENTIRA: Validação física absoluta no arquivo .db
+      const physicalCount = await sqliteService.countAtivos();
+      if (physicalCount === 0 && totalCount > 0) {
+        throw new Error('FALHA DE DUMPING: A contagem física de registros na base nativa resultou em 0. O arquivo Excel não foi persistido no disco local.');
+      }
       
       setUploadStatus('success');
 
@@ -235,16 +253,104 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       setUploadStatus('error');
       const msg = err instanceof Error ? err.message : 'Erro desconhecido ao processar planilha de ativos.';
       setErrorMsg(msg);
+    } finally {
+      // FECHAMENTO ELEGANTE DA CONEXÃO APÓS O PROCESSAMENTO
+      await sqliteService.closeCurrentConnection();
     }
   };
 
   // Ações Auxiliares
   const handleDownloadCloud = async () => {
     try {
-      await onCargaInicial();
+      if (onExecutarSincroniaNuvem) {
+        await onExecutarSincroniaNuvem();
+      } else {
+        await onCargaInicial();
+      }
     } catch (err: unknown) {
       console.error("[SRE Cloud Load] Cloud sync load failed:", err);
     }
+  };
+
+  const renderTreadmill = () => {
+    let processed = 0;
+    let total = 0;
+    
+    if (uploadStatus === 'processing' && processedDetails) {
+      processed = processedDetails.processed;
+      total = processedDetails.total;
+    } else if (isSyncing && syncProgress) {
+      processed = syncProgress.processed;
+      total = syncProgress.total;
+    }
+    
+    if (total <= 0) return null;
+    
+    // Divide em fatias de até 1000 registros para o painel visual
+    const BATCH_UI_SIZE = 1000;
+    const numBatches = Math.ceil(total / BATCH_UI_SIZE);
+    const rows = [];
+    
+    for (let i = 0; i < numBatches; i++) {
+      const start = i * BATCH_UI_SIZE + 1;
+      const end = Math.min((i + 1) * BATCH_UI_SIZE, total);
+      
+      const isCompleted = processed >= end;
+      const isProcessing = processed >= start && processed < end;
+      
+      const rowClass = isCompleted 
+        ? 'bg-green-200 text-green-900' 
+        : isProcessing 
+          ? 'bg-blue-200 text-blue-900 animate-pulse' 
+          : 'text-gray-400 bg-white';
+          
+      let progressPct = 0;
+      if (isCompleted) {
+        progressPct = 100;
+      } else if (isProcessing) {
+        progressPct = ((processed - (start - 1)) / (end - (start - 1))) * 100;
+      }
+      
+      rows.push(
+        <tr key={i} className={`text-xs font-mono font-medium ${rowClass} border-b border-gray-100 last:border-0 transition-colors duration-300`}>
+          <td className="p-2 text-center py-2.5">LOTE {i + 1}</td>
+          <td className="p-2 text-center py-2.5">{start.toString().padStart(4, '0')}</td>
+          <td className="p-2 w-full align-middle py-2.5">
+            <div className={`w-full h-2.5 ${isCompleted ? 'bg-green-300/50' : isProcessing ? 'bg-blue-300/50' : 'bg-gray-100'} rounded-full overflow-hidden`}>
+              <div 
+                className={`h-full ${isCompleted ? 'bg-green-600' : isProcessing ? 'bg-blue-600' : 'bg-transparent'} transition-all duration-[400ms] ease-out`} 
+                style={{ width: `${progressPct}%` }} 
+              />
+            </div>
+          </td>
+          <td className="p-2 text-center py-2.5">{end.toString().padStart(4, '0')}</td>
+        </tr>
+      );
+    }
+    
+    return (
+      <div className="w-full mt-2 flex flex-col gap-2">
+        <div className="flex justify-between items-center text-[10px] font-bold text-gray-500 uppercase tracking-wider px-1">
+          <span>Esteira Operacional</span>
+          <span>{processed} / {total} Processados</span>
+        </div>
+        <div className="w-full overflow-hidden rounded-xl border border-gray-200 shadow-inner bg-white max-h-[220px] overflow-y-auto custom-scrollbar">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-gray-900 text-white text-[10px] uppercase tracking-widest font-black text-center shadow-sm">
+                <th className="p-2 py-2.5">Lote</th>
+                <th className="p-2 py-2.5">Início</th>
+                <th className="p-2 py-2.5 w-1/2">Progressão Visual</th>
+                <th className="p-2 py-2.5">Fim</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -291,7 +397,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       {/* 📦 Main Stage */}
       <main className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
         <div className="w-full max-w-xl flex flex-col gap-6">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="popLayout">
             
             {/* 📥 1. Drag & Drop Master Ingestion Card */}
             {uploadStatus !== 'processing' && !isSyncing && (
@@ -389,16 +495,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     </span>
                   </div>
 
-                  <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-600 rounded-full transition-all duration-300"
-                      style={{ 
-                        width: uploadStatus === 'processing' 
-                          ? `${processedDetails?.percentage || 0}%` 
-                          : `${syncProgress?.percentage || 15}%` 
-                      }}
-                    />
-                  </div>
+                  {renderTreadmill()}
                 </div>
               </motion.div>
             )}
@@ -429,7 +526,12 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
                 <button 
                   id="success-ok-btn"
-                  onClick={() => setUploadStatus('idle')}
+                  onClick={() => {
+                    setUploadStatus('idle');
+                    if (onConfirmSuccess) {
+                      onConfirmSuccess();
+                    }
+                  }}
                   className="w-full py-3 bg-gray-950 hover:bg-gray-900 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition duration-200"
                 >
                   Confirmar e Voltar

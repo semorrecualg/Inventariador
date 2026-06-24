@@ -10,7 +10,7 @@ export enum DatabaseStatus {
 }
 
 const DB_ASSET_COLUMNS: string[] = [
-  'tenantId', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 
+  'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 
   'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 
   'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey', 
   'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno', '_is_synced', '_is_deleted'
@@ -134,51 +134,91 @@ class SqliteService {
     }
   }
 
+  async forcePurgeAndConnect(): Promise<void> {
+    if (!this.sqliteConnection) return;
+    const dbName = this.storageKeys.nativeFileName;
+    try {
+      console.log(">>> [SRE PURGE] Iniciando fechamento violento e purga de conexões zumbis no SQLite...");
+      await this.sqliteConnection.closeConnection(dbName, false);
+    } catch (e) {
+      console.warn(">>> [SRE PURGE] Falha ao fechar conexão existente (pode já estar fechada):", e);
+    }
+    
+    try {
+      this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
+      await this.nativeDb.open();
+      this.isInitialized = true;
+      console.log(">>> [SRE PURGE] Nova conexão bloqueada estabelecida com sucesso.");
+    } catch (err) {
+      console.error(">>> [SRE PURGE FATAL] Falha absoluta ao recriar conexão trancada:", err);
+      throw err;
+    }
+  }
+
+  async closeCurrentConnection(): Promise<void> {
+    if (!this.sqliteConnection) return;
+    try {
+      await this.sqliteConnection.closeConnection(this.storageKeys.nativeFileName, false);
+      this.isInitialized = false;
+      this.nativeDb = null;
+      console.log(">>> [SRE CLOSED] Conexão com gbr_kardek.db fechada de forma elegante.");
+    } catch (err) {
+      console.warn(">>> [SRE CLOSE WARN] Falha no fechamento elegante:", err);
+    }
+  }
+
+  async reopenConnection(): Promise<void> {
+    if (!this.sqliteConnection) return;
+    try {
+      const dbName = this.storageKeys.nativeFileName;
+      const isConn = await this.sqliteConnection.isConnection(dbName, false);
+      if (isConn.result) {
+        this.nativeDb = await this.sqliteConnection.retrieveConnection(dbName, false);
+        if (!(await this.nativeDb.isDBOpen()).result) {
+          await this.nativeDb.open();
+          console.log(">>> [SRE SUCCESS] Arquivo gbr_kardek.db reaberto com sucesso.");
+        }
+      } else {
+        this.nativeDb = await this.sqliteConnection.createConnection(dbName, false, "no-encryption", 1, false);
+        await this.nativeDb.open();
+      }
+      this.isInitialized = true;
+    } catch (err) {
+      console.error(">>> [SRE CRITICAL FAIL] Falha ao reabrir conexão:", err);
+      throw err;
+    }
+  }
+
   private async applySchemaDDL(): Promise<void> {
     if (!this.nativeDb) throw new Error("[SRE] Instância nativeDb ausente no DDL.");
     
     const SCHEMA_ATOMIC = `
       CREATE TABLE IF NOT EXISTS ativos (
         id TEXT PRIMARY KEY,
-        tenantId TEXT,
+        tenantid TEXT,
         _tenantid TEXT,
         filial TEXT,
         _unitid TEXT,
         status TEXT,
-        STATUS TEXT,
         etiqueta TEXT,
         tag TEXT,
-        TAG TEXT,
-        TAG_INVENTARIO TEXT,
         qt INTEGER DEFAULT 1,
         descricaodoativo TEXT,
         serial TEXT,
         dataaqusic TEXT,
-        DATAAQUISIC TEXT,
         cnpj TEXT,
-        CNPJ TEXT,
         nomefornecedor TEXT,
-        NOMEFORNECEDOR TEXT,
         notafiscal TEXT,
-        NOTAFISCAL TEXT,
         endereco TEXT,
-        ENDERECO TEXT,
         registro TEXT,
         subreg TEXT,
-        SUBREG TEXT,
         databaixa TEXT,
-        DATABAIXA TEXT,
         contacontabil TEXT,
-        conta_contabil TEXT,
         primarykey TEXT,
-        PRIMARYKEY TEXT,
         centrodecusto TEXT,
-        CENTRODECUSTO TEXT,
         vlraquisic REAL,
         sn1_recno INTEGER,
-        Sn1_recno INTEGER,
         sn3_recno INTEGER,
-        Sn3_recno INTEGER,
         currentCampaignId TEXT,
         _is_synced INTEGER DEFAULT 0,
         _is_deleted INTEGER DEFAULT 0,
@@ -194,45 +234,30 @@ class SqliteService {
       
       CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
-        tenantId TEXT,
+        tenantid TEXT,
         _tenantid TEXT,
         filial TEXT,
         _unitid TEXT,
         status TEXT,
-        STATUS TEXT,
         etiqueta TEXT,
         tag TEXT,
-        TAG TEXT,
-        TAG_INVENTARIO TEXT,
         qt INTEGER DEFAULT 1,
         descricaodoativo TEXT,
         serial TEXT,
         dataaqusic TEXT,
-        DATAAQUISIC TEXT,
         cnpj TEXT,
-        CNPJ TEXT,
         nomefornecedor TEXT,
-        NOMEFORNECEDOR TEXT,
         notafiscal TEXT,
-        NOTAFISCAL TEXT,
         endereco TEXT,
-        ENDERECO TEXT,
         registro TEXT,
         subreg TEXT,
-        SUBREG TEXT,
         databaixa TEXT,
-        DATABAIXA TEXT,
         contacontabil TEXT,
-        conta_contabil TEXT,
         primarykey TEXT,
-        PRIMARYKEY TEXT,
         centrodecusto TEXT,
-        CENTRODECUSTO TEXT,
         vlraquisic REAL,
         sn1_recno INTEGER,
-        Sn1_recno INTEGER,
         sn3_recno INTEGER,
-        Sn3_recno INTEGER,
         currentCampaignId TEXT,
         _is_synced INTEGER DEFAULT 0,
         _is_deleted INTEGER DEFAULT 0,
@@ -333,18 +358,6 @@ class SqliteService {
     if (typeof window !== 'undefined') {
       (window as Record<string, unknown>).__isImportingBatch = val;
     }
-  }
-
-  async beginTransaction(): Promise<void> {
-    await this.executeRaw("BEGIN TRANSACTION;");
-  }
-
-  async commitTransaction(): Promise<void> {
-    await this.executeRaw("COMMIT;");
-  }
-
-  async rollbackTransaction(): Promise<void> {
-    await this.executeRaw("ROLLBACK;");
   }
 
   async forceMemoryFallback(): Promise<void> {
@@ -782,7 +795,7 @@ class SqliteService {
   ): Promise<void> {
     try {
       const sql = `INSERT OR REPLACE INTO ativos (
-        id, etiqueta, tag, vlraquisic, filial, descricaodoativo, registro, qt, tenantId, _tenantid, primarykey, _conferido, _isNew, _is_synced, endereco
+        id, etiqueta, tag, vlraquisic, filial, descricaodoativo, registro, qt, tenantid, _tenantid, primarykey, _conferido, _isNew, _is_synced, endereco
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`;
       await this.execute(sql, [id, id, id, vlr, filial, desc, registro, Number(qt || 1), tenant, tenant, primarykey, conferido, isNew, isSynced, endereco]);
     } catch (err) {

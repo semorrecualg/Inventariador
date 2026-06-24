@@ -60,9 +60,9 @@ export class DatabaseLoaderService {
    */
   public async processExcelFile(
     file: File,
-    tenantId: string,
+    tenantid: string,
     unitId: string,
-    onProgress: (batchIndex: number, insertedCount: number, totalInserted: number) => void
+    onProgress: (batchIndex: number, insertedCount: number, totalInserted: number, finalPlanilhaTotal: number) => void
   ): Promise<number> {
     
     // 1. Validação Preventiva de Bateria Crítica (< 5% sem fonte externa) com bypass para operador semorr@gmail.com
@@ -110,6 +110,11 @@ export class DatabaseLoaderService {
       throw new Error("A planilha fornecida está vazia ou corrompida.");
     }
 
+    // Garante que o banco de dados nativo está inicializado
+    if (!sqliteService.isInitialized) {
+      await sqliteService.init();
+    }
+
     // Ativa Flag Global de Isolamento de Carga
     sqliteService.setImportingMode(true);
     await sqliteService.executeRaw("PRAGMA foreign_keys = OFF;");
@@ -118,9 +123,6 @@ export class DatabaseLoaderService {
     let batchIndex = 0;
 
     try {
-      // Inicia Transação Primária Geral
-      await sqliteService.beginTransaction();
-
       // Processamento em lotes de 200 (Regra dos 200 Itens)
       for (let i = 0; i < rawRows.length; i += this.BATCH_SIZE) {
         batchIndex++;
@@ -133,7 +135,7 @@ export class DatabaseLoaderService {
 
           const finalId = tagSanitizada;
           const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId).trim();
-          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantId).trim();
+          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid).trim();
           const itemDesc = String(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
           ).trim();
@@ -224,32 +226,26 @@ export class DatabaseLoaderService {
 
           // Atualizações secundárias de suporte à conta_contabil, status, e todos os campos industriais na tabela física
           await sqliteService.execute(
-            `UPDATE Ativos SET 
-              conta_contabil = ?, 
+            `UPDATE ativos SET 
               contacontabil = ?, 
-              TAG_INVENTARIO = ?, 
-              STATUS = ?, 
-              SERIAL = ?, 
+              status = ?, 
+              serial = ?, 
               dataaqusic = ?, 
-              DATAAQUISIC = ?, 
-              CNPJ = ?, 
-              NOMEFORNECEDOR = ?, 
-              NOTAFISCAL = ?, 
-              ENDERECO = ?, 
-              SUBREG = ?, 
-              DATABAIXA = ?, 
-              PRIMARYKEY = ?, 
-              CENTRODECUSTO = ?, 
-              Sn1_recno = ?, 
-              Sn3_recno = ? 
+              cnpj = ?, 
+              nomefornecedor = ?, 
+              notafiscal = ?, 
+              endereco = ?, 
+              subreg = ?, 
+              databaixa = ?, 
+              primarykey = ?, 
+              centrodecusto = ?, 
+              sn1_recno = ?, 
+              sn3_recno = ? 
              WHERE id = ?;`,
             [
               contaContabil, 
-              contaContabil, 
-              statusVal, 
               statusVal, 
               serialVal, 
-              dataaqVal, 
               dataaqVal, 
               cnpjVal, 
               fornecedorVal, 
@@ -269,22 +265,17 @@ export class DatabaseLoaderService {
         }
 
         // Progresso do lote
-        onProgress(batchIndex, chunk.length, totalInseridos);
+        onProgress(batchIndex, chunk.length, totalInseridos, rawRows.length);
+        
+        // Pequeno delay artificial para renderização da esteira reativa
+        await new Promise(res => setTimeout(res, 40));
       }
-
-      // Confirmação atômica segura no SQLite nativo
-      await sqliteService.commitTransaction();
 
       // Gravação no disco físico (Dump Único)
       await sqliteService.saveDatabase();
 
     } catch (importError) {
-      console.error(">>> [CRITICAL IMPORT ERROR] Erro na gravação do lote. Executando Rollback...", importError);
-      try {
-        await sqliteService.rollbackTransaction();
-      } catch (rollbackErr) {
-        console.error(">>> [FATAL ROLLBACK ERROR] Falha ao reverter transação físico de banco:", rollbackErr);
-      }
+      console.error(">>> [CRITICAL IMPORT ERROR] Erro na gravação do lote:", importError);
       throw importError;
     } finally {
       // Restabelece isolamento e PRAGMA de chaves
