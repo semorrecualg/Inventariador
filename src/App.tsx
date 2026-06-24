@@ -118,6 +118,26 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("App Crash:", error, errorInfo);
+    try {
+      const activeUserJson = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
+      const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
+      const email = activeUser?.email || 'anonimo@gbr.com';
+      const tenantId = activeUser?.tenantId || activeUser?._tenantid || sessionStorage.getItem('tenantId') || 'CICOPAL';
+      
+      logAuditEvent({
+        user_email: email,
+        action: 'APP_CRASH',
+        table_name: 'system_errors',
+        details: JSON.stringify({
+          message: error.message,
+          stack: error.stack,
+          componentStack: errorInfo.componentStack
+        }).substring(0, 5000),
+        tenantId: tenantId
+      }).catch(err => console.warn("Erro ao registrar log de crash:", err));
+    } catch (logErr) {
+      console.warn("Falha ao tentar logar crash:", logErr);
+    }
   }
   render() {
     if (this.state.hasError) {

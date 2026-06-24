@@ -132,7 +132,8 @@ export class DatabaseLoaderService {
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, 'filial') || unitId).trim();
+          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId).trim();
+          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantId).trim();
           const itemDesc = String(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
           ).trim();
@@ -213,7 +214,7 @@ export class DatabaseLoaderService {
             itemDesc,
             finalRegistro,
             finalQt,
-            tenantId,
+            finalTenantId,
             finalId,
             statusVal.toLowerCase().includes('conferido') ? 1 : 0,
             0,
