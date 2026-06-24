@@ -28,7 +28,7 @@ jobs:
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'zulu' 
           java-version: '17'
           cache: 'gradle'
 
