@@ -185,6 +185,22 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
   hasCompletedOnboarding: localStorage.getItem('app_onboarding_completed') === 'true'
 });
 
+const removerLoaderEstatico = () => {
+  try {
+    const loader = document.getElementById('gbr-initial-loader') || document.getElementById('app-loader');
+    if (loader && loader.style.display !== 'none') {
+      console.log(">>> [App] Removendo gbr-initial-loader de forma limpa e coordenada.");
+      loader.style.opacity = '0';
+      setTimeout(() => {
+        loader.style.display = 'none';
+        loader.remove();
+      }, 200);
+    }
+  } catch (err) {
+    console.warn(">>> [GBR-Emergency] Erro ao remover loader estático", err);
+  }
+};
+
 // App Component
 const App: React.FC = () => {
   const [sqliteStatus, setSqliteStatusState] = useState(() => {
@@ -992,6 +1008,8 @@ const App: React.FC = () => {
                         }
                       } else {
                         console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                        removerLoaderEstatico();
+                        setIsDataLoaded(true);
                         setUser(null);
                         sessionStorage.removeItem('app_current_user');
                         setHistory([AppScreen.LOGIN]);
@@ -1029,6 +1047,8 @@ const App: React.FC = () => {
                       setIsSessionValid(true);
                     } else {
                       // REQUISITO 3: Purga de Cache de Inicialização
+                      removerLoaderEstatico();
+                      setIsDataLoaded(true);
                       setIsSessionValid(false);
                       setUser(null);
                       sessionStorage.removeItem('app_current_user');
@@ -2719,12 +2739,7 @@ const App: React.FC = () => {
         }
         // Remove o loader do index.html o mais rápido possível
         // ATENÇÃO: corrigido ID do gbr-initial-loader para buscar o loader real do index.html!
-        const loader = document.getElementById('gbr-initial-loader') || document.getElementById('app-loader');
-        if (loader) {
-          console.log(">>> [App] Removendo gbr-initial-loader de forma limpa e coordenada.");
-          loader.style.opacity = '0';
-          setTimeout(() => loader.remove(), 500);
-        }
+        removerLoaderEstatico();
 
         // Verifica se há atualizações na nuvem logo após o carregamento inicial (em background) - Apenas se não acabamos de baixar
         if (databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && user) {
@@ -3526,6 +3541,8 @@ const App: React.FC = () => {
 
           if (!isInternalMode) {
             console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+            removerLoaderEstatico();
+            setIsDataLoaded(true);
             setUser(null);
             sessionStorage.removeItem('app_current_user');
             setHistory([AppScreen.LOGIN]);
