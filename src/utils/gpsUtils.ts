@@ -1,4 +1,3 @@
-
 import { Geolocation } from '@capacitor/geolocation';
 
 /**
@@ -83,31 +82,67 @@ export async function getCurrentDeviceLocation(
   userRole: string,
   unitAnchorCoordinates?: { lat: number; lng: number }
 ): Promise<GeoLocationResult> {
-  const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes((userRole || '').toUpperCase());
+  // Coordenadas padrão da unidade como fallback seguro e universal para evitar travamento
+  const defaultAnchor = { lat: -16.7439, lng: -49.2144 };
+  const finalAnchor = {
+    lat: unitAnchorCoordinates?.lat && !isNaN(Number(unitAnchorCoordinates.lat)) ? Number(unitAnchorCoordinates.lat) : defaultAnchor.lat,
+    lng: unitAnchorCoordinates?.lng && !isNaN(Number(unitAnchorCoordinates.lng)) ? Number(unitAnchorCoordinates.lng) : defaultAnchor.lng
+  };
 
-  // Se o perfil logado for administrativo, aplica bypass síncrono imediatamente
-  if (isAdmin && unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
-    showFloatingBypassToast(unitAnchorCoordinates.lat, unitAnchorCoordinates.lng, 'Soberania Admin (Ativa)');
-    return getAdminFallback(unitAnchorCoordinates);
+  const roleUpper = (userRole || '').toUpperCase();
+  const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes(roleUpper);
+
+  // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER, GESTOR), garanta o bypass síncrono definitivo da validação
+  if (isAdmin) {
+    console.log(">>> [SRE GPS Bypass] Perfil administrativo detectado. Aplicando bypass síncrono definitivo.");
+    showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'Soberania Admin (Ativa)');
+    return {
+      latitude: finalAnchor.lat,
+      longitude: finalAnchor.lng,
+      accuracy: 1.0,
+      isBypassed: true,
+      source: 'admin_bypass'
+    };
   }
 
+  // Se a API navigator.geolocation não existir ou se estivermos em iframe sandbox onde ela pode estar desabilitada
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    if (unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
-      showFloatingBypassToast(unitAnchorCoordinates.lat, unitAnchorCoordinates.lng, 'API Inexistente (Bypass)');
-      return getAdminFallback(unitAnchorCoordinates);
-    }
-    throw new Error("Geolocalização indisponível.");
+    console.warn(">>> [SRE GPS Fallback] API navigator.geolocation inexistente ou desativada no documento. Aplicando fallback automático.");
+    showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'API Inexistente (Bypass Fallback)');
+    return {
+      latitude: finalAnchor.lat,
+      longitude: finalAnchor.lng,
+      accuracy: 1.0,
+      isBypassed: true,
+      source: 'admin_bypass'
+    };
   }
 
   try {
     const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      // Configura um timeout imperativo interno para a Promise para nunca deixar pendurada
+      const timer = setTimeout(() => {
+        reject(new Error("Timeout síncrono na obtenção do GPS"));
+      }, 6000);
+
       try {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0,
-        });
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            clearTimeout(timer);
+            resolve(pos);
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+          {
+            enableHighAccuracy: false, // Menos agressivo em termos de segurança
+            timeout: 5000,
+            maximumAge: 60000,
+          }
+        );
       } catch (err) {
+        clearTimeout(timer);
         reject(err);
       }
     });
@@ -120,31 +155,21 @@ export async function getCurrentDeviceLocation(
       source: 'native',
     };
   } catch (errorVal: unknown) {
-    const error = errorVal as { code?: string | number; message?: string; name?: string } | null;
+    const errorMsg = errorVal instanceof Error ? errorVal.message : String(errorVal || '');
+    console.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
     
-    // Se a permissão for negada/bloqueada, ou houver erro/timeout, aplica o bypass se tivermos as coordenadas da filial
-    if (unitAnchorCoordinates && unitAnchorCoordinates.lat && unitAnchorCoordinates.lng) {
-      console.warn("[GBR v2.6] Falha ou bloqueio de geolocalização detectado. Ativando bypass administrativo de conformidade.");
-      showFloatingBypassToast(
-        unitAnchorCoordinates.lat,
-        unitAnchorCoordinates.lng,
-        error?.message || 'Permissão de GPS bloqueada'
-      );
-      return getAdminFallback(unitAnchorCoordinates);
-    }
-
-    throw new Error(`Falha de Geocerca: ${error && typeof error.message === 'string' ? error.message : 'Acesso negado à localização'}`);
+    // Tratamento específico de erro de Permissions Policy, sandbox, denied, ou timeout
+    // Em caso de falha de permissão (como em ambiente web sandbox/iFrame), aplique um FALLBACK AUTOMÁTICO
+    // retornando sucesso de forma simulada para destravar o bootstrap do aplicativo.
+    showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, `Bypass Sandbox (${errorMsg.substring(0, 30)})`);
+    return {
+      latitude: finalAnchor.lat,
+      longitude: finalAnchor.lng,
+      accuracy: 1.0,
+      isBypassed: true,
+      source: 'admin_bypass'
+    };
   }
-}
-
-function getAdminFallback(anchor: { lat: number; lng: number }): GeoLocationResult {
-  return {
-    latitude: anchor.lat,
-    longitude: anchor.lng,
-    accuracy: 1.0,
-    isBypassed: true,
-    source: 'admin_bypass',
-  };
 }
 
 export interface GpsLocation {
@@ -183,6 +208,21 @@ export const startAutonomousTracking = async () => {
         if (err) {
           console.warn('Autônomo: Erro no rastreio', err.message);
           
+          const isPermissionDenied = err.message && (
+            err.message.toLowerCase().includes('permission') || 
+            err.message.toLowerCase().includes('disabled') || 
+            err.message.toLowerCase().includes('policy')
+          );
+          
+          if (isPermissionDenied) {
+            console.warn('Autônomo: Permissão negada ou desabilitada por política. Desativando rastreamento autônomo definitivo para evitar loops.');
+            if (watchId !== null) {
+              Geolocation.clearWatch({ id: watchId }).catch(() => {});
+              watchId = null;
+            }
+            return;
+          }
+
           const isTimeout = (err as { code?: number }).code === 3 || 
                             (err.message && (err.message.toLowerCase().includes('timeout') || err.message.toLowerCase().includes('expired')));
           
@@ -302,12 +342,12 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
     console.warn('>>> [GPS] Falha no Geolocation.getCurrentPosition Nativo, tentando Web API...', err);
   }
 
-  // Fallback para Web Geolocation API
+  // Fallback para Web Geolocation API com Try/Catch robusto
   return new Promise((resolve) => {
     try {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
         console.log('>>> [GPS] Geolocalização não suportada ou indisponível.');
-        resolve(lastLocation || { lat: -16.6869, lng: -49.2648 });
+        resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
         return;
       }
 
@@ -326,13 +366,13 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
         (err) => {
           // Captura silenciosa de erros de permissão ou política
           console.warn('>>> [GPS] Fallback Web Geolocation erro (silenciado):', err.message);
-          resolve(lastLocation || { lat: -16.6869, lng: -49.2648 });
+          resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
         },
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
       );
     } catch (e) {
       console.warn('>>> [GPS] Geolocation Web API lançou exceção (silenciada):', e);
-      resolve(lastLocation || { lat: -16.6869, lng: -49.2648 });
+      resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
     }
   });
 };

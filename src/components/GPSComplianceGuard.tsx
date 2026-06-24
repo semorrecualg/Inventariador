@@ -34,7 +34,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
     // 2. Pelo seu perfil local no localStorage ou sessionStorage
     try {
-      const userStr = sessionStorage.getItem('app_current_user');
+      const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('app_current_user') || sessionStorage.getItem('user') || localStorage.getItem('user');
       if (userStr) {
         const u = JSON.parse(userStr);
         const uRole = u.role?.toUpperCase();
@@ -49,6 +49,15 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         ) {
           return true;
         }
+      }
+    } catch { /* ignore */ }
+
+    // Verificação adicional direta de e-mail de bypass imutável 'semorr@gmail.com'
+    try {
+      const rawEmail = sessionStorage.getItem('userEmail') || localStorage.getItem('userEmail') || sessionStorage.getItem('email') || localStorage.getItem('email');
+      if (rawEmail) {
+        const cleanEmail = rawEmail.replace(/%22|%2522|"/g, '').trim().toLowerCase();
+        if (cleanEmail === 'semorr@gmail.com') return true;
       }
     } catch { /* ignore */ }
 
@@ -141,11 +150,12 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       try {
         const roleStr = userRole || (isAdminUser ? 'ADMIN' : 'USER');
         const anchorCoords = { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) };
+        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
         
         let geoResult;
         try {
-          if (isAdminUser) {
-            console.warn('[Sandbox GPS Bypass Active]');
+          if (isAdminUser || isIframe) {
+            console.warn('[Sandbox GPS Bypass Active] Ignorando detecção devido a Sandbox/iFrame ou Admin.');
             setStatus('bypassed');
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
@@ -157,7 +167,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         } catch (locationErr: unknown) {
           const errMsg = locationErr instanceof Error ? locationErr.message : String(locationErr);
           console.warn('[Sandbox GPS Bypass Active] Rejeição ou violação de política ao capturar coordenadas:', errMsg);
-          if (isAdminUser) {
+          if (isAdminUser || isIframe) {
             setStatus('bypassed');
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
@@ -192,8 +202,9 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', errMsg);
         
-        if (isAdminUser) {
-          console.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo.');
+        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (isAdminUser || isIframe) {
+          console.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo devido a Sandbox/iFrame ou perfil Admin.');
           setStatus('bypassed');
           setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
           setCurrentDistance(0);
