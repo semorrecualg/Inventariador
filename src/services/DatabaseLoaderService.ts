@@ -220,7 +220,7 @@ export class DatabaseLoaderService {
           );
 
           // Atualizações secundárias de suporte à conta_contabil, status, e todos os campos industriais na tabela física
-          await sqliteService.executeRaw(
+          await sqliteService.execute(
             `UPDATE Ativos SET 
               conta_contabil = ?, 
               contacontabil = ?, 

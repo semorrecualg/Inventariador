@@ -838,7 +838,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   console.log(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
   
-  const CHUNK_SIZE = 200; // Tamanho consolidado para estabilidade do hardware (v25)
+  const CHUNK_SIZE = 50; // Bloqueio em max 50 para evitar erro 400 (URL Too Long) na Nuvem
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
 
@@ -1729,8 +1729,8 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
        const res = await executeDelete('_unitid');
        assetsError = res.error;
        count = res.count;
-    } catch (e: any) {
-       assetsError = e;
+    } catch (e: unknown) {
+       assetsError = e as Error;
     }
 
     if (assetsError) {
@@ -1742,8 +1742,8 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
           const res = await executeDelete('filial');
           retryError = res.error;
           retryCount = res.count;
-        } catch (e: any) {
-          retryError = e;
+        } catch (e: unknown) {
+          retryError = e as Error;
         }
         
         if (retryError) {
@@ -2777,8 +2777,8 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
       }
-    } catch {
-      console.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.');
+    } catch (err) {
+      console.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.', err);
     }
 
     return Object.values(configs);

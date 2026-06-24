@@ -126,8 +126,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
       if (watchId) {
         try {
           navigator.geolocation.clearWatch(watchId);
-        } catch {
-          // ignore
+        } catch (err) {
+          console.warn('[UnitSelector] clearWatch error:', err);
         }
       }
     };
@@ -144,9 +144,32 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // Cálculo de geocerca real em metros do ponto âncora com Turf.js
   const getGeofenceStatus = (filialName: string) => {
+    // 1. Verificação de Bypass Administrativo (semorr@gmail.com ou roles ADMIN/MASTER/GESTOR)
+    let isBypass = false;
+    try {
+      const storedUser = sessionStorage.getItem('app_current_user');
+      if (storedUser) {
+        const parsedUser = JSON.parse(storedUser);
+        const email = (parsedUser?.email || '').toLowerCase().trim();
+        const role = (parsedUser?.role || '').toUpperCase().trim();
+        if (email === 'semorr@gmail.com' || role === 'ADMIN' || role === 'MASTER' || role === 'GESTOR') {
+          isBypass = true;
+        }
+      }
+    } catch (err) {
+      console.warn('[UnitSelector] Erro ao decodificar usuário para bypass de geocerca', err);
+    }
+
     const config = getUnitConfigForFilial(filialName);
     if (!config || !config.lat || !config.lng) {
+      if (isBypass) {
+        return { hasGps: false, message: 'BYPASS: SRE HOMOLOGAÇÃO (SEM GPS)', isInside: true, distance: null };
+      }
       return { hasGps: false, message: 'GPS SEM MODELO', isInside: false, distance: null };
+    }
+
+    if (isBypass) {
+      return { hasGps: true, message: 'BYPASS: SRE HOMOLOGAÇÃO (LIVRE)', isInside: true, distance: 0, allowedRadius: Number(config.radius_meters || 500) };
     }
 
     if (!deviceCoords) {
@@ -163,8 +186,12 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     }
 
     try {
-      const fromPoint = turf.point([deviceCoords.lng, deviceCoords.lat]);
-      const toPoint = turf.point([Number(config.lng), Number(config.lat)]);
+      // Uso defensivo do optional chaining no parse GeoJSON (long, lat)
+      const configLng = Number(config?.lng || 0);
+      const configLat = Number(config?.lat || 0);
+      
+      const fromPoint = turf.point([deviceCoords?.lng || 0, deviceCoords?.lat || 0]);
+      const toPoint = turf.point([configLng, configLat]);
       const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
       const roundedDist = Math.round(distanceM);
       const allowedRadius = Number(config.radius_meters || 500);
@@ -405,7 +432,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                               try { 
                                 const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                                 return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch { 
+                              } catch (err) { 
                                 return isAdmin; 
                               } 
                             })())) ? 'opacity-40 cursor-not-allowed' : 'active:scale-90 cursor-pointer'
@@ -416,7 +443,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                               try { 
                                 const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                                 return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch { 
+                              } catch (err) { 
                                 return isAdmin; 
                               } 
                             })())) { 
@@ -434,7 +461,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                             try { 
                               const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
                               return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                            } catch { 
+                            } catch (err) { 
                               return isAdmin; 
                             } 
                           })())) ? '' : 'hover:scale-105 hover:bg-amber-100'}`}>
