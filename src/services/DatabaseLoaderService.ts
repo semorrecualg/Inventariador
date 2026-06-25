@@ -398,7 +398,7 @@ export class DatabaseLoaderService {
     const worksheet = workbook.Sheets[firstSheetName];
     
     // Converte a planilha em JSON tipado
-    let rawExcelData: AtivoPlanilha[] | null = XLSX.utils.sheet_to_json<AtivoPlanilha>(worksheet);
+    let rawExcelData: Record<string, unknown>[] | null = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
     const totalPlanilha = rawExcelData?.length ?? 0;
     if (!rawExcelData || totalPlanilha === 0) {
       throw new Error("A planilha fornecida está vazia ou corrompida.");

@@ -28,6 +28,7 @@ import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
+import localforage from 'localforage';
 import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
@@ -5883,18 +5884,24 @@ const App: React.FC = () => {
           
           <button 
             onClick={async () => {
-              if (window.confirm("Aviso de Segurança: Esta operação realizará uma limpeza completa nos bancos e esquemas locais para resolver conflitos de DDL e dados corrompidos. Suas alterações não sincronizadas serão removidas. Prosseguir com a RE-SINCRONIZAÇÃO LIMPA do aplicativo?")) {
-                try {
-                  localStorage.clear();
-                  sessionStorage.clear();
-                  if (typeof localforage !== 'undefined') {
-                    await localforage.clear();
-                  }
-                  await sqliteService.hardResetDatabase?.();
-                  window.location.reload();
-                } catch (err) {
-                  console.error("Erro no hard reset:", err);
+              console.log(">>> [SRE Failsafe] Forçando expurgo físico emergencial por travamento de boot...");
+              try {
+                // 1. Limpa todas as instâncias de fallback e chaves do localforage/localStorage
+                await localforage.clear().catch(() => {});
+                localStorage.clear();
+                sessionStorage.clear();
+                
+                // 2. Tenta invocar a purga física se o serviço estiver disponível
+                if (sqliteService?.forcePurgeAndConnect) {
+                  await sqliteService.forcePurgeAndConnect().catch(() => {});
                 }
+                
+                console.log(">>> [SRE Failsafe] Cache e descritores limpos. Forçando reload completo da página.");
+                // 3. Força o recarregamento total limpando a memória do iFrame
+                window.location.reload();
+              } catch (err) {
+                console.error("Falha ao executar Failsafe Purge:", err);
+                window.location.reload();
               }
             }}
             className="bg-red-600 border border-red-700 text-white w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-red-700"

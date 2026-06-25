@@ -136,13 +136,19 @@ export class SqliteService {
       if (typeof document !== 'undefined') {
         const jeepEl = document.querySelector('jeep-sqlite');
         if (!jeepEl) {
-          console.log(">>> [SqliteService] jeep-sqlite não encontrado no DOM. Injetando dinamicamente...");
+          console.log(">>> [SqliteService SRE] Elemento não encontrado. Injetando '<jeep-sqlite>' no DOM...");
           const jeep = document.createElement('jeep-sqlite');
           jeep.id = 'jeep-sqlite';
           document.body.appendChild(jeep);
-          console.log(">>> [SqliteService] jeep-sqlite injetado com sucesso.");
-          // Delay de micro-task para dar tempo ao container/iFrame renderizar o elemento
-          await new Promise(resolve => setTimeout(resolve, 50));
+          
+          // POLLING ATIVO: Varre o DOM a cada 5ms procurando a existência física do nó antes de liberar o driver
+          let tentativas = 0;
+          const MAX_TENTATIVAS = 60; // Limite de 300ms de tolerância física no contêiner
+          while (!document.querySelector('jeep-sqlite') && tentativas < MAX_TENTATIVAS) {
+            await new Promise(resolve => setTimeout(resolve, 5));
+            tentativas++;
+          }
+          console.log(`>>> [SqliteService SRE] Polling do DOM finalizado em ${tentativas * 5}ms.`);
         }
       }
 

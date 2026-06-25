@@ -39,14 +39,14 @@ function cleanKey(key: string): string {
  * Função utilitária herdada para processamento legando, mantida por segurança.
  */
 export async function processarEInjetarPlanilha(
-  rows: AtivoPlanilha[],
-  onProgress?: (progress: { processed: number; total: number; percentage: number }) => void
+  rawExcelData: AtivoPlanilha[],
+  onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
-  if (!rows || rows?.length === 0) {
+  if (!rawExcelData || rawExcelData?.length === 0) {
     throw new Error("[SRE ERROR] Planilha vazia ou inválida enviada para processamento.");
   }
   
-  const sampleRow = rows[0];
+  const sampleRow = rawExcelData[0];
   const headerMap: Record<string, string> = {};
   const rowKeys = Object.keys(sampleRow);
 
@@ -59,10 +59,10 @@ export async function processarEInjetarPlanilha(
   });
 
   const parsedAssets: Asset[] = [];
-  const rowsLength = rows?.length ?? 0;
+  const rowsLength = rawExcelData?.length ?? 0;
 
   for (let i = 0; i < rowsLength; i++) {
-    const row = rows[i];
+    const row = rawExcelData[i];
     if (!row || (!row['etiqueta'] && !row['ETIQUETA'] && !row['Etiqueta'])) {
       continue;
     }
@@ -94,7 +94,7 @@ export async function processarEInjetarPlanilha(
       vlraquisic: Number(getSafeValue('vlraquisic') || 0),
       sn1_recno: Number(getSafeValue('sn1_recno') || 0),
       sn3_recno: Number(getSafeValue('sn3_recno') || 0),
-      _is_synced: 1,
+      _is_synced: 0,
       _is_deleted: 0
     };
 
