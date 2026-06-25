@@ -18,6 +18,7 @@ import BackButton from './BackButton';
 import { DatabaseMode, UnitConfig } from '../types';
 import * as turf from '@turf/turf';
 import { localDb } from '../services/localDbService';
+import { sqliteService } from '../services/sqliteService';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -42,6 +43,13 @@ interface UnitSelectorProps {
   onForceToggleView?: () => void;
 }
 
+interface SqliteUnitStats {
+  filial: string;
+  displayName: string;
+  total: number;
+  checked: number;
+}
+
 const UnitSelector: React.FC<UnitSelectorProps> = ({ 
   units, 
   onSelect, 
@@ -59,6 +67,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
+  const [sqliteUnits, setSqliteUnits] = useState<SqliteUnitStats[]>([]);
 
   // 1. Carrega as configurações de geocerca salvas no IndexedDB (SQLite configs extraídas)
   useEffect(() => {
@@ -69,26 +78,75 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         if (active) {
           setActiveUnitConfigs(configs || []);
         }
-      } catch (err) {
-        console.error(">>> [UnitSelector] Erro ao carregar configurações de GPS do banco:", err);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(">>> [UnitSelector] Erro ao carregar configurações de GPS do banco:", errMsg);
       }
     };
     loadConfigs();
     return () => { active = false; };
   }, []);
 
-  // 2. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão
+  // 2. Carrega as estatísticas do SQLite local via método público getOperationalUnitsWithStats
+  useEffect(() => {
+    let active = true;
+    const fetchSqliteUnits = async () => {
+      try {
+        if (databaseMode === DatabaseMode.INTERNAL) {
+          let tenantId: string | undefined;
+          try {
+            const storedUser = sessionStorage.getItem('app_current_user');
+            if (storedUser) {
+              const parsedUser = JSON.parse(storedUser) as { tenantId?: string; tenantid?: string };
+              tenantId = parsedUser.tenantId || parsedUser.tenantid || undefined;
+            }
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.warn('[UnitSelector] Falha ao ler tenantId do sessionStorage:', errMsg);
+          }
+          
+          const data = await sqliteService.getOperationalUnitsWithStats(tenantId);
+          const mapped: SqliteUnitStats[] = data.map((row) => {
+            const filialVal = typeof row.filial === 'string' ? row.filial : 'GERAL';
+            const displayNameVal = typeof row.displayName === 'string' ? row.displayName : filialVal;
+            const totalVal = typeof row.total === 'number' ? row.total : 0;
+            const checkedVal = typeof row.checked === 'number' ? row.checked : 0;
+            return {
+              filial: filialVal,
+              displayName: displayNameVal,
+              total: totalVal,
+              checked: checkedVal
+            };
+          });
+
+          if (active) {
+            setSqliteUnits(mapped);
+          }
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('>>> [UnitSelector] Erro ao carregar unidades com estatísticas do SQLite:', errMsg);
+      }
+    };
+
+    fetchSqliteUnits();
+    return () => {
+      active = false;
+    };
+  }, [databaseMode]);
+
+  // 3. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão
   useEffect(() => {
     // 🚀 ISOLAMENTO E BYPASS DE SANDBOX (ANTI-CRASH)
     if (typeof window !== 'undefined' && (window.self !== window.top || window.location.hostname.includes('aistudio'))) {
       console.log(">>> [GBR-Compliance] Ambiente iFrame/AI Studio detectado. Abortando GPS de hardware e forçando Fallback GBR v2.70.");
       onSelect("FEIRA_BOA_BA");
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (onForceToggleView) {
           onForceToggleView();
         }
       }, 50);
-      return;
+      return () => clearTimeout(timer);
     }
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
@@ -106,7 +164,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         } else {
           onSelect("FEIRA_BOA_BA");
         }
-      } catch (e) {
+      } catch {
         onSelect("FEIRA_BOA_BA");
       }
     };
@@ -116,14 +174,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         (pos) => {
           setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         },
-        (err) => {
-          console.warn('[UnitSelector GPS] getCurrentPosition falhou:', err);
+        (err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn('[UnitSelector GPS] getCurrentPosition falhou:', errMsg);
           applyGpsFallback();
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
-    } catch (err) {
-      console.warn('[UnitSelector GPS] getCurrentPosition Exception caught silently:', err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[UnitSelector GPS] getCurrentPosition Exception caught silently:', errMsg);
       applyGpsFallback();
     }
 
@@ -133,14 +193,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         (pos) => {
           setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         },
-        (err) => {
-          console.warn('[UnitSelector GPS/Watch] watchPosition falhou:', err);
+        (err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn('[UnitSelector GPS/Watch] watchPosition falhou:', errMsg);
           applyGpsFallback();
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
       );
-    } catch (err) {
-      console.warn('[UnitSelector GPS/Watch] watchPosition Exception caught silently:', err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[UnitSelector GPS/Watch] watchPosition Exception caught silently:', errMsg);
       applyGpsFallback();
     }
 
@@ -148,12 +210,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
       if (watchId) {
         try {
           navigator.geolocation.clearWatch(watchId);
-        } catch (err) {
-          console.warn('[UnitSelector] clearWatch error:', err);
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn('[UnitSelector] clearWatch error:', errMsg);
         }
       }
     };
-  }, [activeUnitConfigs, onSelect]);
+  }, [activeUnitConfigs, onSelect, onForceToggleView]);
 
   // Normalização estrita para mapear chave da unidade com âncora
   const getUnitConfigForFilial = (filialName: string) => {
@@ -171,15 +234,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     try {
       const storedUser = sessionStorage.getItem('app_current_user');
       if (storedUser) {
-        const parsedUser = JSON.parse(storedUser);
-        const email = (parsedUser?.email || '').toLowerCase().trim();
-        const role = (parsedUser?.role || '').toUpperCase().trim();
+        const parsedUser = JSON.parse(storedUser) as { email?: string; role?: string };
+        const email = (parsedUser.email || '').toLowerCase().trim();
+        const role = (parsedUser.role || '').toUpperCase().trim();
         if (email === 'semorr@gmail.com' || role === 'ADMIN' || role === 'MASTER' || role === 'GESTOR') {
           isBypass = true;
         }
       }
-    } catch (err) {
-      console.warn('[UnitSelector] Erro ao decodificar usuário para bypass de geocerca', err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[UnitSelector] Erro ao decodificar usuário para bypass de geocerca', errMsg);
     }
 
     const config = getUnitConfigForFilial(filialName);
@@ -208,11 +272,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     }
 
     try {
-      // Uso defensivo do optional chaining no parse GeoJSON (long, lat)
-      const configLng = Number(config?.lng || 0);
-      const configLat = Number(config?.lat || 0);
+      const configLng = Number(config.lng || 0);
+      const configLat = Number(config.lat || 0);
       
-      const fromPoint = turf.point([deviceCoords?.lng || 0, deviceCoords?.lat || 0]);
+      const fromPoint = turf.point([deviceCoords.lng, deviceCoords.lat]);
       const toPoint = turf.point([configLng, configLat]);
       const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
       const roundedDist = Math.round(distanceM);
@@ -241,8 +304,9 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           allowedRadius
         };
       }
-    } catch (err) {
-      console.error('[Geofence Turf status err]', err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('[Geofence Turf status err]', errMsg);
       return { hasGps: true, message: 'ERRO DE COORDENADA', isInside: false, distance: null };
     }
   };
@@ -252,16 +316,35 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return unitName && unitName.trim() !== '';
   });
 
-  const filteredUnits = purifiedUnits.filter(u => {
+  // Se for DatabaseMode.INTERNAL, a fonte de dados das filiais e contagens é o sqliteService.getOperationalUnitsWithStats()
+  const displayUnitsList = databaseMode === DatabaseMode.INTERNAL
+    ? sqliteUnits.map(su => {
+        const propUnit = units.find(u => u.filial.toUpperCase().trim() === su.filial.toUpperCase().trim());
+        return {
+          filial: su.filial,
+          hasData: su.total > 0,
+          isDownloaded: propUnit?.isDownloaded ?? true,
+          hasCampaign: propUnit?.hasCampaign ?? false,
+          hasGps: propUnit?.hasGps ?? false,
+          assetCount: su.total,
+          checkedCount: su.checked
+        };
+      })
+    : purifiedUnits.map(pu => ({
+        ...pu,
+        checkedCount: 0
+      }));
+
+  const filteredUnits = displayUnitsList.filter(u => {
     const unitName = u.filial || '';
     return unitName.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
   // Log para depuração de unidades
-  if (purifiedUnits.length === 0) {
+  if (displayUnitsList.length === 0) {
     console.warn('>>> [UnitSelector] Recebeu 0 unidades purificadas para exibir.');
   } else {
-    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${purifiedUnits.length} unidades purificadas.`);
+    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${displayUnitsList.length} unidades de exibição.`);
   }
 
   // Helper para gerar ícone e cor consistente baseada no nome
@@ -400,6 +483,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                         {typeof unit.assetCount === 'number' && (
                           <span className="text-slate-400 font-semibold text-xs normal-case whitespace-nowrap">
                             - {unit.assetCount.toLocaleString('pt-BR')} ativos
+                            {databaseMode === DatabaseMode.INTERNAL && typeof unit.checkedCount === 'number' && ` (${unit.checkedCount} conf.)`}
                           </span>
                         )}
                       </h4>
@@ -441,9 +525,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                             if (isAdmin && onConfigGPS) { 
                               e.preventDefault(); 
                               try { 
-                                Promise.resolve(onConfigGPS(displayName)).catch(err => console.error("[GPS MODAL CRASH PREVENTED]", err)); 
-                              } catch (err) { 
-                                console.error("[GPS MODAL CRASH PREVENTED]", err); 
+                                Promise.resolve(onConfigGPS(displayName)).catch((err: unknown) => {
+                                  const errMsg = err instanceof Error ? err.message : String(err);
+                                  console.error("[GPS MODAL CRASH PREVENTED]", errMsg);
+                                }); 
+                              } catch (err: unknown) { 
+                                const errMsg = err instanceof Error ? err.message : String(err);
+                                console.error("[GPS MODAL CRASH PREVENTED]", errMsg); 
                               } 
                             }
                           }}
@@ -466,9 +554,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                           className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans ${
                             (!unit.hasGps && !((() => { 
                               try { 
-                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
-                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch (err) { 
+                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
+                                const uRole = (u.role || '').toUpperCase();
+                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
+                              } catch { 
                                 return isAdmin; 
                               } 
                             })())) ? 'opacity-40 cursor-not-allowed' : 'active:scale-90 cursor-pointer'
@@ -477,9 +566,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                             e.stopPropagation();
                             if (!unit.hasGps && !((() => { 
                               try { 
-                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
-                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch (err) { 
+                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
+                                const uRole = (u.role || '').toUpperCase();
+                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
+                              } catch { 
                                 return isAdmin; 
                               } 
                             })())) { 
@@ -495,9 +585,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                               : 'bg-gray-50 text-gray-300 border-gray-100'
                           } ${(!unit.hasGps && !((() => { 
                             try { 
-                              const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}'); 
-                              return ['ADMIN', 'MASTER', 'GESTOR'].includes(u.role?.toUpperCase()) || u.isAdmin || u.is_admin || isAdmin; 
-                            } catch (err) { 
+                              const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
+                              const uRole = (u.role || '').toUpperCase();
+                              return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
+                            } catch { 
                               return isAdmin; 
                             } 
                           })())) ? '' : 'hover:scale-105 hover:bg-amber-100'}`}>
@@ -574,7 +665,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           <p className="text-[9px] text-ink font-bold uppercase tracking-widest leading-none">Pipeline Ativo</p>
         </div>
         <p className="text-[9px] text-ink-muted font-bold uppercase tracking-widest leading-none">
-          {purifiedUnits.length} {purifiedUnits.length === 1 ? 'Entidade' : 'Entidades'}
+          {displayUnitsList.length} {displayUnitsList.length === 1 ? 'Entidade' : 'Entidades'}
         </p>
       </div>
     </div>

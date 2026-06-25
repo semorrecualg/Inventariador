@@ -51,3 +51,56 @@ O layout da planilha Excel importada pela Carga Expert obrigatoriamente mapeia o
 | Index 18| `vlraquisic` | Valor de Aquisição Original |
 | Index 19| `sn1_recno` | Registro Contábil Original SN1 (Cultura Protheus) |
 | Index 20| `sn3_recno` | Registro Contábil Depreciação SN3 |
+
+# ADENDO DE RIGOR CIRÚRGICO E PARIDADE DE TERCEIROS (GBR v2.90 - NO-HALLUCINATION)
+
+## 6. PROIBIÇÃO ABSOLUTA DE INVENÇÃO DE APIs (ZERO-TRUST DE MÉTODOS)
+- **Assinatura Estrita de Bibliotecas**: É terminantemente proibido deduzir, adivinhar ou inventar métodos de classes de terceiros (como '@capacitor-community/sqlite', '@supabase/supabase-js' ou 'localforage'). 
+- **O Contrato do Driver Local**: Fica estabelecido como premissa pétrea que a classe `SQLiteDBConnection` do Capacitor SQLite NÃO possui o método bruto `.query()` sem wrapping, e exige que consultas parametrizadas retornem explicitamente estruturas contendo `{ values: any[] }`. Qualquer código gerado fora dessa assinatura nativa será considerado REJEITADO automotivamente por erro de compilação.
+- **Checagem de Dependência de Assinatura (Efeito Dominó)**: Antes de alterar a assinatura de qualquer função exportada (como adicionar parâmetros a 'processDataSyncQueue'), a IA DEVE realizar uma varredura estrita em 100% do arquivo atual para garantir que nenhuma chamada em background (como laços de timer ou listeners de rede) invoque a função com a assinatura antiga.
+
+## 7. PENALIDADE POR TRUNCAMENTO E ADIVINHAÇÃO
+- Se a IA não tiver certeza absoluta sobre um método de biblioteca, ela deve se recusar a gerar o código e solicitar explicitamente que o operador humano forneça a documentação ou o arquivo de tipos (`.d.ts`) da dependência através do botão "Add Content".
+
+## 8. RESTRUTURAÇÃO DE PRODUTIVIDADE E INTEGRIDADE (v3.0)
+- **Ceticismo de Compilação Cruzada**: Ao alterar a assinatura, parâmetros ou tipos de retorno de qualquer método de utilidade (ex: sqliteService ou supabaseService), a IA é obrigada a realizar uma varredura de impacto em todas as referências que o consomem no prompt.
+- **Isolamento de Tipos Nativos**: É proibido inventar wrappers ou estender propriedades de bibliotecas externas (como Capacitor ou localforage) fora de sua especificação oficial documentada. Na ausência de declaração explícita de tipos (.d.ts), a IA deve adotar uma abordagem estritamente defensiva utilizando fallbacks seguros.
+
+## 9. POLÍTICA DE SANEAMENTO DE DADOS REMOTOS E CONTRATO RLS (SUPABASE)
+- **Premissa Pétrea de Multi-Tenancy**: O ecossistema opera com isolamento de dados por cliente através da coluna física '_tenantid' na nuvem. Toda operação de mutação (INSERT/UPDATE/UPSERT) enviada pelo 'syncService' deve, obrigatoriamente, incluir o campo '_tenantid' e o cabeçalho de autenticação do usuário autenticado no contexto local.
+- **Veto a payloads Poluídos**: É terminantemente proibido enviar campos derivados ou colunas exclusivas do ecossistema local (como aliases de VIEWs ou propriedades reativas de UI como 'sync_status') em requisições direcionadas à API do Supabase. O payload enviado à nuvem deve conter única e exclusivamente as colunas declaradas no Schema de tabelas da nuvem.
+- **Tratamento Seguro de Exceções de Rede**: Falhas de comunicação com o Supabase não podem derrubar o barramento local de dados. Caso o retorno da API resulte em erro de rede (status 5xx) ou violação de política de segurança/RLS (status 401/403), a IA deve capturar a exceção e isolar o registro com falha na tabela local 'audit_logs' sem marcar a flag '_is_synced = 1'.
+
+## 10. PROTOCOLO DE CONCESSÃO ZERO E FIRMEZA TÉCNICA
+- **Proibição de Otimismo Corporativo**: A IA está proibida de emitir feedbacks com adjetivos de sucesso (ex: 'sucesso completo', 'perfeitamente integrado', 'pronto para produção') a menos que tenha verificado sintaticamente todas as linhas geradas contra as interfaces canônicas do projeto.
+- **Exposição Obrigatória de Pendências**: Se a IA introduzir um método e não souber como ele se comporta nos outros 24 componentes do app, ela DEVE, obrigatoriamente, criar uma seção no final da resposta chamada '⚠️ PONTAS SOLTAS DETECTADAS', listando quais arquivos correm risco de quebrar pelo efeito cobertor curto.
+- **Cultura de Rejeição de Código**: Fica o modelo ciente de que qualquer relatório de sucesso emitido que resulte em erros de execução (como 'Cannot read properties of undefined') resultará na invalidação completa de sua memória de contexto daquele turno, sendo classificado como falha de governança.
+
+## 11. PROTOCOLO DE EXPOSIÇÃO CIRÚRGICA DE FIXES (EXPOSED-FIX)
+- **Veto ao Relatório Cego**: Se o console ou o interpretador acusarem erros de execução (Running Errors), a IA está expressamente proibida de emitir um relatório conceitual de sucesso ou dizer que o problema foi mitigado na teoria.
+- **Obrigatoriedade de Mapeamento Geográfico**: Sempre que houver falhas ativas ou correções pendentes (fixes), a IA DEVE iniciar a resposta abrindo uma tabela ou seção chamada '🔍 LOCALIZAÇÃO GEOGRÁFICA DO ERRO', contendo obrigatoriamente:
+  1. Caminho do Arquivo e Linha Exata (estimada pelo contexto).
+  2. O código bruto que gerou a falha (Como estava).
+  3. O código corrigido de ponta a ponta sem qualquer tipo de omissão ou marcadores '// ...'.
+- **Penalidade por Omissão**: O não mapeamento da linha exata do erro será considerado quebra do contrato de governança SRE, resultando na rejeição imediata da entrega.
+
+## 12. MATRIZ DE SOBERANIA DE LICENCIAMENTO (SOLO VS. PLUS)
+
+O ecossistema opera sob uma arquitetura puramente **Offline-First com Soberania Nativa**. A inteligência de dados e a segurança de acesso devem respeitar rigorosamente o nível de licença comercial ativa do cliente:
+
+### A. MÓDULO LICENÇA SOLO (Padrão Base Único Usuário)
+- **Soberania do Banco Local**: A validação de credenciais de login (`username` e `password`) deve ocorrer obrigatoriamente primeiro na tabela física local `users` do SQLite (ou no contêiner de fallback estável `localforage`).
+- **Tratamento do Supabase Cloud**: A nuvem atua única e exclusivamente como um *Shadow Backup* (Esteira de Cópia de Segurança Assíncrona). 
+- **Isolamento de Erros**: Falhas de autenticação remota, instabilidade de rede ou erros de cache de esquema do Supabase (ex: erros `PGRST204` de RLS) devem ser silenciados e contidos. O fluxo principal da aplicação **nunca** pode ser bloqueado por dependências da nuvem, garantindo a operação 100% isolada e autônoma do Auditor em campo.
+
+### B. MÓDULO LICENÇA PLUS (Multi-Usuários / Corporativo)
+- **Autenticação Centralizada**: A validação de identidade migra para o topo do barramento, consumindo a API nativa `signInWithPassword` do Supabase Auth para gerenciar permissões cruzadas em tempo real.
+- **Sincronismo Síncrono**: O barramento local passa a operar sob regras de conciliação estrita com bloqueio de leitura de tabelas em mutações em lote para evitar colisões entre múltiplos auditores no mesmo tenant.
+
+## 13. DIRETRIZES ADVANCED INDUSTRIAL DE PRODUÇÃO (SRE v3.70)
+- **A. Proteção de Memória RAM (OOM Guard)**: O processamento de dados da planilha Excel de até 50.000 ativos deve adotar listas virtualizadas e paginação rígida no DOM. É terminantemente proibido anular variáveis de arrays de dados (`data = null`) sem antes desvincular e limpar os estados reativos de UI que dependem de sua contagem ou mapeamento. Use operadores de encadeamento opcional (`?.`) ou forneça um array vazio de fallback (`[]`) para evitar estouros de referências nulas pós-Garbage Collection.
+- **B. Isolamento Atômico do Mutex**: A propriedade `writeMutex` no `sqliteService` deve envelopar e priorizar de forma imperativa transações massivas (Carga Expert Lote 0) sobre chamadas em segundo plano (Background Flush de 5 registros) para evitar exceções de concorrência física do tipo 'database is locked'.
+- **C. Higienização Antitransmissão e Delta-Sync**: Para preservar o consumo de dados móveis do operador (3G/4G), o barramento de sincronização Cloud (`syncService`) deve realizar checagens diferencias baseadas em timestamps locais. Apenas os registros alterados (deltas) devem trafegar na rede.
+- **D. Expurgamento de Logs Locais (Disk Saturation Guard)**: Após a transmissão bem-sucedida de registros de auditoria locais para a nuvem do Supabase, o sistema deve executar um comando `DELETE` na tabela local `audit_logs` para registros com mais de 7 dias, evitando o entupimento do armazenamento do dispositivo móvel do operador.
+- **E. Blindagem de Entrada contra Injeção SQL**: Todo e qualquer campo de texto de busca (inputs de etiquetas ou tags de ativos) preenchido pelo usuário em campo deve passar por sanitização e parametrização estrita no método `executeStatement` ou `.query(sql, params)`, sendo proibido concatenar strings diretas dentro de comandos de leitura SQL para evitar injeções destrutivas.
+- **F. Sanitização de Arquivos em Sandbox (Restrição de iFrame)**: Uploads de arquivos em ambientes emulados/iFrames devem processar dados exclusivamente através da leitura de fluxos de bytes e buffers assíncronos (`FileReader.readAsArrayBuffer`), banindo chamadas nativas de manipulação de caminhos físicos de diretórios locais (como caminhos de arquivos rígidos do Windows/Mac).

@@ -271,6 +271,7 @@ const Login: React.FC<LoginProps> = ({
       // BUSCA DIRETA NO SQlite SE O ARRAY DE PROPS ESTIVER VAZIO OU STALE
       if (!matchedLocalUser) {
         try {
+          console.log('[Login] [CHECK 1] Buscando usuário local na tabela física "users" do SQLite/localforage...');
           const dbUsers = await localDb.users.toArray();
           matchedLocalUser = dbUsers.find(u => 
             (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
@@ -284,7 +285,7 @@ const Login: React.FC<LoginProps> = ({
       // BARREIRA LOCAL OFFLINE (Passo 1): 
       // Se as credenciais casarem com o padrão admin físico local ou usuário SQLite cadastrado, login é aceito no ato, 100% offline
       if (isMasterLocal || matchedLocalUser) {
-        console.log('[Login] [BARREIRA LOCAL] Credenciais correspondem a operador administrador mestre ou cadastrado localmente. Desviando fluxo do Supabase imediatamente.');
+        console.log('[Login] [CHECK 3] [BARREIRA LOCAL] Login Offline-First Solo efetuado com sucesso via credenciais locais!');
         try {
           let loggedUser: User;
           if (matchedLocalUser) {
@@ -340,8 +341,17 @@ const Login: React.FC<LoginProps> = ({
         }
       }
 
-      // Passo de Segurança: se o databaseMode for SUPABASE e as credenciais locais acima não serviram, verificamos se o cliente supabase existe
-      if (databaseMode === DatabaseMode.SUPABASE && !supabase) {
+      // SOBERANIA LOCAL: Se a licença ativa não for PLUS, o login só é permitido se bater com as credenciais locais acima.
+      if (databaseMode !== DatabaseMode.SUPABASE_PLUS) {
+        console.log('[Login] [CHECK 2] Licença SOLO/Local ativa (Soberania Offline). Bloqueando tentativa de autenticação direta no Supabase Cloud.');
+        setIsLoading(false);
+        setError("Usuário ou senha inválidos no banco de dados local. A licença ativa é SOLO (Offline-First).");
+        clearTimeout(loginTimeout);
+        return;
+      }
+
+      // Passo de Segurança: se o databaseMode for SUPABASE_PLUS e as credenciais locais acima não serviram, verificamos se o cliente supabase existe
+      if (databaseMode === DatabaseMode.SUPABASE_PLUS && !supabase) {
         setIsLoading(false);
         setError("O Supabase não está configurado. Verifique as variáveis de ambiente (URL e Anon Key) nas configurações do projeto.");
         clearTimeout(loginTimeout);

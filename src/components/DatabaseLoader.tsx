@@ -12,7 +12,9 @@ import {
   HelpCircle, 
   Info,
   Activity,
-  UserCheck
+  UserCheck,
+  BatteryWarning,
+  Loader2
 } from 'lucide-react';
 import { databaseLoaderService } from '../services/DatabaseLoaderService';
 import { sqliteService } from '../services/sqliteService';
@@ -40,7 +42,7 @@ export async function processarEInjetarPlanilha(
   rows: AtivoPlanilha[],
   onProgress?: (progress: { processed: number; total: number; percentage: number }) => void
 ): Promise<void> {
-  if (!rows || rows.length === 0) {
+  if (!rows || rows?.length === 0) {
     throw new Error("[SRE ERROR] Planilha vazia ou inválida enviada para processamento.");
   }
   
@@ -57,8 +59,9 @@ export async function processarEInjetarPlanilha(
   });
 
   const parsedAssets: Asset[] = [];
+  const rowsLength = rows?.length ?? 0;
 
-  for (let i = 0; i < rows.length; i++) {
+  for (let i = 0; i < rowsLength; i++) {
     const row = rows[i];
     if (!row || (!row['etiqueta'] && !row['ETIQUETA'] && !row['Etiqueta'])) {
       continue;
@@ -139,6 +142,8 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [errorType, setErrorType] = useState<'generic' | 'battery' | 'connection'>('generic');
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
   const [processedDetails, setProcessedDetails] = useState<{ processed: number; total: number; percentage: number } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   
@@ -160,13 +165,13 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer?.files && e.dataTransfer.files[0]) {
       await processFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target?.files && e.target.files[0]) {
       await processFile(e.target.files[0]);
     }
   };
@@ -175,17 +180,29 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     fileInputRef.current?.click();
   };
 
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    // Debounce e cooldown de hardware antes de liberar a tela novamente
+    await new Promise(res => setTimeout(res, 1500));
+    setUploadStatus('idle');
+    setErrorMsg('');
+    setErrorType('generic');
+    setIsRetrying(false);
+  };
+
   // Processador Central do Arquivo em Lotes
   const processFile = async (file: File) => {
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (extension !== 'xlsx' && extension !== 'xls' && extension !== 'csv') {
       setUploadStatus('error');
+      setErrorType('generic');
       setErrorMsg('Extensão inválida. Por favor, envie apenas arquivos Excel (.xlsx, .xls) ou CSV.');
       return;
     }
 
     setUploadStatus('processing');
     setErrorMsg('');
+    setErrorType('generic');
     setProcessedDetails({ processed: 0, total: 0, percentage: 0 });
 
     try {
@@ -195,20 +212,18 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
       const tenantid = currentTenantId || user?._tenantid || user?.tenantId || 'CICOPAL';
       const unitId = currentUnitId || user?._unitid || user?.filial || 'CICOPAL_FILIAL_DEFAULT';
 
-      // Executa o processador industrial com fatiamento rígido de 200 itens
-      // O databaseLoaderService deve retornar o total real processado
-      const totalCount = await databaseLoaderService.processExcelFile(
+      // Executa o processador industrial com fatiamento rígido de 200 itens e OOM Guard
+      const totalCount = await databaseLoaderService.importExcelBulkData(
         file,
         tenantid,
         unitId,
-        (batchIndex, insertedCount, totalInserted, finalPlanilhaTotal) => {
-          // Correção da Fórmula: Progresso real baseado no tamanho total absoluto da planilha
-          const totalEstimado = finalPlanilhaTotal && finalPlanilhaTotal > 0 ? finalPlanilhaTotal : 12637;
+        (processedCount, totalCountInFile) => {
+          const totalEstimado = totalCountInFile && totalCountInFile > 0 ? totalCountInFile : 12637;
+          const pctCalculada = Math.min(Math.round((processedCount / totalEstimado) * 100), 99);
           
-          if (totalInserted % 1000 === 0 || totalInserted === totalEstimado) {
-            const pctCalculada = Math.min(Math.round((totalInserted / totalEstimado) * 100), 99);
+          if (processedCount % 1000 === 0 || processedCount === totalEstimado) {
             setProcessedDetails({
-              processed: totalInserted,
+              processed: processedCount,
               total: totalEstimado,
               percentage: pctCalculada
             });
@@ -251,8 +266,30 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     } catch (err: unknown) {
       console.error("[SRE Loader Component] Erro crítico de Ingestão de Lote:", err);
       setUploadStatus('error');
-      const msg = err instanceof Error ? err.message : 'Erro desconhecido ao processar planilha de ativos.';
-      setErrorMsg(msg);
+      
+      let rawMsg = '';
+      if (err instanceof Error) {
+        rawMsg = err.message;
+      } else if (typeof err === 'string') {
+        rawMsg = err;
+      } else {
+        try {
+          rawMsg = JSON.stringify(err);
+        } catch {
+          rawMsg = 'Erro desconhecido ao processar planilha de ativos.';
+        }
+      }
+
+      if (rawMsg?.includes('Battery') || rawMsg?.includes('bateria') || rawMsg?.includes('Bateria')) {
+        setErrorType('battery');
+        setErrorMsg('Dispositivo com bateria crítica (< 5%). Conecte o carregador para liberar a operação massiva de disco e tente novamente.');
+      } else if (rawMsg?.includes('No available connection') || rawMsg?.includes('locked') || rawMsg?.includes('FALHA DE DUMPING')) {
+        setErrorType('connection');
+        setErrorMsg('Falha de alocação de hardware. Banco de dados temporariamente bloqueado. Tente novamente após liberar o barramento.');
+      } else {
+        setErrorType('generic');
+        setErrorMsg(rawMsg || 'Ocorreu um erro estrutural durante a ingestão do Excel.');
+      }
     } finally {
       // FECHAMENTO ELEGANTE DA CONEXÃO APÓS O PROCESSAMENTO
       await sqliteService.closeCurrentConnection();
@@ -277,11 +314,11 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     let total = 0;
     
     if (uploadStatus === 'processing' && processedDetails) {
-      processed = processedDetails.processed;
-      total = processedDetails.total;
+      processed = processedDetails?.processed || 0;
+      total = processedDetails?.total || 0;
     } else if (isSyncing && syncProgress) {
-      processed = syncProgress.processed;
-      total = syncProgress.total;
+      processed = Number(syncProgress?.processed) || 0;
+      total = Number(syncProgress?.total) || 0;
     }
     
     if (total <= 0) return null;
@@ -361,8 +398,8 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           <button 
             id="back-loader-btn"
             onClick={onBack}
-            className="p-2 rounded-xl transition duration-200 hover:bg-gray-100 text-gray-700"
-            disabled={uploadStatus === 'processing' || isSyncing}
+            className="p-2 rounded-xl transition duration-200 hover:bg-gray-100 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={uploadStatus === 'processing' || isSyncing || isRetrying}
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -400,7 +437,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
           <AnimatePresence mode="popLayout">
             
             {/* 📥 1. Drag & Drop Master Ingestion Card */}
-            {uploadStatus !== 'processing' && !isSyncing && (
+            {uploadStatus !== 'processing' && uploadStatus !== 'error' && uploadStatus !== 'success' && !isSyncing && (
               <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -500,7 +537,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </motion.div>
             )}
 
-            {/* 🌟 3. Operational Feedback Panel (Success / Error) */}
+            {/* 🌟 3. Operational Feedback Panel (Success) */}
             {uploadStatus === 'success' && (
               <motion.div 
                 key="success"
@@ -521,7 +558,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
 
                 <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 w-full flex justify-between text-xs font-mono">
                   <span className="text-gray-500">QUANTIDADE EM DISCO:</span>
-                  <span className="font-bold text-gray-900">{processedDetails?.processed} Ativos</span>
+                  <span className="font-bold text-gray-900">{processedDetails?.processed || 0} Ativos</span>
                 </div>
 
                 <button 
@@ -539,6 +576,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
               </motion.div>
             )}
 
+            {/* 🚨 4. Operational Feedback Panel (Error) */}
             {uploadStatus === 'error' && (
               <motion.div 
                 key="error"
@@ -546,21 +584,37 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm flex flex-col items-center text-center gap-6"
               >
-                <div className="w-14 h-14 bg-red-50 text-red-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
-                  <AlertTriangle className="w-8 h-8" />
-                </div>
+                {errorType === 'battery' ? (
+                  <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
+                    <BatteryWarning className="w-8 h-8" />
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
+                    <AlertTriangle className="w-8 h-8" />
+                  </div>
+                )}
 
-                <div className="flex flex-col gap-1.5">
-                  <h3 className="text-base font-black uppercase text-red-600 tracking-tight">Falha Crítica na Persistência</h3>
+                <div className="flex flex-col gap-1.5 items-center">
+                  <h3 className={`text-base font-black uppercase tracking-tight ${errorType === 'battery' ? 'text-amber-600' : 'text-red-600'}`}>
+                    {errorType === 'battery' ? 'ALERTA DE HARDWARE: BATERIA CRÍTICA' : 'FALHA CRÍTICA NA PERSISTÊNCIA'}
+                  </h3>
                   <p className="text-xs text-gray-500 max-w-sm mt-1">{errorMsg}</p>
                 </div>
 
                 <button 
                   id="error-retry-btn"
-                  onClick={() => setUploadStatus('idle')}
-                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition duration-200"
+                  onClick={handleRetry}
+                  disabled={isRetrying}
+                  className={`w-full py-3 ${isRetrying ? 'bg-gray-400 cursor-not-allowed' : errorType === 'battery' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition duration-200 flex items-center justify-center gap-2`}
                 >
-                  Tentar Novamente
+                  {isRetrying ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      PREPARANDO AMBIENTE...
+                    </>
+                  ) : (
+                    'TENTAR NOVAMENTE'
+                  )}
                 </button>
               </motion.div>
             )}
@@ -584,7 +638,8 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <button 
                   id="cloud-load-btn"
                   onClick={handleDownloadCloud}
-                  className="p-4 border border-gray-200 rounded-2xl hover:bg-blue-50/20 hover:border-blue-300 transition duration-200 text-left flex flex-col gap-3 group"
+                  className="p-4 border border-gray-200 rounded-2xl hover:bg-blue-50/20 hover:border-blue-300 transition duration-200 text-left flex flex-col gap-3 group disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={uploadStatus === 'error' || isRetrying}
                 >
                   <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl group-hover:scale-105 transition-transform duration-200 w-10 h-10 flex items-center justify-center">
                     <Database className="w-5 h-5" />
@@ -598,7 +653,8 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                 <button 
                   id="clear-db-btn"
                   onClick={() => setShowClearConfirm(true)}
-                  className="p-4 border border-gray-200 rounded-2xl hover:bg-red-50/20 hover:border-red-300 transition duration-200 text-left flex flex-col gap-3 group"
+                  className="p-4 border border-gray-200 rounded-2xl hover:bg-red-50/20 hover:border-red-300 transition duration-200 text-left flex flex-col gap-3 group disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={uploadStatus === 'error' || isRetrying}
                 >
                   <div className="p-2.5 bg-red-50 text-red-600 rounded-xl group-hover:scale-105 transition-transform duration-200 w-10 h-10 flex items-center justify-center">
                     <Trash2 className="w-5 h-5 border-transparent" />

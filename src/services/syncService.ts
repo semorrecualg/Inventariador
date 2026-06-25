@@ -33,6 +33,17 @@ const campaignQueueStore = localforage.createInstance({
 
 const photoQueueStore = queueStore;
 
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 // PREVENÇÃO ABSOLUTA DE TDZ (HOISTING ESTRITO) - Variáveis de Controle no Topo
 let isSyncingLoopActive = false;
 let consecutiveFailures = 0;
@@ -116,14 +127,66 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
   }
 };
 
-const executeRawQuerySafe = async (sql: string, params: (string | number | boolean | null)[] = []) => {
+// REQUISITO 1: 'query(sql, params)' já retorna Record<string, unknown>[] bruto.
+const fallbackStore = localforage.createInstance({
+  name: 'gbr_sqlite_fallback',
+  storeName: 'assets_fallback'
+});
+
+const executeRawQuerySafe = async (sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, unknown>[]> => {
   try {
-    const values = await sqliteService.query(sql, params);
-    return { values };
+    const results = await sqliteService.query(sql, params);
+    if (results && results.length > 0) {
+      return results;
+    }
   } catch (err) {
-    console.error(">>> [Sync SQL Fallback] Erro ao executar query interna:", err);
-    return { values: [] };
+    console.warn(">>> [Sync SQL Fallback] Erro ao executar query interna no SQLite, tentando fallbackStore:", err);
   }
+
+  // Fallback to localforage
+  try {
+    const sqlUpper = sql.toUpperCase();
+    if (sqlUpper.includes("FROM ATIVOS") || sqlUpper.includes("FROM ASSETS") || sqlUpper.includes("FROM ASSETS_COUNTING")) {
+      console.log(">>> [Sync SQL Fallback Store] Lendo ativos do fallbackStore localforage...");
+      let assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
+      
+      // Filter and map fields
+      assets = assets.map(asset => {
+        const isSynced = asset._is_synced === 1 || asset._is_synced === true;
+        return {
+          ...asset,
+          _is_synced: isSynced ? 1 : 0,
+          sync_status: isSynced ? 'SYNCED' : 'PENDING'
+        };
+      });
+
+      if (sqlUpper.includes("WHERE SYNC_STATUS = 'PENDING'") || sqlUpper.includes("WHERE _IS_SYNCED = 0")) {
+        assets = assets.filter(a => a.sync_status === 'PENDING' || a._is_synced === 0);
+      }
+
+      if (sqlUpper.includes("WHERE _IS_DELETED = 0")) {
+        assets = assets.filter(a => a._is_deleted !== 1 && a._is_deleted !== true);
+      }
+
+      if (params.length > 0) {
+        const tenantId = params[0] ? String(params[0]).trim() : '';
+        const filial = params[1] ? String(params[1]).trim() : '';
+        if (tenantId) {
+          assets = assets.filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenantId.toUpperCase());
+        }
+        if (filial) {
+          assets = assets.filter(a => String(a.filial || a._unitid || '').trim().toUpperCase() === filial.toUpperCase());
+        }
+      }
+
+      console.log(`>>> [Sync SQL Fallback Store] Retornando ${assets.length} ativos filtrados do fallbackStore.`);
+      return assets;
+    }
+  } catch (fallbackErr) {
+    console.error(">>> [Sync SQL Fallback Store] Falha catastrófica no fallbackStore:", fallbackErr);
+  }
+
+  return [];
 };
 
 export interface CampaignSyncItem {
@@ -141,7 +204,7 @@ export const addCampaignToSyncQueue = async (
   status?: unknown, 
   closedBy?: string
 ): Promise<string> => {
-  const id = crypto.randomUUID();
+  const id = generateUUID();
   const item: CampaignSyncItem = {
     id,
     campaignId,
@@ -315,13 +378,13 @@ export const photoSyncManager = {
             .from('asset-photos')
             .getPublicUrl(filePath);
 
-          // Atualização na tabela oficial 'assets_counting' com nomenclatura unificada canonical
+          // Atualização na tabela oficial 'ativos' com nomenclatura unificada canonical
           const updateAssetQuery = `
-            UPDATE assets_counting 
-            SET foto_url = ?, sync_status = 'SYNCED' 
+            UPDATE ativos 
+            SET _photoUrl = ?, _is_synced = 1 
             WHERE primarykey = ? OR id = ?
           `;
-          await sqliteService.query(updateAssetQuery, [publicUrl, item.assetId, item.assetId]);
+          await sqliteService.execute(updateAssetQuery, [publicUrl, item.assetId, item.assetId]);
 
           await photoQueueStore.removeItem(key);
           uploadCount++;
@@ -356,8 +419,7 @@ export const photoSyncManager = {
 export const syncService = {
   isStringInvalid,
 
-  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-  processDataSyncQueue: async (_tenantIdParam?: string | string[]): Promise<SyncResult> => {
+  processDataSyncQueue: async (): Promise<SyncResult> => {
     const user = getUserFromLocalStorage();
     const rawTenant = user ? user.tenantId : null;
     const rawFilial = sessionStorage.getItem('filial');
@@ -377,19 +439,19 @@ export const syncService = {
 
     const tenantIdClean = String(rawTenant).trim();
     const filialClean = String(rawFilial).trim();
-    const TAMANHO_LOTE_SRE = 200;
 
     try {
+      // REQUISITO 1: pendingRecords já é o array bruto
       const pendingRecords = await executeRawQuerySafe(
         `SELECT tenantId, filial, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, 
                 nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, 
-                primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno, id, sync_status, gps_lat, gps_lng
+                primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno, id, gps_lat, gps_lng
          FROM assets_counting
          WHERE sync_status = 'PENDING' AND tenantId = ? AND filial = ?;`,
         [tenantIdClean, filialClean]
       );
 
-      const records = pendingRecords?.values || [];
+      const records = pendingRecords || [];
       if (records.length === 0) {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
@@ -420,6 +482,7 @@ export const syncService = {
         try {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
+          // REQUISITO 2: Limpeza e coerção estrita de payload para prevenção de erros de RLS/Esquema no Supabase
           const { error: supabaseErr } = await supabase
             .from('assets_analytics')
             .upsert({
@@ -427,7 +490,7 @@ export const syncService = {
               _unitid: filialClean,
               status: record.status || '',
               etiqueta: record.etiqueta || '',
-              qt: Number(record.qt || 1),
+              qt: Number(record.qt) || 1,
               descricaodoativo: record.descricaodoativo || '',
               serial: record.serial || '',
               dataaqusic: record.dataaqusic || '',
@@ -441,13 +504,13 @@ export const syncService = {
               contacontabil: contaValue,
               primarykey: pKey,
               centrodecusto: record.centrodecusto || '',
-              vlraquisic: Number(record.vlraquisic || 0),
-              sn1_recno: record.sn1_recno != null ? Number(record.sn1_recno) : null,
-              sn3_recno: record.sn3_recno != null ? Number(record.sn3_recno) : null,
+              vlraquisic: Number(record.vlraquisic) || 0,
+              sn1_recno: record.sn1_recno ? Number(record.sn1_recno) : null,
+              sn3_recno: record.sn3_recno ? Number(record.sn3_recno) : null,
               id: record.id || pKey,
               measured_at: new Date().toISOString(),
-              gps_lat: record.gps_lat || null,
-              gps_lng: record.gps_lng || null,
+              gps_lat: record.gps_lat != null ? (Number(record.gps_lat) || null) : null,
+              gps_lng: record.gps_lng != null ? (Number(record.gps_lng) || null) : null,
               auditor_email: user.email,
               updated_at: new Date().toISOString()
             });
@@ -456,32 +519,41 @@ export const syncService = {
             syncedPrimaryKeys.push(String(pKey));
           } else {
             failedPrimaryKeys.push(String(pKey));
+            const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
+            const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
             await sqliteService.logAuditEvent(
-              user.id, 'SYNC_RECORD_FAIL', 'assets_counting', String(pKey), `Erro Supabase: ${JSON.stringify(supabaseErr)}`
+              user.id,
+              'SYNC_RECORD_FAIL',
+              'audit_logs',
+              String(pKey),
+              `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`
             ).catch(console.error);
           }
-        } catch {
+        } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
+          const errMsg = err instanceof Error ? err.message : String(err);
+          await sqliteService.logAuditEvent(
+            user.id,
+            'SYNC_RECORD_EXCEPTION',
+            'audit_logs',
+            String(pKey),
+            `Exceção ao sincronizar registro: ${errMsg}`
+          ).catch(console.error);
+          
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
         }
       }
 
-      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION EM LOTES): Aplica atualizações locais em blocos de 200
+      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente
       if (syncedPrimaryKeys.length > 0) {
-        console.log(`>>> [Sync ACID Engine] Processando atualização local para ${syncedPrimaryKeys.length} registros...`);
-        let currentUpdateBatch: string[] = [];
+        console.log(`>>> [Sync ACID Engine] Processando atualização local sequencial para ${syncedPrimaryKeys.length} registros...`);
 
         for (let m = 0; m < syncedPrimaryKeys.length; m++) {
           const keyToUpdate = syncedPrimaryKeys[m];
-          // Constrói queries em lote evitando chamadas sequenciais pesadas de query()
-          const sqlUpdate = `UPDATE assets_counting SET sync_status = 'SYNCED' WHERE primarykey = '${keyToUpdate}' OR id = '${keyToUpdate}';`;
-          currentUpdateBatch.push(sqlUpdate);
-
-          if (currentUpdateBatch.length === TAMANHO_LOTE_SRE || m === syncedPrimaryKeys.length - 1) {
-            // Descarrega o bloco inteiro no barramento de uma só vez
-            await sqliteService.executeRaw(currentUpdateBatch.join('\n'));
-            currentUpdateBatch = [];
-          }
+          await sqliteService.execute(
+            "UPDATE ativos SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
+            [keyToUpdate, keyToUpdate]
+          );
         }
         
         // Realiza um único dump unificado após atualizar os estados de sincronia locais
@@ -520,7 +592,7 @@ export const syncService = {
         [tenantIdClean, filialClean]
       );
       
-      const values = activeData?.values || [];
+      const values = activeData || [];
       const backupKey = `gbr_backup_${tenantIdClean}_${filialClean}`;
       localStorage.setItem(backupKey, JSON.stringify(values));
       return true;
@@ -558,8 +630,14 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
      const result = await sqliteService.query(sql, params);
      return Number(result[0]?.total || 0);
    } catch (e) {
-     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela assets_counting:", e);
-     return 0;
+     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela assets_counting, tentando fallbackStore:", e);
+     try {
+       const assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
+       const unsynced = assets.filter(a => a._is_synced === 0 || a._is_synced === false || a.sync_status === 'PENDING');
+       return unsynced.length;
+     } catch {
+       return 0;
+     }
    }
 };
 
@@ -567,7 +645,7 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
  * Adiciona uma foto à fila de sincronização offline
  */
 export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantId: string): Promise<string> => {
-  const id = crypto.randomUUID();
+  const id = generateUUID();
   const item: SyncQueueItem = {
     id,
     assetId,
@@ -644,7 +722,7 @@ export const processSyncQueue = async (): Promise<void> => {
 };
 
 /**
- * Executa de forma exposta a sincronização resiliente de fotos das filas
+ * Executa de forma exposta a sincronização resilient de fotos das filas
  */
 export const processPhotoSyncQueue = async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
   if (isSyncingLoopActive) return { success: false, uploadCount: 0, failedCount: 0 };

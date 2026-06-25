@@ -7,6 +7,27 @@ import { localDb } from './localDbService';
 import { sqliteService } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 
+export class SupabaseNetworkException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SupabaseNetworkException';
+  }
+}
+
+export class SupabaseBatteryException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SupabaseBatteryException';
+  }
+}
+
+export class SupabaseAuthException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SupabaseAuthException';
+  }
+}
+
 export interface ProvisionResult {
   user?: unknown;
   success?: boolean;
@@ -91,7 +112,7 @@ const mapColumnName = (col: string, tableName?: string): string => {
   
   if (tableName === 'user_permissions') {
     if (lower === 'tenantid' || lower === 'tenant_id' || lower === '_tenantid') {
-      return 'tenant_id';
+      return '_tenantid';
     }
     if (lower === 'unitid' || lower === 'unit_id' || lower === '_unitid' || lower === 'filial') {
       return '_unitid';
@@ -748,7 +769,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     name: (metadata?.name || metadata?.username || lowerEmail.split('@')[0]).trim(),
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
-    tenant_id: fallbackTenant,
+    _tenantid: fallbackTenant,
     _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim(),
     ...(userId ? { id: userId } : {})
   };
@@ -832,12 +853,17 @@ export const signInWithMagicLink = async (email: string) => {
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     console.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
-    throw new Error('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
+    throw new SupabaseNetworkException('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
   }
 
   if (!supabase || !navigator.onLine) {
     console.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
     return [];
+  }
+
+  const isBatteryCritical = await sqliteService.isBatteryCritical?.() ?? false;
+  if (isBatteryCritical) {
+    throw new SupabaseBatteryException("Nível de bateria crítico (< 5%). Sincronização em massa abortada para proteção de hardware do Supabase.");
   }
 
   const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
@@ -938,7 +964,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
       if (error) {
         console.error(`>>> [Supabase] Erro de integridade/esquema no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, error);
-        break;
+        throw new SupabaseNetworkException(`Falha no upsert: ${error.message || 'Erro de esquema.'}`);
       }
 
       successfullySyncedIds.push(...chunk.map(a => String(a.id)));
@@ -949,9 +975,13 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       
       // Delay visual para a esteira reativa
       await new Promise(res => setTimeout(res, 40));
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(`>>> [Supabase] Erro de rede/esquema no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, err);
-      break;
+      if (err instanceof SupabaseNetworkException) {
+        throw err;
+      }
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      throw new SupabaseNetworkException(`Falha estrutural ou de rede: ${rawMsg}`);
     }
   }
 
@@ -1186,7 +1216,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
               name: name || username || email.split('@')[0],
               role: role || 'AUDITOR',
               is_admin: role === 'ADMIN' || role === 'MASTER',
-              tenant_id: tenantid || '',
+              _tenantid: tenantid || '',
               _unitid: unitid || '',
               units: units || (unitid ? [unitid] : []),
               tenants: tenants || (tenantid ? [tenantid] : [])
@@ -1231,7 +1261,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         name: name || username || email.split('@')[0],
         role: role || 'AUDITOR',
         is_admin,
-        tenant_id: normTenantId,
+        _tenantid: normTenantId,
         _unitid: normUnitId,
         units: normalizeArray(units || (normUnitId ? [normUnitId] : [])),
         tenants: normalizeArray(tenants || (normTenantId ? [normTenantId] : []))
@@ -1283,7 +1313,7 @@ export const syncUsersToCloud = async (users: User[]) => {
         name: u.name || u.username,
         role: u.role,
         is_admin,
-        tenant_id: tenantVal,
+        _tenantid: tenantVal,
         _unitid,
         units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
         tenants: normalizeArray(u.tenants || (tenantVal ? [tenantVal] : []))
@@ -1724,6 +1754,11 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     return;
   }
 
+  const isBatteryCritical = await sqliteService.isBatteryCritical?.() ?? false;
+  if (isBatteryCritical) {
+    throw new SupabaseBatteryException("Nível de bateria crítico (< 5%). Exclusão em massa abortada para proteção de hardware.");
+  }
+
   try {
     console.log(`[Supabase] Iniciando limpeza na nuvem. Empresa: ${companyToClear || 'TODAS'}, Tenant: ${tenantid}`);
     
@@ -2000,7 +2035,7 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
     let query = supabase
       .from('asset_logs')
       .select('*')
-      .eq('tenant_id', tenantid)
+      .eq('_tenantid', tenantid)
       .order('timestamp', { ascending: false });
 
     if (assetId) {

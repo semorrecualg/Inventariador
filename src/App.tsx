@@ -77,6 +77,13 @@ import { safeStringify } from './services/utils';
 import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
 
+export class AppBootstrapError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AppBootstrapError';
+  }
+}
+
 const ADMIN_EMAIL = "semorr@gmail.com";
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
@@ -389,7 +396,7 @@ const App: React.FC = () => {
     const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !!hasFilial;
   });
-  const [initError, setInitError] = useState<string | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<Error | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -466,7 +473,7 @@ const App: React.FC = () => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ name: string; count: number }>>([]);
+  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number }>>([]);
   const [isDatabaseLoaded, setIsDatabaseLoaded] = useState<boolean>(() => {
     return sessionStorage.getItem('isDatabaseLoaded') === 'true' || localStorage.getItem('isDatabaseLoaded') === 'true';
   });
@@ -663,7 +670,7 @@ const App: React.FC = () => {
           
           if (loaded.assets.length > 0 && loaded.companies.length === 0) {
             console.error(">>> [DBA] CRÍTICO: Ativos carregados mas nenhuma unidade operacional mapeada!");
-            alert("Atenção: Os dados foram carregados, mas nenhuma 'Unidade Operacional' foi identificada. Verifique se as colunas da planilha Excel estão corretas (Ex: UNIDADE, LOCAL, FILIAL).");
+            showModal("Atenção", "Os dados foram carregados, mas nenhuma 'Unidade Operacional' foi identificada. Verifique se as colunas da planilha Excel estão corretas (Ex: UNIDADE, LOCAL, FILIAL).", "warning");
           } else {
             console.log(">>> [DBA] Carga de unidades OK: " + loaded.companies.length + " encontradas.");
           }
@@ -867,10 +874,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const timeout = setTimeout(async () => {
-      if (isInitializing && !initError) {
+      if (isInitializing && !bootstrapError) {
         console.warn(">>> [App] Inicialização demorou demais (>35s). Forçando Fallback em Memória de Contingência...");
         try {
-          await sqliteService.forceMemoryFallback();
+          await sqliteService.init(true);
         } catch (e) {
           console.error(">>> [App] Erro crítico ao forçar fallback:", e);
         }
@@ -880,7 +887,7 @@ const App: React.FC = () => {
       }
     }, 35000);
     return () => clearTimeout(timeout);
-  }, [isInitializing, initError]);
+  }, [isInitializing, bootstrapError]);
 
   useEffect(() => {
     let isMounted = true;
@@ -896,37 +903,33 @@ const App: React.FC = () => {
         const isNative = Capacitor.isNativePlatform();
         
         if (!isNative) {
-          console.log(">>> [App] Ambiente WEB / iFrame detectado. Forçando desvio INSTANTÂNEO de MEMORY_FALLBACK para blindagem total contra restrições de sandbox.");
-          await sqliteService.forceMemoryFallback();
-          success = true;
+          console.log(">>> [App] Ambiente WEB / iFrame detectado. Inicializando SQLite com emulação em memória segura.");
+          success = await sqliteService.init(true);
         } else {
-          let attempts = 0;
-          const maxAttempts = 3;
-          const timeoutDuration = 30000;
-          
-          while (attempts < maxAttempts && !success) {
-            attempts++;
+          try {
+            console.log(">>> [App] Tentando inicializar SQLite Nativo (Primeira tentativa)...");
+            success = await sqliteService.init(false);
+          } catch (firstErr) {
+            console.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
+            console.log(">>> [App] Aguardando 500ms para única re-conexão...");
+            await new Promise(resolve => setTimeout(resolve, 500));
             try {
-              console.log(`>>> [App] Tentando inicializar SQLite Nativo (Tentativa ${attempts}/${maxAttempts})...`);
-              success = await Promise.race([
-                sqliteService.init(attempts > 1),
-                new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('SQLITE_TIMEOUT')), timeoutDuration))
-              ]);
-            } catch (dbErr) {
-              console.warn(`>>> [App - Warning] Falha na tentativa ${attempts} de bootstrap do SQLite Nativo:`, dbErr);
-              if (attempts < maxAttempts) {
-                console.log(">>> [App] Aguardando 1.5s para acomodação de threads antes da re-tentativa...");
-                await new Promise(resolve => setTimeout(resolve, 1500));
-              } else {
-                console.error(">>> [App - Failsafe] Todas as tentativas nativas falharam. Entrando em contingência de memória nativa.", dbErr);
-                await sqliteService.forceMemoryFallback();
-                success = true;
-              }
+              console.log(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
+              success = await sqliteService.init(true);
+            } catch (secondErr) {
+              console.error(">>> [App - Failsafe] Falha crítica na segunda tentativa do SQLite Nativo.", secondErr);
+              throw new Error(`Falha crítica de inicialização do Banco de Dados Local: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
             }
           }
         }
-        setDbInitialized(true);
-        setSqliteStatus('ACTIVE');
+        
+        if (success) {
+          setDbInitialized(true);
+          setSqliteStatus('ACTIVE');
+        } else {
+          setDbInitialized(false);
+          setSqliteStatus('ERROR');
+        }
 
         if (!isMounted) return;
 
@@ -1012,7 +1015,7 @@ const App: React.FC = () => {
                   }
                 } catch (bootErr) {
                   console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
-                  setInitError(bootErr instanceof Error ? bootErr.message : String(bootErr));
+                  setBootstrapError(new AppBootstrapError(bootErr instanceof Error ? bootErr.message : String(bootErr)));
                 }
               }
 
@@ -1124,7 +1127,7 @@ const App: React.FC = () => {
               }
             } catch (asyncErr) {
               console.error(">>> [App - Async Boot Error] Erro crítico no fluxo assíncrono pós-boot:", asyncErr);
-              setInitError(asyncErr instanceof Error ? asyncErr.message : String(asyncErr));
+              setBootstrapError(new AppBootstrapError(asyncErr instanceof Error ? asyncErr.message : String(asyncErr)));
             } finally {
               // GARANTIA SRE REQUISITO 2: Assegura desativação das flags de loading em QUALQUER cenário assíncrono
               setIsInitializing(false);
@@ -1139,7 +1142,7 @@ const App: React.FC = () => {
       } catch (err) {
         console.error(">>> [App] Erro fatal na inicialização:", err);
         if (isMounted) {
-          setInitError(err instanceof Error ? err.message : String(err));
+          setBootstrapError(new AppBootstrapError(err instanceof Error ? err.message : String(err)));
         }
       } finally {
         if (isMounted) {
@@ -1157,7 +1160,7 @@ const App: React.FC = () => {
       const detail = (e as CustomEvent).detail;
       console.error(">>> [App] Evento de falha capturado:", detail?.error);
       if (isMounted) {
-        setInitError(detail?.error || "Falha desconhecida");
+        setBootstrapError(new AppBootstrapError(detail?.error || "Falha desconhecida"));
       }
     };
 
@@ -1226,8 +1229,8 @@ const App: React.FC = () => {
       } catch (redirectErr) {
         console.error(">>> [Session] Falha crítica de ciclo de vida ao tentar redirecionar no handleSessionExpired:", redirectErr);
         try {
-          alert("Sua sessão expirou. Por favor, re-autentique o aplicativo.");
-        } catch { /* ignore if alert is blocked */ }
+          showModal("Sessão Expirada", "Sua sessão expirou. Por favor, re-autentique o aplicativo.", "error");
+        } catch { /* ignore */ }
       }
     };
 
@@ -4214,7 +4217,7 @@ const App: React.FC = () => {
         console.log(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
       } catch (err) {
         console.error(">>> [KARDEK] Falha ao sincronizar com nuvem:", err);
-        alert("Erro SQL (Nuvem): " + (err instanceof Error ? err.message : String(err)));
+        showModal("Erro de Sincronização", "Erro SQL (Nuvem): " + (err instanceof Error ? err.message : String(err)), "error");
       } finally {
         setIsProcessing(false);
       }
@@ -4473,7 +4476,7 @@ const App: React.FC = () => {
       });
     } catch (err) {
       console.error('>>> [DATABASE] Erro ao unitarizar ativo:', err);
-      alert("ERRO SQL (Unitarização): " + (err instanceof Error ? err.message : String(err)));
+      showModal("Erro de Unitarização", "ERRO SQL (Unitarização): " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setIsProcessing(false);
     }
@@ -4543,7 +4546,7 @@ const App: React.FC = () => {
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     
     if (!isAdmin) {
-      alert("Apenas administradores podem excluir ativos.");
+      showModal("Permissão Negada", "Apenas administradores podem excluir ativos.", "error");
       return;
     }
 
@@ -4606,7 +4609,7 @@ const App: React.FC = () => {
       console.log(`>>> [DATABASE] Exclusão confirmada para id: ${assetId}`);
     } catch (err) {
       console.error('>>> [DATABASE] Falha ao excluir ativo:', err);
-      alert("ERRO SQL (Exclusão): " + (err instanceof Error ? err.message : String(err)));
+      showModal("Erro de Exclusão", "ERRO SQL (Exclusão): " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setIsProcessing(false);
     }
@@ -4774,9 +4777,7 @@ const App: React.FC = () => {
       console.log(`>>> [DATABASE] Operação em lote concluída com sucesso.`);
     } catch (err) {
       console.error('>>> [DATABASE] Falha Crítica no Lote:', err);
-      // alert("ERRO SQL (Lote): " + (err instanceof Error ? err.message : String(err)));
-      // No mobile real, alerts são melhores para erros de banco
-      window.alert(`ERRO CRÍTICO NO BANCO:\n${err instanceof Error ? err.message : String(err)}`);
+      showModal("Erro no Banco", `ERRO CRÍTICO NO BANCO:\n${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
       setIsProcessing(false);
     }
@@ -5300,11 +5301,11 @@ const App: React.FC = () => {
     // v24.50: Se temos unidades via SQL (Modo Interno), usamos elas como base prioritária
     if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
       sqliteOperationalUnits.forEach(u => {
-        const companyName = u.name.toUpperCase().replace(/_/g, ' ');
+        const companyName = (u.filial || '').toUpperCase().replace(/_/g, ' ');
         if (companyName === 'CICOPAL' || normalizeKey(companyName) === 'CICOPAL') return;
         companyStatsMap.set(companyName, {
           hasData: true,
-          hasActiveAssets: u.count > 0,
+          hasActiveAssets: (u.total || 0) > 0,
           unitIds: new Set(),
           hasAssetCampaign: false // Será verificado nos ativos abaixo se necessário
         });
@@ -5439,7 +5440,7 @@ const App: React.FC = () => {
 
     const sqlCountsMap = new Map<string, number>();
     sqliteOperationalUnits.forEach(u => {
-      sqlCountsMap.set(normalizeKey(u.name), u.count);
+      sqlCountsMap.set(normalizeKey(u.filial || ''), u.total || 0);
     });
 
     const localCountsMap = new Map<string, number>();
@@ -5674,7 +5675,7 @@ const App: React.FC = () => {
         <div className="flex flex-col items-center space-y-2">
           <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v2.6</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
-            Iniciando Banco de Dados Seguro (Jeep-SQLite)...
+            Carregando Ecossistema GBR...
           </p>
         </div>
       </div>
@@ -5863,13 +5864,13 @@ const App: React.FC = () => {
     );
   }
 
-  if (initError) {
+  if (bootstrapError) {
     return (
       <div className="w-full h-screen bg-[#1a0000] flex flex-col items-center justify-center p-10 text-white font-sans">
         <AlertTriangle size={48} className="text-red-600 mb-8 animate-pulse" />
         <h2 className="text-sm font-black uppercase tracking-[0.4em] mb-10 text-center">Erro de Inicialização</h2>
         <div className="bg-red-900/10 border border-red-500/20 p-6 rounded-3xl max-w-sm w-full mb-10 text-center shadow-2xl">
-          <p className="text-[10px] text-red-200/70 font-medium leading-relaxed font-mono break-all mb-4">{initError}</p>
+          <p className="text-[10px] text-red-200/70 font-medium leading-relaxed font-mono break-all mb-4">{bootstrapError.message}</p>
           <p className="text-[9px] text-yellow-200/50 uppercase tracking-wider">Abaixo, escolha recarregar a página ou executar uma limpeza geral do motor local.</p>
         </div>
         <div className="flex flex-col gap-4 w-full max-w-[240px]">
@@ -5877,7 +5878,7 @@ const App: React.FC = () => {
             onClick={() => window.location.reload()}
             className="bg-slate-950 border border-slate-850 text-white w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all hover:bg-slate-900"
           >
-            Recarregar Aplicativo
+            Reiniciar Aplicação
           </button>
           
           <button 
@@ -5889,11 +5890,10 @@ const App: React.FC = () => {
                   if (typeof localforage !== 'undefined') {
                     await localforage.clear();
                   }
-                  await sqliteService.hardResetDatabase();
+                  await sqliteService.hardResetDatabase?.();
                   window.location.reload();
                 } catch (err) {
                   console.error("Erro no hard reset:", err);
-                  alert("Houve um erro ao reiniciar automaticamente. Por favor, limpe os dados do navegador manualmente.");
                 }
               }
             }}
@@ -5913,7 +5913,7 @@ const App: React.FC = () => {
             setPermissionsGranted(true);
             setShowAccessRequest(false);
           }} 
-          setBootError={setInitError} 
+          setBootError={(errStr) => setBootstrapError(new AppBootstrapError(errStr || 'Erro de Permissão'))} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
           <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
