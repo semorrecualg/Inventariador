@@ -416,7 +416,7 @@ export const photoSyncManager = {
   }
 };
 
-export const syncService = {
+const _syncService = {
   isStringInvalid,
 
   processDataSyncQueue: async (): Promise<SyncResult> => {
@@ -441,14 +441,14 @@ export const syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
-      // REQUISITO 1: pendingRecords já é o array bruto
-      const pendingRecords = await executeRawQuerySafe(
-        `SELECT tenantId, filial, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, 
+      // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0'
+      const pendingRecords = await sqliteService.query(
+        `SELECT id, tenantId, _tenantid, filial, _unitid, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, 
                 nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, 
-                primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno, id, gps_lat, gps_lng
-         FROM assets_counting
-         WHERE sync_status = 'PENDING' AND tenantId = ? AND filial = ?;`,
-        [tenantIdClean, filialClean]
+                primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno, gps_lat, gps_lng
+         FROM local_assets
+         WHERE _is_synced = 0 AND (tenantId = ? OR _tenantid = ?) AND (filial = ? OR _unitid = ?);`,
+        [tenantIdClean, tenantIdClean, filialClean, filialClean]
       );
 
       const records = pendingRecords || [];
@@ -467,7 +467,7 @@ export const syncService = {
         }
 
         const pKey = record.primarykey || record.id || '';
-        if (isStringInvalid(pKey) || isStringInvalid(record.filial)) {
+        if (isStringInvalid(pKey)) {
           failedPrimaryKeys.push(String(pKey));
           continue;
         }
@@ -479,41 +479,25 @@ export const syncService = {
           continue;
         }
 
+        // 3. ISOLAMENTO EM CASO DE FALHA DE REDE OU RLS (401/403)
         try {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
-          // REQUISITO 2: Limpeza e coerção estrita de payload para prevenção de erros de RLS/Esquema no Supabase
+          // 2. VETO A PAYLOADS POLUÍDOS E TRANCA _tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas
+          const payload = {
+            _tenantid: tenantIdClean,
+            _unitid: filialClean,
+            etiqueta: record.etiqueta !== undefined && record.etiqueta !== null ? String(record.etiqueta).trim() : '',
+            qt: Number(record.qt) || 1,
+            descricaodoativo: record.descricaodoativo !== undefined && record.descricaodoativo !== null ? String(record.descricaodoativo).trim() : '',
+            serial: record.serial !== undefined && record.serial !== null ? String(record.serial).trim() : null,
+            primarykey: String(pKey).trim(),
+            vlraquisic: Number(record.vlraquisic) || 0
+          };
+
           const { error: supabaseErr } = await supabase
             .from('assets_analytics')
-            .upsert({
-              _tenantid: tenantIdClean,
-              _unitid: filialClean,
-              status: record.status || '',
-              etiqueta: record.etiqueta || '',
-              qt: Number(record.qt) || 1,
-              descricaodoativo: record.descricaodoativo || '',
-              serial: record.serial || '',
-              dataaqusic: record.dataaqusic || '',
-              cnpj: record.cnpj || '',
-              nomefornecedor: record.nomefornecedor || '',
-              notafiscal: record.notafiscal || '',
-              endereco: record.endereco || '',
-              registro: record.registro || '',
-              subreg: record.subreg || '',
-              databaixa: record.databaixa || '',
-              contacontabil: contaValue,
-              primarykey: pKey,
-              centrodecusto: record.centrodecusto || '',
-              vlraquisic: Number(record.vlraquisic) || 0,
-              sn1_recno: record.sn1_recno ? Number(record.sn1_recno) : null,
-              sn3_recno: record.sn3_recno ? Number(record.sn3_recno) : null,
-              id: record.id || pKey,
-              measured_at: new Date().toISOString(),
-              gps_lat: record.gps_lat != null ? (Number(record.gps_lat) || null) : null,
-              gps_lng: record.gps_lng != null ? (Number(record.gps_lng) || null) : null,
-              auditor_email: user.email,
-              updated_at: new Date().toISOString()
-            });
+            .upsert(payload);
 
           if (!supabaseErr) {
             syncedPrimaryKeys.push(String(pKey));
@@ -521,21 +505,27 @@ export const syncService = {
             failedPrimaryKeys.push(String(pKey));
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
+            const detailsStr = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+            
+            console.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
+
             await sqliteService.logAuditEvent(
               user.id,
               'SYNC_RECORD_FAIL',
-              'audit_logs',
+              'local_assets',
               String(pKey),
-              `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`
+              detailsStr
             ).catch(console.error);
           }
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
           const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
+
           await sqliteService.logAuditEvent(
             user.id,
             'SYNC_RECORD_EXCEPTION',
-            'audit_logs',
+            'local_assets',
             String(pKey),
             `Exceção ao sincronizar registro: ${errMsg}`
           ).catch(console.error);
@@ -544,14 +534,22 @@ export const syncService = {
         }
       }
 
-      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente
+      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente em todas as tabelas espelho
       if (syncedPrimaryKeys.length > 0) {
         console.log(`>>> [Sync ACID Engine] Processando atualização local sequencial para ${syncedPrimaryKeys.length} registros...`);
 
         for (let m = 0; m < syncedPrimaryKeys.length; m++) {
           const keyToUpdate = syncedPrimaryKeys[m];
           await sqliteService.execute(
+            "UPDATE local_assets SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
+            [keyToUpdate, keyToUpdate]
+          );
+          await sqliteService.execute(
             "UPDATE ativos SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
+            [keyToUpdate, keyToUpdate]
+          );
+          await sqliteService.execute(
+            "UPDATE assets SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
             [keyToUpdate, keyToUpdate]
           );
         }
@@ -559,6 +557,20 @@ export const syncService = {
         // Realiza um único dump unificado após atualizar os estados de sincronia locais
         await sqliteService.saveDatabase();
         console.log(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso.`);
+      }
+
+      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo para evitar entupimento de disco
+      try {
+        console.log(">>> [Disk Saturation Guard] Executando expurgo de logs antigos...");
+        try {
+          await sqliteService.execute('DELETE FROM audit_logs WHERE created_at < date("now", "-7 days");');
+        } catch {
+          // Fallback caso a coluna seja updated_at ao invés de created_at
+          await sqliteService.execute('DELETE FROM audit_logs WHERE updated_at < date("now", "-7 days");');
+        }
+        console.log(">>> [Disk Saturation Guard] Expurgo concluído com sucesso.");
+      } catch (logErr) {
+        console.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
       }
 
       return {
@@ -619,18 +631,18 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
      const rawTenant = user ? user.tenantId : null;
      const rawFilial = sessionStorage.getItem('filial');
      
-     let sql = "SELECT COUNT(*) as total FROM assets_counting WHERE sync_status = 'PENDING'";
+     let sql = "SELECT COUNT(*) as total FROM local_assets WHERE _is_synced = 0";
      const params: (string | number)[] = [];
      
      if (user && !isStringInvalid(rawTenant) && !isStringInvalid(rawFilial)) {
-       sql += " AND tenantId = ? AND filial = ?";
-       params.push(String(rawTenant).trim(), String(rawFilial).trim());
+       sql += " AND (tenantId = ? OR _tenantid = ?) AND (filial = ? OR _unitid = ?)";
+       params.push(String(rawTenant).trim(), String(rawTenant).trim(), String(rawFilial).trim(), String(rawFilial).trim());
      }
      
      const result = await sqliteService.query(sql, params);
      return Number(result[0]?.total || 0);
    } catch (e) {
-     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela assets_counting, tentando fallbackStore:", e);
+     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela local_assets, tentando fallbackStore:", e);
      try {
        const assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
        const unsynced = assets.filter(a => a._is_synced === 0 || a._is_synced === false || a.sync_status === 'PENDING');
@@ -823,5 +835,15 @@ if (typeof window !== 'undefined') {
   // Agenda a primeira execução com delay estratégico após inicialização da WebView
   setTimeout(runSyncLoopCycle, 10000);
 }
+
+export const syncService = new Proxy(_syncService, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver);
+    if (typeof value === 'function') {
+      return (value as (...args: unknown[]) => unknown).bind(target);
+    }
+    return value;
+  }
+});
 
 export default syncService;

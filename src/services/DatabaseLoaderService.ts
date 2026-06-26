@@ -404,6 +404,25 @@ export class DatabaseLoaderService {
       throw new Error("A planilha fornecida está vazia ou corrompida.");
     }
 
+    // Captura o conteúdo real do campo 'filial' (Index 1) da planilha carregada
+    let firstFilial = '';
+    for (const row of rawExcelData) {
+      const filialVal = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || '')?.trim();
+      if (filialVal && filialVal.toLowerCase() !== 'null' && filialVal.toLowerCase() !== 'undefined') {
+        firstFilial = filialVal;
+        break;
+      }
+    }
+    if (firstFilial) {
+      console.log(`>>> [SRE Loader] Unidade Física Real detectada no Index 1 (filial): ${firstFilial}`);
+      localStorage.setItem('filial', firstFilial);
+      sessionStorage.setItem('filial', firstFilial);
+      localStorage.setItem('selectedUnit', firstFilial);
+      sessionStorage.setItem('selectedUnit', firstFilial);
+      localStorage.setItem('app_selected_unit', firstFilial);
+      localStorage.setItem('app_current_unit', firstFilial);
+    }
+
     const totalRows = totalPlanilha;
     let totalInserted = 0;
 

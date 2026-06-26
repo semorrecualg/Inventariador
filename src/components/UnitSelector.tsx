@@ -139,8 +139,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   useEffect(() => {
     // 🚀 ISOLAMENTO E BYPASS DE SANDBOX (ANTI-CRASH)
     if (typeof window !== 'undefined' && (window.self !== window.top || window.location.hostname.includes('aistudio'))) {
-      console.log(">>> [GBR-Compliance] Ambiente iFrame/AI Studio detectado. Abortando GPS de hardware e forçando Fallback GBR v2.70.");
-      onSelect("FEIRA_BOA_BA");
+      console.log(">>> [GBR-Compliance] Ambiente iFrame/AI Studio detectado. Abortando GPS de hardware e forçando Unidade Dinâmica do cache.");
+      const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+      if (cachedFilial) {
+        onSelect(cachedFilial);
+      }
       const timer = setTimeout(() => {
         if (onForceToggleView) {
           onForceToggleView();
@@ -159,13 +162,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
             setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
           } else {
-            onSelect("FEIRA_BOA_BA");
+            const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+            if (cachedFilial) onSelect(cachedFilial);
           }
         } else {
-          onSelect("FEIRA_BOA_BA");
+          const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+          if (cachedFilial) onSelect(cachedFilial);
         }
       } catch {
-        onSelect("FEIRA_BOA_BA");
+        // Safe bypass
       }
     };
 
@@ -625,7 +630,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
               <Building2 size={32} className="animate-pulse" />
             </div>
             <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-red-600 mb-6 max-w-sm leading-relaxed">
-              ⚠️ Nenhuma filial carregada em disco. Acesse o painel de Carga Expert.
+              ⚠️ Nenhum dado importado
             </p>
             
             {isAdmin && onLoadDatabase && (

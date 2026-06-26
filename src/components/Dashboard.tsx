@@ -218,7 +218,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 10);
 
     return s;
-  }, [assets]);
+  }, [assets, filterByCampaign, currentCampaignId, sqlStats]);
 
   const auditActivityData = useMemo(() => {
     const userCounts: Record<string, number> = {};
@@ -361,10 +361,18 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
-      {/* Header */}
-      <div className="pt-12 pb-4 px-4 bg-white border-b border-border flex items-center justify-between shadow-sm z-20">
+      {/* Header com layout Flexbox rigoroso */}
+      <div 
+        className="pt-12 pb-4 px-4 bg-white border-b border-border shadow-sm z-20"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        {/* Lado Esquerdo: Nome da Unidade perfeitamente alinhado */}
         <div className="flex items-center space-x-3">
-          <BackButton onClick={onBack} label="Dashboard" subLabel={`${user?.tenantId || user?.tenantid || 'S/ TENANT'}`} />
+          <BackButton 
+            onClick={onBack} 
+            label="Dashboard" 
+            subLabel={selectedUnit || localStorage.getItem('filial') || sessionStorage.getItem('filial') || user?.unitid || user?.tenantId || user?.tenantid || 'Sem Unidade'} 
+          />
           {currentCampaignId && (
             <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">
               <Activity size={10} className="text-accent animate-pulse" />
@@ -372,7 +380,25 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
             </div>
           )}
         </div>
-        <div className="flex items-center space-x-2">
+
+        {/* Lado Direito: Badges reativas de status alinhadas de forma horizontal e simétrica */}
+        <div className="flex items-center space-x-2.5">
+          {/* Badge 1: PENDENTES reativo */}
+          <div className="flex items-center space-x-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+            <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">
+              {stats.totalAtivos - stats.conferidoAtivos} PENDENTES
+            </span>
+          </div>
+
+          {/* Badge 2: OPERACIONAL fixo */}
+          <div className="flex items-center space-x-1 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+              OPERACIONAL
+            </span>
+          </div>
+
           {onChangeUnit && (
             <button 
               onClick={onChangeUnit}
@@ -382,12 +408,14 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
               <span className="text-[9px] font-bold uppercase tracking-widest whitespace-nowrap">Unidades</span>
             </button>
           )}
+
           {stats.syncConflicts24h > 0 && (
             <div className="flex items-center space-x-1 bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/20 animate-pulse">
               <ShieldAlert size={10} className="text-rose-500" />
               <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest">{stats.syncConflicts24h} Conflitos</span>
             </div>
           )}
+
           <button 
             onClick={() => exportFilteredData(() => true, 'CONSOLIDADO_GERAL')}
             className="p-2 bg-bg-main border border-border rounded-xl text-ink-muted hover:text-accent transition-colors"
@@ -436,47 +464,53 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar pb-24">
-        
+      {/* Contêiner centralizado com largura máxima controlada e margens automáticas */}
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar pb-24 w-full"
+        style={{ maxWidth: '1200px', margin: '0 auto' }}
+      >
         {activeTab === 'overview' && (
           <>
-            {/* GBR Expert v25: Quick Action - INICIAR INVENTÁRIO */}
-            <div className="relative group cursor-pointer active:scale-[0.98] transition-all mb-4" onClick={onOpenInventory}>
-              <div className="absolute inset-0 bg-gradient-to-br from-accent to-blue-700 rounded-[2.5rem] shadow-xl shadow-accent/20 border border-white/20 overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform text-white">
-                   <CheckCircle2 size={120} />
-                </div>
-              </div>
-              <div className="relative p-8 flex items-center justify-between">
-                <div>
-                  <h3 className="text-white text-xl font-black uppercase tracking-tight mb-1">INVENTÁRIO</h3>
-                  <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">Conferência Física de Campo</p>
-                </div>
-                <div className="w-14 h-14 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-white border border-white/20 group-hover:bg-white/20 transition-colors">
-                  <ArrowUpRight size={28} />
-                </div>
-              </div>
-            </div>
-
-            {/* GBR Expert v25: Quick Action - ETIQUETAR */}
-            <div className="relative group cursor-pointer active:scale-[0.98] transition-all mb-4" onClick={onOpenLabeling}>
-              <div className="absolute inset-0 bg-white rounded-[2.5rem] shadow-sm border border-border overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform text-accent">
-                   <AlertTriangle size={120} />
-                </div>
-              </div>
-              <div className="relative p-8 flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <div className="w-16 h-16 bg-blue-50 rounded-[1.5rem] flex items-center justify-center text-accent border border-blue-100 shadow-inner">
-                    <TrendingUp size={32} />
+            {/* Distribuição vertical limpa (gap: 20px) entre o card azul de 'INVENTÁRIO' e o card de 'ETIQUETAR' */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* GBR Expert v25: Quick Action - INICIAR INVENTÁRIO (Card Azul) */}
+              <div className="relative group cursor-pointer active:scale-[0.98] transition-all" onClick={onOpenInventory}>
+                <div className="absolute inset-0 bg-gradient-to-br from-accent to-blue-700 rounded-[2.5rem] shadow-xl shadow-accent/20 border border-white/20 overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform text-white">
+                     <CheckCircle2 size={120} />
                   </div>
+                </div>
+                <div className="relative p-8 flex items-center justify-between">
                   <div>
-                    <h3 className="text-ink text-xl font-black uppercase tracking-tight mb-1">ETIQUETAR</h3>
-                    <p className="text-ink-muted text-[10px] font-bold uppercase tracking-widest">Itens sem Plaqueta</p>
+                    <h3 className="text-white text-xl font-black uppercase tracking-tight mb-1">INVENTÁRIO</h3>
+                    <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">Conferência Física de Campo</p>
+                  </div>
+                  <div className="w-14 h-14 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-white border border-white/20 group-hover:bg-white/20 transition-colors">
+                    <ArrowUpRight size={28} />
                   </div>
                 </div>
-                <div className="w-14 h-14 bg-bg-main rounded-2xl flex items-center justify-center text-ink-muted border border-border group-hover:bg-accent group-hover:text-white transition-all duration-300">
-                  <ArrowUpRight size={28} />
+              </div>
+
+              {/* GBR Expert v25: Quick Action - ETIQUETAR (Card Branco) */}
+              <div className="relative group cursor-pointer active:scale-[0.98] transition-all" onClick={onOpenLabeling}>
+                <div className="absolute inset-0 bg-white rounded-[2.5rem] shadow-sm border border-border overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform text-accent">
+                     <AlertTriangle size={120} />
+                  </div>
+                </div>
+                <div className="relative p-8 flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-16 h-16 bg-blue-50 rounded-[1.5rem] flex items-center justify-center text-accent border border-blue-100 shadow-inner">
+                      <TrendingUp size={32} />
+                    </div>
+                    <div>
+                      <h3 className="text-ink text-xl font-black uppercase tracking-tight mb-1">ETIQUETAR</h3>
+                      <p className="text-ink-muted text-[10px] font-bold uppercase tracking-widest">Itens sem Plaqueta</p>
+                    </div>
+                  </div>
+                  <div className="w-14 h-14 bg-bg-main rounded-2xl flex items-center justify-center text-ink-muted border border-border group-hover:bg-accent group-hover:text-white transition-all duration-300">
+                    <ArrowUpRight size={28} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -533,8 +567,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
                 </div>
               </div>
 
-              {/* Seção Sincronização Delta e Logs de Auditoria */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Seção Sincronização Delta e Logs de Auditoria - CSS Grid com repeat(auto-fit, minmax(280px, 1fr)) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
                 {onNavigate && (
                   <button 
                     onClick={() => handleNavigate(AppScreen.SYNC_MANAGER)}

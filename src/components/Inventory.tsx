@@ -19,6 +19,8 @@ import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
+import { SqliteMutexContext } from '../services/SqliteMutexContext';
+import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
 import { BufferIndicator } from './BufferIndicator';
@@ -200,6 +202,29 @@ const Inventory: React.FC<InventoryProps> = ({
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
+  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
+  const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
+  const [sreNotification, setSreNotification] = useState<{ type: 'success' | 'warning' | 'error' | 'info'; message: string; subText?: string } | null>(null);
+
+  // Auto-dismiss SRE notification after 4 seconds
+  useEffect(() => {
+    if (sreNotification) {
+      const timer = setTimeout(() => {
+        setSreNotification(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [sreNotification]);
+
+  // 3. ISOLAMENTO DE CONCORRÊNCIA E MEMÓRIA (MUTEX & MEMGUARD)
+  // No evento de desmonte do componente (useEffect cleanup), invoque MemoryGuardService.releaseMassiveArray
+  useEffect(() => {
+    return () => {
+      console.log(">>> [MemoryGuard] Componente Inventory desmontado. Limpando arrays massivos de cache...");
+      MemoryGuardService.releaseMassiveArray(globalSearchResults);
+      MemoryGuardService.releaseMassiveArray(dbLocations);
+    };
+  }, [globalSearchResults, dbLocations]);
   const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
   const cleanAndCapitalizeAsset = (rawAsset: Asset): Asset => {
@@ -409,14 +434,12 @@ const Inventory: React.FC<InventoryProps> = ({
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
   const [isLocSearching, setIsLocSearching] = useState(false);
-  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
   const ocrInputRef = useRef<HTMLInputElement>(null);
@@ -568,46 +591,142 @@ const Inventory: React.FC<InventoryProps> = ({
     
     setIsHierarchyLoading(true);
     try {
-      // NÍVEL 1 - Busca Local (Automática)
-      // Filtra ETIQUETA + filial atual
       const currentUnit = selectedUnitRef.current || '';
-      const foundAsset = await assetRepository.findByEtiquetaInUnit(term, currentUnit);
+
+      // 1. COMPORTAMENTO E CAPTURA DE LEITURA (SCANNER CONTRATO)
+      // Executa consulta parametrizada estrita buscando na tabela local_assets
+      const sqlQuery = "SELECT * FROM local_assets WHERE (UPPER(etiqueta) = ? OR UPPER(primarykey) = ?) AND (filial = ? OR _unitid = ?) AND _is_deleted = 0";
+      const paramsQuery = [term.toUpperCase(), term.toUpperCase(), currentUnit, currentUnit];
       
-      // Se encontrou localmente, abre o registro diretamente (mantendo lógica de duplicidade)
-      if (foundAsset) {
-        setIsHierarchyLoading(false);
-        if (foundAsset._conferido) {
-          setDuplicateAsset(foundAsset);
-          return;
+      let queryResult;
+      const db = sqliteService.getNativeDb();
+      if (db) {
+        queryResult = await SqliteMutexContext.executeSafeTransaction(db, sqlQuery, paramsQuery);
+      } else {
+        const fallbackRes = await sqliteService.query(sqlQuery, paramsQuery);
+        queryResult = { values: fallbackRes };
+      }
+      
+      let foundAsset = queryResult.values && queryResult.values.length > 0 ? queryResult.values[0] as Asset : null;
+
+      // Se não encontrou na local_assets, fazemos a busca nas tabelas normais para máxima tolerância e segurança
+      if (!foundAsset) {
+        const foundAssetRepo = await assetRepository.findByEtiquetaInUnit(term, currentUnit);
+        if (foundAssetRepo) {
+          foundAsset = foundAssetRepo;
         }
+      }
+
+      if (foundAsset) {
+        // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (MUTEX)
+        // Ativo localizado: update atômico em local_assets e ativos com _conferido=1, status='CONFERIDO' e _is_synced=0
+        const id = foundAsset.id || foundAsset.primarykey;
         
+        const updateSql = "UPDATE local_assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)";
+        const updateParams = [foundAsset.etiqueta || foundAsset.ETIQUETA || '', foundAsset.primarykey || ''];
+        
+        if (db) {
+          await SqliteMutexContext.executeSafeTransaction(db, updateSql, updateParams);
+          // Atualiza também nas tabelas 'ativos' e 'assets' para manter a UI e sincronizador em sincronia
+          await SqliteMutexContext.executeSafeTransaction(db, "UPDATE ativos SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
+          await SqliteMutexContext.executeSafeTransaction(db, "UPDATE assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
+        } else {
+          await sqliteService.execute(updateSql, updateParams);
+          await sqliteService.execute("UPDATE ativos SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
+          await sqliteService.execute("UPDATE assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
+        }
+
+        // Adiciona um log de auditoria via transação protegida
+        const auditLogId = 'AUDIT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+        const auditSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
+        const auditParams = [auditLogId, user?.email || 'operador', 'CONFERENCIA', 'local_assets', String(id), `Ativo conferido via scanner: ${extractedEtiqueta}`];
+        
+        if (db) {
+          await SqliteMutexContext.executeSafeTransaction(db, auditSql, auditParams);
+        } else {
+          await sqliteService.execute(auditSql, auditParams);
+        }
+
+        setIsHierarchyLoading(false);
+
+        // Se tiver o callback onUpdateAsset da prop, notificamos o React para atualizar o state global do app
+        const cleanAsset = cleanAndCapitalizeAsset({
+          ...foundAsset,
+          _conferido: true,
+          status: 'CONFERIDO',
+          _is_synced: 0,
+          _localMaster: selectedLocationRef.current || foundAsset.ENDERECO || foundAsset.endereco
+        });
+        await onUpdateAssetRef.current(cleanAsset);
+
+        setSreNotification({
+          type: 'success',
+          message: 'Ativo Conferido com Sucesso',
+          subText: `Etiqueta: ${extractedEtiqueta} | Status: CONFERIDO`
+        });
+
+        // Limpa committedSearch se autoConfirmOnScan estiver ativo para limpar input de busca
         if (autoConfirmOnScanRef.current) {
-          const cleanAsset = cleanAndCapitalizeAsset({
-            ...foundAsset,
-            _conferido: true,
-            _localMaster: selectedLocationRef.current || foundAsset.ENDERECO
-          });
-          await onUpdateAssetRef.current(cleanAsset);
           setCommittedSearch('');
           setDisplayValue('');
         } else {
-          const statusUpper = String(foundAsset.STATUS || '').toUpperCase();
-          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!foundAsset.DATABAIXA;
-          setScannedAsset({ ...foundAsset, _is_divergent_baixa: isGoldenRuleDivergent });
+          const statusUpper = String(foundAsset.STATUS || foundAsset.status || '').toUpperCase();
+          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.DATABAIXA || foundAsset.databaixa);
+          setScannedAsset({ ...foundAsset, _conferido: true, status: 'CONFERIDO', _is_divergent_baixa: isGoldenRuleDivergent });
         }
         return;
       }
 
-      // NÍVEL 2 - Bem não encontrado Localmente (Interação)
-      // Se não houver match local, apresenta opções ao auditor
-      setIsHierarchyLoading(false);
-      setShowGlobalSearchResolution(extractedEtiqueta);
+      // Se o ativo NÃO for localizado (Item sem plaqueta/Divergente):
+      // Grave um registro de aviso imediatamente na tabela local 'audit_logs' via transação protegida para auditoria futura
+      const auditLogId = 'AUDIT_DIV_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+      const auditSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
+      const auditParams = [auditLogId, user?.email || 'operador', 'DIVERGENCIA', 'local_assets', extractedEtiqueta, `Ativo divergente isolado via scanner: ${extractedEtiqueta}`];
       
-    } catch (err) {
-      console.error(">>> [Inventory] Erro na busca hierárquica:", err);
+      if (db) {
+        await SqliteMutexContext.executeSafeTransaction(db, auditSql, auditParams);
+      } else {
+        await sqliteService.execute(auditSql, auditParams);
+      }
+
       setIsHierarchyLoading(false);
-      setScannedResult(result); // Fallback
-      alert(`Erro na busca hierárquica de ativos: ${err instanceof Error ? err.message : String(err)}`);
+
+      // Atualize o estado de UI informando 'Ativo Divergente Isolado'
+      setSreNotification({
+        type: 'warning',
+        message: 'Ativo Divergente Isolado',
+        subText: `Etiqueta ${extractedEtiqueta} não foi localizada na base local.`
+      });
+
+      // Abre opções de busca global ou cadastro de divergência
+      setShowGlobalSearchResolution(extractedEtiqueta);
+
+    } catch (err) {
+      console.error(">>> [Inventory SRE] Erro físico ou de consulta SQLite:", err);
+      setIsHierarchyLoading(false);
+      
+      // 4. BANIMENTO DE RECHARGES E ALERTS:
+      // Capture qualquer exceção física do SQLite no bloco 'catch', grave silenciosamente o erro na tabela local de auditoria
+      // e exiba uma notificação estilizada em HTML dentro da própria UI para manter a viewport do operador estável.
+      try {
+        const errorLogId = 'ERR_SQL_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+        const errSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
+        const errParams = [errorLogId, user?.email || 'SRE_SYSTEM', 'SQL_ERROR', 'local_assets', term, `Exception in scan query: ${err instanceof Error ? err.message : String(err)}`];
+        const db = sqliteService.getNativeDb();
+        if (db) {
+          await SqliteMutexContext.executeSafeTransaction(db, errSql, errParams);
+        } else {
+          await sqliteService.execute(errSql, errParams);
+        }
+      } catch (innerErr) {
+        console.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);
+      }
+
+      setSreNotification({
+        type: 'error',
+        message: 'Falha no Motor SQLite',
+        subText: `Ocorreu uma exceção física: ${err instanceof Error ? err.message : String(err)}`
+      });
     } finally {
       setIsPersistingScan(false);
     }
@@ -1574,6 +1693,28 @@ const Inventory: React.FC<InventoryProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">
+      {sreNotification && (
+        <div className={`mx-6 mt-4 p-4 rounded-2xl border flex items-start space-x-3 shadow-lg transition-all animate-slideDown z-[11000] relative shrink-0 ${
+          sreNotification.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+          sreNotification.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' :
+          sreNotification.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' :
+          'bg-blue-50 border-blue-200 text-blue-800'
+        }`}>
+          <div className="shrink-0 mt-0.5">
+            {sreNotification.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+            {sreNotification.type === 'warning' && <AlertTriangle className="w-5 h-5 text-amber-600" />}
+            {sreNotification.type === 'error' && <ShieldAlert className="w-5 h-5 text-rose-600" />}
+            {sreNotification.type === 'info' && <Database className="w-5 h-5 text-blue-600" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold leading-tight">{sreNotification.message}</p>
+            {sreNotification.subText && <p className="text-xs text-slate-500 mt-1 font-mono leading-tight">{sreNotification.subText}</p>}
+          </div>
+          <button onClick={() => setSreNotification(null)} className="shrink-0 p-1 hover:bg-black/5 rounded-lg active:scale-90">
+            <X className="w-4 h-4 text-slate-400" />
+          </button>
+        </div>
+      )}
       {!isInventorying ? (
         <div className="flex flex-col h-full bg-[#F8FAFC] relative">
           {/* Header Minimalista */}
