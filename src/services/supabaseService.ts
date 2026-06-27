@@ -4,7 +4,7 @@ import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatu
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
-import { sqliteService } from './sqliteService';
+import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 
 export class SupabaseNetworkException extends Error {
@@ -466,10 +466,10 @@ export const logAuditEvent = async (entry: {
     ]).catch(err => ({ error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (error && error.message !== "LOG_TIMEOUT") {
-      console.error('Erro ao registrar log de auditoria:', error);
+      console.warn('Erro ao registrar log de auditoria:', error);
     }
   } catch (err) {
-    console.error('Erro inesperado ao registrar log:', err);
+    console.warn('Erro inesperado ao registrar log:', err);
   }
 };
 
@@ -524,10 +524,10 @@ export const logAssetChange = async (entry: {
       .insert([sanitizedEntry]);
 
     if (error) {
-      console.error('Erro ao registrar log de ativo:', error);
+      console.warn('Erro ao registrar log de ativo:', error);
     }
   } catch (err) {
-    console.error('Erro inesperado ao registrar log de ativo:', err);
+    console.warn('Erro inesperado ao registrar log de ativo:', err);
   }
 };
 
@@ -952,8 +952,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           if (val === undefined || val === null || val === '') return null;
           const num = Number(val);
           return isNaN(num) ? null : num;
-        })(),
-        _conferido: Boolean(cleanAsset._conferido)
+        })()
       };
     });
 
@@ -2308,16 +2307,19 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
   console.log('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
   let localFound = false;
   try {
-    const allRows = await sqliteService.query("SELECT * FROM campaigns WHERE id = ?", [campaignId]);
+    const row = await db.campaigns.get(campaignId);
     
-    if (allRows && allRows.length > 0) {
-      const row = allRows[0];
+    if (row) {
       const currentCampaign: InventoryCampaign = {
-        ...row,
-        tenant_id: row.tenant_id || row._tenantid,
-        unit_id: row.unit_id || row._unitid,
-        _tenantid: row.tenant_id || row._tenantid,
-        _unitid: row.unit_id || row._unitid
+        id: row.id,
+        name: row.name,
+        status: row.status as CampaignStatus,
+        tenantId: row.tenantId,
+        created_at: row.created_at,
+        tenant_id: row.tenantId || row._tenantid || '',
+        unit_id: row._unitid || '',
+        _tenantid: row.tenantId || row._tenantid || '',
+        _unitid: row._unitid || ''
       };
 
       const updated: InventoryCampaign = { 
@@ -2451,10 +2453,15 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           _tenantid: tenantId
         };
 
-        await sqliteService.execute(
-          "INSERT OR REPLACE INTO campaign_snapshots (id, campaign_id, assets_data, metadata, closed_at, closed_by, _tenantid) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [snapshot.id, snapshot.campaign_id, JSON.stringify(snapshot.assets_data), JSON.stringify(snapshot.metadata), snapshot.snapshot_date, snapshot.closed_by, snapshot._tenantid]
-        );
+        await db.campaign_snapshots.put({
+          id: snapshot.id,
+          campaign_id: snapshot.campaign_id,
+          assets_data: JSON.stringify(snapshot.assets_data),
+          metadata: JSON.stringify(snapshot.metadata),
+          closed_at: snapshot.snapshot_date,
+          closed_by: snapshot.closed_by || '',
+          _tenantid: snapshot._tenantid
+        });
 
         console.log('>>> [SQLite] Snapshot criado com sucesso.');
         return true;
@@ -2546,18 +2553,21 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
     if (isInternal) {
       console.log('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);
       try {
-        const res = await sqliteService.query("SELECT * FROM campaign_snapshots WHERE campaign_id = ? ORDER BY closed_at DESC LIMIT 1", [campaignId]);
-        if (res.length === 0) return null;
+        const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
+        if (snapshots.length === 0) return null;
         
-        const row = res[0];
+        // Sort by closed_at descending (latest first)
+        snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
+        
+        const row = snapshots[0];
         return {
-          id: row.id as string,
-          campaign_id: row.campaign_id as string,
-          assets_data: JSON.parse(row.assets_data as string),
-          metadata: JSON.parse(row.metadata as string),
-          snapshot_date: (row.closed_at || row.snapshot_date) as string,
-          closed_by: row.closed_by as string,
-          _tenantid: (row._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '') as string
+          id: row.id,
+          campaign_id: row.campaign_id,
+          assets_data: JSON.parse(row.assets_data),
+          metadata: JSON.parse(row.metadata),
+          snapshot_date: row.closed_at,
+          closed_by: row.closed_by,
+          _tenantid: row._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || ''
         } as CampaignSnapshot;
       } catch (err) {
         console.error('>>> [SQLite] Erro ao recuperar snapshot:', err);

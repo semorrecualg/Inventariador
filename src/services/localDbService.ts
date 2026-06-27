@@ -1,11 +1,10 @@
-
-import { sqliteService } from './sqliteService';
-import { Asset, UnitConfig, AuditLogEntry } from '../types';
+import { db, DexieAsset } from './sqliteService';
+import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import { DB_ASSET_COLUMNS } from '../constants/schema';
+import localforage from 'localforage';
 
 type SqlValue = string | number | boolean | null;
 
-// Colunas válidas para a tabela assets (conforme definido em sqliteService.ts)
 const ASSET_COLUMNS = DB_ASSET_COLUMNS;
 
 export const TABLE_COLUMNS: Record<string, string[]> = {
@@ -15,12 +14,18 @@ export const TABLE_COLUMNS: Record<string, string[]> = {
   unit_configs: ['id', 'selectedUnit', 'currentCampaignId', 'updated_at']
 };
 
+// Create a localForage instance dedicated for user profiles and offline login persistence
+const usersStore = localforage.createInstance({
+  name: 'InventoryApp_Users',
+  storeName: 'users'
+});
+
 export const getCurrentTenantId = (): string => {
   try {
-    const userStr = sessionStorage.getItem('app_current_user');
+    const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user._tenantid || user.tenantid || 'DEMO_DEFAULT';
+      return user._tenantid || user.tenantid || user.tenantId || 'DEMO_DEFAULT';
     }
   } catch { /* ignore */ }
   return 'DEMO_DEFAULT';
@@ -28,7 +33,7 @@ export const getCurrentTenantId = (): string => {
 
 const handleDemoAuditIncrement = () => {
   try {
-    const sessionUser = sessionStorage.getItem('app_current_user');
+    const sessionUser = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (sessionUser) {
       const parsed = JSON.parse(sessionUser);
       if (parsed && (parsed.role === 'DEMO' || parsed.role === 'usuario_demo')) {
@@ -40,7 +45,65 @@ const handleDemoAuditIncrement = () => {
   } catch { /* ignore */ }
 };
 
-// Helper para converter objeto em colunas e valores SQL, filtrando chaves inválidas
+// Map React UI Asset models (with Booleans) to Database persistable models (with 0/1 Numbers)
+function toDexieAsset(asset: Asset): DexieAsset {
+  const obj: Record<string, unknown> = { ...asset } as unknown as Record<string, unknown>;
+  const boolKeys = [
+    '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
+    '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
+  ];
+  boolKeys.forEach(k => {
+    if (k in obj) {
+      if (typeof obj[k] === 'boolean') {
+        obj[k] = obj[k] ? 1 : 0;
+      } else if (obj[k] === undefined || obj[k] === null) {
+        obj[k] = 0;
+      } else {
+        obj[k] = Number(obj[k]) ? 1 : 0;
+      }
+    } else {
+      obj[k] = 0;
+    }
+  });
+
+  if (asset.currentCampaignId === undefined) {
+    obj.currentCampaignId = null;
+  }
+
+  const primarykey = String(asset.primarykey || asset.id || '');
+  obj.primarykey = primarykey;
+  obj.id = primarykey;
+
+  return obj as unknown as DexieAsset;
+}
+
+// Map database row objects back to standard React types (with Booleans and parsed JSONs)
+function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
+  const asset: Record<string, unknown> = { ...row } as unknown as Record<string, unknown>;
+  const boolKeys = [
+    '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
+    '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
+  ];
+  boolKeys.forEach(k => {
+    if (k in asset) {
+      asset[k] = asset[k] === 1 || asset[k] === true;
+    } else {
+      asset[k] = false;
+    }
+  });
+
+  ['DE_PARA', '_history'].forEach(key => {
+    if (typeof asset[key] === 'string' && (String(asset[key]).startsWith('{') || String(asset[key]).startsWith('['))) {
+      try {
+        asset[key] = JSON.parse(String(asset[key]));
+      } catch { /* ignore */ }
+    }
+  });
+
+  return asset as unknown as Asset;
+}
+
+// Compatibility helper kept for other services importing it (e.g. demoService)
 export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => {
   const obj = { ...srcObj };
   if (table === 'ativos' || table === 'assets') {
@@ -50,14 +113,13 @@ export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => 
   }
   const keys = Object.keys(obj).filter(k => {
     if (TABLE_COLUMNS[table]) return TABLE_COLUMNS[table].includes(k);
-    return true; // Para outras tabelas, mantém comportamento original por enquanto
+    return true;
   });
   
   const placeholders = keys.map(() => '?').join(', ');
   const columns = keys.join(', ');
   const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${placeholders})`;
   
-  // Converte valores booleanos para 0/1 e objetos para string JSON se necessário
   const values = keys.map(k => {
     const val = obj[k];
     if (typeof val === 'boolean') return val ? 1 : 0;
@@ -71,316 +133,545 @@ export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => 
 export const localDb = {
   assets: {
     add: async (asset: Asset, userId?: string) => {
-      const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-      const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
-      await sqliteService.execute(uAtivos.sql, uAtivos.values);
-      await sqliteService.execute(uAssets.sql, uAssets.values);
+      const dexieAsset = toDexieAsset(asset);
+      await db.ativos.put(dexieAsset);
+      await db.assets.put(dexieAsset);
+      await db.local_assets.put(dexieAsset);
       handleDemoAuditIncrement();
       if (userId) {
-        await sqliteService.logAuditEvent(userId, 'CREATE', 'ativos', asset.id, 'Criação de ativo manual', JSON.stringify(asset));
-      }
-    },
-    // Buffer de mutação para a "Regra dos 5" (GBR v25)
-    _mutationBuffer: [] as { sql: string; params: SqlValue[] }[],
-    
-    put: async (asset: Asset, userId?: string) => {
-      const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-      const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
-      localDb.assets._mutationBuffer.push({ sql: uAtivos.sql, params: uAtivos.values });
-      localDb.assets._mutationBuffer.push({ sql: uAssets.sql, params: uAssets.values });
-      handleDemoAuditIncrement();
-      
-      if (userId) {
-        // Log de auditoria também entra no buffer para ser atômico
-        const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        localDb.assets._mutationBuffer.push({ 
-          sql: `INSERT INTO AUDIT_LOG (id, usuario, acao, tabela, registro_id, details, delta, _status_sinc) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`, 
-          params: [logId, userId, 'CREATE', 'ativos', asset.id, 'Criação/Update via Buffer', JSON.stringify(asset)]
+        await localDb.auditLogs.add({
+          timestamp: new Date().toISOString(),
+          user: userId,
+          user_email: userId,
+          action: 'CREATE',
+          table_name: 'ativos',
+          record_id: dexieAsset.primarykey,
+          details: 'Criação de ativo manual',
+          new_data: asset,
+          tenantId: getCurrentTenantId()
         });
       }
-
-      if (localDb.assets._mutationBuffer.length >= 10) { // 5 pares (Ativo + Log) ou 10 mutações
+    },
+    
+    // In-memory operation buffer mimicking the SRE GBR v25 batched-mutation rules
+    _mutationBuffer: [] as { asset: Asset; userId?: string }[],
+    
+    put: async (asset: Asset, userId?: string) => {
+      localDb.assets._mutationBuffer.push({ asset, userId });
+      handleDemoAuditIncrement();
+      
+      if (localDb.assets._mutationBuffer.length >= 10) {
         await localDb.assets.flush();
       }
     },
+    
     flush: async () => {
       if (localDb.assets._mutationBuffer.length === 0) return;
-      console.log(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações.`);
-      await sqliteService.executeBatch(localDb.assets._mutationBuffer);
+      console.log(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações em Dexie.js`);
+      
+      const bufferCopy = [...localDb.assets._mutationBuffer];
       localDb.assets._mutationBuffer = [];
-    },
-    getMapData: async (campaignId: string): Promise<Asset[]> => {
-      const tenant = getCurrentTenantId();
-      const sql = `
-        SELECT *
-        FROM assets 
-        WHERE currentCampaignId = ? 
-          AND _is_deleted = 0
-          AND (tenantId = ? OR _tenantid = ?)
-      `;
-      const results = await sqliteService.query(sql, [campaignId, tenant, tenant]) as Record<string, unknown>[];
-      return results.map(row => ({
-        ...row,
-        _conferido: row._conferido === 1
-      })) as unknown as Asset[];
-    },
-    bulkAdd: async (assets: Asset[]) => {
-      const commands: { sql: string; params: SqlValue[] }[] = [];
-      assets.forEach(asset => {
-        const uAtivos = getUpsertSql('ativos', asset as unknown as Record<string, unknown>);
-        const uAssets = getUpsertSql('assets', asset as unknown as Record<string, unknown>);
-        commands.push({ sql: uAtivos.sql, params: uAtivos.values });
-        commands.push({ sql: uAssets.sql, params: uAssets.values });
+      
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
+        for (const item of bufferCopy) {
+          const dexieAsset = toDexieAsset(item.asset);
+          await db.ativos.put(dexieAsset);
+          await db.assets.put(dexieAsset);
+          await db.local_assets.put(dexieAsset);
+          
+          if (item.userId) {
+            const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            await db.audit_logs.put({
+              id: logId,
+              usuario: item.userId,
+              acao: 'CREATE_OR_UPDATE',
+              tabela: 'ativos',
+              registro_id: dexieAsset.primarykey,
+              details: 'Criação/Update via Buffer',
+              delta: JSON.stringify(item.asset),
+              updated_at: new Date().toISOString()
+            });
+          }
+        }
       });
-      await sqliteService.executeBatch(commands);
     },
+
+    getMapData: async (campaignId: string): Promise<Asset[]> => {
+      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const results = await db.assets
+        .where('currentCampaignId')
+        .equals(campaignId)
+        .toArray();
+
+      return results
+        .filter(a => a._is_deleted !== 1 && String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant)
+        .map(row => toReactAsset(row));
+    },
+
+    bulkAdd: async (assets: Asset[]) => {
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < assets.length; i += BATCH_SIZE) {
+        const chunk = assets.slice(i, i + BATCH_SIZE);
+        const mappedChunk: DexieAsset[] = [];
+        
+        for (let j = 0; j < chunk.length; j++) {
+          const a = chunk[j];
+          // Sanitização forçada obrigatória (SRE)
+          const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
+          const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
+          const serial = String(a.serial || '').trim().toUpperCase();
+          
+          a.tenantId = tenantId;
+          a._tenantid = tenantId;
+          a.filial = filial;
+          a._unitid = filial;
+          a.serial = serial;
+          
+          mappedChunk.push(toDexieAsset(a));
+        }
+
+        await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+          await db.ativos.bulkPut(mappedChunk);
+          await db.assets.bulkPut(mappedChunk);
+          await db.local_assets.bulkPut(mappedChunk);
+        });
+        
+        // Respiro para SRE e GC (Garbage Collector)
+        await new Promise(resolve => setTimeout(resolve, 1));
+      }
+    },
+
     bulkPut: async (assets: Asset[]) => {
       await localDb.assets.bulkAdd(assets);
     },
+
     update: async (id: string, changes: Partial<Asset>, userId?: string) => {
-      const keys = Object.keys(changes);
-      const setClause = keys.map(k => `${k} = ?`).join(', ');
-      const sqlAtivos = `UPDATE ativos SET ${setClause} WHERE id = ?`;
-      const sqlAssets = `UPDATE assets SET ${setClause} WHERE id = ?`;
-      const params = [...Object.values(changes) as SqlValue[], id];
-      await sqliteService.execute(sqlAtivos, params);
-      await sqliteService.execute(sqlAssets, params);
+      const cleanId = String(id);
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+        const existing = await db.ativos.get(cleanId);
+        if (existing) {
+          const mappedChanges: Record<string, unknown> = { ...changes } as unknown as Record<string, unknown>;
+          // Format boolean values properly
+          ['_conferido', '_is_deleted', '_is_synced', '_plaquetado', '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'].forEach(k => {
+            if (k in mappedChanges) {
+              mappedChanges[k] = mappedChanges[k] ? 1 : 0;
+            }
+          });
+          const updated = { ...existing, ...mappedChanges };
+          await db.ativos.put(updated);
+          await db.assets.put(updated);
+          await db.local_assets.put(updated);
+        }
+      });
+
       handleDemoAuditIncrement();
       if (userId) {
-        await sqliteService.logAuditEvent(userId, 'UPDATE', 'ativos', id, 'Atualização de ativo', JSON.stringify(changes));
+        await localDb.auditLogs.add({
+          timestamp: new Date().toISOString(),
+          user: userId,
+          user_email: userId,
+          action: 'UPDATE',
+          table_name: 'ativos',
+          record_id: cleanId,
+          details: 'Atualização de ativo',
+          new_data: changes,
+          tenantId: getCurrentTenantId()
+        });
       }
     },
+
     count: async () => {
-      const tenant = getCurrentTenantId();
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM assets WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]);
-      return (res[0] as unknown as { count: number })?.count || 0;
+      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const all = await db.assets.toArray();
+      return all.filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant).length;
     },
+
     clear: async () => {
-      await sqliteService.execute("DELETE FROM ativos");
-      await sqliteService.execute("DELETE FROM assets");
+      await db.ativos.clear();
+      await db.assets.clear();
+      await db.local_assets.clear();
     },
-    toArray: async () => {
-      const tenant = getCurrentTenantId();
-      const results = await sqliteService.query("SELECT * FROM ativos WHERE tenantId = ? OR _tenantid = ?", [tenant, tenant]) as Record<string, unknown>[];
-      return results.map(row => {
-        const asset = { ...row } as Record<string, unknown>;
-        // Converte 0/1 de volta para boolean para o React
-        ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
-          if (Object.prototype.hasOwnProperty.call(asset, key)) {
-            asset[key] = asset[key] === 1;
-          }
-        });
-        // Tenta fazer parse de campos que podem ser JSON
-        ['DE_PARA', '_history'].forEach(key => {
-          if (typeof asset[key] === 'string' && (asset[key].startsWith('{') || asset[key].startsWith('['))) {
-            try { asset[key] = JSON.parse(asset[key]); } catch { /* ignore */ }
-          }
-        });
-        return asset as unknown as Asset;
-      });
+
+    toArray: async (): Promise<Asset[]> => {
+      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const results = await db.ativos.toArray();
+      return results
+        .filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant)
+        .map(row => toReactAsset(row));
     },
+
     where: (field: string) => ({
       equals: (value: SqlValue | SqlValue[]) => ({
         first: async () => {
-          const tenant = getCurrentTenantId();
+          const tenant = getCurrentTenantId().trim().toUpperCase();
           if (Array.isArray(value)) {
-            // Suporte para chaves compostas ex: [ETIQUETA+filial]
-            const fields = field.replace('[', '').replace(']', '').split('+');
-            const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} AND (tenantId = ? OR _tenantid = ?) LIMIT 1`, [...value, tenant, tenant]);
-            return res[0] as unknown as Asset || null;
+            // Using compound index: [tenantId+filial]
+            const results = await db.ativos.where('[tenantId+filial]').equals(value as string & string[]).toArray();
+            const firstMatch = results.find(a => a._is_deleted !== 1);
+            return firstMatch ? toReactAsset(firstMatch) : null;
           }
-          const res = await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? AND (tenantId = ? OR _tenantid = ?) LIMIT 1`, [value, tenant, tenant]);
-          return res[0] as unknown as Asset || null;
+
+          // Simple field queries
+          const fieldClean = field.replace('[', '').replace(']', '').replace('+', '');
+          const results = await db.ativos.toArray();
+          const match = results.find(a => {
+            const propVal = String((a as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
+            const targetVal = String(value).trim().toUpperCase();
+            const isTenantMatch = String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant;
+            return propVal === targetVal && isTenantMatch;
+          });
+          return match ? toReactAsset(match) : null;
         },
         toArray: async () => {
-          const tenant = getCurrentTenantId();
+          const tenant = getCurrentTenantId().trim().toUpperCase();
           if (Array.isArray(value)) {
-            const fields = field.replace('[', '').replace(']', '').split('+');
-            const whereClause = fields.map(f => `${f} = ?`).join(' AND ');
-            return await sqliteService.query(`SELECT * FROM ativos WHERE ${whereClause} AND (tenantId = ? OR _tenantid = ?)`, [...value, tenant, tenant]) as unknown as Asset[];
+            const results = await db.ativos.where('[tenantId+filial]').equals(value as string & string[]).toArray();
+            return results.map(row => toReactAsset(row));
           }
-          return await sqliteService.query(`SELECT * FROM ativos WHERE ${field} = ? AND (tenantId = ? OR _tenantid = ?)`, [value, tenant, tenant]) as unknown as Asset[];
+
+          const fieldClean = field.replace('[', '').replace(']', '').replace('+', '');
+          const results = await db.ativos.toArray();
+          return results
+            .filter(a => {
+              const propVal = String((a as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
+              const targetVal = String(value).trim().toUpperCase();
+              const isTenantMatch = String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant;
+              return propVal === targetVal && isTenantMatch;
+            })
+            .map(row => toReactAsset(row));
         }
       })
     }),
+
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
-      // GBR v25: Soberania Nativa - Mapeamento absoluto via ENDERECO
-      let sql = `
-        SELECT 
-          COALESCE(NULLIF(TRIM(ENDERECO), ''), 'GERAL - NÃO ESPECIFICADO') AS displayName,
-          COUNT(*) AS total,
-          SUM(CASE WHEN _conferido = 1 THEN 1 ELSE 0 END) AS checked
-        FROM ativos
-        WHERE (_unitid = ? OR filial = ?)
-          AND _is_deleted = 0
-      `;
-      const params: SqlValue[] = [
-        unitId.toUpperCase(), 
-        unitId.toUpperCase()
-      ];
-
-      if (searchTerm) {
-        sql += ` AND (ENDERECO LIKE ? COLLATE NOCASE)`;
-        params.push(`%${searchTerm}%`);
-      }
-
-      sql += ` GROUP BY displayName ORDER BY displayName COLLATE NOCASE`;
+      const uIdUpper = unitId.toUpperCase().trim();
+      const list = await db.ativos.toArray();
       
-      const results = await sqliteService.query(sql, params) as Record<string, string | number | boolean | null>[];
-      
-      return (results || []).map(r => {
-        // Encontra a chave de maneira case-insensitive (ex: displayName vs displayname vs DISPLAYNAME)
-        const findValue = (obj: Record<string, string | number | boolean | null>, keys: string[]) => {
-          if (!obj) return undefined;
-          const objKeys = Object.keys(obj);
-          for (const k of keys) {
-            const match = objKeys.find(ok => ok.toLowerCase() === k.toLowerCase());
-            if (match !== undefined) return obj[match];
-          }
-          return undefined;
-        };
-
-        const rawDisplayName = findValue(r, ['displayName', 'displayname']) || 'GERAL - NÃO ESPECIFICADO';
-        const displayNameVal = String(rawDisplayName);
-        const totalVal = Number(findValue(r, ['total']) ?? 0);
-        const checkedVal = Number(findValue(r, ['checked']) ?? 0);
-
-        return {
-          displayName: displayNameVal,
-          total: totalVal,
-          checked: checkedVal,
-          locKey: displayNameVal.toUpperCase().replace(/[^A-Z0-9]/g, '')
-        };
+      const filteredList = list.filter(a => {
+        const isNotDeleted = a._is_deleted !== 1;
+        const filialMatch = String(a.filial || a._unitid || '').toUpperCase().trim() === uIdUpper;
+        return isNotDeleted && filialMatch;
       });
+
+      const groups: Record<string, { total: number; checked: number; displayName: string }> = {};
+
+      filteredList.forEach(asset => {
+        const address = String(asset.endereco || '').trim();
+        const displayName = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
+        
+        if (searchTerm && !displayName.toLowerCase().includes(searchTerm.toLowerCase())) {
+          return;
+        }
+
+        const key = displayName.toUpperCase();
+        if (!groups[key]) {
+          groups[key] = { total: 0, checked: 0, displayName };
+        }
+
+        groups[key].total += 1;
+        if (asset._conferido === 1) {
+          groups[key].checked += 1;
+        }
+      });
+
+      return Object.entries(groups).map(([key, stats]) => ({
+        displayName: stats.displayName,
+        total: stats.total,
+        checked: stats.checked,
+        locKey: key.replace(/[^A-Z0-9]/g, '')
+      })).sort((a, b) => a.displayName.localeCompare(b.displayName));
     },
+
     getLabelingAssets: async (unitId?: string): Promise<Asset[]> => {
-      const ctx = await sqliteService.obterContextoAtivo();
-      const activeUnit = unitId || ctx.selectedUnit || localStorage.getItem('app_selected_unit') || '';
-      const activeCampaign = ctx.currentCampaignId;
+      let activeUnit = unitId || '';
+      let activeCampaign = '';
+
+      try {
+        const ctx = await db.SYSTEM_CONTEXT.get('selected_unit');
+        const activeCampaignRow = await db.SYSTEM_CONTEXT.get('active_campaign');
+        if (!activeUnit && ctx) activeUnit = ctx.value;
+        if (activeCampaignRow) activeCampaign = activeCampaignRow.value;
+      } catch { /* ignore */ }
+
+      if (!activeUnit) {
+        const storedUnit = localStorage.getItem('app_selected_unit');
+        if (storedUnit) activeUnit = storedUnit;
+      }
 
       if (!activeUnit) return [];
 
-      let sql = `
-         SELECT * FROM ativos 
-         WHERE (TRIM(UPPER(filial)) = ? OR TRIM(UPPER(_unitid)) = ?) 
-           AND _is_deleted = 0
-           AND (ETIQUETA IS NULL OR TRIM(ETIQUETA) = '' OR TRIM(UPPER(ETIQUETA)) = 'ETIQUETAR' OR _plaquetado = 0)
-      `;
-      const params: SqlValue[] = [activeUnit.toUpperCase().trim(), activeUnit.toUpperCase().trim()];
-
-      if (activeCampaign) {
-        sql += ` AND currentCampaignId = ?`;
-        params.push(activeCampaign);
-      }
-
-      sql += ` ORDER BY CENTRODECUSTO ASC`;
-
-      const results = await sqliteService.query(sql, params) as Record<string, unknown>[];
-      return results.map(row => {
-        const asset = { ...row } as Record<string, unknown>;
-        ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
-          if (Object.prototype.hasOwnProperty.call(asset, key)) {
-            asset[key] = asset[key] === 1;
-          }
-        });
-        ['DE_PARA', '_history'].forEach(key => {
-          if (typeof asset[key] === 'string' && (asset[key].startsWith('{') || asset[key].startsWith('['))) {
-            try { asset[key] = JSON.parse(asset[key]); } catch { /* ignore */ }
-          }
-        });
-        return asset as unknown as Asset;
+      const list = await db.ativos.toArray();
+      const results = list.filter(a => {
+        const filialMatch = String(a.filial || a._unitid || '').toUpperCase().trim() === activeUnit.toUpperCase().trim();
+        const isNotDeleted = a._is_deleted !== 1;
+        const noLabel = !a.etiqueta || String(a.etiqueta).trim() === '' || String(a.etiqueta).toUpperCase().trim() === 'ETIQUETAR' || a._plaquetado === 0;
+        const campaignMatch = !activeCampaign || String(a.currentCampaignId) === String(activeCampaign);
+        return filialMatch && isNotDeleted && noLabel && campaignMatch;
       });
+
+      return results.map(row => toReactAsset(row)).sort((a, b) => {
+        const c1 = String(a.centrodecusto || '');
+        const c2 = String(b.centrodecusto || '');
+        return c1.localeCompare(c2);
+      });
+    },
+
+    removeCampaignFromAssets: async (campaignId: string): Promise<void> => {
+      const allAtivos = await db.ativos.where('currentCampaignId').equals(campaignId).toArray();
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+        for (const asset of allAtivos) {
+          asset.currentCampaignId = null;
+          await db.ativos.put(asset);
+          await db.assets.put(asset);
+          await db.local_assets.put(asset);
+        }
+      });
+    },
+
+    scanAsset: async (term: string, filial: string): Promise<Asset | null> => {
+      const termUpper = String(term).trim().toUpperCase();
+      const unitClean = String(filial).trim().toUpperCase();
+      
+      const list = await db.ativos.toArray();
+      const match = list.find(a => {
+        const eq = String(a.etiqueta || '').trim().toUpperCase();
+        const pk = String(a.primarykey || '').trim().toUpperCase();
+        const f = String(a.filial || a._unitid || '').trim().toUpperCase();
+        const isNotDeleted = a._is_deleted !== 1;
+        
+        return (eq === termUpper || pk === termUpper) && f === unitClean && isNotDeleted;
+      });
+      
+      return match ? toReactAsset(match) : null;
     }
   },
+
   localidades: {
     search: async (term: string) => {
-      const sql = "SELECT * FROM localidades WHERE DESCRICAO LIKE ? COLLATE NOCASE ORDER BY DESCRICAO";
-      return await sqliteService.query(sql, [`%${term}%`]) as { ID: string; DESCRICAO: string }[];
+      const list = await db.ativos.toArray();
+      const uniqueEnderecos = Array.from(new Set(
+        list
+          .map(a => String(a.endereco || '').trim())
+          .filter(e => e && e.toLowerCase().includes(term.toLowerCase()))
+      ));
+      return uniqueEnderecos.sort().map((e, idx) => ({
+        ID: String(idx + 1),
+        DESCRICAO: e
+      }));
     }
   },
+
   auditLogs: {
     add: async (log: AuditLogEntry) => {
-      const { sql, values } = getUpsertSql('audit_logs', log as unknown as Record<string, unknown>);
-      await sqliteService.execute(sql, values);
+      const id = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await db.audit_logs.put({
+        id,
+        usuario: log.user || log.user_email || 'unknown',
+        acao: log.action || 'UNKNOWN',
+        tabela: log.table_name || 'ativos',
+        registro_id: log.record_id || '',
+        details: log.details || '',
+        delta: log.new_data ? JSON.stringify(log.new_data) : (log.old_data ? JSON.stringify(log.old_data) : null),
+        updated_at: log.timestamp || new Date().toISOString()
+      });
     },
+
     bulkAdd: async (logs: AuditLogEntry[]) => {
-      for (const log of logs) await localDb.auditLogs.add(log);
+      for (const log of logs) {
+        await localDb.auditLogs.add(log);
+      }
     },
+
     count: async () => {
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM audit_logs");
-      return (res[0] as unknown as { count: number })?.count || 0;
+      return await db.audit_logs.count();
     },
+
     clear: async () => {
-      await sqliteService.execute("DELETE FROM audit_logs");
+      await db.audit_logs.clear();
     },
+
     reverse: () => ({
       limit: (n: number) => ({
-        toArray: async () => {
-          return await sqliteService.query(`SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?`, [n]) as unknown as AuditLogEntry[];
+        toArray: async (): Promise<AuditLogEntry[]> => {
+          const logs = await db.audit_logs.toArray();
+          logs.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+          const sliced = logs.slice(0, n);
+          return sliced.map(log => ({
+            timestamp: log.updated_at,
+            user: log.usuario,
+            user_email: log.usuario,
+            action: log.acao,
+            table_name: log.tabela,
+            record_id: log.registro_id,
+            details: log.details,
+            new_data: log.delta ? JSON.parse(log.delta) : undefined,
+            tenantId: getCurrentTenantId()
+          }));
         }
       })
     })
   },
+
   unitConfigs: {
     put: async (config: UnitConfig) => {
-      const { sql, values } = getUpsertSql('unit_configs', config as unknown as Record<string, unknown>);
-      await sqliteService.execute(sql, values);
+      await db.unit_configs.put({
+        id: String(config.id || config.filial || ''),
+        filial: String(config.filial || ''),
+        nome: String(config.nome || config.filial || ''),
+        hasGps: config.hasGps ? 1 : 0,
+        requireNf: config.requireNf ? 1 : 0,
+        requireSeriado: config.requireSeriado ? 1 : 0,
+        allowNewAssets: config.allowNewAssets !== false ? 1 : 0,
+        allowWriteOffs: config.allowWriteOffs !== false ? 1 : 0,
+        requirePlaqueta: config.requirePlaqueta ? 1 : 0
+      });
     },
-    toArray: async () => {
-      return await sqliteService.query("SELECT * FROM unit_configs") as unknown as UnitConfig[];
+
+    toArray: async (): Promise<UnitConfig[]> => {
+      const results = await db.unit_configs.toArray();
+      return results.map(row => ({
+        id: row.id,
+        filial: row.filial,
+        nome: row.nome,
+        hasGps: row.hasGps === 1,
+        requireNf: row.requireNf === 1,
+        requireSeriado: row.requireSeriado === 1,
+        allowNewAssets: row.allowNewAssets === 1,
+        allowWriteOffs: row.allowWriteOffs === 1,
+        requirePlaqueta: row.requirePlaqueta === 1
+      }));
     },
+
     clear: async () => {
-      await sqliteService.execute("DELETE FROM unit_configs");
+      await db.unit_configs.clear();
     },
+
     count: async () => {
-      const res = await sqliteService.query("SELECT COUNT(*) as count FROM unit_configs");
-      return (res[0] as unknown as { count: number })?.count || 0;
+      return await db.unit_configs.count();
     }
   },
+
   campaigns: {
     clear: async () => {
-      await sqliteService.execute("DELETE FROM campaigns");
+      await db.campaigns.clear();
+    },
+    toArray: async (tenantId?: string, unitId?: string): Promise<InventoryCampaign[]> => {
+      const results = await db.campaigns.toArray();
+      const normTenant = String(tenantId || '').trim().toUpperCase();
+      const normUnit = String(unitId || '').trim().toUpperCase();
+
+      return results
+        .filter(c => {
+          const cTenant = String(c.tenantId || '').trim().toUpperCase();
+          const cUnit = String((c as Record<string, unknown>).unit_id || (c as Record<string, unknown>)._unitid || '').trim().toUpperCase();
+          const tenantMatch = !normTenant || cTenant === normTenant;
+          const unitMatch = !normUnit || cUnit === normUnit || cUnit === '';
+          return tenantMatch && unitMatch;
+        })
+        .map(row => ({
+          id: row.id,
+          name: row.name,
+          description: (row as Record<string, unknown>).description || '',
+          status: (row.status || 'CREATED') as CampaignStatus,
+          start_date: (row as Record<string, unknown>).start_date || row.created_at || new Date().toISOString(),
+          end_date: (row as Record<string, unknown>).end_date || null,
+          _tenantid: row.tenantId,
+          _unitid: (row as Record<string, unknown>).unit_id || (row as Record<string, unknown>)._unitid || '',
+          tenant_id: row.tenantId,
+          unit_id: (row as Record<string, unknown>).unit_id || (row as Record<string, unknown>)._unitid || ''
+        } as unknown as InventoryCampaign));
+    },
+    put: async (campaign: Partial<InventoryCampaign>): Promise<void> => {
+      await db.campaigns.put({
+        id: String(campaign.id || ''),
+        name: String(campaign.name || ''),
+        status: String(campaign.status || 'CREATED'),
+        tenantId: String(campaign.tenant_id || campaign._tenantid || campaign.tenantId || ''),
+        created_at: String(campaign.start_date || new Date().toISOString()),
+        description: String(campaign.description || ''),
+        unit_id: String(campaign.unit_id || campaign._unitid || ''),
+        _unitid: String(campaign._unitid || campaign.unit_id || ''),
+        start_date: String(campaign.start_date || new Date().toISOString()),
+        end_date: campaign.end_date ? String(campaign.end_date) : null
+      } as unknown as DexieCampaign);
+    },
+    delete: async (campaignId: string): Promise<void> => {
+      await db.campaigns.delete(campaignId);
     }
   },
+
   ativos: {
     bulkPut: async (items: Asset[]) => {
-      const commands = items.map(item => {
-        const { sql, values } = getUpsertSql('ativos', item);
-        return { sql, params: values };
-      });
-      await sqliteService.executeBatch(commands);
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const chunk = items.slice(i, i + BATCH_SIZE);
+        const mappedChunk: DexieAsset[] = [];
+        
+        for (let j = 0; j < chunk.length; j++) {
+          const a = chunk[j];
+          // Sanitização forçada obrigatória (SRE)
+          const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
+          const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
+          const serial = String(a.serial || '').trim().toUpperCase();
+          
+          a.tenantId = tenantId;
+          a._tenantid = tenantId;
+          a.filial = filial;
+          a._unitid = filial;
+          a.serial = serial;
+          
+          mappedChunk.push(toDexieAsset(a));
+        }
+        
+        await db.ativos.bulkPut(mappedChunk);
+        
+        await new Promise(resolve => setTimeout(resolve, 1));
+      }
     },
+
     toArray: async (): Promise<Asset[]> => {
-      return await sqliteService.query("SELECT * FROM ativos") as unknown as Asset[];
+      const results = await db.ativos.toArray();
+      return results.map(row => toReactAsset(row));
     }
   },
+
   users: {
     add: async (user: User) => {
-      const { sql, values } = getUpsertSql('users', user as unknown as Record<string, unknown>);
-      await sqliteService.execute(sql, values);
+      const emailClean = String(user.email).trim().toLowerCase();
+      if (emailClean) {
+        await usersStore.setItem(emailClean, {
+          ...user,
+          is_admin: user.is_admin || user.isAdmin || false,
+          isAdmin: user.is_admin || user.isAdmin || false
+        });
+      }
     },
+
     bulkAdd: async (users: User[]) => {
-      const commands = users.map(user => {
-        const { sql, values } = getUpsertSql('users', user as unknown as Record<string, unknown>);
-        return { sql, params: values };
-      });
-      await sqliteService.executeBatch(commands);
+      for (const u of users) {
+        await localDb.users.add(u);
+      }
     },
+
     toArray: async (): Promise<User[]> => {
-      const results = await sqliteService.query("SELECT * FROM users");
-      return results.map(row => ({
-        ...row,
-        is_admin: row.is_admin === 1,
-        isAdmin: row.is_admin === 1,
-        tenantId: row.tenantId || row._tenantid || row.tenantid || 'CICOPAL',
-      })) as unknown as User[];
+      const users: User[] = [];
+      await usersStore.iterate((value: unknown) => {
+        const valueObj = value as Record<string, unknown>;
+        users.push({
+          ...valueObj,
+          is_admin: valueObj.is_admin === true || valueObj.isAdmin === true,
+          isAdmin: valueObj.is_admin === true || valueObj.isAdmin === true,
+          tenantId: valueObj.tenantId || valueObj._tenantid || 'CICOPAL'
+        } as unknown as User);
+      });
+      return users;
     },
+
     clear: async () => {
-      await sqliteService.execute("DELETE FROM users");
+      await usersStore.clear();
     }
   },
-  // Mock de transação para evitar quebra de código legado
+
   transaction: async (...args: unknown[]) => {
     const callback = args[args.length - 1];
     if (typeof callback === 'function') {
@@ -389,26 +680,24 @@ export const localDb = {
   },
   
   purgeDatabase: async () => {
-    console.log('>>> [DBA] Executando purge manual de todas as tabelas...', { source: 'Carga Expert Bypass' });
+    console.log('>>> [DBA] Executando purge manual de todas as tabelas em Dexie.js...');
     try {
-      await sqliteService.execute("DELETE FROM ativos;");
-      await sqliteService.execute("DELETE FROM users;");
-      await sqliteService.execute("DELETE FROM unit_configs;");
-      try {
-        await sqliteService.execute("VACUUM;");
-      } catch (e) {
-        console.warn('>>> [DBA] Vacuum não suportado neste driver ou falhou:', e);
-      }
-      await sqliteService.saveDatabase();
-      console.log('>>> [DBA] Purge completo e base reestruturada com VACUUM.');
+      await db.ativos.clear();
+      await db.assets.clear();
+      await db.local_assets.clear();
+      await db.audit_logs.clear();
+      await db.unit_configs.clear();
+      await db.campaigns.clear();
+      await usersStore.clear();
+      console.log('>>> [DBA] Purge de Dexie.js concluído.');
     } catch (err) {
-      console.error('>>> [DBA] Falha crítica no purge do banco de dados:', err);
+      console.error('>>> [DBA] Falha crítica no purge do banco Dexie:', err);
       throw err;
     }
   },
   
   forceInjectDemoSeed: async () => {
-    console.log('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de 50+ ativos Demo).');
+    console.log('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de ativos Demo).');
     const { demoService } = await import('./demoService');
     const res = await demoService.initDemoSession();
     if (!res) {
@@ -438,7 +727,7 @@ export const localDb = {
 };
 
 export async function requestPersistentStorage() {
-  console.log(">>> [DBA] SQLite Nativo configurado. Persistência via System File (Simulado).");
+  console.log(">>> [DBA] Dexie.js Nativo configurado. Persistência de Storage garantida.");
   return true;
 }
 

@@ -229,11 +229,11 @@ const removerLoaderEstatico = () => {
   }
 };
 
-let iframeNavigationLocked = false;
-
 // App Component
 const App: React.FC = () => {
   // 🚀 INJEÇÃO DE SESSÃO PERMANENTE COM CONTEXTO FÍSICO (AI Studio iFrame)
+  // Comentado para cumprir com o Regime v4.50-PROD de eliminação de bypass fantasma no boot
+  /*
   if (typeof window !== 'undefined' && window.self !== window.top) {
     if (!sessionStorage.getItem('gbr_session_active')) {
       console.warn(">>> [GBR-Compliance] Ambiente iFrame detectado. Injetando sessão estática de barreira contra Wipe.");
@@ -259,6 +259,7 @@ const App: React.FC = () => {
       }
     }
   }
+  */
 
   const [sqliteStatus, setSqliteStatusState] = useState(() => {
     const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
@@ -311,8 +312,14 @@ const App: React.FC = () => {
           role = 'ADMIN';
         }
 
-        const resolvedTenantId = (parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || sessionStorage.getItem('tenantId') || sessionStorage.getItem('gbr_current_tenant') || '').trim().toUpperCase();
-        const resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+        let resolvedTenantId = (parsed.tenantId || parsed._tenantid || parsed.tenant_id || parsed.tenantid || sessionStorage.getItem('tenantId') || sessionStorage.getItem('gbr_current_tenant') || '').trim().toUpperCase();
+        let resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+
+        if (lowerEmail === 'semorr@gmail.com') {
+          const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'CICOPAL';
+          resolvedTenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+          resolvedFilial = 'TODAS';
+        }
 
         if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedFilial || resolvedFilial === 'NULL' || resolvedFilial === 'UNDEFINED') {
           console.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user da sessão. Aplicando Fallback Físico ao invés de interromper.");
@@ -392,57 +399,71 @@ const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [dbInitialized, setDbInitialized] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isEngineReady, setIsEngineReady] = useState(false);
   const [isSessionValid, setIsSessionValid] = useState(() => {
     const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || localStorage.getItem('filial') || localStorage.getItem('app_selected_unit');
     const storedFilial = rawFilial ? rawFilial.replace(/%22|%2522|"/g, '').trim() : '';
     const hasFilial = storedFilial && storedFilial !== "CARREGANDO..." && storedFilial !== "";
     return !!hasFilial;
   });
+
+  // SOBERANIA OFFLINE: Se temos o objeto user e seu perfil é local/offline, a sessão é considerada válida por padrão.
+  const isProfileLocal = useMemo(() => {
+    if (!user) return false;
+    const lowerEmail = (user.email || '').toLowerCase();
+    const lowerUsername = (user.username || '').toLowerCase();
+    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
+  }, [user]);
+
+  // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
+  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || (user && user.role === ('DEMO' as unknown as UserRole));
+  const isUserAuthenticated = !!user && isSessionCurrentlyValid;
+
   const [bootstrapError, setBootstrapError] = useState<Error | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [history, setHistoryVal] = useState<AppScreen[]>(() => {
-    if (typeof window !== 'undefined' && window.self !== window.top) {
-      iframeNavigationLocked = true;
-      return [AppScreen.LOAD_DATABASE];
-    }
-    try {
-      const saved = localStorage.getItem('app_screen_history');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch { /* ignore */ }
-    return [AppScreen.LOGIN];
-  });
+  const [history, setHistoryVal] = useState<AppScreen[]>([AppScreen.LOGIN]);
 
-  const [screen, setScreenState] = useState<AppScreen>(() => {
-    if (typeof window !== 'undefined' && window.self !== window.top) {
-      return AppScreen.LOAD_DATABASE;
-    }
-    try {
-      const saved = localStorage.getItem('app_screen_history');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed[parsed.length - 1];
-      }
-    } catch { /* ignore */ }
-    return AppScreen.LOGIN;
-  });
+  const [screen, setScreenState] = useState<AppScreen>(AppScreen.LOGIN);
 
   const setHistory = useCallback((update: AppScreen[] | ((prev: AppScreen[]) => AppScreen[])) => {
-    if (iframeNavigationLocked) {
-      console.warn(">>> [GBR-Compliance] Sandbox Guard: setHistory ignorado (Modo Imutável).");
-      return;
-    }
     setHistoryVal(prev => {
       const nextHistory = typeof update === 'function' ? update(prev) : update;
       const finalHistory = Array.isArray(nextHistory) && nextHistory.length > 0 ? nextHistory : [AppScreen.LOGIN];
+      const targetScreen = finalHistory[finalHistory.length - 1];
+
       localStorage.setItem('app_screen_history', JSON.stringify(finalHistory));
-      setScreenState(finalHistory[finalHistory.length - 1] || AppScreen.LOGIN);
+      setScreenState(targetScreen || AppScreen.LOGIN);
       return finalHistory;
     });
+  }, []);
+
+  useEffect(() => {
+    const verificarEstadoEBoot = async () => {
+      try {
+        // 1. Abre a conexão com o banco Dexie de forma isolada
+        await db.open();
+        console.log("[SRE_BOOT] Motor IndexedDB carregado com sucesso.");
+
+        // 2. PURGA ABSOLUTA DE BYPASS: Comente ou remova linhas que tentam avaliar 
+        // se o banco tem dados para pular o login automaticamente.
+        /* 
+        const total = await db.local_assets.count();
+        if (total > 0) { setHistory([AppScreen.MODULE_SELECTION]); return; } // REMOVER ESTA TRAVA
+        */
+
+        // 3. Trava de Segurança Imperativa: Força o topo da pilha a permanecer no LOGIN
+        console.log("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
+        setHistory([AppScreen.LOGIN]);
+
+      } catch (error) {
+        console.error("[FATAL_BOOT_ROUTE_CRASH]", error);
+        setHistory([AppScreen.LOGIN]);
+      }
+    };
+
+    verificarEstadoEBoot();
   }, []);
 
   const [screenParams, setScreenParams] = useState<NavigationParams | null>(() => {
@@ -451,6 +472,54 @@ const App: React.FC = () => {
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
+
+  const pushScreen = useCallback(async (s: AppScreen, params?: NavigationParams) => {
+    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Recurso Indisponível',
+        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
+        type: 'info'
+      });
+      return;
+    }
+
+    setScreenParams(params || null);
+
+    // Ajuste de Navegação Failsafe para persistir o unitId/unitName no SYSTEM_CONTEXT se fornecido
+    const unitIdToPersist = params?.unitName;
+    if (unitIdToPersist && databaseMode === DatabaseMode.INTERNAL) {
+      try {
+        console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
+        await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [unitIdToPersist]);
+        
+        if (params?.campaign) {
+          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [params.campaign.id]);
+        }
+        await sqliteService.saveDatabase();
+        console.log(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
+      } catch (err) {
+        console.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
+      }
+    }
+
+    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
+      console.log(`>>> [Navigation] Resetting history to: ${s}`);
+      setHistory([s]);
+    } else {
+      console.log(`>>> [Navigation] Pushing screen: ${s}`);
+      setHistory(prev => [...prev, s]);
+    }
+  }, [databaseMode]);
+
+  // Expose pushScreen to window for components that need it
+  useEffect(() => {
+    window.pushScreen = pushScreen;
+    return () => {
+      delete window.pushScreen;
+    };
+  }, [pushScreen]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAddress, setSelectedAddressState] = useState<string | null>(() => sessionStorage.getItem('current_selected_address') || null);
@@ -838,6 +907,8 @@ const App: React.FC = () => {
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
   useEffect(() => {
+    if (!isEngineReady) return;
+    
     // Só monitora sessão do Supabase se estivermos em um modo que utilize a nuvem
     if (supabase && databaseMode.startsWith('SUPABASE')) {
       // Adicionado timeout de 5s para evitar travamento em redes instáveis
@@ -870,7 +941,7 @@ const App: React.FC = () => {
           console.warn('[Supabase] Falha ao verificar sessão (Timeout ou Rede):', err);
         });
     }
-  }, [databaseMode]);
+  }, [databaseMode, isEngineReady]);
 
 
   useEffect(() => {
@@ -892,10 +963,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
+    
+    if (isEngineReady) return;
+    
     console.log(">>> [App] Iniciando inicialização da infraestrutura local com proteção robusta ferveg...");
 
     const initApp = async () => {
       try {
+        // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais do iFrame
+        try {
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.clear();
+          }
+        } catch {
+          // ignorar falha se não suportado
+        }
+
         // Remoção física absoluta de qualquer chamada ao sensor ou checkPastPermissions no boot
         setPermissionsGranted(true);
         sqliteService.setPermissionsGranted(true);
@@ -912,8 +995,6 @@ const App: React.FC = () => {
             success = await sqliteService.init(false);
           } catch (firstErr) {
             console.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
-            console.log(">>> [App] Aguardando 500ms para única re-conexão...");
-            await new Promise(resolve => setTimeout(resolve, 500));
             try {
               console.log(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
               success = await sqliteService.init(true);
@@ -935,15 +1016,16 @@ const App: React.FC = () => {
         if (!isMounted) return;
 
         if (success) {
-          console.log(">>> [App] SQLite pronto ou emulado com sucesso em ambiente seguro. Agendando carregamento de UI pós-boot...");
+          console.log(">>> [App] SQLite pronto em ambiente seguro. Validando Schema...");
           
-          // REQUISITO 1: Adotamos um setTimeout pós-determinação de inicialização para desvincular o fluxo
-          // de montagem reativa da UI principal de qualquer Toast de Soberania Nativa ou conflito de thread/bridge no Android
-          setTimeout(async () => {
-            if (!isMounted) return;
-            console.log(">>> [MOBILE-SHIELD] Iniciando carregamento assíncrono pós-boot do banco de dados de forma desacoplada.");
-            
-            try {
+          try {
+              // 1. GARANTIA SRE: Validação física estrita antes de liberar isEngineReady
+              await localDb.users.toArray();
+              console.log(">>> [MOBILE-SHIELD] Schema local 100% íntegro. Liberando concorrência (Engine Ready).");
+              setIsEngineReady(true);
+              
+              if (!isMounted) return;
+              
               const fileStatus = await sqliteService.getFileStatus();
               const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
               const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
@@ -1001,6 +1083,8 @@ const App: React.FC = () => {
                       }));
                     }
                     
+                    // Comentado para cumprir com o Regime v4.50-PROD: remoção de bypass automatizado no primeiro render
+                    /*
                     if (parsedUser && recoveredUnit && recoveredCampaign) {
                       console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
                       setHistory([AppScreen.MAIN_MENU]);
@@ -1008,11 +1092,16 @@ const App: React.FC = () => {
                       console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
                       setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
                     }
+                    */
+                    setHistory([AppScreen.LOGIN]);
                   } else {
+                    /*
                     if (parsedUser) {
                       console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
                       setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
                     }
+                    */
+                    setHistory([AppScreen.LOGIN]);
                   }
                 } catch (bootErr) {
                   console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
@@ -1135,26 +1224,8 @@ const App: React.FC = () => {
                 setDbInitialized(true);
                 setSqliteStatus('ACTIVE');
                 
-                const currentUser = sessionStorage.getItem('app_current_user');
-                if (!currentUser) {
-                  const mockUser = {
-                    id: 'sre-bypass-uid',
-                    email: 'semorr@gmail.com',
-                    username: 'semorr',
-                    role: 'ADMIN',
-                    tenantId: 'CICOPAL'
-                  };
-                  sessionStorage.setItem('app_current_user', JSON.stringify(mockUser));
-                  setUser(mockUser);
-                } else {
-                  try {
-                    setUser(JSON.parse(currentUser));
-                  } catch {
-                    // Ignore
-                  }
-                }
-                setSelectedUnit('CICOPAL - MATRIZ');
-                setHistory([AppScreen.MAIN_MENU]);
+                setUser(null);
+                setHistory([AppScreen.LOGIN]);
               }
             } finally {
               // GARANTIA SRE REQUISITO 2: Assegura desativação das flags de loading em QUALQUER cenário assíncrono
@@ -1163,7 +1234,6 @@ const App: React.FC = () => {
               setDbInitialized(true);
               setSqliteStatus('ACTIVE');
             }
-          }, 100);
         } else {
           throw new Error("Falha ao inicializar o motor SQL.");
         }
@@ -1176,26 +1246,8 @@ const App: React.FC = () => {
           setDbInitialized(true);
           setSqliteStatus('ACTIVE');
           
-          const currentUser = sessionStorage.getItem('app_current_user');
-          if (!currentUser) {
-            const mockUser = {
-              id: 'sre-bypass-uid',
-              email: 'semorr@gmail.com',
-              username: 'semorr',
-              role: 'ADMIN',
-              tenantId: 'CICOPAL'
-            };
-            sessionStorage.setItem('app_current_user', JSON.stringify(mockUser));
-            setUser(mockUser);
-          } else {
-            try {
-              setUser(JSON.parse(currentUser));
-            } catch {
-              // Ignore
-            }
-          }
-          setSelectedUnit('CICOPAL - MATRIZ');
-          setHistory([AppScreen.MAIN_MENU]);
+          setUser(null);
+          setHistory([AppScreen.LOGIN]);
         }
       } finally {
         if (isMounted) {
@@ -1219,26 +1271,8 @@ const App: React.FC = () => {
         setDbInitialized(true);
         setSqliteStatus('ACTIVE');
         
-        const currentUser = sessionStorage.getItem('app_current_user');
-        if (!currentUser) {
-          const mockUser = {
-            id: 'sre-bypass-uid',
-            email: 'semorr@gmail.com',
-            username: 'semorr',
-            role: 'ADMIN',
-            tenantId: 'CICOPAL'
-          };
-          sessionStorage.setItem('app_current_user', JSON.stringify(mockUser));
-          setUser(mockUser);
-        } else {
-          try {
-            setUser(JSON.parse(currentUser));
-          } catch {
-            // Ignore
-          }
-        }
-        setSelectedUnit('CICOPAL - MATRIZ');
-        setHistory([AppScreen.MAIN_MENU]);
+        setUser(null);
+        setHistory([AppScreen.LOGIN]);
       }
     };
 
@@ -1247,7 +1281,7 @@ const App: React.FC = () => {
       isMounted = false;
       window.removeEventListener('gbr_db_init_failed', handleInitFailed);
     };
-  }, [databaseMode]);
+  }, []);
 
   useEffect(() => {
     const handleSessionExpired = (e: Event) => {
@@ -1591,49 +1625,60 @@ const App: React.FC = () => {
         const normalizedUnit = currentUnit.toUpperCase().trim();
         const unitCode = normalizedUnit.match(/^\d+/)?.[0];
 
-        let queryStr = "SELECT * FROM ativos WHERE _is_deleted = 0 AND (";
-        const params: (string | number)[] = [];
-
-        queryStr += "TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-        params.push(normalizedUnit, normalizedUnit);
-
-        if (unitCode) {
-          queryStr += " OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-          params.push(unitCode, unitCode);
-
-          const numCode = parseInt(unitCode, 10);
-          if (!isNaN(numCode)) {
-            queryStr += " OR CAST(filial AS INTEGER) = ?";
-            params.push(numCode);
-          }
-        }
-
-        queryStr += " OR ? LIKE '%' || TRIM(filial) || '%' OR TRIM(filial) LIKE '%' || ? || '%'";
-        params.push(normalizedUnit, normalizedUnit);
-
-        queryStr += ")";
-
         const currentAddr = sessionStorage.getItem('current_selected_address') || selectedAddress;
-        if (currentAddr && currentAddr.trim() !== '') {
-          if (currentAddr === 'GERAL - NÃO ESPECIFICADO') {
-            queryStr += " AND (ENDERECO IS NULL OR TRIM(ENDERECO) = '' OR TRIM(UPPER(ENDERECO)) = 'GERAL - NÃO ESPECIFICADO' OR endereco IS NULL OR TRIM(endereco) = '' OR TRIM(UPPER(endereco)) = 'GERAL - NÃO ESPECIFICADO')";
-          } else {
-            queryStr += " AND (TRIM(UPPER(ENDERECO)) = ? OR TRIM(UPPER(endereco)) = ?)";
-            params.push(currentAddr.toUpperCase().trim(), currentAddr.toUpperCase().trim());
-          }
-        }
 
-        if (inventory.currentCampaignId) {
-          queryStr += " AND currentCampaignId = ?";
-          params.push(inventory.currentCampaignId);
-        }
-        const results = await sqliteService.query(queryStr, params) as Record<string, unknown>[];
+        const allAssets = await db.local_assets.toArray();
+        
+        const results = allAssets.filter(item => {
+          if (item._is_deleted === 1 || item._is_deleted === true) return false;
+          
+          if (inventory.currentCampaignId && item.currentCampaignId !== inventory.currentCampaignId) {
+            return false;
+          }
+          
+          if (currentAddr && currentAddr.trim() !== '') {
+            const addrVal = String(item.ENDERECO || item.endereco || '').trim().toUpperCase();
+            if (currentAddr === 'GERAL - NÃO ESPECIFICADO') {
+              if (addrVal !== '' && addrVal !== 'GERAL - NÃO ESPECIFICADO') {
+                return false;
+              }
+            } else {
+              if (addrVal !== currentAddr.toUpperCase().trim()) {
+                return false;
+              }
+            }
+          }
+          
+          const unitIdVal = String(item._unitid || '').trim().toUpperCase();
+          const filialVal = String(item.filial || '').trim().toUpperCase();
+          
+          let matchesUnit = false;
+          if (unitIdVal === normalizedUnit || filialVal === normalizedUnit) {
+            matchesUnit = true;
+          } else if (unitCode && (unitIdVal === unitCode || filialVal === unitCode)) {
+            matchesUnit = true;
+          } else if (filialVal !== '' && (normalizedUnit.includes(filialVal) || filialVal.includes(normalizedUnit))) {
+            matchesUnit = true;
+          }
+          
+          if (!matchesUnit && unitCode) {
+            const numCode = parseInt(unitCode, 10);
+            if (!isNaN(numCode)) {
+              const filialNum = parseInt(filialVal, 10);
+              if (!isNaN(filialNum) && filialNum === numCode) {
+                matchesUnit = true;
+              }
+            }
+          }
+          
+          return matchesUnit;
+        });
         
         const parsedAssets = results.map(row => {
           const asset = { ...row } as Record<string, unknown>;
           ['_conferido', '_is_deleted', '_isNew', '_is_unitized', '_is_divergent_baixa', '_plaquetado', '_aprovado'].forEach(key => {
             if (Object.prototype.hasOwnProperty.call(asset, key)) {
-              asset[key] = asset[key] === 1;
+              asset[key] = asset[key] === 1 || asset[key] === true;
             }
           });
           ['DE_PARA', '_history'].forEach(key => {
@@ -1943,7 +1988,13 @@ const App: React.FC = () => {
       AppScreen.LOAD_DATABASE,
       AppScreen.UNIT_SELECTION,
       AppScreen.UNIT_CONFIGURATOR,
-      AppScreen.CAMPAIGN_MANAGEMENT
+      AppScreen.CAMPAIGN_MANAGEMENT,
+      AppScreen.MODULE_SELECTION,
+      AppScreen.ASSET_CONTROL_HOME,
+      AppScreen.DATABASE_MANAGER,
+      AppScreen.BIOMETRIC_REGISTRATION,
+      AppScreen.STRESS_TEST,
+      AppScreen.CHANGE_PASSWORD
     ];
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
@@ -3018,18 +3069,27 @@ const App: React.FC = () => {
 
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
 
-    // 1. If no user, must be at LOGIN, REGISTER or ONBOARDING or STRESS_TEST
-    if (!user && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER && currentScreen !== AppScreen.ONBOARDING && currentScreen !== AppScreen.STRESS_TEST) {
+    // 1. If not authenticated, must be at LOGIN, REGISTER or ONBOARDING or STRESS_TEST
+    if (!isUserAuthenticated && currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER && currentScreen !== AppScreen.ONBOARDING && currentScreen !== AppScreen.STRESS_TEST) {
       setHistory([AppScreen.LOGIN]);
       return;
     }
 
+    // 1.2 Administrative Guard for Database Loader screen
+    if (currentScreen === AppScreen.LOAD_DATABASE && !user?.isSuperAdmin && user?.email !== "semorr@gmail.com") {
+      pushScreen(AppScreen.LOGIN);
+      return;
+    }
+
     // 1.5 If user is logged in but on LOGIN or REGISTER, go to appropriate screen
+    // Comentado para cumprir com o Regime de eliminação de bypass fantasma no boot
+    /*
     if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
       const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || (user.email && user.email.toLowerCase() === ADMIN_EMAIL);
       setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
       return;
     }
+    */
 
     // 1.6 Removido redirecionamento forçado do ONBOARDING para permitir visualização manual
 
@@ -3046,8 +3106,57 @@ const App: React.FC = () => {
     if (user && !selectedUnit && companyRequiredScreens.includes(currentScreen)) {
       pushScreen(AppScreen.UNIT_SELECTION);
     }
-  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit]);
+  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen]);
 
+  // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
+  useEffect(() => {
+    if (!isUserAuthenticated || !user) return;
+    
+    const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
+    if (currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER) return;
+    
+    const executePostLoginRouting = async () => {
+      console.log(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
+      
+      const activeTenant = user.tenantId || user.tenantid || (Array.isArray(user.tenants) ? user.tenants[0] : user.tenants) || null;
+      const profile: SupabaseUserProfile = {
+        userId: user.id || '',
+        email: user.email,
+        role: user.role,
+        tenantId: activeTenant
+      };
+      
+      const customNavigate = async (path: string) => {
+        console.log('[App] customNavigate interceptou rota pós-login:', path);
+        
+        if (user.mustChangePassword) { 
+          await pushScreen(AppScreen.CHANGE_PASSWORD); 
+        } else {
+          // Passo 2: Divisor de Módulos (MODULE_SELECTION)
+          await pushScreen(AppScreen.MODULE_SELECTION);
+        }
+      };
+      
+      try {
+        await processarRoteamentoPosLoginSaas(profile, customNavigate);
+      } catch (routeErr: unknown) {
+        console.error('[Routing] Roteamento pós-login falhou:', routeErr);
+        setModalConfig({
+          isOpen: true,
+          title: 'Erro de Consistência',
+          message: routeErr instanceof Error ? routeErr.message : String(routeErr),
+          type: 'error',
+          onConfirm: () => {}
+        });
+        setUser(null);
+        sessionStorage.removeItem('app_current_user');
+        setHistory([AppScreen.LOGIN]);
+        return;
+      }
+    };
+    
+    executePostLoginRouting();
+  }, [isUserAuthenticated, user, setHistory, pushScreen]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
@@ -3401,61 +3510,7 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  const pushScreen = useCallback(async (s: AppScreen, params?: NavigationParams) => {
-    if (iframeNavigationLocked && (s === AppScreen.ADDRESS_SELECTION || s === AppScreen.UNIT_SELECTION)) {
-      console.warn(`>>> [GBR-Compliance] Sandbox Guard: Bloqueando push para tela desnecessária em modo iFrame: ${s}`);
-      return;
-    }
-    if (s === AppScreen.LOAD_DATABASE && typeof window !== 'undefined' && window.self !== window.top) {
-      iframeNavigationLocked = true;
-      console.log(">>> [GBR-Compliance] Guard Ativado: Interface congelada no painel administrativo.");
-    }
-    if (s === AppScreen.SYNC_MANAGER && databaseMode === DatabaseMode.INTERNAL) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Recurso Indisponível',
-        message: 'A gestão de sincronização não está disponível no modo INTERNO (Mobile Puro), pois este modo opera exclusivamente com dados locais.',
-        type: 'info'
-      });
-      return;
-    }
 
-    setScreenParams(params || null);
-
-    // Ajuste de Navegação Failsafe para persistir o unitId/unitName no SYSTEM_CONTEXT se fornecido
-    const unitIdToPersist = params?.unitName;
-    if (unitIdToPersist && databaseMode === DatabaseMode.INTERNAL) {
-      try {
-        console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
-        await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-        await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [unitIdToPersist]);
-        
-        if (params?.campaign) {
-          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [params.campaign.id]);
-        }
-        await sqliteService.saveDatabase();
-        console.log(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
-      } catch (err) {
-        console.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
-      }
-    }
-
-    if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
-      console.log(`>>> [Navigation] Resetting history to: ${s}`);
-      setHistory([s]);
-    } else {
-      console.log(`>>> [Navigation] Pushing screen: ${s}`);
-      setHistory(prev => [...prev, s]);
-    }
-  }, [databaseMode]);
-
-  // Expose pushScreen to window for components that need it
-  useEffect(() => {
-    window.pushScreen = pushScreen;
-    return () => {
-      delete window.pushScreen;
-    };
-  }, [pushScreen]);
 
   // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
   useEffect(() => {
@@ -3480,8 +3535,8 @@ const App: React.FC = () => {
           ];
           
           if (!exemptScreens.includes(screen)) {
-            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Carga Inicial.");
-            pushScreen(AppScreen.LOAD_DATABASE);
+            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
+            pushScreen(AppScreen.UNIT_SELECTION);
           }
         }
       } catch (e) {
@@ -3494,7 +3549,7 @@ const App: React.FC = () => {
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
-    if (!supabase || databaseMode === DatabaseMode.INTERNAL) return;
+    if (!isEngineReady || !supabase || databaseMode === DatabaseMode.INTERNAL) return;
 
     // Função para processar o login a partir de uma sessão
     const processSession = async (session: Session) => {
@@ -3523,8 +3578,14 @@ const App: React.FC = () => {
           finalTenant: permissions.tenantId || (permissionsObj.tenantid as string) || ''
         });
         
-        const resolvedTenantId = (permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
-        const resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+        let resolvedTenantId = (permissions.tenantId || (permissionsObj.tenantId as string) || (permissionsObj._tenantid as string) || (permissionsObj.tenantid as string) || unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string) || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim().toUpperCase();
+        let resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+
+        if (session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+          const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'CICOPAL';
+          resolvedTenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+          resolvedUnitId = 'TODAS';
+        }
 
         if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') {
           console.warn(`[Auth Fail-Safe] Usuário logado sem tenantId ou filial associado: ${session.user.email}`);
@@ -3532,7 +3593,7 @@ const App: React.FC = () => {
           setUser(null);
           sessionStorage.removeItem('app_current_user');
           sessionStorage.clear();
-          setHistory([AppScreen.LOAD_DATABASE]);
+          setHistory([AppScreen.LOGIN]);
           
           if (supabase) {
             await supabase.auth.signOut();
@@ -3575,22 +3636,21 @@ const App: React.FC = () => {
         }
         
         // Log de Auditoria na Nuvem
-        logAuditEvent({
-          user_email: loggedUser.email,
-          action: 'LOGIN',
-          details: `Usuário logado no sistema (${loggedUser.role})`,
-          tenantId: loggedUser.tenantId
-        });
+        try {
+          logAuditEvent({
+            user_email: loggedUser.email,
+            action: 'LOGIN',
+            details: `Usuário logado no sistema (${loggedUser.role})`,
+            tenantId: loggedUser.tenantId
+          });
+        } catch (logErr) {
+          console.warn('[SRE Failsafe] Falha ao registrar log de auditoria na inicialização:', logErr);
+        }
         
         // Se logou via Supabase, garante que o modo está correto
         if (databaseMode !== DatabaseMode.SUPABASE) {
           setDatabaseMode(DatabaseMode.SUPABASE);
           localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
-        }
-
-        // Navega para a seleção de módulos se estiver na tela de login
-        if (screen === AppScreen.LOGIN) {
-          pushScreen(AppScreen.MODULE_SELECTION);
         }
         
         // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
@@ -3669,19 +3729,19 @@ const App: React.FC = () => {
 
     handleUrlErrors();
 
-    // Verifica sessão atual ao montar com proteção especial Offline-First
+    // Verifica sessão atual ao montar
     const currentUserStr = sessionStorage.getItem('app_current_user');
     const isNetworkOffline = !navigator.onLine;
 
+    // GBR KARDEK SRE: Ignora bypass de modo offline para forçar login unificado seguro no F5
     if (isNetworkOffline && currentUserStr) {
-      console.log(">>> [Boot Offline Bypass] Conexão indisponível na montagem. Carregando usuário local do cache offline.");
-      try {
-        const parsed = JSON.parse(currentUserStr);
-        setUser(parsed);
-      } catch (e) {
-        console.warn("Falha no parse ao carregar do cache offline:", e);
-      }
-      setIsSessionValid(true);
+      console.warn(">>> [Boot SRE] Conexão indisponível (F5 Offline). Proteção ativada: destruindo cache local fantasma.");
+      setIsSessionValid(false);
+      setUser(null);
+      sessionStorage.removeItem('app_current_user');
+      sessionStorage.removeItem('filial');
+      sessionStorage.removeItem('tenantId');
+      setHistory([AppScreen.LOGIN]);
     } else {
       supabase.auth.getSession().then(({ data: { session } }) => {
         const isValid = !!session && !!session.user && typeof session.user.id === "string";
@@ -3689,76 +3749,25 @@ const App: React.FC = () => {
         if (isValid) {
           processSession(session);
         } else {
-          // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
-          let isLocal = false;
-          if (currentUserStr) {
-            try {
-              const parsed = JSON.parse(currentUserStr);
-              const lowerEmail = (parsed.email || '').toLowerCase();
-              const lowerUsername = (parsed.username || '').toLowerCase();
-              if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
-                isLocal = true;
-              }
-            } catch { /* ignore */ }
-          }
-
-          if (isLocal) {
-            console.log('[Boot] Mantendo sessão local de soberania nativa apesar de sessão cloud nula/vazia.');
-            setIsSessionValid(true);
-            if (currentUserStr) {
-              try {
-                const parsed = JSON.parse(currentUserStr);
-                setUser(parsed);
-              } catch (e) {
-                console.warn("Erro no parse do usuário em sessão cloud nula:", e);
-              }
-            }
-            return;
-          }
-
-          if (!isInternalMode) {
-            console.warn('[Boot] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
-            removerLoaderEstatico();
-            setIsDataLoaded(true);
-            setUser(null);
-            sessionStorage.removeItem('app_current_user');
-            setHistory([AppScreen.LOGIN]);
-          }
+          // GBR KARDEK SRE: Proibido recuperar sessões locais fantasmas em nova montagem (F5)
+          console.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
+          removerLoaderEstatico();
+          setIsDataLoaded(true);
+          setUser(null);
+          setIsSessionValid(false);
+          sessionStorage.removeItem('app_current_user');
+          sessionStorage.removeItem('filial');
+          sessionStorage.removeItem('tenantId');
+          setHistory([AppScreen.LOGIN]);
         }
       }).catch(err => {
         console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
-        const errMsg = String(err instanceof Error ? err.message : err);
-        const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
-        
-        let isLocal = false;
-        if (currentUserStr) {
-          try {
-            const parsed = JSON.parse(currentUserStr);
-            const lowerEmail = (parsed.email || '').toLowerCase();
-            const lowerUsername = (parsed.username || '').toLowerCase();
-            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
-              isLocal = true;
-            }
-          } catch { /* ignore */ }
-        }
-
-        if (isLocal || isNetworkError) {
-          console.log('[Boot] Preservando sessão local ativa pós exceção do Supabase do tipo Rede/Tempo limite.');
-          if (currentUserStr) {
-            try {
-              const parsed = JSON.parse(currentUserStr);
-              setUser(parsed);
-            } catch (e) {
-              console.warn("Erro no parse do usuário sob rede/erro Supabase:", e);
-            }
-          }
-          setIsSessionValid(true);
-          return;
-        }
-
+        // GBR KARDEK SRE: Em qualquer falha de boot ou sessão, destruir fantasma e exigir login
         setIsSessionValid(false);
         setUser(null);
         sessionStorage.removeItem('app_current_user');
+        sessionStorage.removeItem('filial');
+        sessionStorage.removeItem('tenantId');
         setHistory([AppScreen.LOGIN]);
       });
     }
@@ -3818,7 +3827,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, databaseMode]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
+  }, [supabase, databaseMode, isEngineReady]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
@@ -4022,10 +4031,6 @@ const App: React.FC = () => {
   };
 
   const popScreen = useCallback(() => {
-    if (iframeNavigationLocked) {
-      console.warn(">>> [GBR-Compliance] Sandbox Guard: Pop history bloqueado. Navegação imutável ativada.");
-      return;
-    }
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
       const newScreen = newHistory[newHistory.length - 1];
@@ -4035,7 +4040,7 @@ const App: React.FC = () => {
       }
       return newHistory;
     });
-  }, []);
+  }, [setHistory]);
 
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
@@ -5120,10 +5125,6 @@ const App: React.FC = () => {
       const totalRegistros = await db.local_assets.count();
       console.log(`[SRE_AUDIT] Carga validada com total de: ${totalRegistros}`);
 
-      if (typeof window !== 'undefined') {
-        iframeNavigationLocked = false;
-      }
-
       // 2. DISPARAR FORÇADO A MUDANÇA DE TELA - BANINDO O TRAVAMENTO
       // Substitua a linha morta que estava mantendo o usuário preso na tela de carga
       if (totalRegistros > 0) {
@@ -5167,51 +5168,24 @@ const App: React.FC = () => {
       // 2. Limpa localmente (apenas a unidade selecionada se houver)
       await clearInventory(databaseMode, selectedUnit || undefined); 
       
-      // 3. Se estiver no modo Supabase, limpa a nuvem também (apenas a unidade selecionada)
+      if (!selectedUnit) {
+        await db.delete();
+        await db.open();
+      }
+      
+      // 3. FASE 1 (SRE): Nuvem Congelada. Expurgo 100% Offline via File System API
       if (databaseMode === DatabaseMode.SUPABASE) {
-        try {
-          // Tranca invisível de segurança injetada no método de remoção remoto:
-          // .delete().eq('_tenantid', currentTenantId)
-          const currentTenantId = user?.tenantId || user?._tenantid || '';
-          if (!currentTenantId) {
-            console.warn(">>> [Security Guard] Abortando handleClearDatabase: currentTenantId nulo ou indefinido para evitar 'DELETE requires a WHERE clause'");
-            return;
-          }
-          
-          await clearCloudInventory(selectedUnit || undefined, currentTenantId);
-          
-          // Log de Auditoria na Nuvem
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'DELETE',
-            table_name: 'assets',
-            details: `Limpeza de banco de dados (Unidade: ${selectedUnit || 'GERAL'})`,
-            tenantId: user?.tenantId || 'CICOPAL'
-          });
-
-          // Atualiza o timestamp na nuvem para notificar outros usuários
-          try {
-            const configToSync = { ...inventory };
-            // @ts-expect-error - assets is removed for sync
-            delete configToSync.assets;
-            await syncConfigToCloud({ 
-              ...configToSync, 
-              lastUpdated: new Date().toISOString() 
-            } as Omit<InventoryState, 'assets'>, currentTenantId);
-          } catch (syncErr) {
-            console.warn('Empresa limpa na nuvem, mas erro ao sincronizar config (cache stale):', syncErr);
-          }
-        } catch (error: unknown) {
-          console.error('Erro ao limpar nuvem:', error);
-          let errorMessage = 'Erro desconhecido';
-          if (error instanceof Error) {
-            errorMessage = error.message;
-          } else if (error && typeof error === 'object') {
-            const errObj = error as Record<string, unknown>;
-            errorMessage = String(errObj.message || errObj.details || errObj.hint || safeStringify(error));
-          }
-          throw new Error(`Erro na nuvem: ${errorMessage}`);
+        console.warn(">>> [SRE] Integração Supabase CONGELADA. Operando exclusão puramente local no disco físico.");
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const dirHandle = (window as any).globalSreDirectoryHandle;
+        if (dirHandle) {
+          await dirHandle.removeEntry(`PLANILHA_${unitName}.json`);
+          console.log(`>>> [SRE] Arquivo físico PLANILHA_${unitName}.json expurgado silenciosamente.`);
         }
+      } catch (ioErr) {
+        console.warn(">>> [SRE] Arquivo físico não encontrado ou já deletado:", ioErr);
       }
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
@@ -5693,18 +5667,6 @@ const App: React.FC = () => {
     AppScreen.SIGNATURE
   ].includes(screen);
   
-  // SOBERANIA OFFLINE: Se temos o objeto user e seu perfil é local/offline, a sessão é considerada válida por padrão.
-  const isProfileLocal = useMemo(() => {
-    if (!user) return false;
-    const lowerEmail = (user.email || '').toLowerCase();
-    const lowerUsername = (user.username || '').toLowerCase();
-    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
-  }, [user]);
-
-  // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
-  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || (user && user.role === ('DEMO' as unknown as UserRole));
-  const isUserAuthenticated = !!user && isSessionCurrentlyValid;
-
   console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
     sqliteStatus: sqliteStatus.status,
     sqliteLoading: sqliteStatus.loading,
@@ -5733,125 +5695,6 @@ const App: React.FC = () => {
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
             Carregando Ecossistema GBR...
           </p>
-        </div>
-      </div>
-    );
-  }
-
-  // REQUISITO 3 - BLOCO DE SEGURANÇA (LOGIN FORÇADO COM INTERCEPTOR ABSOLUTO)
-  if (dbInitialized && !isInitializing && !authLoading && !isUserAuthenticated) {
-    console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DE SEGURANÇA (Formulário de Login Unificado).");
-    return (
-      <div className="w-full min-h-screen bg-white flex flex-col justify-between p-0 overflow-y-auto no-scrollbar">
-        <div className="flex-1 w-full relative z-[500] no-scrollbar flex flex-col">
-          <Login 
-            users={users} 
-            databaseMode={databaseMode}
-            isDatabaseEmpty={inventory.assets.length === 0}
-            isKeyboardVisible={isKeyboardVisible}
-            onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
-            onUpdateScreen={(s) => setHistory([s])}
-            onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
-            onUpdateDatabaseMode={handleUpdateDatabaseMode}
-            onLogin={async (u) => { 
-              setUser(u); 
-              sessionStorage.setItem('app_current_user', safeStringify(u));
-              
-              if (databaseMode !== DatabaseMode.INTERNAL) {
-                setDatabaseMode(DatabaseMode.SUPABASE);
-              }
-
-              // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta no contexto para evitar 400 / placeholders
-              const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
-              const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
-              
-              setSelectedUnit(defaultUnit);
-              sessionStorage.setItem('tenantId', defaultTenant);
-              sessionStorage.setItem('filial', defaultUnit);
-
-              if (databaseMode !== DatabaseMode.INTERNAL) {
-                console.log('[App] Login detectado. Iniciando sincronização prioritária da nuvem com contexto real...');
-                syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit);
-              }
-
-              // Prepara objeto SupabaseUserProfile
-              const activeTenant = u.tenantId || u.tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
-              const profile: SupabaseUserProfile = {
-                userId: u.id || '',
-                email: u.email,
-                role: u.role,
-                tenantId: activeTenant
-              };
-
-              // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
-              const customNavigate = (path: string) => {
-                console.log('[App] customNavigate interceptou rota:', path);
-                
-                if (u.mustChangePassword) { 
-                  pushScreen(AppScreen.CHANGE_PASSWORD); 
-                } else if (path === '/load-database') {
-                  pushScreen(AppScreen.LOAD_DATABASE);
-                } else if (path === '/auditor/aguardando-carga') {
-                  pushScreen(AppScreen.UNIT_SELECTION);
-                  setModalConfig({
-                    isOpen: true,
-                    title: 'Aguardando Carga Inicial',
-                    message: 'A base local do SQLite está vazia. Aguarde o Administrador ou Master realizar a carga de banco no dispositivo para iniciar os trabalhos de auditoria de campo imobilizado.',
-                    type: 'warning'
-                  });
-                } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
-                  pushScreen(AppScreen.MODULE_SELECTION);
-                } else if (path === '/auditor/selecionar-filial' || path === '/auditor/selecionar-unidade') {
-                  pushScreen(AppScreen.UNIT_SELECTION);
-                } else if (path === '/dashboard-demo') {
-                  setInventory(prev => ({
-                    ...prev,
-                    currentCampaignId: 'DEMO_CAMPAIGN',
-                    status: DatabaseStatus.LOADED
-                  }));
-                  setSelectedUnit('MATRIZ');
-                  localStorage.setItem('app_selected_unit', 'MATRIZ');
-                  localStorage.setItem('app_current_unit', 'MATRIZ');
-                  setHistory([AppScreen.MAIN_MENU]);
-                } else {
-                  const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
-                  if (isAdmin) {
-                    pushScreen(AppScreen.MODULE_SELECTION);
-                  } else {
-                    pushScreen(AppScreen.UNIT_SELECTION);
-                  }
-                }
-              };
-
-              try {
-                await processarRoteamentoPosLoginSaas(profile, customNavigate);
-              } catch (routeErr: unknown) {
-                console.error('[Routing] Roteamento falhou:', routeErr);
-                setModalConfig({
-                  isOpen: true,
-                  title: 'Erro de Consistência',
-                  message: routeErr instanceof Error ? routeErr.message : String(routeErr),
-                  type: 'error',
-                  onConfirm: () => {}
-                });
-                setUser(null);
-                sessionStorage.removeItem('app_current_user');
-                setHistory([AppScreen.LOGIN]);
-                return;
-              }
-
-              const bioSupported = await isBiometricSupported();
-              if (bioSupported) {
-                const username = (u.username || u.email || '').toLowerCase();
-                if (username) {
-                  const alreadyRegistered = await hasBiometricRegistered(username);
-                  if (!alreadyRegistered) {
-                    pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
-                  }
-                }
-              }
-            }} 
-          />
         </div>
       </div>
     );
@@ -6214,83 +6057,22 @@ const App: React.FC = () => {
                     console.warn('[Sync] Sincronização inicial em background falhou:', err);
                   });
                 }
-
-                // Prepara objeto SupabaseUserProfile
-                const activeTenant = u.tenantId || u.tenantid || (Array.isArray(u.tenants) ? u.tenants[0] : u.tenants) || null;
-                const profile: SupabaseUserProfile = {
-                  userId: u.id || '',
-                  email: u.email,
-                  role: u.role,
-                  tenantId: activeTenant
-                };
-
-                // Implementação do Roteamento Seguro Baseado em Rotas Virtuais da v2.6
-                const customNavigate = (path: string) => {
-                  console.log('[App] customNavigate interceptou rota:', path);
-                  
-                  if (u.mustChangePassword) { 
-                    pushScreen(AppScreen.CHANGE_PASSWORD); 
-                  } else if (path === '/load-database') {
-                    pushScreen(AppScreen.LOAD_DATABASE);
-                  } else if (path === '/auditor/aguardando-carga') {
-                    pushScreen(AppScreen.UNIT_SELECTION);
-                    setModalConfig({
-                      isOpen: true,
-                      title: 'Aguardando Carga Inicial',
-                      message: 'A base local do SQLite está vazia. Aguarde o Administrador ou Master realizar a carga de banco no dispositivo para iniciar os trabalhos de auditoria de campo imobilizado.',
-                      type: 'warning'
-                    });
-                  } else if (path === '/saas/painel-global' || path === '/admin/painel-controle') {
-                    pushScreen(AppScreen.MODULE_SELECTION);
-                  } else if (path === '/auditor/selecionar-filial' || path === '/auditor/selecionar-unidade') {
-                    pushScreen(AppScreen.UNIT_SELECTION);
-                  } else if (path === '/dashboard-demo') {
-                    setInventory(prev => ({
-                      ...prev,
-                      currentCampaignId: 'DEMO_CAMPAIGN',
-                      status: DatabaseStatus.LOADED
-                    }));
-                    setSelectedUnit('MATRIZ');
-                    localStorage.setItem('app_selected_unit', 'MATRIZ');
-                    localStorage.setItem('app_current_unit', 'MATRIZ');
-                    setHistory([AppScreen.MAIN_MENU]);
-                  } else {
-                    const isAdmin = u.role === UserRole.ADMIN || u.role === UserRole.MASTER || u.isAdmin || (u.email && u.email.toLowerCase() === ADMIN_EMAIL);
-                    if (isAdmin) {
-                      pushScreen(AppScreen.MODULE_SELECTION);
-                    } else {
-                      pushScreen(AppScreen.UNIT_SELECTION);
-                    }
-                  }
-                };
-
-                try {
-                  await processarRoteamentoPosLoginSaas(profile, customNavigate);
-                } catch (routeErr: unknown) {
-                  console.error('[Routing] Roteamento falhou:', routeErr);
-                  setModalConfig({
-                    isOpen: true,
-                    title: 'Erro de Consistência',
-                    message: routeErr instanceof Error ? routeErr.message : String(routeErr),
-                    type: 'error',
-                    onConfirm: () => {}
-                  });
-                  setUser(null);
-                  sessionStorage.removeItem('app_current_user');
-                  setHistory([AppScreen.LOGIN]);
-                  return;
-                }
-
+                
                 // Oferecer registro de biometria se suportado e ainda não registrado
-                const bioSupported = await isBiometricSupported();
-                if (bioSupported) {
-                  const username = (u.username || u.email || '').toLowerCase();
-                  if (username) {
-                    const alreadyRegistered = await hasBiometricRegistered(username);
-                    if (!alreadyRegistered) {
-                      pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
+                try {
+                  const bioSupported = await isBiometricSupported();
+                  if (bioSupported) {
+                    const username = (u.username || u.email || '').toLowerCase();
+                    if (username) {
+                      const alreadyRegistered = await hasBiometricRegistered(username);
+                      if (!alreadyRegistered) {
+                        // Coloca um delay mínimo para garantir que a navegação do dispatcher termine antes de empilhar a biometria
+                        setTimeout(() => pushScreen(AppScreen.BIOMETRIC_REGISTRATION), 500);
+                      }
                     }
                   }
+                } catch (bioErr) {
+                  console.warn('[Biometric] Falha ao checar biometria pós-login:', bioErr);
                 }
               }} 
             />
@@ -6433,9 +6215,6 @@ const App: React.FC = () => {
                 currentUnitId={selectedUnit}
                 currentTenantId={user?.tenantId || sessionStorage.getItem('tenantId') || ''}
                 onRestore={(state) => {
-                  if (typeof window !== 'undefined') {
-                    iframeNavigationLocked = false;
-                  }
                   setInventory(state);
                   popScreen();
                 }}
@@ -6668,8 +6447,8 @@ const App: React.FC = () => {
                 setInventoryLocation(null);
                 sessionStorage.removeItem('app_just_finished_load');
 
-                // 2º: Redirecionar imediatamente para a Seleção de Endereço Físico (Nova Ancora de Rota).
-                pushScreen(AppScreen.ADDRESS_SELECTION); 
+                // Passo 4: Menu de Opções da Filial (DASHBOARD) - Obrigatório para todos os perfis (GBR v2.6.0)
+                pushScreen(AppScreen.DASHBOARD);
               }} 
               onBack={async () => { 
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
@@ -6735,12 +6514,12 @@ const App: React.FC = () => {
               assets={filteredAssetsByUnit} 
               allAssets={inventory.assets}
               currentCampaignId={inventory.currentCampaignId}
-              onBack={() => setHistory([AppScreen.MAIN_MENU])} 
+              onBack={popScreen} 
               onChangeUnit={() => {
                 setSelectedUnit(null);
                 pushScreen(AppScreen.UNIT_SELECTION);
               }}
-              onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.INVENTORY) : pushScreen(AppScreen.UNIT_SELECTION)}
+              onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.ADDRESS_SELECTION) : pushScreen(AppScreen.UNIT_SELECTION)}
               onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
               onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
               user={user}
@@ -6774,7 +6553,6 @@ const App: React.FC = () => {
               username={user?.username || ''}
               userRole={user?.role}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
-              onOpenDatabaseLoader={() => pushScreen(AppScreen.LOAD_DATABASE)}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({
@@ -6794,13 +6572,7 @@ const App: React.FC = () => {
                 setCurrentModule(module);
                 localStorage.setItem('app_current_module', module);
                 if (module === AppModule.INVENTORY) {
-                  const isSystemAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
-                  const isEmpty = inventory.assets.length === 0 || fullCompaniesWithStatus.length === 0;
-                  if (isEmpty && isSystemAdmin) {
-                    pushScreen(AppScreen.LOAD_DATABASE);
-                  } else {
-                    pushScreen(AppScreen.UNIT_SELECTION);
-                  }
+                  pushScreen(AppScreen.UNIT_SELECTION);
                 } else {
                   pushScreen(AppScreen.ASSET_CONTROL_HOME);
                 }
@@ -6872,7 +6644,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} />}
-          {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
+          {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
               onBack={popScreen} 

@@ -477,8 +477,9 @@ const Login: React.FC<LoginProps> = ({
           let unitId = normalizeValue(cloudUser.filial || cloudUser._unitid || cloudUser.unitid || '');
 
           if (is_master) {
-            if (!tenantId) tenantId = 'CICOPAL';
-            if (!unitId) unitId = '';
+            const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'CICOPAL';
+            tenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+            unitId = 'TODAS';
           }
 
           loggedUser = {

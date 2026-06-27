@@ -18,7 +18,7 @@ import BackButton from './BackButton';
 import { DatabaseMode, UnitConfig } from '../types';
 import * as turf from '@turf/turf';
 import { localDb } from '../services/localDbService';
-import { sqliteService } from '../services/sqliteService';
+import { db } from '../services/sqliteService';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -87,7 +87,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return () => { active = false; };
   }, []);
 
-  // 2. Carrega as estatísticas do SQLite local via método público getOperationalUnitsWithStats
+  // 2. Carrega as estatísticas do SQLite local e funde com as unidades recebidas por prop
   useEffect(() => {
     let active = true;
     const fetchSqliteUnits = async () => {
@@ -105,17 +105,41 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             console.warn('[UnitSelector] Falha ao ler tenantId do sessionStorage:', errMsg);
           }
           
-          const data = await sqliteService.getOperationalUnitsWithStats(tenantId);
-          const mapped: SqliteUnitStats[] = data.map((row) => {
-            const filialVal = typeof row.filial === 'string' ? row.filial : 'GERAL';
-            const displayNameVal = typeof row.displayName === 'string' ? row.displayName : filialVal;
-            const totalVal = typeof row.total === 'number' ? row.total : 0;
-            const checkedVal = typeof row.checked === 'number' ? row.checked : 0;
+          const currentTenantId = tenantId ? tenantId.trim().toUpperCase() : '';
+          
+          // Fallback Seguro: Usa .filter() na fluent API do Dexie pois tenantId isolado não é um índice no schema atual v2.
+          // Isso garante a extração limpa para o currentTenantId e atende o requisito SRE.
+          const allAssets = await db.local_assets
+            .filter(item => {
+              const tId = String(item.tenantId || item._tenantid || '').trim().toUpperCase();
+              return !currentTenantId || tId === currentTenantId;
+            })
+            .toArray();
+            
+          const nonDeleted = allAssets.filter(a => a._is_deleted === 0);
+          const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
+          
+          const configList = await db.unit_configs.toArray();
+          const filiaisConfigs = configList.map(c => String(c.filial || c.nome)).filter(f => f && f.trim() !== '');
+          
+          // A regra de ouro (Soberania da Filial): Inclui todas as filiais vindas via props (que vieram do cloud/sessão),
+          // mais as que possuem ativos locais, mais as que possuem GPS configurado.
+          const propsFiliais = units.map(u => String(u.filial).toUpperCase().trim()).filter(f => f !== '');
+          
+          const allFiliais = Array.from(new Set([
+            ...propsFiliais,
+            ...filiaisAssets.map(f => f.toUpperCase().trim()), 
+            ...filiaisConfigs.map(f => f.toUpperCase().trim())
+          ]));
+          
+          const mapped: SqliteUnitStats[] = allFiliais.map(f => {
+            const filialAssets = nonDeleted.filter(a => String(a.filial || '').toUpperCase().trim() === f);
+            const checkedAssets = filialAssets.filter(a => a._conferido === 1);
             return {
-              filial: filialVal,
-              displayName: displayNameVal,
-              total: totalVal,
-              checked: checkedVal
+              filial: f,
+              displayName: f,
+              total: filialAssets.length,
+              checked: checkedAssets.length
             };
           });
 
@@ -133,23 +157,25 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return () => {
       active = false;
     };
-  }, [databaseMode]);
+  }, [databaseMode, units]);
 
-  // 3. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão
+  // Refs para estabilizar as funções callbacks externas e evitar loops infinitos de render
+  const onSelectRef = React.useRef(onSelect);
+  const onForceToggleViewRef = React.useRef(onForceToggleView);
+
   useEffect(() => {
-    // 🚀 ISOLAMENTO E BYPASS DE SANDBOX (ANTI-CRASH)
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    onForceToggleViewRef.current = onForceToggleView;
+  }, [onForceToggleView]);
+
+  // 4. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão (Depende apenas da contagem de configs)
+  useEffect(() => {
+    // 🚀 ISOLAMENTO DE SANDBOX (Se estiver em iframe, aborta GPS de hardware real)
     if (typeof window !== 'undefined' && (window.self !== window.top || window.location.hostname.includes('aistudio'))) {
-      console.log(">>> [GBR-Compliance] Ambiente iFrame/AI Studio detectado. Abortando GPS de hardware e forçando Unidade Dinâmica do cache.");
-      const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
-      if (cachedFilial) {
-        onSelect(cachedFilial);
-      }
-      const timer = setTimeout(() => {
-        if (onForceToggleView) {
-          onForceToggleView();
-        }
-      }, 50);
-      return () => clearTimeout(timer);
+      return;
     }
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
@@ -161,13 +187,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           if (firstValid) {
             console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
             setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
-          } else {
-            const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
-            if (cachedFilial) onSelect(cachedFilial);
           }
-        } else {
-          const cachedFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
-          if (cachedFilial) onSelect(cachedFilial);
         }
       } catch {
         // Safe bypass
@@ -221,7 +241,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         }
       }
     };
-  }, [activeUnitConfigs, onSelect, onForceToggleView]);
+  }, [activeUnitConfigs.length]);
 
   // Normalização estrita para mapear chave da unidade com âncora
   const getUnitConfigForFilial = (filialName: string) => {
@@ -527,7 +547,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                           className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (isAdmin && onConfigGPS) { 
+                            if (onConfigGPS) { 
                               e.preventDefault(); 
                               try { 
                                 Promise.resolve(onConfigGPS(displayName)).catch((err: unknown) => {
@@ -543,9 +563,9 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                         >
                           <div className={`w-7.5 h-7.5 rounded-lg flex items-center justify-center border transition-all ${
                             unit.hasGps 
-                              ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
-                              : 'bg-rose-50 text-rose-500 border-rose-100'
-                          } ${isAdmin ? 'hover:scale-105 hover:bg-emerald-100' : ''}`}>
+                              ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm hover:bg-emerald-100 hover:scale-105' 
+                              : 'bg-rose-50 text-rose-500 border-rose-100 hover:bg-rose-100/50 hover:scale-105'
+                          }`}>
                             <NavigationIcon size={14} />
                           </div>
                           <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>
@@ -556,50 +576,20 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                         {/* Status de Campanha */}
                         <button 
                           type="button"
-                          className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans ${
-                            (!unit.hasGps && !((() => { 
-                              try { 
-                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
-                                const uRole = (u.role || '').toUpperCase();
-                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch { 
-                                return isAdmin; 
-                              } 
-                            })())) ? 'opacity-40 cursor-not-allowed' : 'active:scale-90 cursor-pointer'
-                          }`}
+                          className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 font-sans"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!unit.hasGps && !((() => { 
-                              try { 
-                                const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
-                                const uRole = (u.role || '').toUpperCase();
-                                return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
-                              } catch { 
-                                return isAdmin; 
-                              } 
-                            })())) { 
-                              e.preventDefault(); 
-                              return; 
-                            } 
                             if (onCampaigns) onCampaigns(displayName);
                           }}
                         >
                           <div className={`w-7.5 h-7.5 rounded-lg flex items-center justify-center border transition-all ${
                             unit.hasCampaign 
-                              ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm' 
-                              : 'bg-gray-50 text-gray-300 border-gray-100'
-                          } ${(!unit.hasGps && !((() => { 
-                            try { 
-                              const u = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as { role?: string; isAdmin?: boolean; is_admin?: boolean }; 
-                              const uRole = (u.role || '').toUpperCase();
-                              return ['ADMIN', 'MASTER', 'GESTOR'].includes(uRole) || u.isAdmin || u.is_admin || isAdmin; 
-                            } catch { 
-                              return isAdmin; 
-                            } 
-                          })())) ? '' : 'hover:scale-105 hover:bg-amber-100'}`}>
+                              ? 'bg-amber-50 text-amber-600 border-amber-100 shadow-sm hover:bg-amber-100 hover:scale-105' 
+                              : 'bg-gray-50 text-gray-300 border-gray-100 hover:bg-gray-100 hover:scale-105'
+                          }`}>
                             <Calendar size={13} />
                           </div>
-                          <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-300'}`}>
+                          <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasCampaign ? 'text-amber-600' : 'text-gray-400'}`}>
                             Campanha
                           </span>
                         </button>

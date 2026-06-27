@@ -19,7 +19,6 @@ import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
-import { SqliteMutexContext } from '../services/SqliteMutexContext';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
@@ -594,20 +593,8 @@ const Inventory: React.FC<InventoryProps> = ({
       const currentUnit = selectedUnitRef.current || '';
 
       // 1. COMPORTAMENTO E CAPTURA DE LEITURA (SCANNER CONTRATO)
-      // Executa consulta parametrizada estrita buscando na tabela local_assets
-      const sqlQuery = "SELECT * FROM local_assets WHERE (UPPER(etiqueta) = ? OR UPPER(primarykey) = ?) AND (filial = ? OR _unitid = ?) AND _is_deleted = 0";
-      const paramsQuery = [term.toUpperCase(), term.toUpperCase(), currentUnit, currentUnit];
-      
-      let queryResult;
-      const db = sqliteService.getNativeDb();
-      if (db) {
-        queryResult = await SqliteMutexContext.executeSafeTransaction(db, sqlQuery, paramsQuery);
-      } else {
-        const fallbackRes = await sqliteService.query(sqlQuery, paramsQuery);
-        queryResult = { values: fallbackRes };
-      }
-      
-      let foundAsset = queryResult.values && queryResult.values.length > 0 ? queryResult.values[0] as Asset : null;
+      // Executa consulta parametrizada de forma fluente e nativa no IndexedDB
+      let foundAsset = await localDb.assets.scanAsset(term, currentUnit);
 
       // Se não encontrou na local_assets, fazemos a busca nas tabelas normais para máxima tolerância e segurança
       if (!foundAsset) {
@@ -618,34 +605,26 @@ const Inventory: React.FC<InventoryProps> = ({
       }
 
       if (foundAsset) {
-        // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (MUTEX)
-        // Ativo localizado: update atômico em local_assets e ativos com _conferido=1, status='CONFERIDO' e _is_synced=0
+        // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
+        // Ativo localizado: update atômico usando o serviço de banco local
         const id = foundAsset.id || foundAsset.primarykey;
         
-        const updateSql = "UPDATE local_assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)";
-        const updateParams = [foundAsset.etiqueta || foundAsset.ETIQUETA || '', foundAsset.primarykey || ''];
-        
-        if (db) {
-          await SqliteMutexContext.executeSafeTransaction(db, updateSql, updateParams);
-          // Atualiza também nas tabelas 'ativos' e 'assets' para manter a UI e sincronizador em sincronia
-          await SqliteMutexContext.executeSafeTransaction(db, "UPDATE ativos SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
-          await SqliteMutexContext.executeSafeTransaction(db, "UPDATE assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
-        } else {
-          await sqliteService.execute(updateSql, updateParams);
-          await sqliteService.execute("UPDATE ativos SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
-          await sqliteService.execute("UPDATE assets SET _conferido = 1, status = 'CONFERIDO', _is_synced = 0 WHERE (etiqueta = ? OR primarykey = ?)", updateParams);
-        }
+        await localDb.assets.update(id, {
+          _conferido: true,
+          status: 'CONFERIDO',
+          _is_synced: 0
+        }, user?.email || 'operador');
 
-        // Adiciona um log de auditoria via transação protegida
-        const auditLogId = 'AUDIT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-        const auditSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
-        const auditParams = [auditLogId, user?.email || 'operador', 'CONFERENCIA', 'local_assets', String(id), `Ativo conferido via scanner: ${extractedEtiqueta}`];
-        
-        if (db) {
-          await SqliteMutexContext.executeSafeTransaction(db, auditSql, auditParams);
-        } else {
-          await sqliteService.execute(auditSql, auditParams);
-        }
+        // Adiciona um log de auditoria de conferência
+        await localDb.auditLogs.add({
+          timestamp: new Date().toISOString(),
+          user: user?.email || 'operador',
+          action: 'CONFERENCIA',
+          table_name: 'local_assets',
+          record_id: String(id),
+          details: `Ativo conferido via scanner: ${extractedEtiqueta}`,
+          tenantId: user?._tenantid || 'CICOPAL'
+        });
 
         setIsHierarchyLoading(false);
 
@@ -679,15 +658,15 @@ const Inventory: React.FC<InventoryProps> = ({
 
       // Se o ativo NÃO for localizado (Item sem plaqueta/Divergente):
       // Grave um registro de aviso imediatamente na tabela local 'audit_logs' via transação protegida para auditoria futura
-      const auditLogId = 'AUDIT_DIV_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-      const auditSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
-      const auditParams = [auditLogId, user?.email || 'operador', 'DIVERGENCIA', 'local_assets', extractedEtiqueta, `Ativo divergente isolado via scanner: ${extractedEtiqueta}`];
-      
-      if (db) {
-        await SqliteMutexContext.executeSafeTransaction(db, auditSql, auditParams);
-      } else {
-        await sqliteService.execute(auditSql, auditParams);
-      }
+      await localDb.auditLogs.add({
+        timestamp: new Date().toISOString(),
+        user: user?.email || 'operador',
+        action: 'DIVERGENCIA',
+        table_name: 'local_assets',
+        record_id: extractedEtiqueta,
+        details: `Ativo divergente isolado via scanner: ${extractedEtiqueta}`,
+        tenantId: user?._tenantid || 'CICOPAL'
+      });
 
       setIsHierarchyLoading(false);
 
@@ -702,29 +681,29 @@ const Inventory: React.FC<InventoryProps> = ({
       setShowGlobalSearchResolution(extractedEtiqueta);
 
     } catch (err) {
-      console.error(">>> [Inventory SRE] Erro físico ou de consulta SQLite:", err);
+      console.error(">>> [Inventory SRE] Erro físico ou de consulta Dexie:", err);
       setIsHierarchyLoading(false);
       
       // 4. BANIMENTO DE RECHARGES E ALERTS:
-      // Capture qualquer exceção física do SQLite no bloco 'catch', grave silenciosamente o erro na tabela local de auditoria
+      // Capture qualquer exceção física no bloco 'catch', grave silenciosamente o erro na tabela local de auditoria
       // e exiba uma notificação estilizada em HTML dentro da própria UI para manter a viewport do operador estável.
       try {
-        const errorLogId = 'ERR_SQL_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-        const errSql = "INSERT INTO audit_logs (id, usuario, acao, tabela, registro_id, details) VALUES (?, ?, ?, ?, ?, ?)";
-        const errParams = [errorLogId, user?.email || 'SRE_SYSTEM', 'SQL_ERROR', 'local_assets', term, `Exception in scan query: ${err instanceof Error ? err.message : String(err)}`];
-        const db = sqliteService.getNativeDb();
-        if (db) {
-          await SqliteMutexContext.executeSafeTransaction(db, errSql, errParams);
-        } else {
-          await sqliteService.execute(errSql, errParams);
-        }
+        await localDb.auditLogs.add({
+          timestamp: new Date().toISOString(),
+          user: user?.email || 'SRE_SYSTEM',
+          action: 'SQL_ERROR',
+          table_name: 'local_assets',
+          record_id: term,
+          details: `Exception in scan query: ${err instanceof Error ? err.message : String(err)}`,
+          tenantId: user?._tenantid || 'CICOPAL'
+        });
       } catch (innerErr) {
         console.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);
       }
 
       setSreNotification({
         type: 'error',
-        message: 'Falha no Motor SQLite',
+        message: 'Falha no Motor Dexie',
         subText: `Ocorreu uma exceção física: ${err instanceof Error ? err.message : String(err)}`
       });
     } finally {

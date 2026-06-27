@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { sqliteService } from '../services/sqliteService';
+import { localDb } from '../services/localDbService';
 import { 
   Database, 
   Trash2, 
@@ -38,18 +38,12 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
         addLog(`[SRE GESTON] Executando diagnóstico estrito de barramento...`);
         
         // Count assets
-        const assetsRes = await sqliteService.executeRaw("SELECT COUNT(*) as count FROM ativos;").catch(() => null);
-        const aCount = assetsRes && assetsRes.values && assetsRes.values[0] 
-          ? Number(assetsRes.values[0].count || assetsRes.values[0]['COUNT(*)'] || 0) 
-          : 0;
+        const aCount = await localDb.assets.count();
         setAssetCount(aCount);
-        addLog(`[SRE GESTON] Ativos armazenados no SQLite local: ${aCount}`);
+        addLog(`[SRE GESTON] Ativos armazenados no Dexie local: ${aCount}`);
 
         // Count audit logs
-        const logsRes = await sqliteService.executeRaw("SELECT COUNT(*) as count FROM AUDIT_LOG;").catch(() => null);
-        const lCount = logsRes && logsRes.values && logsRes.values[0] 
-          ? Number(logsRes.values[0].count || logsRes.values[0]['COUNT(*)'] || 0) 
-          : 0;
+        const lCount = await localDb.auditLogs.count();
         setLogCount(lCount);
         addLog(`[SRE GESTON] Eventos de Auditoria gravados: ${lCount}`);
         
@@ -81,9 +75,8 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
         await onResetDatabase();
       } else {
         // Fallback robusto se a prop não estiver definida
-        addLog(`[SRE GESTON] Executando comandos diretos DROP TABLE no SQLite...`);
-        await sqliteService.executeRaw("DROP TABLE IF EXISTS ativos;");
-        await sqliteService.executeRaw("DROP TABLE IF EXISTS AUDIT_LOG;");
+        addLog(`[SRE GESTON] Executando purge completo do banco Dexie local...`);
+        await localDb.purgeDatabase();
         addLog(`[SRE GESTON] Tabelas eliminadas fisicamente.`);
         
         localStorage.removeItem('app_database_mode');

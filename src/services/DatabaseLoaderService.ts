@@ -1,7 +1,7 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
-import { sqliteService } from './sqliteService';
+import { db, DexieAsset } from './sqliteService';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -53,49 +53,10 @@ function getRowValue(row: AtivoPlanilha, ...keys: string[]): string | number | b
 }
 
 export class DatabaseLoaderService {
-  private BATCH_SIZE = 200;
+  private BATCH_SIZE = 1000;
 
   /**
-   * Executa uma operação assíncrona com backoff exponencial simples para mitigar falhas temporárias e de conexão.
-   */
-  private async retryWithBackoff<T>(
-    operation: () => Promise<T>, 
-    maxRetries: number = 3, 
-    baseDelayMs: number = 1000
-  ): Promise<T> {
-    let attempt = 0;
-    while (attempt <= maxRetries) {
-      try {
-        return await operation();
-      } catch (error: unknown) {
-        attempt++;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const isConnectionError = errorMessage.includes('No available connection') || errorMessage.includes('database is locked');
-        
-        if (attempt > maxRetries) {
-          console.error(`>>> [SRE FATAL] Operação falhou após ${maxRetries} tentativas. Erro final: ${errorMessage}`);
-          throw error;
-        }
-
-        if (isConnectionError) {
-          console.warn(`>>> [SRE RETRY] Falha de conexão SQLite detectada (Tentativa ${attempt}/${maxRetries}). Purgando barramento e re-tentando em ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
-          try {
-            await sqliteService.forcePurgeAndConnect();
-          } catch (purgeErr) {
-            console.error('>>> [SRE PURGE ERR] Falha ao tentar purgar conexões:', purgeErr);
-          }
-        } else {
-          console.warn(`>>> [SRE RETRY] Falha na operação SQLite (Tentativa ${attempt}/${maxRetries}). Erro: ${errorMessage}`);
-        }
-
-        const delay = baseDelayMs * Math.pow(2, attempt - 1);
-        await new Promise(res => setTimeout(res, delay));
-      }
-    }
-  }
-
-  /**
-   * Processa o arquivo físico do Excel (ou CSV/JSON), higieniza os dados e injeta no SQLite via lotes de 200.
+   * Processa o arquivo físico do Excel (ou CSV/JSON), higieniza os dados e injeta no Dexie via lotes de 1000.
    */
   public async processExcelFile(
     file: File,
@@ -153,164 +114,178 @@ export class DatabaseLoaderService {
       throw new Error("A planilha fornecida está vazia ou corrompida.");
     }
 
-    // Garante que o banco de dados nativo está inicializado
-    if (!sqliteService?.isInitialized) {
-      await this.retryWithBackoff(async () => {
-        await sqliteService.init();
-      });
-    }
-
-    // Ativa Flag Global de Isolamento de Carga
-    sqliteService.setImportingMode(true);
-    await this.retryWithBackoff(async () => {
-      await sqliteService.executeRaw("PRAGMA foreign_keys = OFF;");
-    });
-
     let totalInseridos = 0;
     let batchIndex = 0;
 
+    // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
-      // Processamento em lotes de 200 (Regra dos 200 Itens)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dirHandle = (window as any).globalSreDirectoryHandle;
+      if (dirHandle) {
+        const fileHandle = await dirHandle.getFileHandle(`PLANILHA_${unitId.toUpperCase()}.json`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(rawRows));
+        await writable.close();
+        console.log(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
+      }
+    } catch (ioErr) {
+      console.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
+    }
+
+    try {
+      // Processamento em lotes de 1000 (Chunking)
       const totalRows = rawRows.length;
       for (let i = 0; i < totalRows; i += this.BATCH_SIZE) {
         batchIndex++;
         const chunk = rawRows.slice(i, Math.min(i + this.BATCH_SIZE, totalRows));
-        
-        await this.retryWithBackoff(async () => {
-          for (const row of chunk) {
-            // Normalização de chaves flexíveis para garantir suporte a padrões distintos
-            const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
-            const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+        const assetsToInsert: DexieAsset[] = [];
+        const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
-            const finalId = tagSanitizada;
-            const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim();
-            const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim();
-            const itemDesc = String(
-              getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
-            )?.trim();
-            const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
-            const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-            const contaContabil = String(
-              getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA'
-            )?.trim();
-            const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
+        for (const row of chunk) {
+          // Normalização de chaves flexíveis para garantir suporte a padrões distintos
+          const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
+          const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-            const serialVal = String(getRowValue(row, 'serial') || '')?.trim();
-            const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
-            const cnpjVal = String(getRowValue(row, 'cnpj') || '')?.trim();
-            const fornecedorVal = String(getRowValue(row, 'nomefornecedor', 'fornecedor') || '')?.trim();
-            const nfVal = String(getRowValue(row, 'notafiscal') || '')?.trim();
-            const finalEndereco = String(
-              getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição') || ''
-            )?.trim();
-            const subregVal = String(getRowValue(row, 'subreg') || '')?.trim();
-            const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
-            const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
-            const centrodecustoVal = String(getRowValue(row, 'centrodecusto', 'centro_custo') || '')?.trim();
-            const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
-            const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
-            const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
-            const sn3RecnoVal = (sn3RecnoRaw !== undefined && sn3RecnoRaw !== null && !isNaN(Number(sn3RecnoRaw))) ? Number(sn3RecnoRaw) : null;
+          const finalId = tagSanitizada;
+          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim().toUpperCase();
+          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim().toUpperCase();
+          const itemDesc = String(
+            getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
+          )?.trim();
+          const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
+          const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
+          const contaContabil = String(
+            getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA'
+          )?.trim();
+          const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
 
-            // HIGIENIZAÇÃO CONTÁBIL EXIGIDA PELO LAUDO SRE: Higienização de Valor de Aquisição
-            let vlrAquisicSanitizado = 0;
-            let precisaLogarErro = false;
-            const valorOriginalRaw = getRowValue(row, 'vlraquisic');
+          const serialVal = String(getRowValue(row, 'serial', 'serial_number') || '')?.trim().toUpperCase();
+          const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
+          const cnpjVal = String(getRowValue(row, 'cnpj') || '')?.trim();
+          const fornecedorVal = String(getRowValue(row, 'nomefornecedor', 'fornecedor') || '')?.trim();
+          const nfVal = String(getRowValue(row, 'notafiscal') || '')?.trim();
+          const finalEndereco = String(
+            getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição') || ''
+          )?.trim();
+          const subregVal = String(getRowValue(row, 'subreg') || '')?.trim();
+          const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
+          const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
+          const centrodecustoVal = String(getRowValue(row, 'centrodecusto', 'centro_custo') || '')?.trim();
+          const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
+          const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
+          const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
+          const sn3RecnoVal = (sn3RecnoRaw !== undefined && sn3RecnoRaw !== null && !isNaN(Number(sn3RecnoRaw))) ? Number(sn3RecnoRaw) : null;
 
-            if (valorOriginalRaw !== undefined && valorOriginalRaw !== null) {
-              if (typeof valorOriginalRaw === 'number') {
-                if (isNaN(valorOriginalRaw)) {
-                  vlrAquisicSanitizado = 0;
-                  precisaLogarErro = true;
-                } else {
-                  vlrAquisicSanitizado = valorOriginalRaw;
-                }
+          // HIGIENIZAÇÃO CONTÁBIL EXIGIDA PELO LAUDO SRE: Higienização de Valor de Aquisição
+          let vlrAquisicSanitizado = 0;
+          let precisaLogarErro = false;
+          const valorOriginalRaw = getRowValue(row, 'vlraquisic');
+
+          if (valorOriginalRaw !== undefined && valorOriginalRaw !== null) {
+            if (typeof valorOriginalRaw === 'number') {
+              if (isNaN(valorOriginalRaw)) {
+                vlrAquisicSanitizado = 0;
+                precisaLogarErro = true;
               } else {
-                // Remove R$, espaços e ajusta separadores (Padrão BR -> Float JS)
-                const cleanStr = String(valorOriginalRaw).replace(/[R$\s]/gi, '');
-                if (cleanStr.includes(',') && cleanStr.includes('.')) {
-                  vlrAquisicSanitizado = parseFloat(cleanStr.replace(/\./g, '').replace(/,/g, '.'));
-                } else if (cleanStr.includes(',')) {
-                  vlrAquisicSanitizado = parseFloat(cleanStr.replace(/,/g, '.'));
-                } else {
-                  vlrAquisicSanitizado = parseFloat(cleanStr);
-                }
+                vlrAquisicSanitizado = valorOriginalRaw;
+              }
+            } else {
+              const cleanStr = String(valorOriginalRaw).replace(/[R$\s]/gi, '');
+              if (cleanStr.includes(',') && cleanStr.includes('.')) {
+                vlrAquisicSanitizado = parseFloat(cleanStr.replace(/\./g, '').replace(/,/g, '.'));
+              } else if (cleanStr.includes(',')) {
+                vlrAquisicSanitizado = parseFloat(cleanStr.replace(/,/g, '.'));
+              } else {
+                vlrAquisicSanitizado = parseFloat(cleanStr);
+              }
 
-                if (isNaN(vlrAquisicSanitizado)) {
-                  vlrAquisicSanitizado = 0;
-                  precisaLogarErro = true;
-                }
+              if (isNaN(vlrAquisicSanitizado)) {
+                vlrAquisicSanitizado = 0;
+                precisaLogarErro = true;
+              }
+            }
+          }
+
+          if (precisaLogarErro) {
+            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
+          }
+
+          const assetObj: DexieAsset = {
+            id: finalId,
+            tenantId: finalTenantId,
+            _tenantid: finalTenantId,
+            filial: finalFilial,
+            _unitid: finalFilial,
+            status: statusVal,
+            etiqueta: tagSanitizada,
+            tag: tagSanitizada,
+            qt: Number(finalQt || 1),
+            descricaodoativo: itemDesc,
+            serial: serialVal || null,
+            dataaqusic: dataaqVal || null,
+            cnpj: cnpjVal || null,
+            nomefornecedor: fornecedorVal || null,
+            notafiscal: nfVal || null,
+            endereco: finalEndereco || null,
+            registro: finalRegistro || null,
+            subreg: subregVal || null,
+            databaixa: databaixaVal || null,
+            contacontabil: contaContabil || null,
+            primarykey: primarykeyVal || finalId,
+            centrodecusto: centrodecustoVal || null,
+            vlraquisic: vlrAquisicSanitizado,
+            sn1_recno: sn1RecnoVal,
+            sn3_recno: sn3RecnoVal,
+            _is_synced: 0,
+            _is_deleted: 0,
+            _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
+            _plaquetado: 0,
+            _aprovado: 0,
+            _isNew: 0,
+            _is_unitized: 0,
+            _is_divergent_baixa: 0,
+            _history: null,
+            DE_PARA: null,
+            _photoUrl: null,
+            gps_lat: null,
+            gps_lng: null,
+            currentCampaignId: null
+          };
+
+          assetsToInsert.push(assetObj);
+        }
+
+        // Transação ACID atômica do Dexie com Fail-Fast
+        try {
+          await db.transaction('rw', [db.local_assets, db.audit_logs], async () => {
+            // Validação estrita de chaves primárias antes de inserir
+            for (const asset of assetsToInsert) {
+              if (!asset.id || !asset.primarykey) {
+                throw new Error("Violência de chave de integridade: Chave primária nula ou vazia.");
               }
             }
 
-            // Se o valor foi rebaixado a zero, dispara logs de auditoria (bypassing importing batch block)
-            if (precisaLogarErro) {
-              await sqliteService.logAuditEvent(
-                activeEmail,
-                'CORRECTION_VLR_INIT_ZERO',
-                'ativos',
-                tagSanitizada,
-                JSON.stringify({
-                  msg: "Saneamento de valor de aquisição corrompido para '0' na importação Excel",
-                  valorOriginal: valorOriginalRaw
-                })
-              ).catch(err => console.error(">>> [SRE ERR] Falha ao gravar log no DatabaseLoaderService:", err));
+            await db.local_assets.bulkPut(assetsToInsert);
+
+            // Grava logs de correção se houverem
+            for (const corr of correctionsToLog) {
+              const auditId = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+              await db.audit_logs.put({
+                id: auditId,
+                usuario: activeEmail,
+                acao: 'CORRECTION_VLR_INIT_ZERO',
+                tabela: 'ativos',
+                registro_id: corr.id,
+                details: `Saneamento de valor de aquisição corrompido para '0' na importação Excel. Valor original: ${corr.originalValue}`,
+                delta: JSON.stringify({ valorOriginal: corr.originalValue }),
+                updated_at: new Date().toISOString()
+              });
             }
-
-            // Ingestão direta na camada nativa
-            await sqliteService.inserirAtivoDireto(
-              tagSanitizada,
-              vlrAquisicSanitizado,
-              finalFilial,
-              itemDesc,
-              finalRegistro,
-              finalQt,
-              finalTenantId,
-              finalId,
-              statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
-              0,
-              0,
-              finalEndereco
-            );
-
-            // Atualizações secundárias de suporte à conta_contabil, status, e todos os campos industriais na tabela física
-            await sqliteService.execute(
-              `UPDATE ativos SET 
-                contacontabil = ?, 
-                status = ?, 
-                serial = ?, 
-                dataaqusic = ?, 
-                cnpj = ?, 
-                nomefornecedor = ?, 
-                notafiscal = ?, 
-                endereco = ?, 
-                subreg = ?, 
-                databaixa = ?, 
-                primarykey = ?, 
-                centrodecusto = ?, 
-                sn1_recno = ?, 
-                sn3_recno = ? 
-               WHERE id = ?;`,
-              [
-                contaContabil, 
-                statusVal, 
-                serialVal, 
-                dataaqVal, 
-                cnpjVal, 
-                fornecedorVal, 
-                nfVal, 
-                finalEndereco, 
-                subregVal, 
-                databaixaVal, 
-                primarykeyVal, 
-                centrodecustoVal, 
-                sn1RecnoVal !== undefined && sn1RecnoVal !== null ? Number(sn1RecnoVal) : null,
-                sn3RecnoVal !== undefined && sn3RecnoVal !== null ? Number(sn3RecnoVal) : null,
-                finalId
-              ]
-            ).catch(err => console.error(">>> [SQL ERR] Falha ao atualizar dados adicionais:", err));
-          }
-        }, 3, 500);
+          });
+        } catch (txErr) {
+          console.error(">>> [FATAL_IMPORT_CRASH] Falha crítica de integridade na transação Dexie:", txErr);
+          throw new Error(`[FATAL_IMPORT_CRASH] Falha de integridade do lote: ${txErr instanceof Error ? txErr.message : String(txErr)}`);
+        }
 
         totalInseridos += chunk.length;
 
@@ -318,13 +293,8 @@ export class DatabaseLoaderService {
         onProgress(batchIndex, chunk.length, totalInseridos, totalRows);
         
         // Pequeno delay artificial para renderização da esteira reativa
-        await new Promise(res => setTimeout(res, 40));
+        await new Promise(res => setTimeout(res, 1));
       }
-
-      // Gravação no disco físico (Dump Único) com Backoff Exponencial
-      await this.retryWithBackoff(async () => {
-        await sqliteService.saveDatabase();
-      }, 3, 1000);
 
     } catch (importError: unknown) {
       const err = importError instanceof Error ? importError : new Error(String(importError));
@@ -335,11 +305,7 @@ export class DatabaseLoaderService {
       console.error(">>> [CRITICAL IMPORT ERROR] Falha na gravação do lote:", JSON.stringify(errorMeta));
       throw importError;
     } finally {
-      // Restabelece isolamento e PRAGMA de chaves
-      sqliteService.setImportingMode(false);
-      await this.retryWithBackoff(async () => {
-        await sqliteService.executeRaw("PRAGMA foreign_keys = ON;");
-      }, 2, 500).catch(() => {});
+      // Isolamento restabelecido sem dependência de sqliteService
     }
 
     return totalInseridos;
@@ -426,34 +392,41 @@ export class DatabaseLoaderService {
     const totalRows = totalPlanilha;
     let totalInserted = 0;
 
-    // Garante inicialização
-    if (!sqliteService.isInitialized) {
-      await sqliteService.init();
+    // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dirHandle = (window as any).globalSreDirectoryHandle;
+      if (dirHandle) {
+        const fileHandle = await dirHandle.getFileHandle(`PLANILHA_${unitId.toUpperCase()}.json`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(rawExcelData));
+        await writable.close();
+        console.log(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
+      }
+    } catch (ioErr) {
+      console.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
     }
 
-    // Ativa isolamento e PRAGMA de chaves
-    sqliteService.setImportingMode(true);
-    await sqliteService.executeRaw("PRAGMA foreign_keys = OFF;");
-
     try {
-      const BATCH_SIZE = 200;
+      const BATCH_SIZE = 1000;
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
-        const assetsToInsert: Record<string, unknown>[] = [];
+        const assetsToInsert: DexieAsset[] = [];
+        const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
         for (const row of chunk) {
           const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim();
-          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim();
+          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim().toUpperCase();
+          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim().toUpperCase();
           const itemDesc = String(getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`)?.trim();
           const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
           const contaContabil = String(getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA')?.trim();
           const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
 
-          const serialVal = String(getRowValue(row, 'serial') || '')?.trim();
+          const serialVal = String(getRowValue(row, 'serial', 'serial_number') || '')?.trim().toUpperCase();
           const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
           const cnpjVal = String(getRowValue(row, 'cnpj') || '')?.trim();
           const fornecedorVal = String(getRowValue(row, 'nomefornecedor', 'fornecedor') || '')?.trim();
@@ -495,24 +468,12 @@ export class DatabaseLoaderService {
           }
 
           if (precisaLogarErro) {
-            await sqliteService.logAuditEvent(
-              activeEmail,
-              'CORRECTION_VLR_INIT_ZERO',
-              'ativos',
-              tagSanitizada,
-              JSON.stringify({
-                msg: "Saneamento de valor de aquisição corrompido para '0' na importação Excel",
-                valorOriginal: valorOriginalRaw
-              })
-            ).catch(() => {});
+            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
           }
 
-          // Todos os ativos da planilha, sem exceção de conta contábil, devem ser inseridos no banco local com a flag padrão _is_synced = 0
-          const finalIsSynced = 0;
-
-          const assetObj = {
+          const assetObj: DexieAsset = {
             id: finalId,
-            tenantid: finalTenantId,
+            tenantId: finalTenantId,
             _tenantid: finalTenantId,
             filial: finalFilial,
             _unitid: finalFilial,
@@ -521,22 +482,22 @@ export class DatabaseLoaderService {
             tag: tagSanitizada,
             qt: Number(finalQt || 1),
             descricaodoativo: itemDesc,
-            serial: serialVal,
-            dataaqusic: dataaqVal,
-            cnpj: cnpjVal,
-            nomefornecedor: fornecedorVal,
-            notafiscal: nfVal,
-            endereco: finalEndereco,
-            registro: finalRegistro,
-            subreg: subregVal,
-            databaixa: databaixaVal,
-            contacontabil: contaContabil,
+            serial: serialVal || null,
+            dataaqusic: dataaqVal || null,
+            cnpj: cnpjVal || null,
+            nomefornecedor: fornecedorVal || null,
+            notafiscal: nfVal || null,
+            endereco: finalEndereco || null,
+            registro: finalRegistro || null,
+            subreg: subregVal || null,
+            databaixa: databaixaVal || null,
+            contacontabil: contaContabil || null,
             primarykey: primarykeyVal || finalId,
-            centrodecusto: centrodecustoVal,
+            centrodecusto: centrodecustoVal || null,
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
             sn3_recno: sn3RecnoVal,
-            _is_synced: finalIsSynced,
+            _is_synced: 0,
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
             _plaquetado: 0,
@@ -548,16 +509,44 @@ export class DatabaseLoaderService {
             DE_PARA: null,
             _photoUrl: null,
             gps_lat: null,
-            gps_lng: null
+            gps_lng: null,
+            currentCampaignId: null
           };
 
           assetsToInsert.push(assetObj);
         }
 
-        // DESCARGA NO ARMAZENAMENTO LOCAL (Sem Perda em RAM)
-        await this.retryWithBackoff(async () => {
-          await sqliteService.bulkInsertAssetsOfflineFirst(assetsToInsert);
-        }, 3, 500);
+        // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
+        try {
+          await db.transaction('rw', [db.local_assets, db.audit_logs], async () => {
+            // Validação estrita antes da gravação
+            for (const asset of assetsToInsert) {
+              if (!asset.id || !asset.primarykey) {
+                throw new Error("Violência de chave de integridade: Chave primária nula ou vazia.");
+              }
+            }
+
+            await db.local_assets.bulkPut(assetsToInsert);
+
+            // Gravação dos logs de correção
+            for (const corr of correctionsToLog) {
+              const auditId = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+              await db.audit_logs.put({
+                id: auditId,
+                usuario: activeEmail,
+                acao: 'CORRECTION_VLR_INIT_ZERO',
+                tabela: 'ativos',
+                registro_id: corr.id,
+                details: `Saneamento de valor de aquisição corrompido para '0' na importação Excel. Valor original: ${corr.originalValue}`,
+                delta: JSON.stringify({ valorOriginal: corr.originalValue }),
+                updated_at: new Date().toISOString()
+              });
+            }
+          });
+        } catch (txErr) {
+          console.error(">>> [FATAL_IMPORT_CRASH] Falha de integridade na transação em lote:", txErr);
+          throw new Error(`[FATAL_IMPORT_CRASH] Falha de integridade do lote: ${txErr instanceof Error ? txErr.message : String(txErr)}`);
+        }
 
         totalInserted += chunk.length;
         if (onProgress) {
@@ -565,23 +554,12 @@ export class DatabaseLoaderService {
         }
 
         // Pequeno delay artificial para renderização da esteira reativa
-        await new Promise(res => setTimeout(res, 30));
+        await new Promise(res => setTimeout(res, 1));
       }
-
-      // Gravação no disco físico (Dump Único)
-      await this.retryWithBackoff(async () => {
-        await sqliteService.saveDatabase();
-      }, 3, 1000);
 
     } finally {
       // COLETA DE LIXO (OOM Guard Ativo): Libera memória e anula referências
       rawExcelData = null;
-      
-      // Restabelece isolamento e PRAGMA de chaves
-      sqliteService.setImportingMode(false);
-      await this.retryWithBackoff(async () => {
-        await sqliteService.executeRaw("PRAGMA foreign_keys = ON;");
-      }, 2, 500).catch(() => {});
     }
 
     return totalInserted;

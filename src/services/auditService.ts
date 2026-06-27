@@ -1,9 +1,9 @@
-import { sqliteService } from './sqliteService';
+import { localDb } from './localDbService';
 import { Asset } from '../types';
 
 export const auditService = {
   /**
-   * Compara o ativo original com o editado, calcula o delta e grava o log no SQLite (AUDIT_LOG)
+   * Compara o ativo original com o editado, calcula o delta e grava o log no Dexie (AUDIT_LOG)
    */
   logAssetChange: async (
     userEmail: string,
@@ -32,30 +32,22 @@ export const auditService = {
     if (!hasChanges) return { hasChanges: false };
 
     try {
-      const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      // GBR v24.50: Usando o nome correto da tabela AUDIT_LOG e suas colunas correspondentes
-      const query = `
-        INSERT INTO AUDIT_LOG (
-          id, usuario, acao, tabela, registro_id, 
-          details, delta, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
       const details = `Edição do ativo Etiqueta: ${updatedAsset.ETIQUETA || 'Sem Plaqueta'}`;
-      const deltaPayload = JSON.stringify({ old: oldData, new: newData });
-
-      await sqliteService.execute(query, [
-        logId,
-        userEmail,
-        'UPDATE',
-        'ativos', // A tabela de ativos no SQLite é 'ativos'
-        updatedAsset.id,
+      
+      await localDb.auditLogs.add({
+        timestamp: new Date().toISOString(),
+        user: userEmail,
+        user_email: userEmail,
+        action: 'UPDATE',
+        table_name: 'ativos',
+        record_id: updatedAsset.id || updatedAsset.primarykey,
         details,
-        deltaPayload,
-        new Date().toISOString()
-      ]);
+        old_data: oldData,
+        new_data: newData,
+        tenantId: updatedAsset.tenantId || updatedAsset._tenantid || 'CICOPAL'
+      });
 
-      console.log(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id}`);
+      console.log(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id || updatedAsset.primarykey}`);
       return { hasChanges: true };
     } catch (error) {
       console.error(">>> [Audit Error] Falha ao registrar trilha de auditoria local:", error);
@@ -65,3 +57,4 @@ export const auditService = {
 };
 
 export default auditService;
+

@@ -1,7 +1,7 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
-import { sqliteService } from './sqliteService';
+import { sqliteService, db } from './sqliteService';
 
 export interface UserSessionData {
   id: string;
@@ -133,61 +133,7 @@ const fallbackStore = localforage.createInstance({
   storeName: 'assets_fallback'
 });
 
-const executeRawQuerySafe = async (sql: string, params: (string | number | boolean | null)[] = []): Promise<Record<string, unknown>[]> => {
-  try {
-    const results = await sqliteService.query(sql, params);
-    if (results && results.length > 0) {
-      return results;
-    }
-  } catch (err) {
-    console.warn(">>> [Sync SQL Fallback] Erro ao executar query interna no SQLite, tentando fallbackStore:", err);
-  }
 
-  // Fallback to localforage
-  try {
-    const sqlUpper = sql.toUpperCase();
-    if (sqlUpper.includes("FROM ATIVOS") || sqlUpper.includes("FROM ASSETS") || sqlUpper.includes("FROM ASSETS_COUNTING")) {
-      console.log(">>> [Sync SQL Fallback Store] Lendo ativos do fallbackStore localforage...");
-      let assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
-      
-      // Filter and map fields
-      assets = assets.map(asset => {
-        const isSynced = asset._is_synced === 1 || asset._is_synced === true;
-        return {
-          ...asset,
-          _is_synced: isSynced ? 1 : 0,
-          sync_status: isSynced ? 'SYNCED' : 'PENDING'
-        };
-      });
-
-      if (sqlUpper.includes("WHERE SYNC_STATUS = 'PENDING'") || sqlUpper.includes("WHERE _IS_SYNCED = 0")) {
-        assets = assets.filter(a => a.sync_status === 'PENDING' || a._is_synced === 0);
-      }
-
-      if (sqlUpper.includes("WHERE _IS_DELETED = 0")) {
-        assets = assets.filter(a => a._is_deleted !== 1 && a._is_deleted !== true);
-      }
-
-      if (params.length > 0) {
-        const tenantId = params[0] ? String(params[0]).trim() : '';
-        const filial = params[1] ? String(params[1]).trim() : '';
-        if (tenantId) {
-          assets = assets.filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenantId.toUpperCase());
-        }
-        if (filial) {
-          assets = assets.filter(a => String(a.filial || a._unitid || '').trim().toUpperCase() === filial.toUpperCase());
-        }
-      }
-
-      console.log(`>>> [Sync SQL Fallback Store] Retornando ${assets.length} ativos filtrados do fallbackStore.`);
-      return assets;
-    }
-  } catch (fallbackErr) {
-    console.error(">>> [Sync SQL Fallback Store] Falha catastrófica no fallbackStore:", fallbackErr);
-  }
-
-  return [];
-};
 
 export interface CampaignSyncItem {
   id: string;
@@ -378,13 +324,11 @@ export const photoSyncManager = {
             .from('asset-photos')
             .getPublicUrl(filePath);
 
-          // Atualização na tabela oficial 'ativos' com nomenclatura unificada canonical
-          const updateAssetQuery = `
-            UPDATE ativos 
-            SET _photoUrl = ?, _is_synced = 1 
-            WHERE primarykey = ? OR id = ?
-          `;
-          await sqliteService.execute(updateAssetQuery, [publicUrl, item.assetId, item.assetId]);
+          // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro
+          const assetKey = String(item.assetId).trim();
+          await db.ativos.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
+          await db.local_assets.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
+          await db.assets.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
 
           await photoQueueStore.removeItem(key);
           uploadCount++;
@@ -441,17 +385,16 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
-      // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0'
-      const pendingRecords = await sqliteService.query(
-        `SELECT id, tenantId, _tenantid, filial, _unitid, status, etiqueta, qt, descricaodoativo, serial, dataaqusic, cnpj, 
-                nomefornecedor, notafiscal, endereco, registro, subreg, databaixa, contacontabil, 
-                primarykey, centrodecusto, vlraquisic, sn1_recno, sn3_recno, gps_lat, gps_lng
-         FROM local_assets
-         WHERE _is_synced = 0 AND (tenantId = ? OR _tenantid = ?) AND (filial = ? OR _unitid = ?);`,
-        [tenantIdClean, tenantIdClean, filialClean, filialClean]
-      );
+      // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0' via Dexie API
+      const pendingRecords = await db.local_assets.where('_is_synced').equals(0).toArray();
 
-      const records = pendingRecords || [];
+      // Filtro de Multi-Tenancy e Unidade com custo documentado para campos não indexados (apenas filial e _is_synced são indexados no store da v1)
+      const records = (pendingRecords || []).filter(record => {
+        const isTenantMatch = String(record.tenantId || record._tenantid || '').trim().toUpperCase() === tenantIdClean.toUpperCase();
+        const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean.toUpperCase();
+        return isTenantMatch && isFilialMatch;
+      });
+
       if (records.length === 0) {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
@@ -479,24 +422,43 @@ const _syncService = {
           continue;
         }
 
-        // 3. ISOLAMENTO EM CASO DE FALHA DE REDE OU RLS (401/403)
+        // 3. ISOLAMENTO EM CASO DE FALHA DE REDE OU RLS (401/403) COM TRATAMENTO RESILIENTE
         try {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
-          // 2. VETO A PAYLOADS POLUÍDOS E TRANCA _tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas
+          // 2. VETO A PAYLOADS POLUÍDOS E TRANCA _tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas (21 índices contábeis)
           const payload = {
             _tenantid: tenantIdClean,
             _unitid: filialClean,
+            tenantId: tenantIdClean,
+            filial: filialClean,
+            status: record.status !== undefined && record.status !== null ? String(record.status).trim() : 'ATIVO',
             etiqueta: record.etiqueta !== undefined && record.etiqueta !== null ? String(record.etiqueta).trim() : '',
-            qt: Number(record.qt) || 1,
+            qt: record.qt !== undefined && record.qt !== null ? Number(record.qt) : 1,
             descricaodoativo: record.descricaodoativo !== undefined && record.descricaodoativo !== null ? String(record.descricaodoativo).trim() : '',
             serial: record.serial !== undefined && record.serial !== null ? String(record.serial).trim() : null,
+            dataaqusic: record.dataaqusic !== undefined && record.dataaqusic !== null ? String(record.dataaqusic).trim() : null,
+            cnpj: record.cnpj !== undefined && record.cnpj !== null ? String(record.cnpj).trim() : null,
+            nomefornecedor: record.nomefornecedor !== undefined && record.nomefornecedor !== null ? String(record.nomefornecedor).trim() : null,
+            notafiscal: record.notafiscal !== undefined && record.notafiscal !== null ? String(record.notafiscal).trim() : null,
+            endereco: record.endereco !== undefined && record.endereco !== null ? String(record.endereco).trim() : null,
+            registro: record.registro !== undefined && record.registro !== null ? String(record.registro).trim() : null,
+            subreg: record.subreg !== undefined && record.subreg !== null ? String(record.subreg).trim() : null,
+            databaixa: record.databaixa !== undefined && record.databaixa !== null ? String(record.databaixa).trim() : null,
+            contacontabil: record.contacontabil !== undefined && record.contacontabil !== null ? String(record.contacontabil).trim() : null,
             primarykey: String(pKey).trim(),
-            vlraquisic: Number(record.vlraquisic) || 0
+            centrodecusto: record.centrodecusto !== undefined && record.centrodecusto !== null ? String(record.centrodecusto).trim() : null,
+            vlraquisic: record.vlraquisic !== undefined && record.vlraquisic !== null ? Number(record.vlraquisic) : 0,
+            sn1_recno: record.sn1_recno !== undefined && record.sn1_recno !== null ? Number(record.sn1_recno) : null,
+            sn3_recno: record.sn3_recno !== undefined && record.sn3_recno !== null ? Number(record.sn3_recno) : null,
+            DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
+            gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
+            gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,
+            currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null
           };
 
           const { error: supabaseErr } = await supabase
-            .from('assets_analytics')
+            .from('assets')
             .upsert(payload);
 
           if (!supabaseErr) {
@@ -534,41 +496,31 @@ const _syncService = {
         }
       }
 
-      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente em todas as tabelas espelho
+      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente via Dexie sem usar SQL
       if (syncedPrimaryKeys.length > 0) {
-        console.log(`>>> [Sync ACID Engine] Processando atualização local sequencial para ${syncedPrimaryKeys.length} registros...`);
+        console.log(`>>> [Sync ACID Engine] Processando atualização local sequencial via Dexie para ${syncedPrimaryKeys.length} registros...`);
 
-        for (let m = 0; m < syncedPrimaryKeys.length; m++) {
-          const keyToUpdate = syncedPrimaryKeys[m];
-          await sqliteService.execute(
-            "UPDATE local_assets SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
-            [keyToUpdate, keyToUpdate]
-          );
-          await sqliteService.execute(
-            "UPDATE ativos SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
-            [keyToUpdate, keyToUpdate]
-          );
-          await sqliteService.execute(
-            "UPDATE assets SET _is_synced = 1 WHERE primarykey = ? OR id = ?;",
-            [keyToUpdate, keyToUpdate]
-          );
-        }
+        await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+          for (let m = 0; m < syncedPrimaryKeys.length; m++) {
+            const keyToUpdate = syncedPrimaryKeys[m];
+            await db.local_assets.update(keyToUpdate, { _is_synced: 1 });
+            await db.ativos.update(keyToUpdate, { _is_synced: 1 });
+            await db.assets.update(keyToUpdate, { _is_synced: 1 });
+          }
+        });
         
-        // Realiza um único dump unificado após atualizar os estados de sincronia locais
-        await sqliteService.saveDatabase();
-        console.log(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso.`);
+        console.log(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso via Dexie.`);
       }
 
-      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo para evitar entupimento de disco
+      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco
       try {
-        console.log(">>> [Disk Saturation Guard] Executando expurgo de logs antigos...");
-        try {
-          await sqliteService.execute('DELETE FROM audit_logs WHERE created_at < date("now", "-7 days");');
-        } catch {
-          // Fallback caso a coluna seja updated_at ao invés de created_at
-          await sqliteService.execute('DELETE FROM audit_logs WHERE updated_at < date("now", "-7 days");');
-        }
-        console.log(">>> [Disk Saturation Guard] Expurgo concluído com sucesso.");
+        console.log(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const isoString = sevenDaysAgo.toISOString();
+        
+        await db.audit_logs.where('updated_at').below(isoString).delete();
+        console.log(">>> [Disk Saturation Guard] Expurgo concluído com sucesso via Dexie.");
       } catch (logErr) {
         console.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
       }
@@ -599,17 +551,17 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
-      const activeData = await executeRawQuerySafe(
-        "SELECT * FROM assets_counting WHERE tenantId = ? AND filial = ?;",
-        [tenantIdClean, filialClean]
+      // Busca local_assets onde filial é igual a filialClean, e filtra por tenantId em memória (apenas filial é indexado)
+      const list = await db.local_assets.where('filial').equals(filialClean).toArray();
+      const filtered = list.filter(item => 
+        String(item.tenantId || item._tenantid || '').trim().toUpperCase() === tenantIdClean.toUpperCase()
       );
       
-      const values = activeData || [];
-      const backupKey = `gbr_backup_${tenantIdClean}_${filialClean}`;
-      localStorage.setItem(backupKey, JSON.stringify(values));
+      const backupKey = `gbr_backup_${tenantIdClean.toUpperCase()}_${filialClean.toUpperCase()}`;
+      localStorage.setItem(backupKey, JSON.stringify(filtered));
       return true;
     } catch (e) {
-      console.error(">>> [Contingency Guard] Erro ao consolidar rascunho físico em localStorage:", e);
+      console.error(">>> [Contingency Guard] Erro ao consolidar rascunho físico em localStorage via Dexie:", e);
       return false;
     }
   }
@@ -623,7 +575,7 @@ export const processDataSyncQueue = async (): Promise<SyncResult> => {
 };
 
 /**
- * Retorna o número de ativos aguardando sincronização com a nuvem (da tabela unificada assets_counting)
+ * Retorna o número de ativos aguardando sincronização com a nuvem via Dexie API
  */
 export const getUnsyncedAssetsCount = async (): Promise<number> => {
    try {
@@ -631,18 +583,22 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
      const rawTenant = user ? user.tenantId : null;
      const rawFilial = sessionStorage.getItem('filial');
      
-     let sql = "SELECT COUNT(*) as total FROM local_assets WHERE _is_synced = 0";
-     const params: (string | number)[] = [];
+     const unsynced = await db.local_assets.where('_is_synced').equals(0).toArray();
      
      if (user && !isStringInvalid(rawTenant) && !isStringInvalid(rawFilial)) {
-       sql += " AND (tenantId = ? OR _tenantid = ?) AND (filial = ? OR _unitid = ?)";
-       params.push(String(rawTenant).trim(), String(rawTenant).trim(), String(rawFilial).trim(), String(rawFilial).trim());
+       const tenantIdClean = String(rawTenant).trim().toUpperCase();
+       const filialClean = String(rawFilial).trim().toUpperCase();
+       const filtered = unsynced.filter(record => {
+         const isTenantMatch = String(record.tenantId || record._tenantid || '').trim().toUpperCase() === tenantIdClean;
+         const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean;
+         return isTenantMatch && isFilialMatch;
+       });
+       return filtered.length;
      }
      
-     const result = await sqliteService.query(sql, params);
-     return Number(result[0]?.total || 0);
+     return unsynced.length;
    } catch (e) {
-     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela local_assets, tentando fallbackStore:", e);
+     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela local_assets via Dexie, tentando fallbackStore:", e);
      try {
        const assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
        const unsynced = assets.filter(a => a._is_synced === 0 || a._is_synced === false || a.sync_status === 'PENDING');

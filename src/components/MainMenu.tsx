@@ -590,6 +590,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center mr-4 border border-amber-100"><DatabaseZap size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Carga Física</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Cargas Internas</p>
+                </div>
+              </button>
+
               <button 
                 onClick={handleCheckIntegrity}
                 disabled={isCheckingIntegrity}

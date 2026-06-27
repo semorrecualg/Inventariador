@@ -16,9 +16,12 @@ import {
   BatteryWarning,
   Loader2
 } from 'lucide-react';
-import { databaseLoaderService } from '../services/DatabaseLoaderService';
-import { sqliteService } from '../services/sqliteService';
+import { sqliteService, db } from '../services/sqliteService';
 import { Asset } from '../types';
+import { Device } from '@capacitor/device';
+import { Capacitor } from '@capacitor/core';
+import * as XLSX from 'xlsx';
+import { bulkInsertAssetsOfflineFirst } from '../services/dexieService';
 
 export interface AtivoPlanilha {
   [key: string]: string | number | boolean | null | undefined;
@@ -135,9 +138,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
   onClearDatabase,
   onExecutarSincroniaNuvem,
   onDataLoaded,
-  onConfirmSuccess,
-  currentUnitId,
-  currentTenantId
+  onConfirmSuccess
 }) => {
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -165,6 +166,16 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     e.stopPropagation();
     setDragActive(false);
 
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ('showDirectoryPicker' in window && !(window as any).globalSreDirectoryHandle) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).globalSreDirectoryHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      }
+    } catch (err) {
+      console.warn(">>> [SRE] DirectoryPicker ignorado via Drop.", err);
+    }
+
     if (e.dataTransfer?.files && e.dataTransfer.files[0]) {
       await processFile(e.dataTransfer.files[0]);
     }
@@ -176,7 +187,11 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     }
   };
 
-  const triggerFileInput = () => {
+  const triggerFileInput = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     fileInputRef.current?.click();
   };
 
@@ -205,62 +220,99 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
     setErrorType('generic');
     setProcessedDetails({ processed: 0, total: 0, percentage: 0 });
 
+    // SRE Requirement: Cede o controle para a Main Thread renderizar o Loading antes de congelar no XLSX
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     try {
-      // FECHAMENTO VIOLENTO E PURGA DE THREAD LOCKS NO INÍCIO DA CARGA
-      await sqliteService.forcePurgeAndConnect();
-
-      const tenantid = currentTenantId || user?._tenantid || user?.tenantId || 'CICOPAL';
-      const unitId = currentUnitId || user?._unitid || user?.filial || 'CICOPAL_FILIAL_DEFAULT';
-
-      // Executa o processador industrial com fatiamento rígido de 200 itens e OOM Guard
-      const totalCount = await databaseLoaderService.importExcelBulkData(
-        file,
-        tenantid,
-        unitId,
-        (processedCount, totalCountInFile) => {
-          const totalEstimado = totalCountInFile && totalCountInFile > 0 ? totalCountInFile : 12637;
-          const pctCalculada = Math.min(Math.round((processedCount / totalEstimado) * 100), 99);
-          
-          if (processedCount % 1000 === 0 || processedCount === totalEstimado) {
-            setProcessedDetails({
-              processed: processedCount,
-              total: totalEstimado,
-              percentage: pctCalculada
-            });
+      // 1. BYPASS DE BATERIA: Impeça se < 5% de carga, exceto se for semorr@gmail.com
+      let currentBatteryLevel = 1.0;
+      let isDeviceCharging = true;
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const info = await Device.getBatteryInfo();
+          currentBatteryLevel = info.batteryLevel !== undefined ? info.batteryLevel : 1.0;
+          isDeviceCharging = info.isCharging === true;
+        } else {
+          const nav = navigator as unknown as { getBattery?: () => Promise<{ level: number; charging: boolean }> };
+          if (nav?.getBattery) {
+            const battery = await nav.getBattery();
+            currentBatteryLevel = battery?.level ?? 1.0;
+            isDeviceCharging = battery?.charging ?? true;
           }
         }
-      );
+      } catch (energyErr) {
+        console.warn(">>> [Hardware Check] Falha ao consultar subsistema de energia:", energyErr);
+      }
+
+      const activeEmail = (user?.email || 'semorr@gmail.com').toString().trim().toLowerCase();
+      const isSuperEmail = activeEmail === 'semorr@gmail.com';
+
+      if (currentBatteryLevel < 0.05 && !isDeviceCharging && !isSuperEmail) {
+        throw new Error('Dispositivo com bateria crítica (< 5%). Conecte o carregador para liberar a operação massiva de disco e tente novamente.');
+      }
+
+      // 2. PARSE INDUSTRIAL DA PLANILHA NO CLIENTE VIA XLSX
+      const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result instanceof ArrayBuffer) {
+            resolve(e.target.result);
+          } else {
+            reject(new Error("Falha ao ler o arquivo como ArrayBuffer."));
+          }
+        };
+        reader.onerror = (e) => reject(e);
+        reader.readAsArrayBuffer(file);
+      });
+
+      const workbook = XLSX.read(dataBuffer, { type: "array" });
+      
+      // Respiro para não travar a tela na descompressão
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const firstSheetName = workbook?.SheetNames?.[0];
+      if (!firstSheetName) {
+        throw new Error("Planilha vazia ou inválida.");
+      }
+      const worksheet = workbook.Sheets[firstSheetName];
+      const dadosBrutos = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
+
+      // Respiro após o parse para não estressar o garbage collector abruptamente
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      if (!dadosBrutos || dadosBrutos.length === 0) {
+        throw new Error("A planilha fornecida está vazia ou corrompida.");
+      }
+
+      console.log(`>>> [SRE Ingestão UI] Iniciando gravação física via Dexie.js para ${dadosBrutos.length} registros.`);
+
+      // 3. DISPARO DO LAÇO REAL DE GRAVAÇÃO DEXIE EM LOTES DE 200 REGISTROS
+      await bulkInsertAssetsOfflineFirst(dadosBrutos, user?.email || 'semorr@gmail.com', (progresso) => {
+        setProcessedDetails({
+          processed: Math.round((progresso / 100) * dadosBrutos.length),
+          total: dadosBrutos.length,
+          percentage: progresso
+        });
+      });
 
       // Garante a estabilização visual em 100% apenas após o término físico da transação
       setProcessedDetails({
-        processed: totalCount,
-        total: totalCount,
+        processed: dadosBrutos.length,
+        total: dadosBrutos.length,
         percentage: 100
       });
       
-      // ACIONAMENTO DO COMMITT FÍSICO EM DISCO ANTES DA VALIDAÇÃO
-      await sqliteService.saveDatabase();
-      
-      // TRAVA ANTIMENTIRA: Validação física absoluta no arquivo .db
-      const physicalCount = await sqliteService.countAtivos();
-      if (physicalCount === 0 && totalCount > 0) {
-        throw new Error('FALHA DE DUMPING: A contagem física de registros na base nativa resultou em 0. O arquivo Excel não foi persistido no disco local.');
-      }
-      
       setUploadStatus('success');
 
-      // PROGRAMAÇÃO DEFENSIVA: Captura segura de dados locais para evitar quebra de fluxo
-      const rawAssets = await sqliteService.getAllAssets();
+      // 4. LEITURA FÍSICA PARA PROPAGAÇÃO DE ESTADO
+      const rawAssets = await db.local_assets.toArray();
       const loadedAssets: Asset[] = Array.isArray(rawAssets) ? rawAssets : [];
       
-      // Filtro sanitário estrito para expurgar qualquer linha residual nula que o Excel possa ter gerado
-      const validAssets = loadedAssets.filter(asset => asset && (asset.etiqueta || asset.ETIQUETA || asset.id));
-      const loadedUnits = await sqliteService.getOperationalUnits() || [];
+      // Filtro sanitário estrito para expurgar qualquer linha residual nula
+      const validAssets = loadedAssets.filter(asset => asset && (asset.etiqueta || asset.id));
+      const loadedUnits = Array.from(new Set(validAssets.map(a => a.filial).filter(Boolean)));
 
-      // SOBERANIA LOCAL: Verifica se o array contém o volume correto antes de despachar à interface
-      console.log(`[SRE Audit] Carga consolidada em RAM operacional: ${validAssets?.length || 0} ativos.`);
-      
-      // Acoplamento blindado com optional chaining interno na árvore consumidora
+      console.log(`[SRE Audit] Carga consolidada em RAM operacional via Dexie: ${validAssets.length} ativos.`);
       onDataLoaded(validAssets, loadedUnits);
 
     } catch (err: unknown) {
@@ -280,19 +332,16 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
         }
       }
 
-      if (rawMsg?.includes('Battery') || rawMsg?.includes('bateria') || rawMsg?.includes('Bateria')) {
+      if (rawMsg?.includes('bateria') || rawMsg?.includes('Bateria') || rawMsg?.includes('bateria crítica')) {
         setErrorType('battery');
         setErrorMsg('Dispositivo com bateria crítica (< 5%). Conecte o carregador para liberar a operação massiva de disco e tente novamente.');
-      } else if (rawMsg?.includes('No available connection') || rawMsg?.includes('locked') || rawMsg?.includes('FALHA DE DUMPING')) {
-        setErrorType('connection');
-        setErrorMsg('Falha de alocação de hardware. Banco de dados temporariamente bloqueado. Tente novamente após liberar o barramento.');
+      } else if (rawMsg?.includes('[FATAL_IMPORT_CRASH]')) {
+        setErrorType('generic');
+        setErrorMsg(rawMsg);
       } else {
         setErrorType('generic');
         setErrorMsg(rawMsg || 'Ocorreu um erro estrutural durante a ingestão do Excel.');
       }
-    } finally {
-      // FECHAMENTO ELEGANTE DA CONEXÃO APÓS O PROCESSAMENTO
-      await sqliteService.closeCurrentConnection();
     }
   };
 
@@ -473,6 +522,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                     className="hidden"
                     accept=".xlsx,.xls,.csv"
                     onChange={handleFileInputChange}
+                    onClick={(e) => e.stopPropagation()}
                   />
                   
                   <div className="w-14 h-14 rounded-2xl bg-gray-50 text-gray-500 border border-gray-100 flex items-center justify-center shadow-inner">
@@ -613,7 +663,7 @@ export const DatabaseLoader: React.FC<DatabaseLoaderProps> = ({
                       PREPARANDO AMBIENTE...
                     </>
                   ) : (
-                    'TENTAR NOVAMENTE'
+                    errorMsg.includes('[FATAL_IMPORT_CRASH]') ? 'RECURSAR / TENTAR NOVAMENTE' : 'TENTAR NOVAMENTE'
                   )}
                 </button>
               </motion.div>

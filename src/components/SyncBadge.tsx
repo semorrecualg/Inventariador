@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { sqliteService } from '../services/sqliteService';
+import { db } from '../services/sqliteService';
 import { syncService, photoSyncManager } from '../services/syncService';
 import localforage from 'localforage';
 import { Cloud, CloudLightning, CloudOff, RefreshCw } from 'lucide-react';
@@ -19,9 +19,8 @@ export const SyncBadge: React.FC = () => {
 
   const checkCounters = async () => {
     try {
-      // 1. Contador de dados pendentes no SQLite
-      const dataRes = await sqliteService.query("SELECT COUNT(*) as total FROM ativos WHERE _is_synced = 0 AND _is_deleted = 0");
-      const dataCount = dataRes && dataRes.length > 0 ? Number(dataRes[0]?.total || 0) : 0;
+      // 1. Contador de dados pendentes no Dexie de forma fluente e nativa
+      const dataCount = await db.ativos.where('_is_synced').equals(0).filter(a => a._is_deleted !== 1).count();
       
       // 2. Contador de fotos pendentes no IndexedDB
       const photoKeys = await photoQueueStore.keys();

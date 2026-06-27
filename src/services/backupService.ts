@@ -1,6 +1,6 @@
 import { supabase } from './supabaseService';
 import { localDb } from './localDbService';
-import { sqliteService } from './sqliteService';
+import { db } from './sqliteService';
 
 export const backupService = {
   /**
@@ -17,8 +17,8 @@ export const backupService = {
       // 1. Coleta dados locais de ativos de forma limpa
       const assets = await localDb.assets.toArray();
       
-      // 2. Coleta histórico de logs de auditoria locais
-      const auditLogs = await sqliteService.query("SELECT * FROM AUDIT_LOG") || [];
+      // 2. Coleta histórico de logs de auditoria locais usando Dexie
+      const auditLogs = await db.audit_logs.toArray() || [];
 
       // 3. Estrutura o backup com metadados de integridade e timestamp
       const backupPayload = {

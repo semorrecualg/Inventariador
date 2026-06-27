@@ -17,6 +17,7 @@ export interface User {
   role: UserRole;
   is_admin?: boolean; // Novo padrão unificado
   isAdmin?: boolean; // Deprecated: use is_admin
+  isSuperAdmin?: boolean; // Super administrator flag
   mustChangePassword?: boolean;
   tenantId: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
   filial?: string;    // 2ª Coluna / Unidade Operacional - Oficial

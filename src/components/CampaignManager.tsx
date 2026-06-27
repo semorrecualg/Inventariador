@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
-import { sqliteService } from '../services/sqliteService';
+import { localDb } from '../services/localDbService';
 import { Device } from '@capacitor/device';
 
 interface CampaignManagerProps {
@@ -76,7 +76,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
 
   // CORREÇÃO DA LEITURA LOCAL E RENDERIZAÇÃO CENTRAL:
-  // Carrega as campanhas ativas diretamente da tabela local via SQLite nativo
+  // Carrega as campanhas ativas diretamente da tabela local via Dexie/localDb nativo
   // com a tranca de isolamento multidomínio (tenant_id / unit_id)
   const fetchLocalCampaignsOnScreen = async () => {
     setIsRefreshing(true);
@@ -84,42 +84,15 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       const currentTenant = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
       const currentFilial = (initialUnit || '').trim();
       
-      console.log(`>>> [SQLite Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
+      console.log(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
       
-      let queryStr = `SELECT * FROM campaigns WHERE 1=1`;
-      const queryParams: (string | number | boolean | null)[] = [];
-      
-      if (currentTenant) {
-        queryStr += ` AND (tenant_id = ? OR _tenantid = ?)`;
-        queryParams.push(currentTenant, currentTenant);
-      }
-      if (currentFilial) {
-        queryStr += ` AND (unit_id = ? OR _unitid = ? OR unit_id = '' OR _unitid = '' OR unit_id IS NULL)`;
-        queryParams.push(currentFilial, currentFilial);
-      }
-      
-      const rows = await sqliteService.query(queryStr, queryParams);
-      console.log(`>>> [SQLite Native] Campanhas lidas do banco local:`, rows);
-      
-      const parsedCampaigns: InventoryCampaign[] = (rows || []).map(row => {
-        return {
-          id: String(row.id),
-          name: String(row.name || ''),
-          description: String(row.description || ''),
-          status: (row.status || 'CREATED') as CampaignStatus,
-          start_date: String(row.start_date || new Date().toISOString()),
-          end_date: row.end_date ? String(row.end_date) : null,
-          _tenantid: String(row._tenantid || row.tenant_id || currentTenant),
-          _unitid: String(row._unitid || row.unit_id || currentFilial),
-          tenant_id: String(row.tenant_id || row._tenantid || currentTenant),
-          unit_id: String(row.unit_id || row._unitid || currentFilial)
-        } as InventoryCampaign;
-      });
+      const parsedCampaigns = await localDb.campaigns.toArray(currentTenant, currentFilial);
+      console.log(`>>> [Dexie Native] Campanhas lidas do banco local:`, parsedCampaigns);
       
       setLocalCampaigns(parsedCampaigns);
       return parsedCampaigns;
     } catch (err) {
-      console.error(`>>> [SQLite Native] Erro na leitura automática:`, err);
+      console.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
       if (campaigns && campaigns.length > 0) {
         setLocalCampaigns(campaigns);
       }
@@ -274,21 +247,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     setIsSaving(true);
     try {
-      const tenantId = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
-      const filial = (initialUnit || '').trim();
-
-      console.log(`>>> [SQLite] Executando comando SQL DELETE estrito para ID=${campaignId}, Tenant=${tenantId}, Filial=${filial}`);
+      console.log(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
       
-      const sqlDelete = `DELETE FROM campaigns WHERE id = ? AND (tenant_id = ? OR _tenantid = ?) AND (unit_id = ? OR _unitid = ? OR unit_id = '' OR _unitid = '' OR unit_id IS NULL)`;
-      await sqliteService.execute(sqlDelete, [campaignId, tenantId, tenantId, filial, filial]);
+      await localDb.campaigns.delete(campaignId);
       
       // Limpeza de ativos relacionados vinculados a essa campanha
-      await sqliteService.execute(`UPDATE ativos SET currentCampaignId = NULL WHERE currentCampaignId = ?`, [campaignId]);
+      await localDb.assets.removeCampaignFromAssets(campaignId);
       
-      // Invoque a função de sincronismo em disco físico (saveDatabase()) para consolidar o dump
-      await sqliteService.saveDatabase();
-      
-      // Também deleta no Supabase em background/clor para continuar funcionando sincronizado se online
+      // Também deleta no Supabase em background para continuar funcionando sincronizado se online
       try {
         await deleteCampaign(campaignId);
       } catch (sbErr) {
@@ -311,8 +277,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       }
       
     } catch (err) {
-      console.error('>>> [SQLite] Erro ao excluir campanha:', err);
-      setErrorMessage('Erro técnico ao persistir exclusão no SQLite');
+      console.error('>>> [Dexie] Erro ao excluir campanha:', err);
+      setErrorMessage('Erro técnico ao persistir exclusão no Dexie');
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {
       setIsSaving(false);

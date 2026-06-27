@@ -619,9 +619,11 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 console.warn('onBack prop is not a function');
               }
             }}
-            className="w-10 h-10 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all shrink-0"
+            title="Retornar para Unidades"
+            className="flex items-center gap-2 px-3 h-10 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-xl text-white active:scale-95 transition-all shrink-0 font-sans font-bold text-[10px] uppercase tracking-wider"
           >
             <ArrowLeft size={18} />
+            <span>Retornar para Unidades</span>
           </button>
 
           {/* Centro: Texto limpo */}

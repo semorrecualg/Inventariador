@@ -81,6 +81,16 @@ export interface DexieUnitConfig {
   requirePlaqueta: number;
 }
 
+export interface DexieCampaignSnapshot {
+  id: string;
+  campaign_id: string;
+  assets_data: string;
+  metadata: string;
+  closed_at: string;
+  closed_by: string;
+  _tenantid: string;
+}
+
 class InventoryDexieDatabase extends Dexie {
   local_assets!: Dexie.Table<DexieAsset, string>;
   ativos!: Dexie.Table<DexieAsset, string>;
@@ -89,6 +99,7 @@ class InventoryDexieDatabase extends Dexie {
   campaigns!: Dexie.Table<DexieCampaign, string>;
   SYSTEM_CONTEXT!: Dexie.Table<DexieSystemContext, string>;
   unit_configs!: Dexie.Table<DexieUnitConfig, string>;
+  campaign_snapshots!: Dexie.Table<DexieCampaignSnapshot, string>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -101,6 +112,16 @@ class InventoryDexieDatabase extends Dexie {
       SYSTEM_CONTEXT: 'key',
       unit_configs: 'id, filial'
     });
+    this.version(2).stores({
+      local_assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      ativos: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantId',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id'
+    });
   }
 }
 
@@ -111,79 +132,6 @@ export class SQLitePersistenceException extends Error {
     super(`[SQLitePersistenceException] ${message}`);
     this.name = "SQLitePersistenceException";
   }
-}
-
-function getTableName(sql: string): string {
-  const match = sql.match(/(?:INSERT\s+OR\s+REPLACE\s+INTO|INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM)\s+(\w+)/i);
-  return match ? match[1].toLowerCase() : '';
-}
-
-function parseSqlAndParams(sql: string, params: unknown[]): Record<string, unknown> {
-  const obj: Record<string, unknown> = {};
-  const sqlUpper = sql.toUpperCase();
-
-  // Simple key-value extraction based on standard columns we saw in our logs
-  if (sqlUpper.includes("SYSTEM_CONTEXT")) {
-    if (sqlUpper.includes("INSERT OR REPLACE") || sqlUpper.includes("INSERT INTO")) {
-      obj['key'] = params[0];
-      obj['value'] = params[1];
-    }
-  }
-
-  if (sqlUpper.includes("UNIT_CONFIGS")) {
-    obj['id'] = params[0];
-    obj['filial'] = params[1];
-    obj['nome'] = params[2];
-    obj['hasGps'] = params[3];
-    obj['requireNf'] = params[4];
-    obj['requireSeriado'] = params[5];
-    obj['allowNewAssets'] = params[6];
-    obj['allowWriteOffs'] = params[7];
-    obj['requirePlaqueta'] = params[8];
-  }
-
-  if (sqlUpper.includes("AUDIT_LOG")) {
-    obj['id'] = params[0];
-    obj['usuario'] = params[1];
-    obj['acao'] = params[2];
-    obj['tabela'] = params[3];
-    obj['registro_id'] = params[4];
-    obj['details'] = params[5];
-    obj['delta'] = params[6];
-  }
-
-  if (sqlUpper.includes("CAMPAIGNS")) {
-    obj['id'] = params[0];
-    obj['name'] = params[1];
-    obj['status'] = params[2];
-    obj['tenantId'] = params[3];
-    obj['created_at'] = params[4];
-  }
-
-  if (sqlUpper.includes("INSERT OR REPLACE INTO ATIVOS") || sqlUpper.includes("INSERT OR REPLACE INTO ASSETS") || sqlUpper.includes("INSERT OR REPLACE INTO LOCAL_ASSETS") || sqlUpper.includes("INSERT INTO ATIVOS")) {
-    const insertMatch = sql.match(/\(([^)]+)\)/);
-    if (insertMatch && insertMatch[1]) {
-      const cols = insertMatch[1].split(',').map(c => c.trim().toLowerCase());
-      cols.forEach((col, idx) => {
-        if (idx < params.length) {
-          obj[col] = params[idx];
-        }
-      });
-    }
-  }
-
-  if (sqlUpper.includes("UPDATE") && (sqlUpper.includes("ATIVOS") || sqlUpper.includes("ASSETS") || sqlUpper.includes("LOCAL_ASSETS"))) {
-    if (sqlUpper.includes("_CONFERIDO = 1")) {
-      obj['_conferido'] = 1;
-      obj['status'] = 'CONFERIDO';
-      obj['_is_synced'] = 0;
-    }
-    if (sqlUpper.includes("CURRENTCAMPAIGNID = NULL")) {
-      obj['currentCampaignId'] = null;
-    }
-  }
-
-  return obj;
 }
 
 export class SqliteService {
@@ -345,9 +293,17 @@ export class SqliteService {
       const list = await db.local_assets.toArray();
       const nonDeleted = list.filter(a => a._is_deleted === 0);
       
-      const filiais = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
-      const stats = filiais.map(f => {
-        const filialAssets = nonDeleted.filter(a => String(a.filial) === f);
+      const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
+      
+      // Busca unidades configuradas
+      const configList = await db.unit_configs.toArray();
+      const filiaisConfigs = configList.map(c => String(c.filial || c.nome)).filter(f => f && f.trim() !== '');
+      
+      // União única de todas as filiais do tenant
+      const allFiliais = Array.from(new Set([...filiaisAssets.map(f => f.toUpperCase().trim()), ...filiaisConfigs.map(f => f.toUpperCase().trim())]));
+      
+      const stats = allFiliais.map(f => {
+        const filialAssets = nonDeleted.filter(a => String(a.filial || '').toUpperCase().trim() === f);
         const checkedAssets = filialAssets.filter(a => a._conferido === 1);
         return {
           filial: f,
@@ -437,262 +393,19 @@ export class SqliteService {
   }
 
   public async query(sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
-    const sqlUpper = sql.toUpperCase().trim();
-    const tableName = getTableName(sqlUpper);
-
-    if (sqlUpper.includes("COUNT(")) {
-      let count = 0;
-      if (tableName === 'ativos' || tableName === 'assets' || tableName === 'local_assets') {
-        let queryCollection = db.ativos.toCollection();
-        if (sqlUpper.includes("_IS_SYNCED = 0")) {
-          queryCollection = queryCollection.filter(a => a._is_synced === 0);
-        }
-        if (sqlUpper.includes("_IS_DELETED = 0")) {
-          queryCollection = queryCollection.filter(a => a._is_deleted === 0);
-        }
-        if (sqlUpper.includes("_CONFERIDO = 1")) {
-          queryCollection = queryCollection.filter(a => a._conferido === 1);
-        }
-        if (sqlUpper.includes("FILIAL = ?")) {
-          const filialParam = params[0] as string;
-          queryCollection = queryCollection.filter(a => String(a.filial).toUpperCase() === String(filialParam).toUpperCase());
-        }
-        count = await queryCollection.count();
-      } else if (tableName === 'audit_logs' || tableName === 'audit_log') {
-        count = await db.audit_logs.count();
-      } else if (tableName === 'unit_configs') {
-        count = await db.unit_configs.count();
-      }
-      
-      const aliasMatch = sqlUpper.match(/COUNT\([^)]+\)\s+AS\s+(\w+)/i);
-      const alias = aliasMatch ? aliasMatch[1].toLowerCase() : 'total';
-      return [{ [alias]: count }];
-    }
-
-    if (sqlUpper.includes("SELECT DISTINCT FILIAL")) {
-      const list = await db.local_assets.toArray();
-      const filiais = Array.from(new Set(list.map(a => String(a.filial || '')).filter(f => f !== '')));
-      return filiais.map(f => ({ filial: f, FILIAL: f }));
-    }
-
-    if (sqlUpper.includes("SELECT DISTINCT ENDERECO")) {
-      const list = await db.ativos.toArray();
-      const enderecos = Array.from(new Set(list.map(a => String(a.endereco || '')).filter(e => e !== '')));
-      return enderecos.map(e => ({ endereco: e }));
-    }
-
-    if (tableName === 'ativos' || tableName === 'assets' || tableName === 'local_assets') {
-      let assets = await db.ativos.toArray();
-      
-      if (sqlUpper.includes("_IS_DELETED = 0")) {
-        assets = assets.filter(a => a._is_deleted === 0);
-      }
-      if (sqlUpper.includes("_IS_SYNCED = 0")) {
-        assets = assets.filter(a => a._is_synced === 0);
-      }
-      if (sqlUpper.includes("WHERE (ETIQUETA = ? OR PRIMARYKEY = ?)") || sqlUpper.includes("WHERE ETIQUETA = ? OR PRIMARYKEY = ?")) {
-        const p = String(params[0]);
-        return assets.filter(a => String(a.etiqueta) === p || String(a.primarykey) === p) as unknown as Record<string, unknown>[];
-      }
-      if (sqlUpper.includes("WHERE FILIAL = ?") || sqlUpper.includes("AND FILIAL = ?")) {
-        const filialParam = params[sqlUpper.includes("AND FILIAL = ?") ? 1 : 0] as string;
-        if (filialParam) {
-          assets = assets.filter(a => String(a.filial).toUpperCase() === String(filialParam).toUpperCase());
-        }
-      }
-      if (sqlUpper.includes("WHERE ID = ?") || sqlUpper.includes("WHERE PRIMARYKEY = ?")) {
-        const idParam = String(params[0]);
-        return assets.filter(a => String(a.id) === idParam || String(a.primarykey) === idParam) as unknown as Record<string, unknown>[];
-      }
-      
-      return assets as unknown as Record<string, unknown>[];
-    }
-
-    if (tableName === 'audit_logs' || tableName === 'audit_log') {
-      let logs = await db.audit_logs.toArray();
-      logs.sort((a, b) => b.id.localeCompare(a.id));
-      if (sqlUpper.includes("LIMIT ?")) {
-        const limit = Number(params[0] ?? 5);
-        logs = logs.slice(0, limit);
-      }
-      return logs as unknown as Record<string, unknown>[];
-    }
-
-    if (tableName === 'campaigns') {
-      let campaigns = await db.campaigns.toArray();
-      if (sqlUpper.includes("WHERE ID = ?")) {
-        const idParam = String(params[0]);
-        campaigns = campaigns.filter(c => c.id === idParam);
-      }
-      return campaigns as unknown as Record<string, unknown>[];
-    }
-
-    if (tableName === 'unit_configs') {
-      const configs = await db.unit_configs.toArray();
-      return configs as unknown as Record<string, unknown>[];
-    }
-
-    if (tableName === 'system_context') {
-      const context = await db.SYSTEM_CONTEXT.toArray();
-      if (sqlUpper.includes("WHERE KEY = ?")) {
-        const keyParam = String(params[0]);
-        const match = context.find(c => c.key === keyParam);
-        return match ? [match as unknown as Record<string, unknown>] : [];
-      }
-      return context as unknown as Record<string, unknown>[];
-    }
-
-    return [];
+    throw new Error(`[SRE] Motor SQL legado purgado. Use APIs Dexie diretamente. Query: ${sql}, Params: ${params.length}`);
   }
 
   public async execute(sql: string, params: unknown[] = []): Promise<void> {
-    const sqlUpper = sql.toUpperCase().trim();
-    const tableName = getTableName(sqlUpper);
-
-    if (sqlUpper.startsWith("INSERT") || sqlUpper.startsWith("UPDATE")) {
-      const obj = parseSqlAndParams(sql, params);
-      
-      if (tableName === 'ativos' || tableName === 'assets' || tableName === 'local_assets') {
-        const primaryKeyVal = String(obj.primarykey || obj.id || params[0] || '');
-        if (primaryKeyVal) {
-          const existing = await db.ativos.get(primaryKeyVal);
-          const updatedItem: DexieAsset = {
-            ...existing,
-            ...obj,
-            primarykey: primaryKeyVal,
-            id: primaryKeyVal,
-            _is_synced: obj._is_synced !== undefined ? Number(obj._is_synced) : (existing?._is_synced ?? 0),
-            _is_deleted: obj._is_deleted !== undefined ? Number(obj._is_deleted) : (existing?._is_deleted ?? 0),
-            _conferido: obj._conferido !== undefined ? Number(obj._conferido) : (existing?._conferido ?? 0),
-            _plaquetado: obj._plaquetado !== undefined ? Number(obj._plaquetado) : (existing?._plaquetado ?? 0),
-            _aprovado: obj._aprovado !== undefined ? Number(obj._aprovado) : (existing?._aprovado ?? 0),
-            _isNew: obj._isNew !== undefined ? Number(obj._isNew) : (existing?._isNew ?? 0),
-            _is_unitized: obj._is_unitized !== undefined ? Number(obj._is_unitized) : (existing?._is_unitized ?? 0),
-            _is_divergent_baixa: obj._is_divergent_baixa !== undefined ? Number(obj._is_divergent_baixa) : (existing?._is_divergent_baixa ?? 0),
-            tenantId: String(obj.tenantId || existing?.tenantId || 'CICOPAL'),
-            _tenantid: String(obj._tenantid || existing?._tenantid || 'CICOPAL'),
-            filial: String(obj.filial || existing?.filial || ''),
-            _unitid: String(obj._unitid || existing?._unitid || ''),
-            status: String(obj.status || existing?.status || 'P'),
-            etiqueta: String(obj.etiqueta || existing?.etiqueta || ''),
-            tag: String(obj.tag || existing?.tag || ''),
-            qt: Number(obj.qt ?? existing?.qt ?? 1),
-            descricaodoativo: String(obj.descricaodoativo || existing?.descricaodoativo || ''),
-            serial: obj.serial !== undefined ? String(obj.serial) : (existing?.serial ?? null),
-            dataaqusic: obj.dataaqusic !== undefined ? String(obj.dataaqusic) : (existing?.dataaqusic ?? null),
-            cnpj: obj.cnpj !== undefined ? String(obj.cnpj) : (existing?.cnpj ?? null),
-            nomefornecedor: obj.nomefornecedor !== undefined ? String(obj.nomefornecedor) : (existing?.nomefornecedor ?? null),
-            notafiscal: obj.notafiscal !== undefined ? String(obj.notafiscal) : (existing?.notafiscal ?? null),
-            endereco: obj.endereco !== undefined ? String(obj.endereco) : (existing?.endereco ?? null),
-            registro: obj.registro !== undefined ? String(obj.registro) : (existing?.registro ?? null),
-            subreg: obj.subreg !== undefined ? String(obj.subreg) : (existing?.subreg ?? null),
-            databaixa: obj.databaixa !== undefined ? String(obj.databaixa) : (existing?.databaixa ?? null),
-            contacontabil: obj.contacontabil !== undefined ? String(obj.contacontabil) : (existing?.contacontabil ?? null),
-            centrodecusto: obj.centrodecusto !== undefined ? String(obj.centrodecusto) : (existing?.centrodecusto ?? null),
-            vlraquisic: obj.vlraquisic !== undefined ? Number(obj.vlraquisic) : (existing?.vlraquisic ?? 0),
-            sn1_recno: obj.sn1_recno !== undefined ? (obj.sn1_recno === null ? null : Number(obj.sn1_recno)) : (existing?.sn1_recno ?? null),
-            sn3_recno: obj.sn3_recno !== undefined ? (obj.sn3_recno === null ? null : Number(obj.sn3_recno)) : (existing?.sn3_recno ?? null),
-            _history: obj._history !== undefined ? String(obj._history) : (existing?._history ?? null),
-            DE_PARA: obj.DE_PARA !== undefined ? String(obj.DE_PARA) : (existing?.DE_PARA ?? null),
-            _photoUrl: obj._photoUrl !== undefined ? String(obj._photoUrl) : (existing?._photoUrl ?? null),
-            gps_lat: obj.gps_lat !== undefined ? Number(obj.gps_lat) : (existing?.gps_lat ?? null),
-            gps_lng: obj.gps_lng !== undefined ? Number(obj.gps_lng) : (existing?.gps_lng ?? null),
-            currentCampaignId: obj.currentCampaignId !== undefined ? String(obj.currentCampaignId) : (existing?.currentCampaignId ?? null)
-          };
-          
-          await db.ativos.put(updatedItem);
-          await db.assets.put(updatedItem);
-          await db.local_assets.put(updatedItem);
-        }
-      } else if (tableName === 'system_context') {
-        const key = String(obj.key || params[0] || '');
-        const value = String(obj.value || params[1] || '');
-        if (key) {
-          await db.SYSTEM_CONTEXT.put({
-            key,
-            value,
-            updated_at: new Date().toISOString()
-          });
-        }
-      } else if (tableName === 'unit_configs') {
-        const id = String(obj.id || params[0] || '');
-        if (id) {
-          await db.unit_configs.put({
-            id,
-            filial: String(obj.filial || params[1] || ''),
-            nome: String(obj.nome || params[2] || ''),
-            hasGps: obj.hasGps ? 1 : 0,
-            requireNf: obj.requireNf ? 1 : 0,
-            requireSeriado: obj.requireSeriado ? 1 : 0,
-            allowNewAssets: obj.allowNewAssets !== false ? 1 : 0,
-            allowWriteOffs: obj.allowWriteOffs !== false ? 1 : 0,
-            requirePlaqueta: obj.requirePlaqueta ? 1 : 0
-          });
-        }
-      } else if (tableName === 'audit_logs' || tableName === 'audit_log') {
-        const id = String(obj.id || params[0] || '');
-        if (id) {
-          await db.audit_logs.put({
-            id,
-            usuario: String(obj.usuario || params[1] || ''),
-            acao: String(obj.acao || params[2] || ''),
-            tabela: String(obj.tabela || params[3] || ''),
-            registro_id: String(obj.registro_id || params[4] || ''),
-            details: String(obj.details || params[5] || ''),
-            delta: obj.delta ? String(obj.delta) : null,
-            updated_at: new Date().toISOString()
-          });
-        }
-      } else if (tableName === 'campaigns') {
-        const id = String(obj.id || params[0] || '');
-        if (id) {
-          await db.campaigns.put({
-            id,
-            name: String(obj.name || params[1] || ''),
-            status: String(obj.status || params[2] || ''),
-            tenantId: String(obj.tenantId || params[3] || ''),
-            created_at: String(obj.created_at || params[4] || '')
-          });
-        }
-      }
-    } else if (sqlUpper.startsWith("DELETE FROM")) {
-      if (tableName === 'ativos' || tableName === 'assets' || tableName === 'local_assets') {
-        if (sqlUpper.includes("WHERE")) {
-          if (sqlUpper.includes("CURRENTCAMPAIGNID = ?")) {
-            const campaignId = String(params[0]);
-            await db.ativos.where('currentCampaignId').equals(campaignId).delete();
-            await db.assets.where('currentCampaignId').equals(campaignId).delete();
-            await db.local_assets.where('currentCampaignId').equals(campaignId).delete();
-          }
-        } else {
-          await db.ativos.clear();
-          await db.assets.clear();
-          await db.local_assets.clear();
-        }
-      } else if (tableName === 'audit_logs' || tableName === 'audit_log') {
-        if (sqlUpper.includes("CREATED_AT <") || sqlUpper.includes("UPDATED_AT <")) {
-          const sevenDaysAgo = new Date();
-          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-          await db.audit_logs.filter(log => new Date(log.updated_at) < sevenDaysAgo).delete();
-        } else {
-          await db.audit_logs.clear();
-        }
-      } else if (tableName === 'unit_configs') {
-        await db.unit_configs.clear();
-      } else if (tableName === 'campaigns') {
-        await db.campaigns.clear();
-      }
-    }
+    throw new Error(`[SRE] Motor SQL legado purgado. Use APIs Dexie diretamente. Query: ${sql}, Params: ${params.length}`);
   }
 
   public async executeRaw(sql: string): Promise<void> {
-    await this.execute(sql);
+    throw new Error(`[SRE] Motor SQL legado purgado. Use APIs Dexie diretamente. Query: ${sql}`);
   }
 
   public async executeBatch(set: { statement: string; values: unknown[] }[]): Promise<void> {
-    for (const item of set) {
-      await this.execute(item.statement, item.values);
-    }
+    throw new Error(`[SRE] Motor SQL legado purgado. Use APIs Dexie diretamente. Batch size: ${set.length}`);
   }
 
   public async saveDatabase(): Promise<void> {

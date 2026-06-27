@@ -15,12 +15,11 @@ interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
   onLogout: () => void;
   onOpenDatabaseManager?: () => void;
-  onOpenDatabaseLoader?: () => void;
   username: string;
   userRole?: UserRole;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, onOpenDatabaseLoader, username, userRole }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole }) => {
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
   return (
@@ -59,19 +58,6 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
               >
                 <Database size={16} className="group-hover:text-accent" />
                 <span className="text-[10px] font-black uppercase tracking-widest">Gestor de Base</span>
-              </button>
-            )}
-
-            {isAdmin && onOpenDatabaseLoader && (
-              <button 
-                onClick={onOpenDatabaseLoader}
-                className="flex items-center space-x-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 rounded-xl text-amber-700 transition-all border border-amber-200 active:scale-95 group"
-                title={sessionStorage.getItem('gbr_admin_scope') === 'TENANT_MASTER' ? "Carga Expert Master (Inquilinato Ativo)" : "Carga Expert Mestra"}
-              >
-                <Database size={16} className="text-amber-500 group-hover:text-amber-600 animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-widest">
-                  {sessionStorage.getItem('gbr_admin_scope') === 'TENANT_MASTER' ? "Carga Master" : "Carga Expert"}
-                </span>
               </button>
             )}
           </div>
