@@ -1,18 +1,8 @@
-import { db, DexieAsset } from './sqliteService';
+import { db, DexieAsset, sqliteService } from './sqliteService';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
-import { DB_ASSET_COLUMNS } from '../constants/schema';
 import localforage from 'localforage';
 
 type SqlValue = string | number | boolean | null;
-
-const ASSET_COLUMNS = DB_ASSET_COLUMNS;
-
-export const TABLE_COLUMNS: Record<string, string[]> = {
-  ativos: ASSET_COLUMNS,
-  assets: ASSET_COLUMNS,
-  users: ['id', 'username', 'name', 'email', 'password', 'role', 'is_admin', '_tenantid', '_unitid'],
-  unit_configs: ['id', 'selectedUnit', 'currentCampaignId', 'updated_at']
-};
 
 // Create a localForage instance dedicated for user profiles and offline login persistence
 const usersStore = localforage.createInstance({
@@ -102,33 +92,6 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
 
   return asset as unknown as Asset;
 }
-
-// Compatibility helper kept for other services importing it (e.g. demoService)
-export const getUpsertSql = (table: string, srcObj: Record<string, unknown>) => {
-  const obj = { ...srcObj };
-  if (table === 'ativos' || table === 'assets') {
-    const tenant = getCurrentTenantId();
-    if (!obj.tenantId) obj.tenantId = tenant;
-    if (!obj._tenantid) obj._tenantid = tenant;
-  }
-  const keys = Object.keys(obj).filter(k => {
-    if (TABLE_COLUMNS[table]) return TABLE_COLUMNS[table].includes(k);
-    return true;
-  });
-  
-  const placeholders = keys.map(() => '?').join(', ');
-  const columns = keys.join(', ');
-  const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${placeholders})`;
-  
-  const values = keys.map(k => {
-    const val = obj[k];
-    if (typeof val === 'boolean') return val ? 1 : 0;
-    if (val !== null && typeof val === 'object') return JSON.stringify(val);
-    return val as SqlValue;
-  });
-  
-  return { sql, values };
-};
 
 export const localDb = {
   assets: {
@@ -344,42 +307,81 @@ export const localDb = {
     }),
 
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
+      const tenant = getCurrentTenantId().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
-      const list = await db.ativos.toArray();
+      const cleanSearch = searchTerm.toLowerCase().trim();
       
-      const filteredList = list.filter(a => {
-        const isNotDeleted = a._is_deleted !== 1;
-        const filialMatch = String(a.filial || a._unitid || '').toUpperCase().trim() === uIdUpper;
-        return isNotDeleted && filialMatch;
-      });
+      const query = db.addresses.where('[tenantId+filial]').equals([tenant, uIdUpper]);
+      let addrList = await query.toArray();
 
-      const groups: Record<string, { total: number; checked: number; displayName: string }> = {};
+      if (cleanSearch !== '') {
+        addrList = addrList.filter(a => String(a.codigo_endereco || '').toLowerCase().startsWith(cleanSearch));
+      }
+      
+      // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente de ativos (ativos)
+      if (addrList.length === 0) {
+        const assets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+        const extractedAddrs = new Map<string, typeof addrList[0]>();
+        assets.forEach(a => {
+          const addrStr = String(a.endereco || '').trim();
+          if (addrStr && (cleanSearch === '' || addrStr.toUpperCase().startsWith(cleanSearch))) {
+            const key = addrStr.toUpperCase();
+            if (!extractedAddrs.has(key)) {
+              extractedAddrs.set(key, {
+                tenantId: tenant,
+                filial: uIdUpper,
+                codigo_endereco: addrStr,
+                setor: '',
+                bloco: '',
+                _is_synced: 1
+              });
+            }
+          }
+        });
+        addrList = Array.from(extractedAddrs.values());
+      }
 
-      filteredList.forEach(asset => {
-        const address = String(asset.endereco || '').trim();
-        const displayName = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
-        
-        if (searchTerm && !displayName.toLowerCase().includes(searchTerm.toLowerCase())) {
-          return;
-        }
+      // 4. Busca reativa das estatísticas de conferência em db.ativos
+      const listAssets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+      const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
-        const key = displayName.toUpperCase();
-        if (!groups[key]) {
-          groups[key] = { total: 0, checked: 0, displayName };
-        }
-
-        groups[key].total += 1;
+      const statsMap = new Map<string, { total: number; checked: number }>();
+      nonDeleted.forEach(asset => {
+        const address = String(asset.endereco || '').trim().toUpperCase();
+        const key = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
+        const stats = statsMap.get(key) || { total: 0, checked: 0 };
+        stats.total += 1;
         if (asset._conferido === 1) {
-          groups[key].checked += 1;
+          stats.checked += 1;
+        }
+        statsMap.set(key, stats);
+      });
+
+      const finalResults = addrList.map(addr => {
+        const displayName = String(addr.codigo_endereco || '').trim() || 'GERAL - NÃO ESPECIFICADO';
+        const stats = statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 };
+        return {
+          displayName,
+          total: Math.max(0, stats.total),
+          checked: Math.max(0, stats.checked),
+          locKey: displayName.toUpperCase().replace(/[^A-Z0-9]/g, '')
+        };
+      });
+
+      // Deduplicação dos endereços resultantes para evitar duplicidade de renderização
+      const uniqueResults = new Map<string, typeof finalResults[0]>();
+      finalResults.forEach(r => {
+        const key = r.displayName.toUpperCase();
+        if (!uniqueResults.has(key)) {
+          uniqueResults.set(key, r);
+        } else {
+          const existing = uniqueResults.get(key)!;
+          existing.total = Math.max(existing.total, r.total);
+          existing.checked = Math.max(existing.checked, r.checked);
         }
       });
 
-      return Object.entries(groups).map(([key, stats]) => ({
-        displayName: stats.displayName,
-        total: stats.total,
-        checked: stats.checked,
-        locKey: key.replace(/[^A-Z0-9]/g, '')
-      })).sort((a, b) => a.displayName.localeCompare(b.displayName));
+      return Array.from(uniqueResults.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
     },
 
     getLabelingAssets: async (unitId?: string): Promise<Asset[]> => {
@@ -647,6 +649,19 @@ export const localDb = {
       }
     },
 
+    get: async (criteria: { email: string }): Promise<User | null> => {
+      const emailClean = String(criteria.email || '').trim().toLowerCase();
+      if (!emailClean) return null;
+      const found = await usersStore.getItem<User>(emailClean);
+      if (!found) return null;
+      return {
+        ...found,
+        is_admin: found.is_admin === true || found.isAdmin === true,
+        isAdmin: found.is_admin === true || found.isAdmin === true,
+        tenantId: found.tenantId || found._tenantid || 'CICOPAL'
+      } as unknown as User;
+    },
+
     bulkAdd: async (users: User[]) => {
       for (const u of users) {
         await localDb.users.add(u);
@@ -680,19 +695,27 @@ export const localDb = {
   },
   
   purgeDatabase: async () => {
-    console.log('>>> [DBA] Executando purge manual de todas as tabelas em Dexie.js...');
+    console.log('>>> [DBA] Executando purge manual das tabelas operacionais em Dexie.js (preservando sessões)...');
     try {
+      // 1. Matar Processos em Segundo Plano (suspender listeners/workers do SQLite)
+      sqliteService.setImportingMode(true);
+
+      // 2. Limpeza síncrona e exclusiva com as tabelas ativas do Dexie.js (.clear())
       await db.ativos.clear();
       await db.assets.clear();
       await db.local_assets.clear();
       await db.audit_logs.clear();
       await db.unit_configs.clear();
-      await db.campaigns.clear();
-      await usersStore.clear();
-      console.log('>>> [DBA] Purge de Dexie.js concluído.');
+      await db.campaign_snapshots.clear();
+      await db.addresses.clear();
+      
+      // 3. Restaurar processamento de segundo plano
+      sqliteService.setImportingMode(false);
+      
+      console.log('>>> [DBA] Purge operacional de Dexie.js concluído com sucesso via .clear().');
     } catch (err) {
-      console.error('>>> [DBA] Falha crítica no purge do banco Dexie:', err);
-      throw err;
+      console.error('>>> [DBA] Falha crítica no purge operacional do banco Dexie:', err);
+      sqliteService.setImportingMode(false);
     }
   },
   

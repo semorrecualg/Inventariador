@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
@@ -7,6 +7,7 @@ import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
+import { sqliteService } from '../services/sqliteService';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -18,6 +19,8 @@ interface LoginProps {
   isDatabaseEmpty?: boolean;
   isKeyboardVisible?: boolean;
   onUpdateDatabaseMode?: (mode: DatabaseMode) => void;
+  isInitializing?: boolean;
+  dbInitialized?: boolean;
 }
 
 // Login Component
@@ -30,7 +33,9 @@ const Login: React.FC<LoginProps> = ({
   onShowModal,
   isDatabaseEmpty = false,
   isKeyboardVisible = false,
-  onUpdateDatabaseMode
+  onUpdateDatabaseMode,
+  isInitializing = false,
+  dbInitialized = true
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -38,8 +43,29 @@ const Login: React.FC<LoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
-  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
-  const [isPressingLogo, setIsPressingLogo] = useState(false);
+  const [realEmpty, setRealEmpty] = useState<boolean>(isDatabaseEmpty);
+
+  // Check the real count of assets from the SQLite IndexedDB service on mount or databaseMode/dbInitialized change
+  useEffect(() => {
+    let active = true;
+    const checkDbAssets = async () => {
+      try {
+        const count = await sqliteService.getAssetCount();
+        if (active) {
+          setRealEmpty(count === 0);
+        }
+      } catch (err) {
+        console.error(">>> [Login Check] Failed to read database assets count:", err);
+        if (active) {
+          setRealEmpty(true);
+        }
+      }
+    };
+    checkDbAssets();
+    return () => {
+      active = false;
+    };
+  }, [databaseMode, dbInitialized, isDatabaseEmpty, users]);
 
   // Reset loading state when database mode changes to prevent "stuck" UI
   React.useEffect(() => {
@@ -156,50 +182,6 @@ const Login: React.FC<LoginProps> = ({
     });
   };
 
-  const handleCargaExpertNavigation = (): void => {
-    console.warn("[GBR v2.6] Forçando contingência local via Carga Expert");
-    
-    // Prepara a retenção volátil limpando estados prévios de sessão comum
-    sessionStorage.removeItem('gbr_session_mode');
-    sessionStorage.setItem('gbr_pending_expert_load', 'true');
-    
-    // Altera modo para usar SQLite localmente como fonte da verdade
-    onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
-
-    // Cria usuário especializado local para que o sistema entre no contexto de administrador autorizado
-    // Objeto 100% alinhado com o layout da planilha de carga de dados
-    const expertUser: User = {
-      id: 'carga_expert_contingency',
-      email: 'semorr@gmail.com', // Reconhecido como administrador pelo helper checkIsAdmin
-      username: 'carga_expert',
-      role: 'ADMIN' as unknown as UserRole,
-      isAdmin: true,
-      tenantId: 'CICOPAL',  // Campo 0 da Planilha
-      filial: '',    // Campo 1 da Planilha
-      mustChangePassword: false
-    };
-
-    // Redireciona estritamente para a tela/modal do DatabaseLoader
-    onLogin(expertUser);
-    onUpdateScreen(AppScreen.LOAD_DATABASE);
-  };
-
-  const startPressLogo = () => {
-    setIsPressingLogo(true);
-    const timer = setTimeout(() => {
-       handleCargaExpertNavigation();
-    }, 3000); // 3 segundos
-    setLongPressTimer(timer);
-  };
-
-  const endPressLogo = () => {
-    setIsPressingLogo(false);
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      setLongPressTimer(null);
-    }
-  };
-
   const handleDemoMode = (): void => {
     console.log("[GBR v2.6] Inicializando Modo Demo");
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
@@ -290,6 +272,9 @@ const Login: React.FC<LoginProps> = ({
           let loggedUser: User;
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
+            if (loggedUser.email && loggedUser.email.toLowerCase() === 'semorr@gmail.com') {
+              loggedUser.tenantId = 'DEMO_DEFAULT';
+            }
           } else if (normalizedUsername === 'admin' && password === '123456') {
             loggedUser = {
               username: 'admin',
@@ -316,7 +301,7 @@ const Login: React.FC<LoginProps> = ({
                 is_admin: true,
                 isAdmin: true,
                 mustChangePassword: false,
-                tenantId: 'CICOPAL',
+                tenantId: 'DEMO_DEFAULT',
                 filial: ''
               };
             }
@@ -641,32 +626,18 @@ const Login: React.FC<LoginProps> = ({
       {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
       {!isKeyboardVisible && (
         <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
-          {/* Seletor de Ambiente Dinâmico GBR v2.6 */}
-          <button
-            type="button"
-            onClick={() => {
-              if (onUpdateDatabaseMode) {
-                const nextMode = databaseMode === DatabaseMode.INTERNAL ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
-                onUpdateDatabaseMode(nextMode);
-              }
-            }}
-            className="absolute top-0 right-0 bg-accent/10 border border-accent/20 hover:bg-accent/20 active:scale-95 transition-all px-2.5 py-1 rounded-full flex items-center gap-1.5 cursor-pointer z-[100]"
-            title="Clique para alternar o ambiente de dados"
+          {/* Seletor de Ambiente Dinâmico GBR v2.6 - Forçado a LOCAL por Orientação */}
+          <div
+            className="absolute top-0 right-0 bg-accent/10 border border-accent/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 z-[100] select-none"
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${databaseMode === DatabaseMode.INTERNAL ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></span>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
             <span className="text-[7px] font-black text-slate-900 uppercase tracking-wider">
-              {databaseMode === DatabaseMode.INTERNAL ? 'AMBIENTE: MOBILE (LOCAL)' : 'AMBIENTE: NUVEM (ONLINE)'}
+              AMBIENTE: MOBILE (LOCAL)
             </span>
-          </button>
+          </div>
 
           <div 
-            onTouchStart={startPressLogo}
-            onTouchEnd={endPressLogo}
-            onMouseDown={startPressLogo}
-            onMouseUp={endPressLogo}
-            onMouseLeave={endPressLogo}
-            className={`w-20 h-20 bg-white border border-slate-100 rounded-full flex items-center justify-center mb-2.5 shadow-md ring-4 ring-white cursor-pointer select-none transition-all duration-300 ${isPressingLogo ? 'scale-90 border-amber-500 ring-amber-500/55 shadow-amber-200/20' : 'border-border'}`}
-            title="Mantenha pressionado por 3 segundos para contra-medida Carga Expert"
+            className="w-20 h-20 bg-white border border-slate-100 rounded-full flex items-center justify-center mb-2.5 shadow-md ring-4 ring-white select-none transition-all duration-300 border-border"
           >
             <div className="flex flex-col items-center justify-center">
               <ShieldCheck size={28} className="text-accent animate-pulse-slow" />
@@ -702,8 +673,8 @@ const Login: React.FC<LoginProps> = ({
       )}
 
       <div className="mb-4 max-w-sm mx-auto w-full">
-        {databaseMode === DatabaseMode.INTERNAL && (
-          (isDatabaseEmpty || users.length === 0) ? (
+        {databaseMode === DatabaseMode.INTERNAL && !isInitializing && dbInitialized && (
+          (realEmpty || users.length === 0) ? (
             <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2 text-left">
               <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
               <div>

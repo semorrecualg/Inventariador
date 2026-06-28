@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppModule, UserRole } from '../types';
 import { 
   ClipboardCheck, 
@@ -8,8 +8,10 @@ import {
   ShieldCheck,
   TrendingUp,
   BarChart3,
-  Database
+  Database,
+  ShieldAlert
 } from 'lucide-react';
+import { sqliteService } from '../services/sqliteService';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
@@ -17,11 +19,62 @@ interface ModuleSelectorProps {
   onOpenDatabaseManager?: () => void;
   username: string;
   userRole?: UserRole;
+  isDatabaseEmpty?: boolean;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole, isDatabaseEmpty = false }) => {
+  const [effectiveEmpty, setEffectiveEmpty] = useState<boolean>(isDatabaseEmpty);
+
+  useEffect(() => {
+    setEffectiveEmpty(isDatabaseEmpty);
+  }, [isDatabaseEmpty]);
+
+  useEffect(() => {
+    let active = true;
+    const runCheck = async () => {
+      try {
+        const count = await sqliteService.getAssetCount();
+        if (active) {
+          if (count === 0) {
+            setEffectiveEmpty(true);
+          } else {
+            setEffectiveEmpty(false);
+          }
+        }
+      } catch (e) {
+        console.error("Error checking asset count in ModuleSelector:", e);
+      }
+    };
+    runCheck();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
+
+  if (isAuditor && effectiveEmpty) {
+    return (
+      <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn justify-center items-center text-center">
+        <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mb-6 border border-red-100">
+          <ShieldAlert size={40} />
+        </div>
+        <h2 className="text-2xl font-black text-ink uppercase tracking-tight mb-2">Acesso Impeditivo</h2>
+        <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-4">Base de dados vazia</p>
+        <p className="text-ink-muted text-xs max-w-md mb-8 leading-relaxed font-bold uppercase">
+          O banco de dados local está vazio. Solicite ao administrador do sistema para realizar a carga de dados inicial antes de prosseguir com o inventário.
+        </p>
+        <button 
+          onClick={onLogout}
+          className="px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm active:scale-95 transition-all hover:bg-slate-50 cursor-pointer"
+        >
+          Sair do Sistema
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn overflow-y-auto">
       {/* Header */}
@@ -66,8 +119,9 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Módulo Inventariador */}
           <button 
-            onClick={() => onSelect(AppModule.INVENTORY)}
-            className="group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98] overflow-hidden"
+            disabled={effectiveEmpty}
+            onClick={() => !effectiveEmpty && onSelect(AppModule.INVENTORY)}
+            className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${effectiveEmpty ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
           >
             <div className="relative z-10">
               <div className="w-16 h-16 bg-accent-soft rounded-2xl flex items-center justify-center text-accent mb-6 group-hover:bg-accent group-hover:text-white transition-all">
@@ -98,8 +152,9 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
           {/* Módulo Controle de Ativo Imobilizado */}
           {!isAuditor && (
             <button 
-              onClick={() => onSelect(AppModule.ASSET_CONTROL)}
-              className="group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98] overflow-hidden"
+              disabled={effectiveEmpty}
+              onClick={() => !effectiveEmpty && onSelect(AppModule.ASSET_CONTROL)}
+              className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${effectiveEmpty ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
             >
               <div className="relative z-10">
                 <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 mb-6 group-hover:bg-ink group-hover:text-white transition-all">

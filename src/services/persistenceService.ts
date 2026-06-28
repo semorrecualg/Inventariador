@@ -3,7 +3,7 @@ import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb } from './localDbService';
-import { sqliteService } from './sqliteService';
+import { sqliteService, db, DexieAsset } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
 
@@ -155,6 +155,40 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
     throw new Error(`Erro SQL no salvamento local: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
+
+export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & { primarykey: string }): Promise<void> {
+  // Higienização dos indexadores principais conforme diretrizes de governança GBR
+  if (assetData.primarykey) {
+    assetData.primarykey = String(assetData.primarykey).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  }
+  if (assetData.etiqueta) {
+    assetData.etiqueta = String(assetData.etiqueta).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  }
+  if (assetData.tag) {
+    assetData.tag = String(assetData.tag).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  }
+
+  // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
+  await db.transaction('rw', [db.local_assets, db.ativos], async () => {
+    const existingActive = await db.ativos.get(assetData.primarykey);
+    const existingLocal = await db.local_assets.get(assetData.primarykey);
+
+    const mergedData = {
+      ...(existingActive || {}),
+      ...(existingLocal || {}),
+      ...assetData,
+      _conferido: 1,
+      _is_synced: 0,
+      updated_at: new Date().toISOString()
+    };
+
+    // Escrita atômica sequencial
+    await db.local_assets.put(mergedData as DexieAsset);
+    if (existingActive) {
+      await db.ativos.update(assetData.primarykey, { _conferido: 1 });
+    }
+  });
+}
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {
   try {

@@ -36,9 +36,10 @@ export interface ProvisionResult {
 
 // ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
 // o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
-const rawSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/%22|"/g, '').trim();
-const rawSupabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').replace(/%22|"/g, '').trim();
-export const isInternalMode = !rawSupabaseUrl || !rawSupabaseAnonKey;
+// GBR FORCE LOCAL DEVELOPMENT - SUPABASE DISABLED PER ORIENTATION
+const rawSupabaseUrl = '';
+const rawSupabaseAnonKey = '';
+export const isInternalMode = true;
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
 const supabaseAnonKey = rawSupabaseAnonKey || 'placeholder-anon-key';

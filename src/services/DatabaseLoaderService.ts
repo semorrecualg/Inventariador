@@ -53,10 +53,10 @@ function getRowValue(row: AtivoPlanilha, ...keys: string[]): string | number | b
 }
 
 export class DatabaseLoaderService {
-  private BATCH_SIZE = 1000;
+  private BATCH_SIZE = 200;
 
   /**
-   * Processa o arquivo físico do Excel (ou CSV/JSON), higieniza os dados e injeta no Dexie via lotes de 1000.
+   * Processa o arquivo físico do Excel (ou CSV/JSON), higieniza os dados e injeta no Dexie via lotes de 200.
    */
   public async processExcelFile(
     file: File,
@@ -257,7 +257,7 @@ export class DatabaseLoaderService {
 
         // Transação ACID atômica do Dexie com Fail-Fast
         try {
-          await db.transaction('rw', [db.local_assets, db.audit_logs], async () => {
+          await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
             // Validação estrita de chaves primárias antes de inserir
             for (const asset of assetsToInsert) {
               if (!asset.id || !asset.primarykey) {
@@ -266,6 +266,8 @@ export class DatabaseLoaderService {
             }
 
             await db.local_assets.bulkPut(assetsToInsert);
+            await db.ativos.bulkPut(assetsToInsert);
+            await db.assets.bulkPut(assetsToInsert);
 
             // Grava logs de correção se houverem
             for (const corr of correctionsToLog) {
@@ -408,7 +410,7 @@ export class DatabaseLoaderService {
     }
 
     try {
-      const BATCH_SIZE = 1000;
+      const BATCH_SIZE = 200;
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
@@ -518,7 +520,7 @@ export class DatabaseLoaderService {
 
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
         try {
-          await db.transaction('rw', [db.local_assets, db.audit_logs], async () => {
+          await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
             // Validação estrita antes da gravação
             for (const asset of assetsToInsert) {
               if (!asset.id || !asset.primarykey) {
@@ -527,6 +529,8 @@ export class DatabaseLoaderService {
             }
 
             await db.local_assets.bulkPut(assetsToInsert);
+            await db.ativos.bulkPut(assetsToInsert);
+            await db.assets.bulkPut(assetsToInsert);
 
             // Gravação dos logs de correção
             for (const corr of correctionsToLog) {

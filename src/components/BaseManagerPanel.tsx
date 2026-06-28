@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { localDb } from '../services/localDbService';
+import { db } from '../services/sqliteService';
 import { 
   Database, 
   Trash2, 
@@ -8,46 +9,60 @@ import {
   Terminal, 
   HardDrive, 
   CheckCircle2,
-  AlertTriangle,
-  DatabaseZap
+  AlertTriangle
 } from 'lucide-react';
 
 interface BaseManagerPanelProps {
   onBack?: () => void;
-  onGoToCargaExpert?: () => void;
   onResetDatabase?: () => Promise<void>;
 }
 
-export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGoToCargaExpert, onResetDatabase }) => {
+export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onResetDatabase }) => {
   const [assetCount, setAssetCount] = useState<number | null>(null);
   const [logCount, setLogCount] = useState<number | null>(null);
   const [dbMode, setDbMode] = useState<string>('NÃO IDENTIFICADO');
   const [isProcessing, setIsProcessing] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
     setDbMode(mode);
 
-    addLog(`[SRE GESTON] Inicializando console de gerenciamento físico...`);
-    addLog(`[SRE GESTON] Modo atual detectado: ${mode}`);
+    addLog(`[SRE GESTOR] Inicializando console de gerenciamento físico...`);
+    addLog(`[SRE GESTOR] Modo atual detectado: ${mode}`);
+
+    const checkIsAdmin = () => {
+      try {
+        const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+        if (userStr) {
+          const parsed = JSON.parse(userStr);
+          const email = parsed?.email?.toLowerCase() || '';
+          const roleStr = String(parsed?.role || '').toUpperCase();
+          const isAdm = parsed?.isAdmin || parsed?.is_admin;
+          return roleStr === 'ADMIN' || roleStr === 'MASTER' || roleStr === 'GESTOR' || !!isAdm || email === 'semorr@gmail.com';
+        }
+      } catch { /* ignore */ }
+      return false;
+    };
+    setIsAdmin(checkIsAdmin());
 
     const loadStats = async () => {
       try {
-        addLog(`[SRE GESTON] Executando diagnóstico estrito de barramento...`);
+        addLog(`[SRE GESTOR] Executando diagnóstico estrito de barramento...`);
         
-        // Count assets
-        const aCount = await localDb.assets.count();
+        // Count assets directly using Dexie.js for absolute reliability
+        const aCount = await db.ativos.count();
         setAssetCount(aCount);
-        addLog(`[SRE GESTON] Ativos armazenados no Dexie local: ${aCount}`);
+        addLog(`[SRE GESTOR] Ativos armazenados no Dexie local: ${aCount}`);
 
-        // Count audit logs
-        const lCount = await localDb.auditLogs.count();
+        // Count audit logs directly using Dexie.js
+        const lCount = await db.audit_logs.count();
         setLogCount(lCount);
-        addLog(`[SRE GESTON] Eventos de Auditoria gravados: ${lCount}`);
+        addLog(`[SRE GESTOR] Eventos de Auditoria gravados: ${lCount}`);
         
-        addLog(`[SRE GESTON] Estado operacional de disco: ESTÁVEL`);
+        addLog(`[SRE GESTOR] Estado operacional de disco: ESTÁVEL`);
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         addLog(`[SRE ERR] Falha no auto-diagnóstico: ${errMsg}`);
@@ -69,19 +84,27 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
   const executeReset = async () => {
     try {
       setIsProcessing(true);
-      addLog(`[SRE GESTON] Comando de reset recebido. Iniciando barreira de isolamento...`);
+      addLog(`[SRE GESTOR] Comando de reset recebido. Iniciando barreira de isolamento...`);
       
       if (onResetDatabase) {
+        addLog(`[SRE GESTOR] Executando reset via callback de controle isolado...`);
         await onResetDatabase();
       } else {
-        // Fallback robusto se a prop não estiver definida
-        addLog(`[SRE GESTON] Executando purge completo do banco Dexie local...`);
-        await localDb.purgeDatabase();
-        addLog(`[SRE GESTON] Tabelas eliminadas fisicamente.`);
-        
+        try {
+          await localDb.purgeDatabase();
+          setAssetCount(0);
+          setLogCount(0);
+          setShowModal(false);
+          addLog(`[SRE GESTOR] Purga física concluída com sucesso via Dexie clear()`);
+        } catch (dbErr: unknown) {
+          const dbErrMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+          addLog(`[SRE ERR] Falha na purga direta: ${dbErrMsg}.`);
+        }
+
         localStorage.removeItem('app_database_mode');
-        addLog(`[SRE GESTON] Preferências de persistência removidas do localStorage.`);
-        addLog(`[SRE GESTON] Reiniciando aplicação para efetivar alterações...`);
+        sessionStorage.setItem('app_just_cleared_data', 'true');
+        addLog(`[SRE GESTOR] Preferências de persistência removidas do localStorage.`);
+        addLog(`[SRE GESTOR] Reiniciando aplicação para efetivar alterações...`);
         
         setTimeout(() => {
           window.location.reload();
@@ -109,17 +132,6 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
         </div>
 
         <div className="flex items-center gap-2">
-          {onGoToCargaExpert && (
-            <button 
-              type="button"
-              onClick={onGoToCargaExpert}
-              className="flex items-center space-x-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-xl text-white font-bold text-xs uppercase tracking-wider transition-all border border-amber-500 cursor-pointer active:scale-95"
-            >
-              <DatabaseZap size={14} className="animate-pulse" />
-              <span>Ir para Carga Expert</span>
-            </button>
-          )}
-
           {onBack && (
             <button 
               type="button"
@@ -140,8 +152,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
           <div>
             <h3 className="text-xs font-black tracking-widest uppercase mb-1">Atenção: Acesso de Nível Máximo</h3>
             <p className="text-[10px] text-red-300 leading-relaxed uppercase font-bold">
-              Todas os comandos nesta página possuem impacto estrutural direto na integridade física do SQLite. 
-              As operações ignoram travas relacionais por barreira sanitária nativa.
+              Todos os comandos nesta página possuem impacto estrutural direto no banco de dados local Dexie.js (IndexedDB). As operações de higienização limpam fisicamente as tabelas do dispositivo.
             </p>
           </div>
         </div>
@@ -195,7 +206,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
                 <span>Higienização / Destruição Controlada</span>
               </h3>
               <p className="text-[10px] text-slate-400 leading-relaxed uppercase font-semibold mt-2">
-                Limpa completamente as tabelas estruturais de <b>ativos</b> e <b>AUDIT_LOG</b> do SQLite local e remove as configurações salvas no dispositivo.
+                Limpa completamente as tabelas estruturais de <b>ativos</b> e <b>audit_logs</b> do Dexie.js local e remove as configurações salvas no dispositivo.
               </p>
             </div>
 
@@ -203,12 +214,17 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
               <button
                 type="button"
                 onClick={handleReset}
-                disabled={isProcessing}
-                className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-red-650 hover:bg-red-700 disabled:bg-slate-800 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 cursor-pointer border border-red-500/35"
+                disabled={isProcessing || !isAdmin}
+                className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-red-650 hover:bg-red-700 disabled:bg-slate-850 disabled:text-slate-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 cursor-pointer border border-red-500/35"
               >
                 <Trash2 size={16} />
                 <span>{isProcessing ? "Executando Purga..." : "Zerar Base de Dados Local"}</span>
               </button>
+              {!isAdmin && (
+                <p className="text-[9px] text-red-400 font-bold uppercase text-center mt-2.5 tracking-wider animate-pulse">
+                  Controle Restrito: Apenas ADMIN pode zerar a base de dados local.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -259,7 +275,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onGo
                 id="reset-cancel-btn"
                 onClick={() => {
                   setShowModal(false);
-                  addLog(`[SRE GESTON] Operação cancelada pelo operador.`);
+                  addLog(`[SRE GESTOR] Operação cancelada pelo operador.`);
                 }}
                 className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-slate-700 active:scale-95 cursor-pointer"
               >

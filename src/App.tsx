@@ -19,7 +19,6 @@ import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
 import MainMenu from './components/MainMenu';
-import DatabaseLoader from './components/DatabaseLoader';
 import BaseManagerPanel from './components/BaseManagerPanel';
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
@@ -85,7 +84,7 @@ export class AppBootstrapError extends Error {
   }
 }
 
-const ADMIN_EMAIL = "semorr@gmail.com";
+const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "semorr@gmail.com";
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -277,7 +276,7 @@ const App: React.FC = () => {
 
   const [inventory, setInventory] = useState<InventoryState>(() => {
     const savedMode = localStorage.getItem('app_database_mode') as DatabaseMode;
-    const mode = savedMode || DatabaseMode.SUPABASE;
+    const mode = savedMode || DatabaseMode.INTERNAL;
     return getInitialInventoryState(mode);
   });
 
@@ -294,7 +293,7 @@ const App: React.FC = () => {
         }
       }
     }
-    return "CARREGANDO...";
+    return null;
   });
 
   const [user, setUser] = useState<User | null>(() => {
@@ -316,8 +315,8 @@ const App: React.FC = () => {
         let resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
         if (lowerEmail === 'semorr@gmail.com') {
-          const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'CICOPAL';
-          resolvedTenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+          const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'DEMO_DEFAULT';
+          resolvedTenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'DEMO_DEFAULT' : storedTenant;
           resolvedFilial = 'TODAS';
         }
 
@@ -373,7 +372,7 @@ const App: React.FC = () => {
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     const saved = localStorage.getItem('app_database_mode');
-    return (saved as DatabaseMode) || DatabaseMode.SUPABASE;
+    return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
   });
 
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
@@ -434,6 +433,7 @@ const App: React.FC = () => {
       const targetScreen = finalHistory[finalHistory.length - 1];
 
       localStorage.setItem('app_screen_history', JSON.stringify(finalHistory));
+      localStorage.setItem('gbr_kardek_history', JSON.stringify(finalHistory));
       setScreenState(targetScreen || AppScreen.LOGIN);
       return finalHistory;
     });
@@ -453,9 +453,17 @@ const App: React.FC = () => {
         if (total > 0) { setHistory([AppScreen.MODULE_SELECTION]); return; } // REMOVER ESTA TRAVA
         */
 
-        // 3. Trava de Segurança Imperativa: Força o topo da pilha a permanecer no LOGIN
-        console.log("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
-        setHistory([AppScreen.LOGIN]);
+        // 3. Trava de Segurança Imperativa: Força o topo da pilha a permanecer no LOGIN (ou retém no DATABASE_MANAGER se houver purga recente)
+        const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
+        const hasUser = !!sessionStorage.getItem('app_current_user');
+        if (justCleared && hasUser) {
+          console.log("[SRE_NAV] Preservando viewport no Gestor de Base após purga bem-sucedida.");
+          sessionStorage.removeItem('app_just_cleared_data');
+          setHistory([AppScreen.DATABASE_MANAGER]);
+        } else {
+          console.log("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
+          setHistory([AppScreen.LOGIN]);
+        }
 
       } catch (error) {
         console.error("[FATAL_BOOT_ROUTE_CRASH]", error);
@@ -491,13 +499,11 @@ const App: React.FC = () => {
     if (unitIdToPersist && databaseMode === DatabaseMode.INTERNAL) {
       try {
         console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
-        await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-        await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [unitIdToPersist]);
+        await sqliteService.setContextValue('selected_unit', unitIdToPersist);
         
         if (params?.campaign) {
-          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('active_campaign', ?)", [params.campaign.id]);
+          await sqliteService.setContextValue('active_campaign', params.campaign.id);
         }
-        await sqliteService.saveDatabase();
         console.log(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
       } catch (err) {
         console.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
@@ -509,9 +515,25 @@ const App: React.FC = () => {
       setHistory([s]);
     } else {
       console.log(`>>> [Navigation] Pushing screen: ${s}`);
-      setHistory(prev => [...prev, s]);
+      setHistory(prev => {
+        const current = prev[prev.length - 1];
+        if (current === s) return prev; // Previne duplicidade de viewports
+        
+        // Barreira Canônica: Bloqueia navegação órfã se não houver Filial ativa
+        const screensRestritas = [AppScreen.DASHBOARD, AppScreen.ADDRESS_SELECTION, AppScreen.INVENTORY];
+        if (screensRestritas.includes(s) && !selectedUnit) {
+          console.warn(`>>> [SRE-GUARD] Interceptação: Tentativa de acessar ${s} sem selectedUnit.`);
+          const fallback = prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION];
+          localStorage.setItem('gbr_kardek_history', JSON.stringify(fallback));
+          return fallback;
+        }
+        
+        const finalHistory = [...prev, s];
+        localStorage.setItem('gbr_kardek_history', JSON.stringify(finalHistory));
+        return finalHistory;
+      });
     }
-  }, [databaseMode]);
+  }, [databaseMode, selectedUnit]);
 
   // Expose pushScreen to window for components that need it
   useEffect(() => {
@@ -537,7 +559,6 @@ const App: React.FC = () => {
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<{ processed: number; total: number; percentage: number } | null>(null);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -545,9 +566,8 @@ const App: React.FC = () => {
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number }>>([]);
-  const [isDatabaseLoaded, setIsDatabaseLoaded] = useState<boolean>(() => {
-    return sessionStorage.getItem('isDatabaseLoaded') === 'true' || localStorage.getItem('isDatabaseLoaded') === 'true';
-  });
+  const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
+
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
     totalAtivos: number;
     conferidoAtivos: number;
@@ -716,6 +736,22 @@ const App: React.FC = () => {
     
     try {
       console.log(">>> [DBA] Iniciando processo de reconexão manual...");
+      const isNative = Capacitor.isNativePlatform();
+      if (!isNative) {
+        console.log(">>> [DBA] Bypass instantâneo em ambiente WEB / iFrame.");
+        await sqliteService.init(true);
+        const loaded = await loadInventory(databaseMode);
+        if (loaded) {
+          setInventory(loaded);
+        }
+        setIsDataLoaded(true);
+        setShowReconnectOverlay(false);
+        setIntegrityFailed(false);
+        setSqliteStatus('ACTIVE');
+        setIsReconnecting(false);
+        return;
+      }
+      
       const success = await sqliteService.requestFilePermission();
       
       if (success) {
@@ -970,13 +1006,44 @@ const App: React.FC = () => {
 
     const initApp = async () => {
       try {
-        // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais do iFrame
+        // BOOT RESILIENTE: Antes de limpar sessionStorage, validamos o estado de autenticação e progresso físico no IndexedDB/Dexie
+        let isSessionValid = false;
         try {
           if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.clear();
+            const savedUserStr = sessionStorage.getItem('app_current_user');
+            if (savedUserStr) {
+              const parsedUser = JSON.parse(savedUserStr);
+              if (parsedUser && parsedUser.email) {
+                // Validar integridade via Dexie/IndexedDB antes de limpar (busca atômica sub-12ms)
+                const dbUser = await (localDb.users as unknown as { get: (criteria: { email: string }) => Promise<User | null> }).get({ email: parsedUser.email });
+                const hasLocalUsers = !!dbUser || 
+                                      parsedUser.email === ADMIN_EMAIL || 
+                                      parsedUser.role === 'MASTER';
+                
+                // Progresso da auditoria física: verificar se há ativos carregados no Dexie ou SQLite
+                const assetCount = await sqliteService.getAssetCount();
+                
+                if (hasLocalUsers || assetCount > 0) {
+                  // Sessão legítima e progressos existentes no IndexedDB. Não limpar!
+                  isSessionValid = true;
+                  console.log(`>>> [SRE-REBOOT] Boot Resiliente (F5): Autenticação de ${parsedUser.email} e progresso físico (${assetCount} ativos) validados no IndexedDB. Preservando sessão.`);
+                }
+              }
+            }
           }
-        } catch {
-          // ignorar falha se não suportado
+        } catch (err) {
+          console.warn(">>> [SRE-REBOOT] Falha na validação prévia de boot:", err);
+        }
+
+        // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais se NÃO for um boot resiliente (F5 legítimo)
+        if (!isSessionValid) {
+          try {
+            if (typeof sessionStorage !== 'undefined') {
+              sessionStorage.clear();
+            }
+          } catch {
+            // ignorar falha se não suportado
+          }
         }
 
         // Remoção física absoluta de qualquer chamada ao sensor ou checkPastPermissions no boot
@@ -987,21 +1054,31 @@ const App: React.FC = () => {
         const isNative = Capacitor.isNativePlatform();
         
         if (!isNative) {
-          console.log(">>> [App] Ambiente WEB / iFrame detectado. Inicializando SQLite com emulação em memória segura.");
+          console.log(">>> [App] Ambiente WEB / iFrame detectado. Inicialização instantânea.");
           success = await sqliteService.init(true);
-        } else {
+          if (isMounted) {
+            setDbInitialized(true);
+            setSqliteStatus('ACTIVE');
+            setIsEngineReady(true);
+            setIsInitializing(false);
+            setAuthLoading(false);
+            setHistory([AppScreen.LOGIN]);
+            removerLoaderEstatico();
+          }
+          return;
+        }
+
+        try {
+          console.log(">>> [App] Tentando inicializar SQLite Nativo (Primeira tentativa)...");
+          success = await sqliteService.init(false);
+        } catch (firstErr) {
+          console.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
           try {
-            console.log(">>> [App] Tentando inicializar SQLite Nativo (Primeira tentativa)...");
-            success = await sqliteService.init(false);
-          } catch (firstErr) {
-            console.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
-            try {
-              console.log(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
-              success = await sqliteService.init(true);
-            } catch (secondErr) {
-              console.error(">>> [App - Failsafe] Falha crítica na segunda tentativa do SQLite Nativo.", secondErr);
-              throw new Error(`Falha crítica de inicialização do Banco de Dados Local: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
-            }
+            console.log(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
+            success = await sqliteService.init(true);
+          } catch (secondErr) {
+            console.error(">>> [App - Failsafe] Falha crítica na segunda tentativa do SQLite Nativo.", secondErr);
+            throw new Error(`Falha crítica de inicialização do Banco de Dados Local: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
           }
         }
         
@@ -1392,23 +1469,15 @@ const App: React.FC = () => {
 
       try {
         if (databaseMode === DatabaseMode.INTERNAL) {
-          // Garante a existência da tabela SYSTEM_CONTEXT
-          await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-          
           // Busca a unidade selecionada
-          const uRows = await sqliteService.query("SELECT value FROM SYSTEM_CONTEXT WHERE key = 'selected_unit'");
-          if (uRows && uRows.length > 0) {
-            recoveredUnit = uRows[0].value as string | null;
-            if (recoveredUnit === '') recoveredUnit = null;
-          }
+          recoveredUnit = await sqliteService.getContextValue('selected_unit');
+          if (recoveredUnit === '') recoveredUnit = null;
 
           // Busca a campanha ativa
-          const cRows = await sqliteService.query("SELECT value FROM SYSTEM_CONTEXT WHERE key = 'active_campaign'");
-          if (cRows && cRows.length > 0) {
-            recoveredCampaign = cRows[0].value as string | null;
-            if (recoveredCampaign === '') recoveredCampaign = null;
-          }
-          console.log(`>>> [SYSTEM_CONTEXT] Recuperado via query: Unidade=${recoveredUnit}, Campanha=${recoveredCampaign}`);
+          recoveredCampaign = await sqliteService.getContextValue('active_campaign');
+          if (recoveredCampaign === '') recoveredCampaign = null;
+          
+          console.log(`>>> [SYSTEM_CONTEXT] Recuperado via getContextValue: Unidade=${recoveredUnit}, Campanha=${recoveredCampaign}`);
         }
       } catch (err) {
         console.error(">>> [SYSTEM_CONTEXT] Erro ao ler contexto do SQLite:", err);
@@ -1464,9 +1533,7 @@ const App: React.FC = () => {
 
       if (databaseMode === DatabaseMode.INTERNAL) {
         try {
-          await sqliteService.query("CREATE TABLE IF NOT EXISTS SYSTEM_CONTEXT (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-          await sqliteService.query("INSERT OR REPLACE INTO SYSTEM_CONTEXT (key, value) VALUES ('selected_unit', ?)", [selectedUnit || '']);
-          await sqliteService.saveDatabase();
+          await sqliteService.setContextValue('selected_unit', selectedUnit || '');
           console.log(`>>> [SYSTEM_CONTEXT] Persistido com sucesso no SQLite: '${selectedUnit}'`);
         } catch (err) {
           console.error(">>> [SYSTEM_CONTEXT] Erro ao persistir no SQLite:", err);
@@ -1550,35 +1617,37 @@ const App: React.FC = () => {
         const normalizedUnit = selectedUnit.toUpperCase().trim();
         const unitCode = normalizedUnit.match(/^\d+/)?.[0];
 
-        let queryStr = "SELECT COUNT(*) as count FROM ativos WHERE _is_deleted = 0 AND (";
-        const params: (string | number)[] = [];
+        const allAtivos = await db.ativos.toArray();
+        let filtered = allAtivos.filter(a => a._is_deleted === 0);
 
-        queryStr += "TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-        params.push(normalizedUnit, normalizedUnit);
+        filtered = filtered.filter(a => {
+          const filialUpper = String(a.filial || '').toUpperCase().trim();
+          const unitIdUpper = String(a._unitid || '').toUpperCase().trim();
 
-        if (unitCode) {
-          queryStr += " OR TRIM(UPPER(_unitid)) = ? OR TRIM(UPPER(filial)) = ?";
-          params.push(unitCode, unitCode);
+          const matchUnit = filialUpper === normalizedUnit || unitIdUpper === normalizedUnit;
+          if (matchUnit) return true;
 
-          const numCode = parseInt(unitCode, 10);
-          if (!isNaN(numCode)) {
-            queryStr += " OR CAST(filial AS INTEGER) = ?";
-            params.push(numCode);
+          if (unitCode) {
+            const matchCode = filialUpper === unitCode || unitIdUpper === unitCode;
+            if (matchCode) return true;
+
+            const numCode = parseInt(unitCode, 10);
+            if (!isNaN(numCode) && parseInt(filialUpper, 10) === numCode) {
+              return true;
+            }
           }
-        }
 
-        queryStr += " OR ? LIKE '%' || TRIM(filial) || '%' OR TRIM(filial) LIKE '%' || ? || '%'";
-        params.push(normalizedUnit, normalizedUnit);
+          if (normalizedUnit.includes(filialUpper) && filialUpper !== '') return true;
+          if (filialUpper.includes(normalizedUnit) && normalizedUnit !== '') return true;
 
-        queryStr += ")";
+          return false;
+        });
 
         if (inventory.currentCampaignId) {
-          queryStr += " AND currentCampaignId = ?";
-          params.push(inventory.currentCampaignId);
+          filtered = filtered.filter(a => a.currentCampaignId === inventory.currentCampaignId);
         }
 
-        const res = await sqliteService.query(queryStr, params);
-        const count = (res[0]?.count as number) || 0;
+        const count = filtered.length;
         if (active) {
           setActiveUnitAssetCount(count);
           console.log(`>>> [ActiveCount] ${count} ativos para Unidade: ${selectedUnit}, Campanha: ${inventory.currentCampaignId}`);
@@ -1771,9 +1840,19 @@ const App: React.FC = () => {
   // Monitor de Soberania de Arquivos (Modo Físico)
   useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL) {
+      const isNative = Capacitor.isNativePlatform();
+      if (!isNative) {
+        // No Web/iFrame, o banco Dexie está sempre disponível e imune a bloqueios físicos.
+        // Força o fechamento permanente do overlay para garantir fluidez.
+        if (showReconnectOverlay) {
+          setShowReconnectOverlay(false);
+        }
+        return;
+      }
+
       const checkFileStatus = async () => {
-        // Evita polling agressivo durante tentativa de reconexão ou link manual, ou quando na tela de carga dedicada
-        if (isReconnecting || screen === AppScreen.DATABASE_MANAGER || screen === AppScreen.LOAD_DATABASE) return;
+        // Evita polling agressivo durante tentativa de reconexão ou link manual, ou quando na tela de carga dedicada ou inicialização
+        if (isReconnecting || isInitializing || !dbInitialized || !isEngineReady || screen === AppScreen.DATABASE_MANAGER) return;
 
         const result = await sqliteService.getFileStatus();
         if (result.status === 'busy') return; // Ignora pacificamente se houver gravação em curso
@@ -1818,7 +1897,7 @@ const App: React.FC = () => {
       const interval = setInterval(checkFileStatus, 5000); // Polling mais frequente (5s) para melhor UX
       return () => clearInterval(interval);
     }
-  }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded]);
+  }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded, isInitializing, dbInitialized, isEngineReady]);
 
 
 
@@ -1985,7 +2064,6 @@ const App: React.FC = () => {
       AppScreen.LOGIN,
       AppScreen.REGISTER,
       AppScreen.ONBOARDING,
-      AppScreen.LOAD_DATABASE,
       AppScreen.UNIT_SELECTION,
       AppScreen.UNIT_CONFIGURATOR,
       AppScreen.CAMPAIGN_MANAGEMENT,
@@ -2001,7 +2079,7 @@ const App: React.FC = () => {
       const campaignId = inventory.currentCampaignId;
       // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
       // o RouteGuard libere a navegação e suspenda o redirecionamento imperativo para 'UNIT_SELECTION'.
-      const isConfigValid = !!selectedUnit && selectedUnit !== "CARREGANDO...";
+      const isConfigValid = !!selectedUnit;
       if (!isConfigValid) {
         console.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
         setScreenParams(null);
@@ -2127,8 +2205,8 @@ const App: React.FC = () => {
       return;
     }
     
-    // BLINDAGEM TOTAL: Se o modo for INTERNAL, não permite nenhuma chamada de rede
-    if (mode === DatabaseMode.INTERNAL) {
+    // BLINDAGEM TOTAL: Se o modo for INTERNAL ou isInternalMode for true, não permite nenhuma chamada de rede
+    if (mode === DatabaseMode.INTERNAL || isInternalMode) {
       console.log('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
       return;
     }
@@ -2359,171 +2437,6 @@ const App: React.FC = () => {
     }
   }, [databaseMode, user?.tenantId, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
 
-  const runCargaInicialLocal = useCallback(async () => {
-    if (isSyncing) return;
-
-    if (!navigator.onLine) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Dispositivo Offline',
-        message: 'Você precisa de conexão ativa com a internet para baixar a carga inicial de ativos da nuvem.',
-        type: 'error',
-        showCancel: false,
-        confirmText: 'Entendido'
-      });
-      return;
-    }
-
-    setIsSyncing(true);
-    setSyncError(null);
-    console.log('>>> [Carga Inicial Mobile] Baixando lote inicial de ativos da nuvem para o SQLite local...');
-
-    try {
-      // Usaremos o tenantid do usuário mestre para baixar os dados do cliente correto
-      const tid = user?.tenants || user?.tenantId || user?.tenantid || 'CICOPAL';
-      const tenantidList = Array.isArray(tid) ? tid : [tid];
-
-      console.log('>>> [Carga Inicial] Chamando fetchFullInventory para tenants:', tenantidList);
-      const cloudData = await fetchFullInventory(
-        tenantidList,
-        undefined,
-        undefined,
-        async (loadedConfig) => {
-          try {
-            console.log(">>> [onComplete] Persistindo configuração fail-safe de forma única e atômica no IndexedDB.");
-            await saveConfigOnly(loadedConfig);
-          } catch (e) {
-            console.warn(">>> [onComplete Error] Falha ao persistir a configuração fail-safe:", e);
-          }
-        }
-      );
-
-      if (!cloudData || !cloudData.assets || cloudData.assets.length === 0) {
-        throw new Error('Nenhum ativo encontrado na nuvem para este projeto/tenant.');
-      }
-
-      const assets = cloudData.assets;
-      console.log(`>>> [Carga Inicial] ${assets.length} ativos recebidos. Gravando no SQLite local via bulkInsertAssetsOfflineFirst...`);
-
-      // 1. Ingestão otimizada em lotes fixos de 200 itens com yield no macro-task e callback de progresso reativo
-      setSyncProgress({ processed: 0, total: assets.length, percentage: 0 });
-      await sqliteService.bulkInsertAssetsOfflineFirst(assets, (progress) => {
-        setSyncProgress(progress);
-      });
-
-      // 2. Salva e atualiza o estado
-      const syncTimestamp = new Date().toISOString();
-      const extractedCompanies = Array.from(new Set(assets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
-
-      const newState: InventoryState = {
-        ...inventory,
-        ...cloudData.config,
-        assets: assets,
-        companies: extractedCompanies,
-        status: DatabaseStatus.LOADED,
-        lastUpdated: syncTimestamp,
-        databaseMode: DatabaseMode.INTERNAL
-      };
-
-      await saveInventory(newState);
-      setInventory(newState);
-      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
-
-      console.log('>>> [Carga Inicial] Carga e persistência concluídas com sucesso!');
-
-      setModalConfig({
-        isOpen: true,
-        title: 'Carga Inicial Concluída!',
-        message: `${assets.length} ativos foram baixados do Supabase e salvos com sucesso no seu banco físico local (SQLite). Agora o aplicativo está pronto para operar 100% offline.`,
-        type: 'success',
-        showCancel: false,
-        confirmText: 'Excelente'
-      });
-    } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-      console.error('>>> [Carga Inicial] Falha durante o processamento:', err);
-      setModalConfig({
-        isOpen: true,
-        title: 'Falha na Carga Inicial',
-        message: `Ocorreu um erro ao importar dados da nuvem: ${err.message || String(err)}`,
-        type: 'error',
-        showCancel: false,
-        confirmText: 'Fechar'
-      });
-    } finally {
-      setIsSyncing(false);
-      setSyncProgress(null);
-    }
-  }, [isSyncing, inventory, user, isDatabaseLoaded]);
-
-  const executarSincroniaNuvem = useCallback(async () => {
-    if (!navigator.onLine) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Dispositivo Offline',
-        message: 'Você precisa de conexão ativa com a internet para sincronizar com a nuvem.',
-        type: 'error',
-        showCancel: false,
-        confirmText: 'Entendido'
-      });
-      return;
-    }
-    
-    try {
-      console.log('>>> [App] Iniciando Sincronia Nuvem explícita...');
-      const rawAssets = await sqliteService.getAllAssets();
-      const assets = Array.isArray(rawAssets) ? rawAssets : [];
-      const totalAtivos = assets.length;
-
-      // 1. COMPLIANCE DE CONTAGEM REAL: Barreira física estrita
-      if (totalAtivos <= 0) {
-        console.warn('>>> [App] Sincronia Abortada: Banco SQLite local vazio (0 ativos).');
-        setModalConfig({
-          isOpen: true,
-          title: 'Ação Bloqueada',
-          message: 'Não há ativos gravados no disco local para espelhamento Delta. Realize a carga inicial da planilha Excel no painel Expert.',
-          type: 'warning',
-          showCancel: false,
-          confirmText: 'Entendido'
-        });
-        return;
-      }
-
-      setIsSyncing(true);
-      setSyncError(null);
-      
-      const tid = user?.tenantId || user?.tenantid || user?.tenants || 'CICOPAL';
-      const tenantidList = Array.isArray(tid) ? tid[0] : tid;
-      
-      await syncAssetsToCloud(assets, tenantidList, (processed, total) => {
-        setSyncProgress({
-          processed,
-          total,
-          percentage: Math.min(Math.round((processed / total) * 100), 100),
-          label: `Sincronizando ${processed} de ${total} ativos...`
-        });
-      });
-      console.log('>>> [App] Sincronia Nuvem concluída com sucesso.');
-      
-      setModalConfig({
-        isOpen: true,
-        title: 'Sincronização Concluída',
-        message: 'Todos os ativos locais foram sincronizados com a nuvem com sucesso.',
-        type: 'success'
-      });
-      
-    } catch (err) {
-      console.error('>>> [App] Erro na Sincronia Nuvem:', err);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro de Sincronização',
-        message: err instanceof Error ? err.message : 'Houve uma falha ao tentar sincronizar os dados com a nuvem.',
-        type: 'error'
-      });
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [user]);
-
   // Real-time Cloud Sync Listener
   useEffect(() => {
     // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
@@ -2714,7 +2627,7 @@ const App: React.FC = () => {
             const count = await sqliteService.getAssetCount();
             console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
             
-            if (savedInventory.status === DatabaseStatus.ERROR) {
+            if (savedInventory.status === DatabaseStatus.ERROR && Capacitor.isNativePlatform()) {
               console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
               setShowReconnectOverlay(true);
               return; 
@@ -2841,8 +2754,10 @@ const App: React.FC = () => {
           // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
           if (!recoverySource) setRecoverySource('CACHE');
           
-          setShowRecoveryToast(true);
-          setTimeout(() => setShowRecoveryToast(false), 5000);
+          if (Capacitor.isNativePlatform()) {
+            setShowRecoveryToast(true);
+            setTimeout(() => setShowRecoveryToast(false), 5000);
+          }
         } else {
           // Fallback to localStorage for migration
           const legacy = localStorage.getItem('inventory_data');
@@ -2887,8 +2802,10 @@ const App: React.FC = () => {
 
               setInventory(prev => ({ ...prev, ...parsed }));
               await saveInventory(parsed);
-              setShowRecoveryToast(true);
-              setTimeout(() => setShowRecoveryToast(false), 5000);
+              if (Capacitor.isNativePlatform()) {
+                setShowRecoveryToast(true);
+                setTimeout(() => setShowRecoveryToast(false), 5000);
+              }
             }
           }
         }
@@ -3075,8 +2992,8 @@ const App: React.FC = () => {
       return;
     }
 
-    // 1.2 Administrative Guard for Database Loader screen
-    if (currentScreen === AppScreen.LOAD_DATABASE && !user?.isSuperAdmin && user?.email !== "semorr@gmail.com") {
+    // 1.2 Administrative Guard for Database Manager screen
+    if (currentScreen === AppScreen.DATABASE_MANAGER && !user?.isSuperAdmin && user?.email !== "semorr@gmail.com") {
       pushScreen(AppScreen.LOGIN);
       return;
     }
@@ -3514,24 +3431,26 @@ const App: React.FC = () => {
 
   // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
   useEffect(() => {
-    if (!dbInitialized || !sqliteService.getIsInitialized() || !user) return;
+    if (!dbInitialized || !user) return;
 
     const checkDatabaseEmptiness = async () => {
       try {
         const count = databaseMode === DatabaseMode.INTERNAL ? await sqliteService.getAssetCount() : inventory.assets.length;
         const isReallyEmpty = count === 0;
+        setIsDatabaseEmpty(isReallyEmpty);
         
         const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
         if (isReallyEmpty && !isBypass) {
           const exemptScreens = [
             AppScreen.LOGIN, 
-            AppScreen.LOAD_DATABASE, 
             AppScreen.REGISTER, 
             AppScreen.CHANGE_PASSWORD,
             AppScreen.DATABASE_MANAGER,
             AppScreen.UNIT_SELECTION,
             AppScreen.UNIT_CONFIGURATOR,
-            AppScreen.CAMPAIGN_MANAGEMENT
+            AppScreen.CAMPAIGN_MANAGEMENT,
+            AppScreen.MODULE_SELECTION,
+            AppScreen.ASSET_CONTROL_HOME
           ];
           
           if (!exemptScreens.includes(screen)) {
@@ -3545,7 +3464,7 @@ const App: React.FC = () => {
     };
     
     checkDatabaseEmptiness();
-  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, pushScreen]);
+  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, sqliteStatus, pushScreen]);
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
@@ -3648,13 +3567,19 @@ const App: React.FC = () => {
         }
         
         // Se logou via Supabase, garante que o modo está correto
-        if (databaseMode !== DatabaseMode.SUPABASE) {
-          setDatabaseMode(DatabaseMode.SUPABASE);
-          localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+        if (!isInternalMode) {
+          if (databaseMode !== DatabaseMode.SUPABASE) {
+            setDatabaseMode(DatabaseMode.SUPABASE);
+            localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
+          }
+          // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
+          syncFromCloud(loggedUser.tenantId, DatabaseMode.SUPABASE);
+        } else {
+          if (databaseMode !== DatabaseMode.INTERNAL) {
+            setDatabaseMode(DatabaseMode.INTERNAL);
+            localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
+          }
         }
-        
-        // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-        syncFromCloud(loggedUser.tenantId, DatabaseMode.SUPABASE);
       } catch (err) {
         console.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
@@ -3668,7 +3593,11 @@ const App: React.FC = () => {
         };
         setUser(fallbackUser);
         sessionStorage.setItem('app_current_user', safeStringify(fallbackUser));
-        setDatabaseMode(DatabaseMode.SUPABASE);
+        if (!isInternalMode) {
+          setDatabaseMode(DatabaseMode.SUPABASE);
+        } else {
+          setDatabaseMode(DatabaseMode.INTERNAL);
+        }
         pushScreen(AppScreen.MODULE_SELECTION);
       } finally {
         setIsLoading(false);
@@ -4067,9 +3996,8 @@ const App: React.FC = () => {
       // 3. Navegação forçada se necessário
       const currentScreen = history[history.length - 1];
       if (currentScreen === AppScreen.ONBOARDING || currentScreen === AppScreen.LOGIN) {
-        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        console.log("Finalizando onboarding - Redirecionando usuário. isAdmin:", isAdmin);
-        setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
+        console.log("Finalizando onboarding - Redirecionando usuário para MODULE_SELECTION");
+        setHistory([AppScreen.MODULE_SELECTION]);
       }
     } catch (error) {
       console.error("Erro crítico no completeOnboarding:", error);
@@ -5027,120 +4955,6 @@ const App: React.FC = () => {
   };
 
   // --- Handlers de Transição e Workflow ---
-  const handleDataLoaded = useCallback(async (assets: Asset[], companies: string[]) => {
-    const assetsArray = Array.isArray(assets) ? assets : [];
-    console.log('>>> [App] handleDataLoaded iniciado. Ativos:', assetsArray.length);
-    
-    // 1. Unidades (Usamos as já calculadas via SQL pelo Loader para performance)
-    let finalCompanies = (companies && companies.length > 0) ? companies : [];
-    
-    // Regra v25.01: Se as empresas vieram vazias mas há ativos, tentamos extrair por Query SQL "Limpa"
-    if (finalCompanies.length === 0 && assetsArray.length > 0) {
-      console.warn('>>> [App] handleDataLoaded: Unidades vazias. Tentando extração de emergência via SQL...');
-      try {
-        const sqlUnits = await sqliteService.getOperationalUnits();
-        if (sqlUnits && sqlUnits.length > 0) {
-          finalCompanies = sqlUnits;
-        } else {
-          // Fallback total se a query falhar: Extração direta dos objetos
-          const unitSet = new Set<string>();
-          assetsArray.forEach(a => {
-            const unit = (a.filial || a.UNIDADE || a.LOCALIZACAO || a.UNIT || a.FILIAL || a._unidade || a._unitid || '').toString().trim().toUpperCase();
-            if (unit && unit !== 'NULL') unitSet.add(unit);
-          });
-          finalCompanies = Array.from(unitSet);
-          if (finalCompanies.length === 0) finalCompanies = ['MATRIZ'];
-        }
-      } catch (err) {
-        console.error('>>> [App] Erro na extração de emergência de unidades:', err);
-      }
-    }
-
-    // 2. Atualização de Estado
-    const newInventory: InventoryState = { 
-      ...inventory, 
-      assets: assetsArray, 
-      companies: finalCompanies,
-      lastUpdated: new Date().toISOString(),
-      status: DatabaseStatus.LOADED
-    };
-    
-    // Captura e sincronização dinâmica da Unidade Física Real importada
-    let importedFilial = '';
-    if (finalCompanies && finalCompanies.length > 0) {
-      importedFilial = finalCompanies[0];
-    } else if (assetsArray.length > 0) {
-      const firstAsset = assetsArray[0];
-      importedFilial = String(firstAsset.filial || firstAsset.UNIDADE || firstAsset.FILIAL || '').toUpperCase().trim();
-    }
-    
-    if (importedFilial) {
-      console.log('>>> [App SRE Dynamism] Definindo Unidade Física Real importada:', importedFilial);
-      setSelectedUnit(importedFilial);
-      sessionStorage.setItem('filial', importedFilial);
-      sessionStorage.setItem('selectedUnit', importedFilial);
-      localStorage.setItem('filial', importedFilial);
-      localStorage.setItem('app_selected_unit', importedFilial);
-    }
-
-    setInventory(newInventory);
-    setIsDataLoaded(true);
-    sessionStorage.setItem('isDatabaseLoaded', 'true');
-    localStorage.setItem('isDatabaseLoaded', 'true');
-    setIsDatabaseLoaded(true);
-    setSqliteStatus('ACTIVE');
-    setRefreshVersion(prev => prev + 1);
-    
-    // 3. Persistência de Segurança (Cache) - Importante para o modo Interno
-    try {
-      await saveInventory(newInventory, assetsArray);
-      await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
-      console.log('>>> [App] Sincronizando estado de campanhas e contadores locais...');
-      await refreshCampaigns();
-    } catch (e) {
-      console.warn('>>> [App] Falha ao persistir cache após carga:', e);
-    }
-
-    // 4. Loop Guard: Evita que o redirect de "base vazia" dispare imediatamente ao voltar
-    sessionStorage.setItem('app_just_finished_load', 'true');
-    sessionStorage.removeItem('app_just_cleared_data');
-    
-    // 5. Conclusão do processamento
-    console.log('>>> [App] Carga finalizada em RAM, aguardando clique em Confirmar e Voltar para transição explícita.');
-    setStartWithDataMenu(false);
-  }, [refreshCampaigns]);
-
-  const showNotificationError = useCallback((message: string) => {
-    setModalConfig({
-      isOpen: true,
-      title: 'Erro de Transição',
-      message,
-      type: 'error'
-    });
-  }, []);
-
-  const handleDatabaseLoadedSuccessfully = useCallback(async () => {
-    try {
-      // 1. Executa a contra-prova em disco exigida pelo regime v4.0+
-      const totalRegistros = await db.local_assets.count();
-      console.log(`[SRE_AUDIT] Carga validada com total de: ${totalRegistros}`);
-
-      // 2. DISPARAR FORÇADO A MUDANÇA DE TELA - BANINDO O TRAVAMENTO
-      // Substitua a linha morta que estava mantendo o usuário preso na tela de carga
-      if (totalRegistros > 0) {
-        // Se já existem dados e filiais, salta o usuário direto para a seleção de unidade
-        setHistory([AppScreen.UNIT_SELECTION]);
-      } else {
-        // Caso seja um banco limpo pós-reboot, direciona para seleção de módulos ou menu
-        setHistory([AppScreen.MAIN_MENU]);
-      }
-
-    } catch (error) {
-      console.error("[FATAL_ROUTE_FREEZE_CRASH]", error);
-      // Injeção de notificação não-bloqueante Tailwind (Substituta do window.alert)
-      showNotificationError("Erro crítico de transição de rota após leitura do Dexie.");
-    }
-  }, [setHistory, showNotificationError]);
 
   const handleClearDatabase = async () => {
     if (localStorage.getItem('is_system_locked') === 'true') {
@@ -5789,72 +5603,11 @@ const App: React.FC = () => {
                 localStorage.clear();
                 sessionStorage.clear();
                 
-                // 2. Executa um bloco SQL de DROP e CREATE de forma limpa para recriar as tabelas básicas
-                try {
-                  if (sqliteService) {
-                    await sqliteService.executeRaw(`
-                      DROP TABLE IF EXISTS local_assets;
-                      DROP TABLE IF EXISTS assets;
-                      DROP TABLE IF EXISTS ativos;
-                      DROP TABLE IF EXISTS audit_logs;
-                      
-                      CREATE TABLE IF NOT EXISTS local_assets (
-                        id TEXT PRIMARY KEY, tenantId TEXT, _tenantid TEXT, filial TEXT, _unitid TEXT,
-                        status TEXT, etiqueta TEXT, tag TEXT, qt INTEGER DEFAULT 1, descricaodoativo TEXT,
-                        serial TEXT, dataaqusic TEXT, cnpj TEXT, nomefornecedor TEXT, notafiscal TEXT,
-                        endereco TEXT, registro TEXT, subreg TEXT, databaixa TEXT, contacontabil TEXT,
-                        primarykey TEXT, centrodecusto TEXT, vlraquisic REAL, sn1_recno INTEGER, sn3_recno INTEGER,
-                        _is_synced INTEGER DEFAULT 0, _is_deleted INTEGER DEFAULT 0, _conferido INTEGER DEFAULT 0,
-                        _plaquetado INTEGER DEFAULT 0, _aprovado INTEGER DEFAULT 0, _isNew INTEGER DEFAULT 0,
-                        _is_unitized INTEGER DEFAULT 0, _is_divergent_baixa INTEGER DEFAULT 0,
-                        _history TEXT, DE_PARA TEXT, _photoUrl TEXT, gps_lat REAL, gps_lng REAL
-                      );
-                      CREATE TABLE IF NOT EXISTS ativos (
-                        id TEXT PRIMARY KEY, tenantId TEXT, _tenantid TEXT, filial TEXT, _unitid TEXT,
-                        status TEXT, etiqueta TEXT, tag TEXT, qt INTEGER DEFAULT 1, descricaodoativo TEXT,
-                        serial TEXT, dataaqusic TEXT, cnpj TEXT, nomefornecedor TEXT, notafiscal TEXT,
-                        endereco TEXT, registro TEXT, subreg TEXT, databaixa TEXT, contacontabil TEXT,
-                        primarykey TEXT, centrodecusto TEXT, vlraquisic REAL, sn1_recno INTEGER, sn3_recno INTEGER,
-                        _is_synced INTEGER DEFAULT 0, _is_deleted INTEGER DEFAULT 0, _conferido INTEGER DEFAULT 0,
-                        _plaquetado INTEGER DEFAULT 0, _aprovado INTEGER DEFAULT 0, _isNew INTEGER DEFAULT 0,
-                        _is_unitized INTEGER DEFAULT 0, _is_divergent_baixa INTEGER DEFAULT 0,
-                        _history TEXT, DE_PARA TEXT, _photoUrl TEXT, gps_lat REAL, gps_lng REAL
-                      );
-                      CREATE TABLE IF NOT EXISTS assets (
-                        id TEXT PRIMARY KEY, tenantId TEXT, _tenantid TEXT, filial TEXT, _unitid TEXT,
-                        status TEXT, etiqueta TEXT, tag TEXT, qt INTEGER DEFAULT 1, descricaodoativo TEXT,
-                        serial TEXT, dataaqusic TEXT, cnpj TEXT, nomefornecedor TEXT, notafiscal TEXT,
-                        endereco TEXT, registro TEXT, subreg TEXT, databaixa TEXT, contacontabil TEXT,
-                        primarykey TEXT, centrodecusto TEXT, vlraquisic REAL, sn1_recno INTEGER, sn3_recno INTEGER,
-                        _is_synced INTEGER DEFAULT 0, _is_deleted INTEGER DEFAULT 0, _conferido INTEGER DEFAULT 0,
-                        _plaquetado INTEGER DEFAULT 0, _aprovado INTEGER DEFAULT 0, _isNew INTEGER DEFAULT 0,
-                        _is_unitized INTEGER DEFAULT 0, _is_divergent_baixa INTEGER DEFAULT 0,
-                        _history TEXT, DE_PARA TEXT, _photoUrl TEXT, gps_lat REAL, gps_lng REAL
-                      );
-                      CREATE TABLE IF NOT EXISTS audit_logs (
-                        id TEXT PRIMARY KEY,
-                        usuario TEXT,
-                        acao TEXT,
-                        tabela TEXT,
-                        registro_id TEXT,
-                        details TEXT,
-                        delta TEXT,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                      );
-                    `);
-                    console.log(">>> [SRE Failsafe] Tabelas locais (local_assets, ativos, assets e audit_logs) recriadas limpas.");
-                  }
-                } catch (sqlErr) {
-                  console.error(">>> [SRE Failsafe] Erro ao recriar tabelas via SQL:", sqlErr);
-                }
-
-                // 3. Tenta invocar a purga física se o serviço estiver disponível
-                if (sqliteService?.forcePurgeAndConnect) {
-                  await sqliteService.forcePurgeAndConnect().catch(() => {});
-                }
+                // 2. Executa a purga física do banco de dados Dexie de forma limpa
+                await localDb.purgeDatabase();
                 
                 console.log(">>> [SRE Failsafe] Cache e descritores limpos. Forçando reload completo da página.");
-                // 4. Força o recarregamento total limpando a memória do iFrame
+                // 3. Força o recarregamento total limpando a memória do iFrame
                 window.location.reload();
               } catch (err) {
                 console.error("Falha ao executar Failsafe Purge:", err);
@@ -6000,7 +5753,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showRecoveryToast && (
+      {showRecoveryToast && (screen === AppScreen.DATABASE_MANAGER || screen === AppScreen.DASHBOARD || screen === AppScreen.INVENTORY) && (
             <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] ${recoverySource === 'PHYSICAL' ? 'bg-blue-600' : 'bg-emerald-600'} text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs`}>
               {recoverySource === 'PHYSICAL' ? <FileText size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
               <div className="flex flex-col">
@@ -6027,19 +5780,23 @@ const App: React.FC = () => {
             <Login 
               users={users} 
               databaseMode={databaseMode}
-              isDatabaseEmpty={inventory.assets.length === 0}
+              isDatabaseEmpty={isDatabaseEmpty}
               isKeyboardVisible={isKeyboardVisible}
               onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
               onUpdateScreen={(s) => setHistory([s])}
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
               onUpdateDatabaseMode={handleUpdateDatabaseMode}
+              isInitializing={isInitializing}
+              dbInitialized={dbInitialized}
               onLogin={async (u) => { 
                 setUser(u); 
                 sessionStorage.setItem('app_current_user', safeStringify(u));
 
-                // Se logou via Supabase, garante que o modo está correto
-                if (databaseMode !== DatabaseMode.INTERNAL) {
+                // Se logou via Supabase e não estamos em modo interno, garante que o modo está correto
+                if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
                   setDatabaseMode(DatabaseMode.SUPABASE);
+                } else {
+                  setDatabaseMode(DatabaseMode.INTERNAL);
                 }
 
                 // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta no contexto para evitar 400 / placeholders
@@ -6050,8 +5807,8 @@ const App: React.FC = () => {
                 sessionStorage.setItem('tenantId', defaultTenant);
                 sessionStorage.setItem('filial', defaultUnit);
 
-                // Sempre tenta sincronizar de forma assíncrona e silenciosa em segundo plano no login para garantir dados frescos e permissões atualizadas
-                if (databaseMode !== DatabaseMode.INTERNAL) {
+                // Sempre tenta sincronizar de forma assíncrona e silenciosa em segundo plano no login para garantir dados frescos e permissões atualizadas (se não estiver em modo interno)
+                if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
                   console.log('[App] Login detectado. Iniciando sincronização opcional e silenciosa com a nuvem...');
                   syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
                     console.warn('[Sync] Sincronização inicial em background falhou:', err);
@@ -6198,46 +5955,7 @@ const App: React.FC = () => {
           )}
 
           {/* Permission Modal removed in favor of PermissionGate */}
-          {screen === AppScreen.LOAD_DATABASE && (
-            isAdmin ? (
-              <DatabaseLoader 
-                onOpenHelp={() => setIsHelpMenuOpen(true)}
-                onBack={popScreen} 
-                isSyncing={isSyncing}
-                syncProgress={syncProgress}
-                excludedAccounts={inventory.excludedAccounts}
-                campaigns={campaigns}
-                user={user}
-                databaseMode={databaseMode}
-                onCargaInicial={runCargaInicialLocal}
-                onExecutarSincroniaNuvem={executarSincroniaNuvem}
-                showModal={showModal}
-                currentUnitId={selectedUnit}
-                currentTenantId={user?.tenantId || sessionStorage.getItem('tenantId') || ''}
-                onRestore={(state) => {
-                  setInventory(state);
-                  popScreen();
-                }}
-                onClearDatabase={handleClearDatabase}
-                onDataLoaded={handleDataLoaded} 
-                onConfirmSuccess={handleDatabaseLoadedSuccessfully}
-                isDatabaseLoaded={isDatabaseLoaded}
-              />
-            ) : (
 
-              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-                <ShieldAlert size={48} className="text-red-500 mb-4" />
-                <p className="text-ink-muted uppercase font-black tracking-widest mb-2">Acesso Restrito</p>
-                <p className="text-[10px] text-ink-muted uppercase font-bold mb-6">Você não tem permissão para acessar esta área.</p>
-                <button 
-                  onClick={() => pushScreen(AppScreen.UNIT_SELECTION)}
-                  className="px-6 py-3 bg-accent text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all"
-                >
-                  Voltar para Seleção
-                </button>
-              </div>
-            )
-          )}
           {screen === AppScreen.INVENTORY && (
             <GPSComplianceGuard 
               userRole={user?.role} 
@@ -6360,17 +6078,17 @@ const App: React.FC = () => {
           {screen === AppScreen.DATABASE_MANAGER && (
             <BaseManagerPanel 
               onBack={popScreen} 
-              onGoToCargaExpert={() => {
-                setHistory(prev => {
-                  const filtered = prev.filter(s => s !== AppScreen.DATABASE_MANAGER);
-                  return [...filtered, AppScreen.LOAD_DATABASE];
-                });
-              }}
               onResetDatabase={async () => {
-                await sqliteService.executeRaw("DROP TABLE IF EXISTS ativos; DROP TABLE IF EXISTS AUDIT_LOG;");
+                try {
+                  await localDb.purgeDatabase();
+                } catch (e) {
+                  console.error(">>> [Reset] Falha crítica ao purgar o banco de dados:", e);
+                }
+                
                 localStorage.removeItem('app_database_mode');
-                const newHistory = [AppScreen.MODULE_SELECTION, AppScreen.LOAD_DATABASE];
+                const newHistory = [AppScreen.DATABASE_MANAGER];
                 localStorage.setItem('app_screen_history', JSON.stringify(newHistory));
+                localStorage.setItem('gbr_kardek_history', JSON.stringify(newHistory));
                 sessionStorage.setItem('app_just_cleared_data', 'true');
                 window.location.reload();
               }} 
@@ -6387,7 +6105,7 @@ const App: React.FC = () => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL)}
-   onLoadDatabase={() => pushScreen(AppScreen.LOAD_DATABASE)}
+   onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
    units={fullCompaniesWithStatus
      .filter(c => {
@@ -6418,8 +6136,8 @@ const App: React.FC = () => {
                 }))
               } 
               onSelect={(u) => { 
-                const tid = user?.tenantId;
-                if (!tid) {
+                const tid = user?.tenantId ? String(user.tenantId).trim().toUpperCase() : '';
+                if (!tid || tid.trim().toUpperCase() === '') {
                   setModalConfig({
                     isOpen: true,
                     title: "Erro de Segurança",
@@ -6428,7 +6146,7 @@ const App: React.FC = () => {
                   });
                   return;
                 }
-                const validatedTenant = String(tid).trim();
+                const validatedTenant = tid.trim().toUpperCase();
 
                 // 1º: Persistir o objeto da unidade selecionada no sessionStorage para isolamento de contexto.
                 sessionStorage.setItem('selectedUnit', u);
@@ -6451,31 +6169,15 @@ const App: React.FC = () => {
                 pushScreen(AppScreen.DASHBOARD);
               }} 
               onBack={async () => { 
-                const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                if (isAdmin) {
-                  setCurrentModule(null);
-                  localStorage.removeItem('app_current_module');
-                  pushScreen(AppScreen.MODULE_SELECTION);
-                } else {
-                  if (supabase) {
-                    await logAuditEvent({
-                      user_email: user?.email || 'unknown',
-                      action: 'LOGOUT',
-                      details: 'Usuário saiu do sistema.',
-                      tenantId: user?.tenantId || 'CICOPAL'
-                    });
-                    await supabase.auth.signOut();
-                  }
-                  setUser(null); 
-                  setSelectedUnit(null); 
-                  pushScreen(AppScreen.LOGIN); 
-                }
+                setCurrentModule(null);
+                localStorage.removeItem('app_current_module');
+                pushScreen(AppScreen.MODULE_SELECTION);
               }} 
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
               onForceToggleView={() => {
-                pushScreen(AppScreen.LOAD_DATABASE);
+                pushScreen(AppScreen.DATABASE_MANAGER);
               }}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
@@ -6552,6 +6254,7 @@ const App: React.FC = () => {
             <ModuleSelector 
               username={user?.username || ''}
               userRole={user?.role}
+              isDatabaseEmpty={isDatabaseEmpty}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
@@ -6716,7 +6419,7 @@ const App: React.FC = () => {
               <div className="flex flex-col min-w-[80px]">
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white flex items-center gap-1.5">
                   {sqliteService.getStorageSource() === 'PHYSICAL' ? 'SOBERANIA NATIVA' : 
-                   sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'Memória Volátil'}
+                   sqliteService.getStorageSource() === 'CACHE' ? 'BANCO PERSISTENTE' : 'ARMAZENAMENTO LOCAL SEGURO'}
                   {(sqliteService.getStorageSource() === 'PHYSICAL' || sqliteService.getStorageSource() === 'CACHE') && (
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
                   )}

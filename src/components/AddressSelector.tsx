@@ -23,9 +23,17 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   onBack,
   isImportingBatch = false
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [addresses, setAddresses] = useState<Array<{ displayName: string; total: number; checked: number; locKey: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -33,7 +41,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
       if (!selectedUnit) return;
       setIsLoading(true);
       try {
-        const results = await localDb.assets.getLocationsWithStats(selectedUnit, searchTerm);
+        const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedQuery);
         if (active) {
           setAddresses(results || []);
         }
@@ -44,15 +52,19 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
       }
     };
 
-    const timer = setTimeout(() => {
-      fetchAddresses();
-    }, 200);
+    fetchAddresses();
 
     return () => {
       active = false;
-      clearTimeout(timer);
     };
-  }, [selectedUnit, searchTerm]);
+  }, [selectedUnit, debouncedQuery]);
+
+  const handleBack = () => {
+    setAddresses([]);
+    setSearchQuery('');
+    setDebouncedQuery('');
+    onBack();
+  };
 
   const handleSelect = (address: string) => {
     sessionStorage.setItem('current_selected_address', address);
@@ -68,7 +80,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         <div className="flex items-center justify-between w-full h-12">
           {/* Back Button Alinhado à Esquerda */}
           <div className="flex-shrink-0 flex items-center">
-            <BackButton id="address-back-btn" onClick={onBack} label="Voltar" subLabel="Unidades" />
+            <BackButton id="address-back-btn" onClick={handleBack} label="Voltar" subLabel="Unidades" />
           </div>
           
           {/* Bloco de Texto Centralizado Verticalmente */}
@@ -96,8 +108,8 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
             type="text"
             id="address-search-input"
             placeholder="PESQUISAR ENDEREÇO / LOCALIDADE..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
             className="w-full pl-11 pr-5 py-2.5 bg-bg-main rounded-xl text-[10px] font-bold uppercase border border-border focus:border-accent outline-none transition-all shadow-inner placeholder:text-ink-muted/30 text-ink"
           />
         </div>

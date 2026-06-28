@@ -1,4 +1,5 @@
 import Dexie from 'dexie';
+import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -91,6 +92,16 @@ export interface DexieCampaignSnapshot {
   _tenantid: string;
 }
 
+export interface DexieAddress {
+  id?: number;
+  tenantId: string;
+  filial: string;
+  codigo_endereco: string;
+  setor: string;
+  bloco: string;
+  _is_synced: number;
+}
+
 class InventoryDexieDatabase extends Dexie {
   local_assets!: Dexie.Table<DexieAsset, string>;
   ativos!: Dexie.Table<DexieAsset, string>;
@@ -100,6 +111,7 @@ class InventoryDexieDatabase extends Dexie {
   SYSTEM_CONTEXT!: Dexie.Table<DexieSystemContext, string>;
   unit_configs!: Dexie.Table<DexieUnitConfig, string>;
   campaign_snapshots!: Dexie.Table<DexieCampaignSnapshot, string>;
+  addresses!: Dexie.Table<DexieAddress, number>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -121,6 +133,17 @@ class InventoryDexieDatabase extends Dexie {
       SYSTEM_CONTEXT: 'key',
       unit_configs: 'id, filial',
       campaign_snapshots: 'id, campaign_id'
+    });
+    this.version(3).stores({
+      local_assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      ativos: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantId',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced'
     });
   }
 }
@@ -625,11 +648,23 @@ export class SqliteService {
   }
 
   public async getFileStatus(): Promise<{ status: string; path: string; fileName?: string }> {
+    const isNative = Capacitor.isNativePlatform();
     return {
-      status: this.isInitialized ? 'linked' : 'permission_denied',
-      path: this.getNativePath(),
+      status: (!isNative || this.isInitialized) ? 'linked' : 'permission_denied',
+      path: this.getNativePath() || 'IndexedDB',
       fileName: 'InventoryLocalStore'
     };
+  }
+
+  public async requestFilePermission(): Promise<boolean> {
+    console.log(">>> [SqliteService] requestFilePermission called (Web/Dexie Simulation)");
+    try {
+      await this.init(true);
+      return true;
+    } catch (err) {
+      console.error(">>> [SqliteService] Error in requestFilePermission:", err);
+      return false;
+    }
   }
 
   public async obterContextoAtivo(): Promise<{ selectedUnit: string; currentCampaignId: string }> {
@@ -663,7 +698,7 @@ export class SqliteService {
 
   public async getAssetCount(): Promise<number> {
     try {
-      const list = await db.ativos.toArray();
+      const list = await db.local_assets.toArray();
       return list.filter(a => a._is_deleted === 0).length;
     } catch {
       return 0;

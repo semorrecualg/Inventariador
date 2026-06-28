@@ -138,8 +138,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             return {
               filial: f,
               displayName: f,
-              total: filialAssets.length,
-              checked: checkedAssets.length
+              total: Math.max(0, filialAssets.length),
+              checked: Math.max(0, checkedAssets.length)
             };
           });
 
@@ -507,8 +507,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                         <span className="truncate">{displayName}</span>
                         {typeof unit.assetCount === 'number' && (
                           <span className="text-slate-400 font-semibold text-xs normal-case whitespace-nowrap">
-                            - {unit.assetCount.toLocaleString('pt-BR')} ativos
-                            {databaseMode === DatabaseMode.INTERNAL && typeof unit.checkedCount === 'number' && ` (${unit.checkedCount} conf.)`}
+                            • {Math.max(0, unit.assetCount).toLocaleString('pt-BR')} ativos
+                            {databaseMode === DatabaseMode.INTERNAL && typeof unit.checkedCount === 'number' && ` (${Math.max(0, unit.checkedCount)} conf.)`}
                           </span>
                         )}
                       </h4>

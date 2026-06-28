@@ -122,7 +122,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onUpdateScanFeedbackMode,
   initialDataMenuOpen = false,
   databaseMode,
-  onUpdateDatabaseMode,
   selectedUnit,
   darkMode,
   onUpdateDarkMode,
@@ -239,7 +238,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       );
       return null; // Interrompe sem disparar exceção fatal ('throw') que derruba a UI
     }
-    return String(tid).trim();
+    return String(tid).trim().toUpperCase();
   };
 
   // 2. MALHA DE NAVEGAÇÃO À PROVA DE FALHAS DE MEMÓRIA E ESTADOS NULOS
@@ -590,14 +589,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_DATABASE); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center mr-4 border border-amber-100"><DatabaseZap size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Carga Física</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gestão de Cargas Internas</p>
-                </div>
-              </button>
-
               <button 
                 onClick={handleCheckIntegrity}
                 disabled={isCheckingIntegrity}
@@ -620,44 +611,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
-              {/* INFRAESTRUTURA CLOUD - NOVA SEÇÃO RESTRITA */}
-              <div className="w-full p-4 bg-blue-50 border border-blue-100 rounded-2xl shadow-sm">
-                <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-md"><Cloud size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-blue-900 uppercase tracking-tight">Infraestrutura Cloud</h4>
-                    <p className="text-[8px] font-bold text-blue-400 uppercase tracking-widest mt-0.5">Sincronização e Backup</p>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-blue-100">
-                    <div>
-                      <span className="text-[10px] font-bold text-blue-900 uppercase tracking-widest block">Modo Cloud Sync</span>
-                      <span className="text-[8px] text-blue-400 uppercase font-medium">Backup em tempo real</span>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        const newMode = databaseMode === DatabaseMode.INTERNAL ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
-                        onUpdateDatabaseMode(newMode);
-                      }}
-                      className={`w-10 h-5 rounded-full relative transition-colors ${databaseMode === DatabaseMode.SUPABASE ? 'bg-blue-500' : 'bg-slate-200'}`}
-                    >
-                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${databaseMode === DatabaseMode.SUPABASE ? 'left-6' : 'left-1'}`}  />
-                    </button>
-                  </div>
 
-                  {databaseMode === DatabaseMode.SUPABASE && (
-                    <button 
-                      onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.SYNC_MANAGER); }}
-                      className="w-full py-2.5 px-4 bg-blue-600 text-white rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
-                    >
-                      <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-                      Gerenciar Sincronização
-                    </button>
-                  )}
-                </div>
-              </div>
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
@@ -1006,7 +960,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </div>
 
-              {/* Modalidade de Acesso movida para cá */}
+              {/* Modalidade de Acesso - Fixado em Local por Orientação */}
               <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl shadow-sm mb-3">
                 <div className="flex items-center mb-3">
                   <div className="w-8 h-8 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30 shadow-sm"><Database size={16} /></div>
@@ -1016,39 +970,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <button 
-                    onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
-                    className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-slate-600/20 border-slate-500 text-slate-400 shadow-sm' : 'bg-white/5 border-white/10 text-white/40'}`}
+                  <div 
+                    className="w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border bg-slate-600/20 border-slate-500 text-slate-400 shadow-sm select-none"
                   >
                     <div className="flex items-center">
                       <Server size={14} className="mr-3" />
-                      <span>1) Mobile Puro (Local)</span>
+                      <span>Mobile Puro (Local)</span>
                     </div>
-                    {databaseMode === DatabaseMode.INTERNAL && <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />}
-                  </button>
-                  
-                  <div className="relative group">
-                    <button 
-                      onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
-                      className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${
-                        databaseMode === DatabaseMode.SUPABASE 
-                          ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-sm' 
-                          : 'bg-white/5 border-white/10 text-white/40'
-                      }`}
-                    >
-                      <div className="flex items-center">
-                        <Cloud size={14} className="mr-3" />
-                        <span>2) Cloud Sync (Nuvem)</span>
-                      </div>
-                      {databaseMode === DatabaseMode.SUPABASE ? (
-                        <div className="w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                      ) : null}
-                    </button>
+                    <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />
                   </div>
                 </div>
                 <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">
                   <p className="text-[7px] font-bold text-accent uppercase leading-relaxed tracking-wide opacity-80">
-                    Nota: A alteração da modalidade afeta o método de login e a sincronização de dados.
+                    Nota: Atualmente configurado em modo offline-first restrito (sem conexão com a nuvem).
                   </p>
                 </div>
               </div>
@@ -1057,15 +991,15 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 onClick={() => { 
                   setIsDataMenuOpen(false); 
                   setIsAdminMenuOpen(false);
-                  onNavigate(AppScreen.LOAD_DATABASE); 
+                  onNavigate(AppScreen.DATABASE_MANAGER); 
                 }} 
                 className="w-full flex items-center p-5 bg-accent text-white rounded-2xl active:scale-[0.98] transition-all text-left shadow-xl shadow-accent/20 border-2 border-white/20"
               >
-                <div className="w-12 h-12 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5 shadow-inner"><DatabaseZap size={24} /></div>
+                <div className="w-12 h-12 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5 shadow-inner"><Database size={24} /></div>
                 <div className="flex-1">
-                  <h4 className="text-sm font-black uppercase tracking-tight">GESTOR DE DADOS</h4>
+                  <h4 className="text-sm font-black uppercase tracking-tight">GESTOR DE BASE</h4>
                   <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5 whitespace-pre-wrap">
-                    Carga Expert (v25), Backup, Exportação & Persistência
+                    Zerar Base de Dados Local, Diagnóstico de Hardware & Logs de SRE
                   </p>
                 </div>
                 <ChevronRight size={20} className="text-white/40" />

@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
@@ -179,6 +180,10 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
 };
 
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
+  const IS_OFFLINE_FIRST_PHASE = true;
+  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    return { success: true, processedCount: 0 };
+  }
   const user = getUserFromLocalStorage();
   const rawTenant = user ? user.tenantId : null;
   const rawFilial = sessionStorage.getItem('filial');
@@ -251,6 +256,10 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
 
 export const photoSyncManager = {
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
+    const IS_OFFLINE_FIRST_PHASE = true;
+    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+      return { success: true, uploadCount: 0, failedCount: 0 };
+    }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? user.tenantId : null;
     const rawFilial = sessionStorage.getItem('filial');
@@ -364,6 +373,10 @@ const _syncService = {
   isStringInvalid,
 
   processDataSyncQueue: async (): Promise<SyncResult> => {
+    const IS_OFFLINE_FIRST_PHASE = true;
+    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+      return { success: true, processedCount: 0 };
+    }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? user.tenantId : null;
     const rawFilial = sessionStorage.getItem('filial');
@@ -719,6 +732,11 @@ const scheduleNextCycle = () => {
 };
 
 const runSyncLoopCycle = async () => {
+  const IS_OFFLINE_FIRST_PHASE = true;
+  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    scheduleNextCycle();
+    return;
+  }
   if (isSyncingLoopActive) return;
   
   const safe = await checkHardwareSafety();

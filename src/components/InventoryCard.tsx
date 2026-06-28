@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, DexieAsset } from '../services/sqliteService';
+import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -59,6 +60,23 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
   const [notification, setNotification] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
   const [batteryLevel, setBatteryLevel] = useState<number>(1);
   const [batteryCharging, setBatteryCharging] = useState<boolean>(true);
+
+  // --- Estados do Coletor de Código de Barras / RFID ---
+  const [barcodeInput, setBarcodeInput] = useState<string>('');
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [scanFeedback, setScanFeedback] = useState<{
+    type: 'success' | 'divergence' | 'surplus';
+    message: string;
+    asset?: DexieAsset;
+  } | null>(null);
+
+  const [showTransferModal, setShowTransferModal] = useState<boolean>(false);
+  const [pendingAssetToTransfer, setPendingAssetToTransfer] = useState<DexieAsset | null>(null);
+
+  const [showSurplusModal, setShowSurplusModal] = useState<boolean>(false);
+  const [surplusDescription, setSurplusDescription] = useState<string>('');
+  const [surplusSerial, setSurplusSerial] = useState<string>('');
+  const [surplusObservation, setSurplusObservation] = useState<string>('');
 
   // --- Efeito: Monitoramento de Hardware (Bateria) ---
   useEffect(() => {
@@ -301,6 +319,191 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
     setNovaObservacao('');
   };
 
+  // --- Manipuladores de Escaneamento e Confronto ---
+  const handleScanSubmit = async (code: string) => {
+    if (!code) return;
+    const normalizedBarcode = code.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (!normalizedBarcode) return;
+
+    setIsSaving(true);
+    setScanFeedback(null);
+
+    // 1. Tratamento de Hardware: Se bateria < 5% e não estiver carregando, aborta de forma impeditiva
+    const isBatteryCritical = batteryLevel <= 0.05 && !batteryCharging;
+    if (isBatteryCritical) {
+      triggerNotification(
+        'error', 
+        `Operação cancelada! Bateria em nível crítico (${Math.round(batteryLevel * 100)}%) sem alimentação externa.`
+      );
+      setIsSaving(false);
+      return;
+    }
+
+    try {
+      // Buscar primeiro por primarykey ou etiqueta na tabela de ativos
+      let asset = await db.ativos.where('primarykey').equals(normalizedBarcode).first();
+      if (!asset) {
+        asset = await db.ativos.where('etiqueta').equals(normalizedBarcode).first();
+      }
+
+      if (asset) {
+        // Encontrou o ativo cadastrado!
+        const assetUnit = String(asset.filial || asset._unitid || '').toUpperCase().trim();
+        const currentUnit = unidadeSelecionada.toUpperCase().trim();
+
+        if (assetUnit === currentUnit) {
+          // SUCESSO OPERACIONAL (Verde): mesma filial
+          await saveCollectedAssetAtomic({
+            ...asset,
+            _conferido: 1,
+            _is_synced: 0,
+            status: 'CONFERIDO'
+          });
+
+          await carregarAtivos();
+
+          setScanFeedback({
+            type: 'success',
+            message: `Ativo ${normalizedBarcode} conferido com sucesso na filial atual!`,
+            asset
+          });
+          setBarcodeInput('');
+        } else {
+          // DIVERGÊNCIA DE LOCALIDADE (Amarelo): filial diferente
+          setPendingAssetToTransfer(asset);
+          setShowTransferModal(true);
+          setScanFeedback({
+            type: 'divergence',
+            message: `O ativo ${normalizedBarcode} foi cadastrado originalmente na filial ${assetUnit || 'NÃO CONFIGURADA'}. Deseja transferi-lo para a filial atual (${unidadeSelecionada})?`,
+            asset
+          });
+        }
+      } else {
+        // SOBRA FÍSICA / EXCEDENTE (Laranja): não localizado
+        setScanFeedback({
+          type: 'surplus',
+          message: `O ativo ${normalizedBarcode} não foi localizado na base local. Deseja registrá-lo como Sobra Física (Excedente)?`
+        });
+        setShowSurplusModal(true);
+      }
+    } catch (err) {
+      console.error(">>> [InventoryCard] Erro no confronto assíncrono de ativo:", err);
+      triggerNotification('error', 'Falha física de acesso ao IndexedDB durante o confronto.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!pendingAssetToTransfer) return;
+
+    // Trava preventiva de bateria baixa (< 5%) sem alimentação externa
+    const isBatteryCritical = batteryLevel <= 0.05 && !batteryCharging;
+    if (isBatteryCritical) {
+      triggerNotification(
+        'error', 
+        `Operação cancelada! Bateria em nível crítico (${Math.round(batteryLevel * 100)}%) sem alimentação externa.`
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updatedAsset: DexieAsset = {
+        ...pendingAssetToTransfer,
+        filial: unidadeSelecionada,
+        _conferido: 1,
+        _is_synced: 0,
+        status: 'CONFERIDO_TRANSFERIDO',
+        _history: JSON.stringify([
+          ...(JSON.parse(pendingAssetToTransfer._history || '[]')),
+          {
+            data: new Date().toISOString(),
+            auditor: userEmail,
+            status_anterior: pendingAssetToTransfer.status || 'PENDENTE',
+            novo_status: 'CONFERIDO_TRANSFERIDO',
+            obs: `Transferido da filial ${pendingAssetToTransfer.filial} para ${unidadeSelecionada} via Coletor SRE.`
+          }
+        ])
+      };
+
+      await saveCollectedAssetAtomic(updatedAsset);
+      await carregarAtivos();
+
+      triggerNotification('success', `Ativo ${pendingAssetToTransfer.etiqueta || pendingAssetToTransfer.primarykey} transferido e conferido com sucesso!`);
+      setBarcodeInput('');
+      setScanFeedback(null);
+      setShowTransferModal(false);
+      setPendingAssetToTransfer(null);
+    } catch (err) {
+      console.error(">>> [InventoryCard] Erro ao transferir ativo:", err);
+      triggerNotification('error', 'Falha ao processar transferência.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveSurplus = async () => {
+    if (!barcodeInput) return;
+    const cleanBarcode = barcodeInput.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (!cleanBarcode) return;
+
+    // Trava preventiva de bateria baixa (< 5%) sem alimentação externa
+    const isBatteryCritical = batteryLevel <= 0.05 && !batteryCharging;
+    if (isBatteryCritical) {
+      triggerNotification(
+        'error', 
+        `Operação cancelada! Bateria em nível crítico (${Math.round(batteryLevel * 100)}%) sem alimentação externa.`
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const newSurplus: DexieAsset = {
+        primarykey: cleanBarcode,
+        etiqueta: cleanBarcode,
+        filial: unidadeSelecionada,
+        descricaodoativo: surplusDescription.trim() || 'SOBRA FÍSICA - EXCEDENTE DE CAMPO',
+        serial: surplusSerial.trim() || 'SEM SERIAL',
+        status: 'SOBRA_FISICA',
+        _conferido: 1,
+        _is_synced: 0,
+        observacao: surplusObservation.trim(),
+        _auditor: userEmail,
+        _dataLeitura: new Date().toISOString(),
+        _history: JSON.stringify([{
+          data: new Date().toISOString(),
+          auditor: userEmail,
+          status_anterior: 'NÃO CADASTRADO',
+          novo_status: 'SOBRA_FISICA',
+          obs: 'Cadastrado como Sobra Física (Surplus) de campo via Coletor SRE.'
+        }])
+      };
+
+      await saveCollectedAssetAtomic(newSurplus);
+      
+      // Garante escrita explícita local de compatibilidade nas coleções do Dexie
+      await db.local_assets.put(newSurplus);
+      await db.ativos.put(newSurplus);
+
+      await carregarAtivos();
+
+      triggerNotification('success', `Sobra física ${cleanBarcode} registrada e conferida na unidade ${unidadeSelecionada}!`);
+      setBarcodeInput('');
+      setScanFeedback(null);
+      setShowSurplusModal(false);
+      setSurplusDescription('');
+      setSurplusSerial('');
+      setSurplusObservation('');
+    } catch (err) {
+      console.error(">>> [InventoryCard] Erro ao cadastrar sobra física:", err);
+      triggerNotification('error', 'Falha ao registrar sobra física no IndexedDB.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div id="gbr-inventory-card-screen" className="flex flex-col h-full bg-slate-900 text-slate-100 font-sans">
       {/* --- NOTIFICAÇÃO FLUTUANTE (Sem window.alert) --- */}
@@ -366,6 +569,89 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
       {/* --- CONTEÚDO PRINCIPAL (GRID) --- */}
       <main id="gbr-inventory-grid-body" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 max-w-7xl mx-auto w-full">
         
+        {/* --- MOTOR DE CAPTURA E ENTRADA ATÔMICA (SRE) --- */}
+        <div className="bg-slate-950 p-5 rounded-3xl border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-900 pb-2.5">
+            <div className="flex items-center space-x-2">
+              <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <label htmlFor="input-barcode-capture" className="text-[10px] font-black uppercase tracking-widest text-slate-200">
+                Coletor Ativo de Código de Barras / RFID Tag (SRE)
+              </label>
+            </div>
+            <div className="text-[9px] text-slate-500 uppercase tracking-widest font-mono font-bold">
+              CONEXÃO ATÔMICA ACID
+            </div>
+          </div>
+
+          <form onSubmit={(e) => { e.preventDefault(); handleScanSubmit(barcodeInput); }} className="flex gap-3">
+            <div className="flex-1 relative">
+              <input 
+                id="input-barcode-capture"
+                type="text" 
+                placeholder={isSaving ? "GRAVANDO REGISTRO..." : "ESCANEIE OU DIGITE O CÓDIGO DA PLAQUETA/RFID..."}
+                value={barcodeInput}
+                disabled={isSaving}
+                onChange={(e) => setBarcodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+                className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl pl-11 pr-4 py-3.5 text-xs font-mono font-bold tracking-widest placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 transition-all uppercase"
+                autoComplete="off"
+                autoFocus
+              />
+              <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-500">
+                <Search size={15} className="text-slate-500" />
+              </div>
+            </div>
+            <button
+              id="btn-submit-scanned-code"
+              type="submit"
+              disabled={isSaving || !barcodeInput}
+              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl font-black uppercase tracking-wider text-[10px] transition-colors shrink-0"
+            >
+              CONFERIR
+            </button>
+          </form>
+
+          {/* Visual state feedback cards */}
+          {scanFeedback && (
+            <div 
+              id="scanned-asset-feedback-card"
+              className={`p-4 rounded-2xl border flex items-start space-x-3 transition-all ${
+                scanFeedback.type === 'success' 
+                  ? 'bg-emerald-950/30 border-emerald-900/50 text-emerald-400' 
+                  : scanFeedback.type === 'divergence' 
+                    ? 'bg-amber-950/30 border-amber-900/50 text-amber-400' 
+                    : 'bg-orange-950/30 border-orange-900/50 text-orange-400'
+              }`}
+            >
+              <AlertTriangle className="shrink-0 mt-0.5" size={16} />
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider">
+                    {scanFeedback.type === 'success' && 'SUCESSO OPERACIONAL'}
+                    {scanFeedback.type === 'divergence' && 'DIVERGÊNCIA DE LOCALIDADE'}
+                    {scanFeedback.type === 'surplus' && 'SOBRA FÍSICA DETECTADA (EXCEDENTE)'}
+                  </span>
+                  <button 
+                    onClick={() => setScanFeedback(null)} 
+                    className="text-[9px] uppercase font-black tracking-widest hover:underline opacity-80"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <p className="text-xs font-semibold leading-relaxed">
+                  {scanFeedback.message}
+                </p>
+                {scanFeedback.asset && (
+                  <div className="text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900 flex flex-wrap gap-x-4">
+                    <span>Etiqueta: {scanFeedback.asset.etiqueta}</span>
+                    <span>Desc: {scanFeedback.asset.descricaodoativo}</span>
+                    <span>Original: {scanFeedback.asset.filial}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* FILIAL SELECTOR & TELEMETRIA OPERACIONAL */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-slate-950 p-5 rounded-3xl border border-slate-800 flex flex-col justify-between space-y-4">
@@ -664,7 +950,7 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
                   <div className="space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-wider block">CONTA DE ELIMINAÇÃO DETECTADA</span>
                     <p className="text-[11px] leading-relaxed">
-                      Este ativo pertence à conta de eliminação fiscal <strong>131105001</strong>. De acordo com as diretrizes SRE (GBR v3.70), as modificações feitas aqui serão travadas localmente com <code>_is_synced = 0</code> para evitar inconsistências nos livros consolidados de nuvem.
+                      Este ativo belongs à conta de eliminação fiscal <strong>131105001</strong>. De acordo com as diretrizes SRE (GBR v3.70), as modificações feitas aqui serão travadas localmente com <code>_is_synced = 0</code> para evitar inconsistências nos livros consolidados de nuvem.
                     </p>
                   </div>
                 </div>
@@ -775,6 +1061,143 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE CONFIRMAÇÃO DE TRANSFERÊNCIA (DIVERGÊNCIA) --- */}
+      {showTransferModal && pendingAssetToTransfer && (
+        <div 
+          id="gbr-transfer-modal-overlay" 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
+        >
+          <div 
+            id="gbr-transfer-modal"
+            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-scaleUp p-6 space-y-6"
+          >
+            <div className="flex items-start space-x-3 text-amber-400">
+              <AlertTriangle className="shrink-0 mt-1" size={24} />
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Divergência Crítica</span>
+                <h3 className="text-sm font-black uppercase tracking-wide text-white">Transferir Ativo de Filial?</h3>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              O ativo <strong className="font-mono text-white">{pendingAssetToTransfer.etiqueta || pendingAssetToTransfer.primarykey}</strong> ({pendingAssetToTransfer.descricaodoativo}) está registrado na filial <strong className="text-amber-400">{pendingAssetToTransfer.filial}</strong>. 
+              <br/><br/>
+              Deseja transferi-lo para a filial atual <strong className="text-emerald-400">{unidadeSelecionada}</strong> e registrá-lo como conferido?
+            </p>
+
+            <div className="flex items-center space-x-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setShowTransferModal(false); setPendingAssetToTransfer(null); }}
+                className="flex-1 py-3 bg-slate-950 text-slate-400 hover:text-white rounded-xl font-bold uppercase tracking-wider text-[10px] border border-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                id="btn-confirm-transfer"
+                type="button"
+                onClick={handleConfirmTransfer}
+                disabled={isSaving}
+                className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold uppercase tracking-wider text-[10px] transition-colors shadow-lg shadow-amber-900/20 disabled:opacity-50"
+              >
+                {isSaving ? "PROCESSANDO..." : "SIM, TRANSFERIR"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE REGISTRO DE SOBRA FÍSICA (SURPLUS) --- */}
+      {showSurplusModal && (
+        <div 
+          id="gbr-surplus-modal-overlay" 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
+        >
+          <div 
+            id="gbr-surplus-modal"
+            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-scaleUp flex flex-col max-h-[90vh]"
+          >
+            {/* Header */}
+            <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">SOBRA FÍSICA / SOBRA SRE</span>
+                <h3 className="text-sm font-black text-white font-mono uppercase">CÓDIGO: {barcodeInput}</h3>
+              </div>
+              <span className="bg-orange-950 text-orange-400 border border-orange-800 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">
+                EXCEDENTE (SURPLUS)
+              </span>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Este ativo não pertence a nenhuma filial cadastrada. Preencha os detalhes abaixo para incluí-lo como <strong>Sobra Física (Excedente)</strong> na filial <strong className="text-white">{unidadeSelecionada}</strong>.
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">
+                    Descrição do Ativo *
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: CADEIRA DE ESCRITÓRIO PRETA"
+                    value={surplusDescription}
+                    onChange={(e) => setSurplusDescription(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium placeholder:text-slate-700 uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">
+                    Número de Serial (S/N)
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: SN-12345-XYZ"
+                    value={surplusSerial}
+                    onChange={(e) => setSurplusSerial(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium placeholder:text-slate-700 uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">
+                    Observações de Coleta / Campo
+                  </label>
+                  <textarea 
+                    placeholder="Notas técnicas do local físico do ativo excedente..."
+                    value={surplusObservation}
+                    onChange={(e) => setSurplusObservation(e.target.value)}
+                    rows={3}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium placeholder:text-slate-700"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 bg-slate-950 border-t border-slate-800 flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={() => { setShowSurplusModal(false); setSurplusDescription(''); setSurplusSerial(''); setSurplusObservation(''); }}
+                className="flex-1 py-3 bg-slate-900 text-slate-400 hover:text-white rounded-xl font-bold uppercase tracking-wider text-[10px] border border-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                id="btn-confirm-save-surplus"
+                type="button"
+                onClick={handleSaveSurplus}
+                disabled={isSaving}
+                className="flex-1 py-3 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold uppercase tracking-wider text-[10px] transition-colors shadow-lg shadow-orange-900/20 disabled:opacity-50"
+              >
+                {isSaving ? "GRAVANDO..." : "SALVAR EXCEDENTE"}
+              </button>
             </div>
           </div>
         </div>
