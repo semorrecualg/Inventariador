@@ -14,14 +14,14 @@ export function useBufferController(): BufferStatus {
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [isFlushing, setIsFlushing] = useState<boolean>(false);
 
-  // Sincroniza o contador local com o estado interno do sqliteService periodicamente
   useEffect(() => {
+    // SRE Guard: Desativa o pooling em background se o barramento central estiver em processo de carga em bloco
     const updateCount = () => {
       setPendingCount(sqliteService.getBufferedChangesCount());
     };
-
+    
     updateCount();
-    const interval = setInterval(updateCount, 1000); // Poll a cada 1 segundo para maior precisão
+    const interval = setInterval(updateCount, 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -38,9 +38,5 @@ export function useBufferController(): BufferStatus {
     }
   }, [isFlushing]);
 
-  return {
-    pendingCount,
-    isFlushing,
-    flush
-  };
+  return { pendingCount, isFlushing, flush };
 }

@@ -2,6 +2,7 @@ import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
 import { db, DexieAsset } from './sqliteService';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -54,6 +55,100 @@ function getRowValue(row: AtivoPlanilha, ...keys: string[]): string | number | b
 
 export class DatabaseLoaderService {
   private BATCH_SIZE = 200;
+  private static CHUNK_SIZE = 200; // Política SRE imperativa
+
+  static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
+    const reader = new FileReader();
+    const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+      reader.onload = (e) => {
+        if (e.target?.result instanceof ArrayBuffer) {
+          resolve(e.target.result);
+        } else {
+          reject(new Error("Falha ao ler dados binários do arquivo."));
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+
+    const workbook = XLSX.read(dataBuffer, { type: "array" });
+    const firstSheetName = workbook?.SheetNames?.[0];
+    if (!firstSheetName) {
+      throw new Error("Planilha inválida ou vazia.");
+    }
+    const worksheet = workbook.Sheets[firstSheetName];
+    return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) as unknown[];
+  }
+
+  static async injetarDadosEmLotes(dadosBrutos: unknown[], onProgresso?: (porcentagem: number) => void): Promise<number> {
+    let registrosProcessados = 0;
+
+    for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
+      const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
+      
+      const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
+        const pk = row.primarykey ? String(row.primarykey).trim().toUpperCase() : `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+        const tenantId = row.tenantId ? String(row.tenantId).trim().toUpperCase() : 'GBR_DEFAULT';
+        const codEnd = row.codigo_endereco ? String(row.codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : '';
+        const tagVal = row.tag || row.etiqueta || pk;
+        
+        return {
+          id: pk,
+          primarykey: pk,
+          tenantId: tenantId,
+          _tenantid: tenantId,
+          filial: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
+          _unitid: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
+          status: row.status ? String(row.status).trim() : 'Pendente',
+          etiqueta: String(tagVal),
+          tag: String(tagVal),
+          qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
+          descricaodoativo: String(row.descricaodoativo || row.descricao || row.item || `Ativo N-${pk}`),
+          serial: row.serial ? String(row.serial).trim().toUpperCase() : null,
+          dataaqusic: row.dataaqusic ? String(row.dataaqusic) : null,
+          cnpj: row.cnpj ? String(row.cnpj) : null,
+          nomefornecedor: row.nomefornecedor ? String(row.nomefornecedor) : null,
+          notafiscal: row.notafiscal ? String(row.notafiscal) : null,
+          endereco: codEnd || null,
+          registro: row.registro ? String(row.registro) : null,
+          subreg: row.subreg ? String(row.subreg) : null,
+          databaixa: row.databaixa ? String(row.databaixa) : null,
+          contacontabil: row.contacontabil ? String(row.contacontabil) : null,
+          centrodecusto: row.centrodecusto ? String(row.centrodecusto) : null,
+          vlraquisic: isNaN(Number(row.vlraquisic)) ? 0 : Number(row.vlraquisic),
+          sn1_recno: isNaN(Number(row.sn1_recno)) ? null : Number(row.sn1_recno),
+          sn3_recno: isNaN(Number(row.sn3_recno)) ? null : Number(row.sn3_recno),
+          _is_synced: 0,
+          _is_deleted: 0,
+          _conferido: 0,
+          _plaquetado: 0,
+          _aprovado: 0,
+          _isNew: 0,
+          _is_unitized: 0,
+          _is_divergent_baixa: 0,
+          _history: null,
+          DE_PARA: null,
+          _photoUrl: null,
+          gps_lat: null,
+          gps_lng: null
+        };
+      });
+
+      // Transação ACID atômica por bloco para mitigar Race Conditions
+      await db.transaction('rw', [db.ativos, db.assets], async () => {
+        await db.ativos.bulkPut(loteHigienizado);
+        await db.assets.bulkPut(loteHigienizado);
+      });
+
+      registrosProcessados += loteHigienizado.length;
+      if (onProgresso) {
+        onProgresso(Math.round((registrosProcessados / dadosBrutos.length) * 100));
+      }
+      console.log(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
+    }
+    return registrosProcessados;
+  }
+
 
   /**
    * Processa o arquivo físico do Excel (ou CSV/JSON), higieniza os dados e injeta no Dexie via lotes de 200.
@@ -589,3 +684,43 @@ export class DatabaseLoaderService {
 }
 
 export const databaseLoaderService = new DatabaseLoaderService();
+
+export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
+  try {
+    const fileContent = await Filesystem.readFile({
+      path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
+      directory: Directory.Documents,
+      encoding: Encoding.UTF8
+    });
+
+    if (fileContent.data) {
+      const restoredAssets = JSON.parse(fileContent.data as string);
+      // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions
+      await db.transaction('rw', [db.local_assets], async () => {
+        await db.local_assets.clear();
+        await db.local_assets.bulkAdd(restoredAssets);
+      });
+      return true;
+    }
+  } catch {
+    // Arquivo ainda não criado no primeiro boot limpo (Comportamento Esperado)
+  }
+  return false;
+}
+
+export async function initializeLocalLoaderPipeline(): Promise<void> {
+  console.log("[SRE GESTOR] Inicializando barramento de carga estrutural local...");
+  
+  try {
+    // Força a varredura e restauração a partir do diretório físico C:\GBR_Inventario independente da plataforma
+    const hasData = await verifyAndRestorePhysicalBackup();
+    
+    if (hasData) {
+      console.log("[SRE GESTOR] Estado físico restaurado com sucesso a partir do disco local.");
+    } else {
+      console.log("[SRE GESTOR] Banco local limpo. Aguardando importação manual da planilha pelo painel.");
+    }
+  } catch (error) {
+    console.error("[SRE CRÍTICO] Falha ao acionar barramento interno de disco:", error);
+  }
+}

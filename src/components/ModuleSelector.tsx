@@ -23,10 +23,12 @@ interface ModuleSelectorProps {
 }
 
 const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole, isDatabaseEmpty = false }) => {
-  const [effectiveEmpty, setEffectiveEmpty] = useState<boolean>(isDatabaseEmpty);
+  const [canAccessModules, setCanAccessModules] = useState<boolean>(!isDatabaseEmpty);
 
   useEffect(() => {
-    setEffectiveEmpty(isDatabaseEmpty);
+    const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+    const isOnlineSession = dbMode === 'SUPABASE';
+    setCanAccessModules(!isDatabaseEmpty || isOnlineSession);
   }, [isDatabaseEmpty]);
 
   useEffect(() => {
@@ -35,11 +37,10 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
       try {
         const count = await sqliteService.getAssetCount();
         if (active) {
-          if (count === 0) {
-            setEffectiveEmpty(true);
-          } else {
-            setEffectiveEmpty(false);
-          }
+          const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+          const isOnlineSession = dbMode === 'SUPABASE';
+          const hasLocalData = count > 0;
+          setCanAccessModules(hasLocalData || isOnlineSession);
         }
       } catch (e) {
         console.error("Error checking asset count in ModuleSelector:", e);
@@ -54,7 +55,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
 
-  if (isAuditor && effectiveEmpty) {
+  if (isAuditor && !canAccessModules) {
     return (
       <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn justify-center items-center text-center">
         <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mb-6 border border-red-100">
@@ -119,9 +120,9 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Módulo Inventariador */}
           <button 
-            disabled={effectiveEmpty}
-            onClick={() => !effectiveEmpty && onSelect(AppModule.INVENTORY)}
-            className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${effectiveEmpty ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
+            disabled={!canAccessModules}
+            onClick={() => canAccessModules && onSelect(AppModule.INVENTORY)}
+            className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${!canAccessModules ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
           >
             <div className="relative z-10">
               <div className="w-16 h-16 bg-accent-soft rounded-2xl flex items-center justify-center text-accent mb-6 group-hover:bg-accent group-hover:text-white transition-all">
@@ -152,9 +153,9 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
           {/* Módulo Controle de Ativo Imobilizado */}
           {!isAuditor && (
             <button 
-              disabled={effectiveEmpty}
-              onClick={() => !effectiveEmpty && onSelect(AppModule.ASSET_CONTROL)}
-              className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${effectiveEmpty ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
+              disabled={!canAccessModules}
+              onClick={() => canAccessModules && onSelect(AppModule.ASSET_CONTROL)}
+              className={`group relative bg-white rounded-[2rem] p-8 text-left transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] overflow-hidden ${!canAccessModules ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-[0_10px_30px_rgba(0,0,0,0.1)] active:scale-[0.98]'}`}
             >
               <div className="relative z-10">
                 <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 mb-6 group-hover:bg-ink group-hover:text-white transition-all">

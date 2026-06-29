@@ -2,10 +2,11 @@ import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
-import { localDb } from './localDbService';
+import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
+import { FileSystemStorageService } from './FileSystemStorageService';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -188,6 +189,20 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       await db.ativos.update(assetData.primarykey, { _conferido: 1 });
     }
   });
+
+  // Espelhamento físico em background no disco rígido do dispositivo (Anti-Limpeza)
+  try {
+    const todosAtivos = await db.local_assets.toArray();
+    // Executa conversões explícitas e higienização regex de ruídos antes de gravar no hardware físico
+    const dadosHigienizados = todosAtivos.map(row => ({
+      ...row,
+      codigo_endereco: row.codigo_endereco ? String(row.codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : ''
+    }));
+    await FileSystemStorageService.salvarEmDiretorioLocal(dadosHigienizados);
+    await backupDatabaseToPhysicalStorage(dadosHigienizados);
+  } catch (err) {
+    console.error('[SRE] Erro ao espelhar em diretorio local:', err);
+  }
 }
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {

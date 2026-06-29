@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, DexieAsset } from '../services/sqliteService';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
+import { showRecoveryToast } from '../services/NavigationGuardService';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -16,6 +17,46 @@ import {
 } from 'lucide-react';
 
 interface InventoryCardProps {
+  asset: Partial<DexieAsset>;
+  batteryLevel: number;
+  isPlugged: boolean;
+}
+
+export const InventoryCard: React.FC<InventoryCardProps> = ({ asset, batteryLevel, isPlugged }) => {
+  // Salvaguarda de Hardware (Diretriz 6): Trava impeditiva automática se bateria < 5% sem tomada
+  const isHardwareLocked = batteryLevel < 0.05 && !isPlugged;
+
+  // Contrato Crítico de Cores (Diretriz 2): Verde (Sucesso), Amarelo (Divergência), Laranja (Sobra)
+  const getStatusColor = (status?: string): string => {
+    switch (String(status).trim().toUpperCase()) {
+      case 'SUCESSO': return '#00e676';     // Verde
+      case 'DIVERGENCIA': return '#ffd600';  // Amarelo
+      case 'SOBRA': return '#ff6d00';        // Laranja
+      default: return '#8892b0';             // Neutro
+    }
+  };
+
+  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  const handleAuditSubmit = async (inputCode: string) => {
+    if (isHardwareLocked) {
+      showRecoveryToast("⚠️ GRAVAÇÃO IMPEDIDA: BATERIA CRÍTICA (<5%) SEM ALIMENTAÇÃO EXTERNA.", "blue");
+      return;
+    }
+    // Conversão Expert (Diretriz 6): Caixa alta limpa e Regex removendo ruídos de planilhas
+    const sanitizedCode = String(inputCode).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    await saveCollectedAssetAtomic({ ...asset, codigo_barra_coletado: sanitizedCode });
+  };
+
+  return (
+    <div className="inventory-card-container" style={{ borderLeft: `6px solid ${getStatusColor(asset.status_auditoria)}`, padding: '16px', background: '#0a192f', borderRadius: '4px', opacity: isHardwareLocked ? 0.4 : 1 }}>
+      <span style={{ fontSize: '11px', color: '#64ffda', fontFamily: 'monospace' }}>TAG: {asset.tag_atual}</span>
+      <h4 style={{ color: '#ffffff', margin: '4px 0' }}>{String(asset.descricao).toUpperCase()}</h4>
+      {isHardwareLocked && <p style={{ color: '#ff1744', fontSize: '10px', fontWeight: 'bold' }}>SISTEMA BLOQUEADO PARA PRESERVAR O DISPOSITIVO</p>}
+    </div>
+  );
+};
+
+interface InventoryScreenProps {
   onBack: () => void;
   userEmail?: string;
   userName?: string;
@@ -29,7 +70,7 @@ interface BatteryStatus {
   removeEventListener: (type: string, listener: () => void) => void;
 }
 
-export const InventoryCard: React.FC<InventoryCardProps> = ({
+export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   onBack,
   userEmail = 'auditor@gbr.com.br',
   userName = 'Auditor SRE',

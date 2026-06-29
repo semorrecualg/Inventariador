@@ -503,15 +503,18 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                       <Icon size={24} strokeWidth={2.5} />
                     </div>
                     <div className="text-left flex-1 min-w-0">
-                      <h4 className={`font-bold text-sm uppercase leading-tight tracking-tight flex items-baseline flex-wrap gap-x-2 ${unit.hasData ? 'text-ink' : 'text-slate-400'}`}>
-                        <span className="truncate">{displayName}</span>
+                      <div className="unit-row-item flex items-center flex-wrap">
+                        <span style={{ fontSize: '14px', color: '#0a192f', fontWeight: '500' }}>{displayName}</span>
                         {typeof unit.assetCount === 'number' && (
-                          <span className="text-slate-400 font-semibold text-xs normal-case whitespace-nowrap">
-                            • {Math.max(0, unit.assetCount).toLocaleString('pt-BR')} ativos
-                            {databaseMode === DatabaseMode.INTERNAL && typeof unit.checkedCount === 'number' && ` (${Math.max(0, unit.checkedCount)} conf.)`}
-                          </span>
+                          <>
+                            <span style={{ margin: '0 8px', color: '#8892b0' }}>•</span>
+                            <span style={{ fontSize: '12px', color: '#64ffda', fontFamily: 'monospace' }}>
+                              {Math.max(0, unit.assetCount)} ATIVOS
+                              {databaseMode === DatabaseMode.INTERNAL && typeof unit.checkedCount === 'number' && ` (${Math.max(0, unit.checkedCount)} CONF.)`}
+                            </span>
+                          </>
                         )}
-                      </h4>
+                      </div>
                       
                       {/* Barra de conformidade geométrica real (SRE) */}
                       {(() => {

@@ -43,6 +43,10 @@ export interface DexieAsset {
   gps_lat: number | null;
   gps_lng: number | null;
   currentCampaignId?: string | null;
+  tag_atual?: string;
+  status_auditoria?: string;
+  descricao?: string;
+  codigo_barra_coletado?: string;
 }
 
 export interface DexieAuditLog {
@@ -698,8 +702,9 @@ export class SqliteService {
 
   public async getAssetCount(): Promise<number> {
     try {
-      const list = await db.local_assets.toArray();
-      return list.filter(a => a._is_deleted === 0).length;
+      const localCount = await db.local_assets.count();
+      const ativosCount = await db.ativos.count();
+      return Math.max(localCount, ativosCount);
     } catch {
       return 0;
     }

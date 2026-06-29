@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { localDb } from '../services/localDbService';
 import { db } from '../services/sqliteService';
+import { FileSystemStorageService } from '../services/FileSystemStorageService';
+import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import { AppScreen } from '../types';
 import { 
   Database, 
   Trash2, 
@@ -25,6 +27,10 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [progresso, setProgresso] = useState<number>(0);
+  const [operacaoAtiva, setOperacaoAtiva] = useState<'CARGA' | 'PURGA' | null>(null);
+  const [caminhoDiretorio] = useState<string>("Documentos/GBR_KARDEK_DATA");
+  const temDadosCarregados = assetCount !== null && assetCount > 0;
 
   useEffect(() => {
     const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
@@ -82,40 +88,116 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
   };
 
   const executeReset = async () => {
+    setOperacaoAtiva('PURGA');
+    setProgresso(100); // Inicia cheia para o efeito decrescente
+    setIsProcessing(true);
+    addLog(`[SRE_PURGE] Iniciando esvaziamento controlado das tabelas...`);
+    
     try {
-      setIsProcessing(true);
-      addLog(`[SRE GESTOR] Comando de reset recebido. Iniciando barreira de isolamento...`);
+      console.log("[SRE_PURGE] Iniciando esvaziamento controlado das tabelas...");
+      
+      // Simulação de regressão visual da purga atômica dividida em 4 etapas lógicas de SRE
+      setProgresso(75); 
+      addLog(`[SRE_PURGE] Limpando local_assets...`);
+      await db.local_assets.clear();
+      
+      setProgresso(50); 
+      addLog(`[SRE_PURGE] Limpando ativos e assets...`);
+      await db.ativos.clear();
+      await db.assets.clear();
+      
+      setProgresso(25); 
+      addLog(`[SRE_PURGE] Limpando logs de auditoria...`);
+      await db.audit_logs.clear();
       
       if (onResetDatabase) {
-        addLog(`[SRE GESTOR] Executando reset via callback de controle isolado...`);
+        addLog(`[SRE_PURGE] Executando reset via callback de controle isolado...`);
         await onResetDatabase();
       } else {
-        try {
-          await localDb.purgeDatabase();
-          setAssetCount(0);
-          setLogCount(0);
-          setShowModal(false);
-          addLog(`[SRE GESTOR] Purga física concluída com sucesso via Dexie clear()`);
-        } catch (dbErr: unknown) {
-          const dbErrMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-          addLog(`[SRE ERR] Falha na purga direta: ${dbErrMsg}.`);
-        }
-
-        localStorage.removeItem('app_database_mode');
-        sessionStorage.setItem('app_just_cleared_data', 'true');
-        addLog(`[SRE GESTOR] Preferências de persistência removidas do localStorage.`);
-        addLog(`[SRE GESTOR] Reiniciando aplicação para efetivar alterações...`);
-        
-        setTimeout(() => {
-          window.location.reload();
-        }, 1500);
+        // Limpeza física total e reinicialização do schema
+        addLog(`[SRE_PURGE] Reiniciando schema físico Dexie...`);
+        db.close();
+        await indexedDB.deleteDatabase('gbr_kardek_db');
+        await indexedDB.deleteDatabase('InventoryLocalStore');
+        await db.open();
       }
+      
+      setProgresso(0);
+      addLog(`[SRE_PURGE] Base totalmente higienizada.`);
+      console.log("[SRE_PURGE] Base totalmente higienizada.");
+      
+      // Força o histórico canônico e executa o reload de reset
+      localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.MODULE_SELECTION, AppScreen.DASHBOARD, AppScreen.DATABASE_MANAGER]));
+      window.location.reload();
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      addLog(`[SRE ERR] Falha ao redefinir base: ${errMsg}`);
+      addLog(`[SRE_PURGE] Erro crítico na purga: ${errMsg}`);
+      console.error("[SRE_PURGE] Erro crítico na purga:", err);
+      setOperacaoAtiva(null);
       setIsProcessing(false);
     }
   };
+
+  const processarCargaFatiada = async (arquivo: Blob) => {
+    try {
+      setIsProcessing(true);
+      setOperacaoAtiva('CARGA');
+      setProgresso(1);
+      addLog(`[SRE_LOADER] Iniciando extração física da planilha...`);
+      const dadosExtraidos = await DatabaseLoaderService.extrairDadosDaPlanilha(arquivo);
+      if (!dadosExtraidos || dadosExtraidos.length === 0) {
+        addLog(`[SRE_LOADER] Aviso: Nenhum registro extraído.`);
+        setIsProcessing(false);
+        setOperacaoAtiva(null);
+        setProgresso(0);
+        return;
+      }
+
+      addLog(`[SRE_LOADER] Planilha lida. ${dadosExtraidos.length} registros brutos encontrados.`);
+      addLog(`[SRE_LOADER] Iniciando injeção em lotes de 200 (Política SRE)...`);
+      
+      const totalInserido = await DatabaseLoaderService.injetarDadosEmLotes(dadosExtraidos, (p) => setProgresso(p));
+      addLog(`[SRE_LOADER] Carga concluída com sucesso: ${totalInserido} ativos injetados.`);
+      
+      const novoTotal = await db.ativos.count();
+      setAssetCount(novoTotal);
+
+      // PREVENÇÃO DE SESSÃO FANTASMA: Garante as viewports corretas no localStorage antes do F5
+      const historicoManutencao = [AppScreen.LOGIN, AppScreen.MODULE_SELECTION, AppScreen.DASHBOARD, AppScreen.DATABASE_MANAGER];
+      localStorage.setItem('gbr_kardek_history', JSON.stringify(historicoManutencao));
+      
+      setTimeout(() => {
+        window.location.reload(); // F5 Resiliente para atualizar contadores da UI
+      }, 1000);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_LOADER] Erro crítico na carga segmentada: ${errMsg}`);
+      console.error("[SRE_LOADER] Erro crítico na carga segmentada:", err);
+      setIsProcessing(false);
+      setOperacaoAtiva(null);
+      setProgresso(0);
+    }
+  };
+
+  const handleAcionarNavegacaoECarga = () => {
+    const inputWeb = document.getElementById('input-file-web-canonic') as HTMLInputElement;
+    if (inputWeb) {
+      inputWeb.click();
+    } else {
+      (async () => {
+        addLog(`[SRE_LOADER] Invocando seletor de arquivos nativo do dispositivo móvel.`);
+        console.log("[SRE_LOADER] Invocando seletor de arquivos nativo do dispositivo móvel.");
+        const arquivoBlob = await FileSystemStorageService.selecionarPlanilhaDoDispositivo();
+        if (arquivoBlob) {
+          await processarCargaFatiada(arquivoBlob);
+        } else {
+          addLog(`[SRE] Nenhum arquivo selecionado ou operação cancelada.`);
+        }
+      })();
+    }
+  };
+
+  const isBaseVazia = assetCount === 0 && logCount === 0;
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col p-6 animate-fadeIn">
@@ -158,7 +240,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
         </div>
 
         {/* Grid de Diagnósticos */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-4">
             <h3 className="text-[10px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-2 border-b border-slate-800/80 pb-2">
               <HardDrive size={12} className="text-accent" />
@@ -198,6 +280,59 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
             </div>
           </div>
 
+          {/* Carga de Ativos Segmentada Card */}
+          <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-4 flex flex-col justify-between">
+            <div>
+              <h3 className="text-[10px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-2 border-b border-slate-800/80 pb-2">
+                <Database size={12} className="text-emerald-500" />
+                <span>Carga de Ativos Segmentada</span>
+              </h3>
+              <p className="text-[10px] text-slate-400 leading-relaxed uppercase font-semibold mt-2">
+                Carrega planilhas Excel/CSV segmentando em blocos de 200 ativos com higienização estrita de endereços em caixa alta sem ruídos.
+              </p>
+            </div>
+
+            <div className="pt-4">
+              <button 
+                type="button"
+                onClick={handleAcionarNavegacaoECarga}
+                disabled={isProcessing || temDadosCarregados}
+                style={{ 
+                  background: temDadosCarregados ? '#0d1b2a' : '#0a192f', 
+                  color: temDadosCarregados ? '#495670' : '#64ffda', 
+                  border: temDadosCarregados ? '1px dashed #233554' : '1px dashed #64ffda',
+                  opacity: temDadosCarregados ? 0.5 : 1,
+                  cursor: temDadosCarregados ? 'not-allowed' : 'pointer',
+                  padding: '12px', 
+                  borderRadius: '12px', 
+                  fontWeight: 'bold', 
+                  width: '100%', 
+                  transition: 'all 0.2s ease',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em'
+                }}
+              >
+                <span>{temDadosCarregados ? 'BASE JÁ ALIMENTADA' : 'NAVEGAR E CARREGAR PLANILHA'}</span>
+              </button>
+              <input 
+                id="input-file-web-canonic"
+                type="file" 
+                accept=".xlsx, .xls, .csv" 
+                onChange={(e) => { 
+                  const file = e.target.files?.[0]; 
+                  if (file) {
+                    processarCargaFatiada(file); 
+                  }
+                }}
+                style={{ display: 'none' }}
+              />
+            </div>
+          </div>
+
           {/* Dangerous Zone Card */}
           <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4 flex flex-col justify-between">
             <div>
@@ -214,11 +349,21 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
               <button
                 type="button"
                 onClick={handleReset}
-                disabled={isProcessing || !isAdmin}
-                className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-red-650 hover:bg-red-700 disabled:bg-slate-850 disabled:text-slate-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 cursor-pointer border border-red-500/35"
+                disabled={isProcessing || !isAdmin || isBaseVazia}
+                className={`w-full flex items-center justify-center space-x-2 px-6 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border ${
+                  isBaseVazia 
+                    ? "bg-slate-950 text-slate-500 border-slate-800 cursor-not-allowed opacity-50" 
+                    : "bg-red-650 hover:bg-red-700 disabled:bg-slate-850 disabled:text-slate-500 text-white cursor-pointer border-red-500/35 active:scale-95"
+                }`}
               >
                 <Trash2 size={16} />
-                <span>{isProcessing ? "Executando Purga..." : "Zerar Base de Dados Local"}</span>
+                <span>
+                  {isProcessing 
+                    ? "Executando Purga..." 
+                    : isBaseVazia 
+                      ? "Base já Higienizada" 
+                      : "Zerar Base de Dados Local"}
+                </span>
               </button>
               {!isAdmin && (
                 <p className="text-[9px] text-red-400 font-bold uppercase text-center mt-2.5 tracking-wider animate-pulse">
@@ -227,6 +372,27 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
               )}
             </div>
           </div>
+        </div>
+
+        {/* Componente Único de Progressão Simétrica Reativa */}
+        {operacaoAtiva && (
+          <div style={{ width: '100%', background: '#112240', height: '16px', borderRadius: '4px', marginBottom: '12px', overflow: 'hidden', border: '1px solid #233554', display: 'flex', alignItems: 'center' }}>
+            <div style={{ 
+              width: `${progresso}%`, 
+              background: operacaoAtiva === 'CARGA' ? '#64ffda' : '#ff5555', 
+              height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', 
+              color: '#0a192f', fontSize: '10px', fontWeight: 'bold', 
+              transition: 'width 0.2s ease, background-color 0.3s ease' 
+            }}>
+              {operacaoAtiva}: {progresso}%
+            </div>
+          </div>
+        )}
+
+        {/* Injeção acima do SRE Boot Monitor: Barra de Progresso e Pasta Ativa */}
+        <div style={{ padding: '12px', background: '#0a192f', border: '1px solid #233554', borderRadius: '12px', marginBottom: '16px', fontSize: '10px', color: '#8892b0', width: '100%', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <span>📁 DIRETÓRIO DE PERSISTÊNCIA FÍSICA ATIVA (CAPACITOR): </span>
+          <strong style={{ color: '#64ffda' }}>{caminhoDiretorio}</strong>
         </div>
 
         {/* Live Terminal */}

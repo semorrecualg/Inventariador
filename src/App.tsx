@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
+import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
 
@@ -23,7 +24,7 @@ import BaseManagerPanel from './components/BaseManagerPanel';
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
 import ImpairmentReport from './components/ImpairmentReport';
-import { InventoryCard } from './components/InventoryCard';
+import { InventoryScreen } from './components/InventoryCard';
 import Labeling from './components/Labeling'; 
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
@@ -76,6 +77,8 @@ import { safeStringify } from './services/utils';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
+import { FileSystemStorageService } from './services/FileSystemStorageService';
+import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 
 export class AppBootstrapError extends Error {
   constructor(message: string) {
@@ -227,6 +230,28 @@ const removerLoaderEstatico = () => {
     console.warn(">>> [GBR-Emergency] Erro ao remover loader estático", err);
   }
 };
+
+export function InitializeBootPipeline(): void {
+  // Comportamento Anti-Sessão Fantasma (Diretriz 5): Força reset se não houver token ou sessão ativa
+  const activeHistory = localStorage.getItem('gbr_kardek_history');
+  
+  if (!activeHistory) {
+    localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN]));
+  }
+
+  // Latência Zero em Ambiente Web/iFrame: Limpeza instantânea do esqueleto HTML
+  if (typeof window !== 'undefined') {
+    const removerLoaderEstaticoLocal = () => {
+      const loader = document.getElementById('gbr-static-loader') || document.getElementById('gbr-initial-loader');
+      if (loader) loader.remove();
+    };
+    // Execução síncrona imediata para bater a meta sub-150ms
+    removerLoaderEstaticoLocal();
+  }
+}
+
+// Execução síncrona imediata no carregamento do arquivo
+InitializeBootPipeline();
 
 // App Component
 const App: React.FC = () => {
@@ -440,11 +465,41 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    InitializeBootPipeline();
     const verificarEstadoEBoot = async () => {
       try {
         // 1. Abre a conexão com o banco Dexie de forma isolada
         await db.open();
         console.log("[SRE_BOOT] Motor IndexedDB carregado com sucesso.");
+
+        // Validação se o IndexedDB está zerado no carregamento e restauração via FileSystemStorageService
+        const totalLocalAssets = await db.local_assets.count();
+        if (totalLocalAssets === 0) {
+          console.log("[SRE_BOOT] IndexedDB zerado. Tentando recuperar dados do FileSystem físico de salvaguarda...");
+          const restored = await verifyAndRestorePhysicalBackup();
+          if (restored) {
+            console.log("[SRE_BOOT] Recuperação de desastre física (Capacitor FileSystem) restaurada com sucesso.");
+          } else {
+            const dadosFisicos = await FileSystemStorageService.carregarDeDiretorioLocal();
+            if (dadosFisicos && dadosFisicos.length > 0) {
+              console.log(`[SRE_BOOT] Recuperação física legada ativada. Restaurando ${dadosFisicos.length} registros...`);
+              await db.transaction('rw', [db.local_assets, db.ativos], async () => {
+                // Restaura estritamente o inventário coletado pelo usuário (coletas locais)
+                await db.local_assets.bulkPut(dadosFisicos as DexieAsset[]);
+                
+                // Sincroniza e marca o flag de conferido na tabela operacional ativa mapeando as chaves primárias
+                for (const asset of (dadosFisicos as DexieAsset[])) {
+                  if (asset.primarykey) {
+                    await db.ativos.update(asset.primarykey, { _conferido: 1, _is_synced: 0 });
+                  }
+                }
+              });
+              console.log("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
+            } else {
+              console.log("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
+            }
+          }
+        }
 
         // 2. PURGA ABSOLUTA DE BYPASS: Comente ou remova linhas que tentam avaliar 
         // se o banco tem dados para pular o login automaticamente.
@@ -520,8 +575,8 @@ const App: React.FC = () => {
         if (current === s) return prev; // Previne duplicidade de viewports
         
         // Barreira Canônica: Bloqueia navegação órfã se não houver Filial ativa
-        const screensRestritas = [AppScreen.DASHBOARD, AppScreen.ADDRESS_SELECTION, AppScreen.INVENTORY];
-        if (screensRestritas.includes(s) && !selectedUnit) {
+        const validatedScreen = validateAndPushRoute(s, selectedUnit);
+        if (validatedScreen !== s) {
           console.warn(`>>> [SRE-GUARD] Interceptação: Tentativa de acessar ${s} sem selectedUnit.`);
           const fallback = prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION];
           localStorage.setItem('gbr_kardek_history', JSON.stringify(fallback));
@@ -542,6 +597,18 @@ const App: React.FC = () => {
       delete window.pushScreen;
     };
   }, [pushScreen]);
+
+  // Register NavigationGuard toast callback
+  useEffect(() => {
+    registerToastCallback((message) => {
+      setModalConfig({
+        isOpen: true,
+        title: 'Controle de Fluxo SRE',
+        message: message,
+        type: 'warning'
+      });
+    });
+  }, []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAddress, setSelectedAddressState] = useState<string | null>(() => sessionStorage.getItem('current_selected_address') || null);
@@ -5980,7 +6047,7 @@ const App: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <InventoryCard 
+                <InventoryScreen 
                   onBack={popScreen} 
                   userEmail={user?.email}
                   userName={user?.name}

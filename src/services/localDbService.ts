@@ -1,6 +1,8 @@
 import { db, DexieAsset, sqliteService } from './sqliteService';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 type SqlValue = string | number | boolean | null;
 
@@ -757,3 +759,125 @@ export async function requestPersistentStorage() {
 export async function isStoragePersisted() {
   return true;
 }
+
+import { showRecoveryToast } from './NavigationGuardService';
+
+let winWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+export async function initializeWindowsDirectoryHandle(): Promise<boolean> {
+  if (Capacitor.isNativePlatform()) return true;
+
+  try {
+    console.log("[SRE INFRA] Vinculando manipulador para o diretório C:\\GBR_Inventario...");
+    winWorkspaceHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      mode: 'readwrite',
+      id: 'gbr_inventario_root'
+    });
+    return true;
+  } catch (error) {
+    console.error("[SRE BARRAMENTO] Falha de privilégio no diretório C:\\GBR_Inventario:", error);
+    showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
+    return false;
+  }
+}
+
+export async function writeSnapshotToWindowsDirectory(dataPayload: any[]): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (Capacitor.isNativePlatform() || !winWorkspaceHandle) return;
+
+  try {
+    const fileHandle = await winWorkspaceHandle.getFileHandle('gbr_kardek_backup.dat', { create: true });
+    const writableStream = await fileHandle.createWritable();
+    await writableStream.write(JSON.stringify(dataPayload));
+    await writableStream.close();
+    console.log("[SRE TELEMETRIA] Espelhamento persistido com sucesso no diretório local.");
+  } catch (error) {
+    console.error("[SRE CRÍTICO] Bloqueio de I/O do Windows detectado na gravação:", error);
+  }
+}
+
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promise<void> {
+  // Early-return obrigatório e silencioso se estiver em ambiente Web/iFrame (Diretriz 6)
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    const payloadString = JSON.stringify(assetsData);
+    
+    // Força a criação física do diretório estrutural e do arquivo de dados real
+    await Filesystem.writeFile({
+      path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
+      data: payloadString,
+      directory: Directory.Documents,
+      encoding: Encoding.UTF8,
+      recursive: true // Garante a criação da pasta pai física se não existir
+    });
+  } catch (error) {
+    // SRE Protocol: Logs de diagnóstico expostos no barramento
+    console.error("[SRE GESTOR] Erro crítico de gravação física em hardware:", error);
+  }
+}
+
+let userWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: string; fileBlob: File | null } | null> {
+  if (Capacitor.isNativePlatform()) return null;
+
+  try {
+    // 1. Abre a seleção delegando ao Windows o foco na pasta de Documentos
+    const rootDocuments = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      mode: 'readwrite',
+      startIn: 'documents'
+    });
+
+    try {
+      // 2. Vincula e valida a subpasta específica do projeto
+      userWorkspaceHandle = await rootDocuments.getDirectoryHandle('GBR_Inventario', { create: false });
+      
+      const permissionStatus = await userWorkspaceHandle.requestPermission({ mode: 'readwrite' });
+      if (permissionStatus !== 'granted') return null;
+
+      // 3. Varre a estrutura da pasta procurando de forma nativa pela planilha Excel de origem
+      for await (const entry of userWorkspaceHandle.values()) {
+        if (entry.kind === 'file' && (entry.name.endsWith('.xlsx') || entry.name.endsWith('.csv'))) {
+          const fileHandle = await userWorkspaceHandle.getFileHandle(entry.name);
+          const fileBlob = await fileHandle.getFile();
+          
+          console.log(`[SRE INFRA] Planilha de origem localizada: ${entry.name}`);
+          return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob };
+        }
+      }
+
+      showRecoveryToast("⚠️ ERRO: INSIRA A PLANILHA EXCEL DENTRO DA PASTA GBR_Inventario.", "blue");
+      return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob: null };
+    } catch {
+      showRecoveryToast("⚠️ DIRETÓRIO AUSENTE: CRIE A PASTA 'GBR_Inventario' EM SEUS DOCUMENTOS.", "blue");
+      return null;
+    }
+  } catch (error) {
+    console.error("[SRE INFRA] Operação cancelada ou negada pelo Windows:", error);
+    return null;
+  }
+}
+
+export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!userWorkspaceHandle) return false;
+
+  try {
+    const permission = await userWorkspaceHandle.requestPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') {
+      console.error("[SRE CRÍTICO] Permissão de escrita negada pelo usuário.");
+      return false;
+    }
+
+    const fileHandle = await userWorkspaceHandle.getFileHandle('gbr_kardek_backup.dat', { create: true });
+    const writableStream = await fileHandle.createWritable();
+    await writableStream.write(JSON.stringify(dataPayload));
+    await writableStream.close();
+    console.log("[SRE TELEMETRIA] Snapshot gravado de forma resiliente em Documentos/GBR_Inventario.");
+    return true;
+  } catch (error) {
+    console.error("[SRE CRÍTICO] Falha de I/O de escrita na pasta do Windows:", error);
+    return false; 
+  }
+}
+

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
@@ -7,7 +7,6 @@ import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
-import { sqliteService } from '../services/sqliteService';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -31,11 +30,8 @@ const Login: React.FC<LoginProps> = ({
   onOpenPrivacyCenter, 
   onUpdateScreen, 
   onShowModal,
-  isDatabaseEmpty = false,
   isKeyboardVisible = false,
-  onUpdateDatabaseMode,
-  isInitializing = false,
-  dbInitialized = true
+  onUpdateDatabaseMode
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -43,29 +39,6 @@ const Login: React.FC<LoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
-  const [realEmpty, setRealEmpty] = useState<boolean>(isDatabaseEmpty);
-
-  // Check the real count of assets from the SQLite IndexedDB service on mount or databaseMode/dbInitialized change
-  useEffect(() => {
-    let active = true;
-    const checkDbAssets = async () => {
-      try {
-        const count = await sqliteService.getAssetCount();
-        if (active) {
-          setRealEmpty(count === 0);
-        }
-      } catch (err) {
-        console.error(">>> [Login Check] Failed to read database assets count:", err);
-        if (active) {
-          setRealEmpty(true);
-        }
-      }
-    };
-    checkDbAssets();
-    return () => {
-      active = false;
-    };
-  }, [databaseMode, dbInitialized, isDatabaseEmpty, users]);
 
   // Reset loading state when database mode changes to prevent "stuck" UI
   React.useEffect(() => {
@@ -672,29 +645,7 @@ const Login: React.FC<LoginProps> = ({
         </div>
       )}
 
-      <div className="mb-4 max-w-sm mx-auto w-full">
-        {databaseMode === DatabaseMode.INTERNAL && !isInitializing && dbInitialized && (
-          (realEmpty || users.length === 0) ? (
-            <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2 text-left">
-              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-[10px] font-black text-amber-800 uppercase tracking-wider leading-tight">
-                  Carga local vazia
-                </p>
-                <p className="text-[8.5px] font-bold text-amber-700 leading-normal uppercase mt-0.5">
-                  Realize o primeiro login online para sincronizar.
-                </p>
-              </div>
-            </div>
-          ) : users.length <= 1 ? (
-            <div className="mt-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
-              <p className="text-[8px] font-black text-emerald-700 uppercase tracking-tight leading-tight text-center">
-                ✅ Banco de dados carregado. Auditores: acessem com suas credenciais locais.
-              </p>
-            </div>
-          ) : null
-        )}
-      </div>
+      {/* O Bloco Condicional 'CARGA LOCAL VAZIA' foi completamente expurgado daqui */}
 
       <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
         {error && (
