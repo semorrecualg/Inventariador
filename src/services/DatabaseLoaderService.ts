@@ -135,9 +135,10 @@ export class DatabaseLoaderService {
       });
 
       // Transação ACID atômica por bloco para mitigar Race Conditions
-      await db.transaction('rw', [db.ativos, db.assets], async () => {
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         await db.ativos.bulkPut(loteHigienizado);
         await db.assets.bulkPut(loteHigienizado);
+        await db.local_assets.bulkPut(loteHigienizado);
       });
 
       registrosProcessados += loteHigienizado.length;

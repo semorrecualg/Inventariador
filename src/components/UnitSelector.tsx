@@ -109,12 +109,40 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           
           // Fallback Seguro: Usa .filter() na fluent API do Dexie pois tenantId isolado não é um índice no schema atual v2.
           // Isso garante a extração limpa para o currentTenantId e atende o requisito SRE.
-          const allAssets = await db.local_assets
+          let allAssets = await db.local_assets
             .filter(item => {
               const tId = String(item.tenantId || item._tenantid || '').trim().toUpperCase();
               return !currentTenantId || tId === currentTenantId;
             })
             .toArray();
+            
+          const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+          if (allAssets.length === 0 && isIframe) {
+            const virtualData = localStorage.getItem('gbr_virtual_snapshot_backup');
+            if (virtualData) {
+              try {
+                const parsed = JSON.parse(virtualData);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  allAssets = parsed.map((row: unknown) => {
+                    const r = row as Record<string, unknown>;
+                    return {
+                      id: String(r.primarykey || r.id || ''),
+                      primarykey: String(r.primarykey || r.id || ''),
+                      tenantId: String(r.tenantId || 'GBR_DEFAULT'),
+                      _tenantid: String(r._tenantid || 'GBR_DEFAULT'),
+                      filial: String(r.filial || 'FILIAL_DEFAULT'),
+                      _unitid: String(r._unitid || 'FILIAL_DEFAULT'),
+                      status: String(r.status || 'Pendente'),
+                      _conferido: Number(r._conferido ?? 0),
+                      _is_deleted: Number(r._is_deleted ?? 0)
+                    };
+                  });
+                }
+              } catch (err) {
+                console.warn("Error parsing virtual snapshot backup:", err);
+              }
+            }
+          }
             
           const nonDeleted = allAssets.filter(a => a._is_deleted === 0);
           const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));

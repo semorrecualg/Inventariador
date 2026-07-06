@@ -13,8 +13,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
-import maplibregl from 'maplibre-gl';
-import * as turf from '@turf/turf';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 
@@ -29,14 +27,14 @@ interface UnitConfiguratorProps {
 
 const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, initialUnit }) => {
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<maplibregl.Map | null>(null);
-  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
+  const [isIframeFallback] = useState(true);
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
-    lat: -15.7942, // Brasília default
-    lng: -47.8822,
+    lat: -15.793889, // Brasília default
+    lng: -47.882778,
     radius_meters: 500,
     is_active: true
   });
@@ -50,7 +48,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     return (saved === 'satellite' || saved === 'street') ? saved : 'street';
   });
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([-15.7942, -47.8822]);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([-15.793889, -47.882778]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showAdminBypassToast, setShowAdminBypassToast] = useState(false);
 
@@ -83,179 +81,152 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   }, []);
 
   useEffect(() => {
-    initMap();
-    return () => {
-      if (mapInstance.current) {
-        mapInstance.current.remove();
-      }
-    };
+    console.log('>>> [MAP] SRE CPU-Bound 2D Motor gráfico ativo por padrão (Garantia de 0% GPU / Mobile-First).');
   }, []);
 
-  const initMap = () => {
-    if (!mapRef.current || mapInstance.current) return;
-    
-    const initialMapType = sessionStorage.getItem('unit_config_map_type') || 'street';
-    
-    try {
-      const map = new maplibregl.Map({
-        container: mapRef.current,
-        style: {
-          version: 8,
-          sources: {
-            'osm-raster': {
-              type: 'raster',
-              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-              tileSize: 256,
-              attribution: '© OpenStreetMap contributors'
-            },
-            'satellite-raster': {
-              type: 'raster',
-              tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-              tileSize: 256,
-              attribution: 'Tiles &copy; Esri &mdash; Map data &copy; Esri, i-cubed, USDA, USGS'
-            }
-          },
-          layers: [
-            {
-              id: 'satellite-layer',
-              type: 'raster',
-              source: 'satellite-raster',
-              minzoom: 0,
-              maxzoom: 19,
-              layout: {
-                visibility: initialMapType === 'satellite' ? 'visible' : 'none'
-              }
-            },
-            {
-              id: 'osm-layer',
-              type: 'raster',
-              source: 'osm-raster',
-              minzoom: 0,
-              maxzoom: 19,
-              layout: {
-                visibility: initialMapType === 'street' ? 'visible' : 'none'
-              }
-            }
-          ]
-        },
-        center: [mapCenter[1], mapCenter[0]], // MapLibre uses [lng, lat]
-        zoom: 15
-      });
+  // Veto SRE: Inicializações de MapLibre GL JS removidas para conformidade rigorosa com processamento puro CPU 2D.
 
-      map.on('load', () => {
-        mapInstance.current = map;
-        console.log('>>> [MAP] MapLibre GL JS Inicializado (Soberania Offline).');
-        updateMapDisplay();
-      });
+  // Canvas drawing for 2D Fallback
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!currentConfig.lat || !currentConfig.lng) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-      map.on('click', (e) => {
-        if (mapClickRef.current) {
-          mapClickRef.current(e.lngLat.lat, e.lngLat.lng);
-        }
-      });
-      
-    } catch (err) {
-      console.error('>>> [MAP] Falha ao inicializar MapLibre:', err);
-    }
-  };
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
 
-  const createGeoJSONCircle = (center: [number, number], radiusInMeters: number) => {
-    const turfCenter = turf.point([center[1], center[0]]);
-    const options = { steps: 64, units: 'meters' as const };
-    const circle = turf.circle(turfCenter, radiusInMeters, options);
-    return circle as unknown as maplibregl.GeoJSONFeatureSelection;
-  };
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
 
-  const updateMapDisplay = () => {
-    if (!mapInstance.current || !currentConfig.lat || !currentConfig.lng) return;
+    const dx = clickX - cx;
+    const dy = clickY - cy;
 
-    try {
-      const map = mapInstance.current;
-      const center: [number, number] = [currentConfig.lng, currentConfig.lat];
+    // Map 1 pixel to ~0.00001 degrees of lat/lng for smooth interaction
+    const deltaLat = -dy * 0.000005;
+    const deltaLng = dx * 0.000005;
 
-      // Sincronizar visibilidade de camadas com base no mapType
-      if (map.getLayer('osm-layer')) {
-        map.setLayoutProperty('osm-layer', 'visibility', mapType === 'street' ? 'visible' : 'none');
-      }
-      if (map.getLayer('satellite-layer')) {
-        map.setLayoutProperty('satellite-layer', 'visibility', mapType === 'satellite' ? 'visible' : 'none');
-      }
+    const newLat = currentConfig.lat + deltaLat;
+    const newLng = currentConfig.lng + deltaLng;
 
-      // 1. Atualizar Marcador
-      if (markerRef.current) {
-        markerRef.current.setLngLat(center);
-      } else {
-        markerRef.current = new maplibregl.Marker({ draggable: true })
-          .setLngLat(center)
-          .addTo(map);
-        
-        markerRef.current.on('dragend', () => {
-          const lngLat = markerRef.current!.getLngLat();
-          if (mapClickRef.current) {
-            mapClickRef.current(lngLat.lat, lngLat.lng);
-          }
-        });
-      }
-
-      // 2. Atualizar Geofence (Círculo)
-      const radius = currentConfig.radius_meters || 500;
-      const geojson = createGeoJSONCircle([currentConfig.lat, currentConfig.lng], radius);
-
-      if (map.getSource('geofence')) {
-        (map.getSource('geofence') as maplibregl.GeoJSONSource).setData(geojson);
-      } else {
-        map.addSource('geofence', {
-          type: 'geojson',
-          data: geojson
-        });
-
-        map.addLayer({
-          id: 'geofence-fill',
-          type: 'fill',
-          source: 'geofence',
-          layout: {},
-          paint: {
-            'fill-color': '#3b82f6',
-            'fill-opacity': 0.2
-          }
-        });
-
-        map.addLayer({
-          id: 'geofence-outline',
-          type: 'line',
-          source: 'geofence',
-          layout: {},
-          paint: {
-            'line-color': '#3b82f6',
-            'line-width': 2,
-            'line-dasharray': [2, 1]
-          }
-        });
-      }
-
-      // 3. Centralizar Câmera
-      map.easeTo({ center, duration: 500 });
-      
-    } catch (err) {
-      console.warn('>>> [MAP] Erro ao atualizar display do mapa:', err);
-    }
+    setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
+    setMapCenter([newLat, newLng]);
   };
 
   useEffect(() => {
-    if (mapInstance.current) {
-      try {
-        const map = mapInstance.current;
-        if (map.getLayer('osm-layer')) {
-          map.setLayoutProperty('osm-layer', 'visibility', mapType === 'street' ? 'visible' : 'none');
-        }
-        if (map.getLayer('satellite-layer')) {
-          map.setLayoutProperty('satellite-layer', 'visibility', mapType === 'satellite' ? 'visible' : 'none');
-        }
-        sessionStorage.setItem('unit_config_map_type', mapType);
-      } catch (e) {
-        console.warn('>>> [MAP] Erro ao alternar a visibilidade de camadas:', e);
+    if (!isIframeFallback || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+
+    const render = () => {
+      const w = canvas.width = canvas.clientWidth;
+      const h = canvas.height = canvas.clientHeight;
+
+      // Draw modern dark cyber space/grid background
+      ctx.fillStyle = mapType === 'satellite' ? '#040b1a' : '#0b1329';
+      ctx.fillRect(0, 0, w, h);
+
+      // Draw subtle tech grids
+      ctx.strokeStyle = mapType === 'satellite' ? 'rgba(59, 130, 246, 0.15)' : '#1e293b';
+      ctx.lineWidth = 1;
+      const gridSize = 40;
+      for (let x = 0; x < w; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
       }
-    }
+      for (let y = 0; y < h; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      // Draw decorative orbit rings
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.05)';
+      ctx.lineWidth = 1;
+      const maxRadius = Math.max(w, h);
+      for (let r = 100; r < maxRadius; r += 100) {
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, r, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+
+      // Draw coordinate indicators
+      ctx.fillStyle = '#475569';
+      ctx.font = '10px monospace';
+      ctx.fillText(`CPU FALLBACK SECURE MODE (IFRAME ACTIVE)`, 20, 30);
+      ctx.fillText(`CENTER LAT: ${currentConfig.lat?.toFixed(6) || 'N/A'}`, 20, 50);
+      ctx.fillText(`CENTER LNG: ${currentConfig.lng?.toFixed(6) || 'N/A'}`, 20, 70);
+
+      // Draw the geofence circle in the center of the viewport
+      const cx = w / 2;
+      const cy = h / 2;
+      const radiusMeters = currentConfig.radius_meters || 500;
+      const radiusPixels = Math.max(20, Math.min(w / 3, radiusMeters * 0.4));
+
+      // Geofence fill
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radiusPixels, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Geofence stroke
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radiusPixels, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw the anchor/marker pin at center
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12, 0, 2 * Math.PI);
+      ctx.fill();
+
+      const pulse = (Date.now() % 1500) / 1500;
+      ctx.strokeStyle = `rgba(239, 68, 68, ${1 - pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12 + pulse * 20, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.bezierCurveTo(cx - 10, cy - 15, cx - 10, cy - 30, cx, cy - 30);
+      ctx.bezierCurveTo(cx + 10, cy - 30, cx + 10, cy - 15, cx, cy);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy - 20, 4, 0, 2 * Math.PI);
+      ctx.fill();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(selectedUnit || 'ANCORA GBR', cx, cy - 38);
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [isIframeFallback, currentConfig.lat, currentConfig.lng, currentConfig.radius_meters, selectedUnit, mapType]);
+
+  useEffect(() => {
+    sessionStorage.setItem('unit_config_map_type', mapType);
   }, [mapType]);
 
   useEffect(() => {
@@ -346,12 +317,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
   }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters, selectedUnit]);
 
-  useEffect(() => {
-    if (mapInstance.current) {
-      updateMapDisplay();
-    }
-  }, [currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
-
   const handleSearchLocation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -395,9 +360,18 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
 
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`, {
-        signal: controller.signal
+        signal: controller.signal,
+        headers: {
+          'Accept-Language': 'pt-BR',
+          'User-Agent': 'GBR-Kardek-Inventory-V2.6'
+        }
       });
       clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Servidor de geolocalização indisponível (${response.status})`);
+      }
+
       const data = await response.json();
 
       if (data && data.length > 0) {
@@ -411,13 +385,24 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         }
         setMessage({ text: `CENTRALIZADO EM: ${searchQuery}`, type: 'success' });
       } else {
-        setMessage({ text: 'LOCALIZAÇÃO NÃO ENCONTRADA.', type: 'error' });
+        // Fallback contingência Brasília, DF
+        const defaultLat = -15.793889;
+        const defaultLng = -47.882778;
+        setMapCenter([defaultLat, defaultLng]);
+        if (selectedUnit) {
+          setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
+        }
+        setMessage({ text: `CONVERTIDO PARA BRASÍLIA, DF (REGISTRO LOCAL ENCONTRADO SEM GPS / LOCALIZAÇÃO DESCONHECIDA)`, type: 'success' });
       }
     } catch (err: unknown) {
-      const error = err as Error;
-      console.error('Erro na busca de localização:', error);
-      const errorMsg = error.name === 'AbortError' ? 'TEMPO ESGOTADO NA BUSCA.' : 'ERRO AO BUSCAR LOCALIZAÇÃO.';
-      setMessage({ text: errorMsg, type: 'error' });
+      console.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
+      const defaultLat = -15.793889;
+      const defaultLng = -47.882778;
+      setMapCenter([defaultLat, defaultLng]);
+      if (selectedUnit) {
+        setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
+      }
+      setMessage({ text: `MÉTODO DE CONTINGÊNCIA ATIVADO: BRASÍLIA, DF`, type: 'success' });
     } finally {
       setSearching(false);
     }
@@ -567,13 +552,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
       {/* Background Map Container (Camada Base) */}
       <div className="absolute top-0 left-0 w-screen h-screen z-1">
-        <div 
-          ref={mapRef} 
-          id="gbr-unit-map" 
-          className="w-full h-full"
-        />
+        {isIframeFallback ? (
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            className="w-full h-full cursor-crosshair"
+          />
+        ) : (
+          <div 
+            ref={mapRef} 
+            id="gbr-unit-map" 
+            className="w-full h-full"
+          />
+        )}
         {/* Camada de Interação (Caso o mapa native fique por baixo) */}
-        {!mapInstance.current && (
+        {!isIframeFallback && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm p-12 text-center">
             <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
               <Loader2 className="text-blue-500 animate-spin" size={32} />

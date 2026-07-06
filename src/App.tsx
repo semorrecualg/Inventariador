@@ -14,13 +14,14 @@ declare global {
   interface Window {
     pushScreen?: (s: AppScreen, params?: NavigationParams) => void;
     clickResetTimeout?: ReturnType<typeof setTimeout>;
+    setShowErrorModal?: (show: boolean) => void;
   }
 }
 import Modal from './components/Modal';
 import Login from './components/Login';
 import Register from './components/Register';
 import MainMenu from './components/MainMenu';
-import BaseManagerPanel from './components/BaseManagerPanel';
+import { DatabaseManagerScreen } from './screens/DatabaseManagerScreen';
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
 import ImpairmentReport from './components/ImpairmentReport';
@@ -298,6 +299,15 @@ const App: React.FC = () => {
   });
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isDatabaseLoaded, setIsDatabaseLoaded] = useState<boolean>(() => {
+    return localStorage.getItem('isDatabaseLoaded') === 'true' || sessionStorage.getItem('isDatabaseLoaded') === 'true';
+  });
+
+  useEffect(() => {
+    if (isDatabaseLoaded) {
+      console.log('>>> [DATABASE] Banco de dados inicializado de forma reativa.');
+    }
+  }, [isDatabaseLoaded]);
 
   const [inventory, setInventory] = useState<InventoryState>(() => {
     const savedMode = localStorage.getItem('app_database_mode') as DatabaseMode;
@@ -593,8 +603,12 @@ const App: React.FC = () => {
   // Expose pushScreen to window for components that need it
   useEffect(() => {
     window.pushScreen = pushScreen;
+    window.setShowErrorModal = (show: boolean) => {
+      setModalConfig((prev: ModalConfig) => ({ ...prev, isOpen: show }));
+    };
     return () => {
       delete window.pushScreen;
+      delete window.setShowErrorModal;
     };
   }, [pushScreen]);
 
@@ -803,32 +817,89 @@ const App: React.FC = () => {
     
     try {
       console.log(">>> [DBA] Iniciando processo de reconexão manual...");
-      const isNative = Capacitor.isNativePlatform();
-      if (!isNative) {
-        console.log(">>> [DBA] Bypass instantâneo em ambiente WEB / iFrame.");
-        await sqliteService.init(true);
-        const loaded = await loadInventory(databaseMode);
-        if (loaded) {
-          setInventory(loaded);
+      // v24.50.6 - Correção SRE: Captura Dinâmica de Diretório via File System Access API para Windows/Desktop
+      if (!Capacitor.isNativePlatform()) {
+        const isIframe = window.self !== window.top;
+        if (isIframe) {
+          console.log(">>> [DBA-iFrame] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
+          const virtualFolderName = 'GBR_Inventario_Virtual';
+          await sqliteService.init(true);
+          sessionStorage.setItem('gbr_physical_folder_name', virtualFolderName);
+          localStorage.setItem('gbr_physical_link_active', 'true');
+          const loaded = await loadInventory(databaseMode);
+          if (loaded) setInventory(loaded);
+          setFileStatus({
+            status: 'granted',
+            path: virtualFolderName,
+            folderName: virtualFolderName
+          });
+          setIsDataLoaded(true);
+          setShowReconnectOverlay(false);
+          setSqliteStatus('ACTIVE');
+          return;
         }
-        setIsDataLoaded(true);
-        setShowReconnectOverlay(false);
-        setIntegrityFailed(false);
-        setSqliteStatus('ACTIVE');
-        setIsReconnecting(false);
-        return;
+
+        try {
+          console.log(">>> [DBA-Desktop] Abrindo seletor dinâmico de diretório do Windows...");
+          
+          // Invoca a API nativa do navegador para o usuário selecionar a pasta local de trabalho
+          const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
+            mode: 'readwrite'
+          });
+
+          if (directoryHandle) {
+            console.log(`>>> [DBA-Desktop] Pasta vinculada com sucesso: ${directoryHandle.name}`);
+            
+            await sqliteService.init(true);
+            
+            // Captura o endereço/nome e persiste no contexto para operações subsequentes (ler, gravar, expurgar)
+            sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
+            localStorage.setItem('gbr_physical_link_active', 'true');
+            
+            const loaded = await loadInventory(databaseMode);
+            if (loaded) setInventory(loaded);
+            
+            setFileStatus({
+              status: 'granted',
+              path: directoryHandle.name,
+              folderName: directoryHandle.name
+            });
+            
+            setIsDataLoaded(true);
+            setShowReconnectOverlay(false);
+            setSqliteStatus('ACTIVE');
+            return;
+          }
+        } catch (pickerErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+          console.error(">>> [DBA-Security] Usuário cancelou ou Windows bloqueou o seletor:", pickerErr);
+          
+          if (pickerErr?.name === 'SecurityError' || String(pickerErr?.message || '').includes('Cross origin') || String(pickerErr?.message || '').includes('sub frames')) {
+            console.warn(">>> [DBA-Security] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
+            const virtualFolderName = 'GBR_Inventario_Virtual';
+            await sqliteService.init(true);
+            sessionStorage.setItem('gbr_physical_folder_name', virtualFolderName);
+            localStorage.setItem('gbr_physical_link_active', 'true');
+            const loaded = await loadInventory(databaseMode);
+            if (loaded) setInventory(loaded);
+            setFileStatus({
+              status: 'granted',
+              path: virtualFolderName,
+              folderName: virtualFolderName
+            });
+            setIsDataLoaded(true);
+            setShowReconnectOverlay(false);
+            setSqliteStatus('ACTIVE');
+            return;
+          }
+
+          setSqliteStatus('ERROR');
+          return;
+        }
       }
-      
       const success = await sqliteService.requestFilePermission();
-      
       if (success) {
-        // ESSENCIAL: Aguarda o serviço ler os dados do arquivo físico recém-liberado
         await sqliteService.init(true);
-        
-        // Aguarda um pequeno delay para o OS processar a permissão
         await new Promise(r => setTimeout(r, 800));
-        
-        // Recarrega os dados do inventário para o estado do React
         const loaded = await loadInventory(databaseMode);
         
         // v25.01: Se carregou dados (mesmo que do cache), atualizamos o estado
@@ -6143,23 +6214,7 @@ const App: React.FC = () => {
             />
           )}
           {screen === AppScreen.DATABASE_MANAGER && (
-            <BaseManagerPanel 
-              onBack={popScreen} 
-              onResetDatabase={async () => {
-                try {
-                  await localDb.purgeDatabase();
-                } catch (e) {
-                  console.error(">>> [Reset] Falha crítica ao purgar o banco de dados:", e);
-                }
-                
-                localStorage.removeItem('app_database_mode');
-                const newHistory = [AppScreen.DATABASE_MANAGER];
-                localStorage.setItem('app_screen_history', JSON.stringify(newHistory));
-                localStorage.setItem('gbr_kardek_history', JSON.stringify(newHistory));
-                sessionStorage.setItem('app_just_cleared_data', 'true');
-                window.location.reload();
-              }} 
-            />
+            <DatabaseManagerScreen onBack={() => pushScreen(AppScreen.MODULE_SELECTION)} />
           )}
           {screen === AppScreen.SIGNATURE && (
             <Signature 

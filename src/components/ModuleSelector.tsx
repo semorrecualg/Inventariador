@@ -12,6 +12,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { sqliteService } from '../services/sqliteService';
+import { Capacitor } from '@capacitor/core';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
@@ -35,7 +36,19 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
     let active = true;
     const runCheck = async () => {
       try {
-        const count = await sqliteService.getAssetCount();
+        let count = await sqliteService.getAssetCount();
+        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (count === 0 && isIframe) {
+          const virtualData = localStorage.getItem('gbr_virtual_snapshot_backup');
+          if (virtualData) {
+            try {
+              const parsed = JSON.parse(virtualData);
+              if (Array.isArray(parsed)) count = parsed.length;
+            } catch (err) {
+              console.warn("Error parsing virtualData:", err);
+            }
+          }
+        }
         if (active) {
           const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
           const isOnlineSession = dbMode === 'SUPABASE';
@@ -54,6 +67,51 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
 
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
+
+  // v24.50.8 - Interceptador SRE: Barreira de Proteção Física no acesso ao Gestor de Base
+  const handleDatabaseManagerClick = async () => {
+    const isNative = Capacitor.isNativePlatform();
+    const hasFolderLinked = !!sessionStorage.getItem('gbr_physical_folder_name');
+
+    if (!isNative && !hasFolderLinked) {
+      console.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Windows. Forçando Picker...");
+      
+      const isIframe = window.self !== window.top;
+      if (isIframe) {
+        console.warn(">>> [SRE-GUARD] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
+        sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
+        localStorage.setItem('gbr_physical_link_active', 'true');
+      } else {
+        try {
+          const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
+            mode: 'readwrite'
+          });
+          if (directoryHandle) {
+            sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
+            localStorage.setItem('gbr_physical_link_active', 'true');
+            console.log(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
+          } else {
+            return; // Aborta navegação se o usuário cancelar
+          }
+        } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+          console.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
+          
+          if (err?.name === 'SecurityError' || String(err?.message || '').includes('Cross origin') || String(err?.message || '').includes('sub frames')) {
+            console.warn(">>> [SRE-GUARD] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
+            sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
+            localStorage.setItem('gbr_physical_link_active', 'true');
+          } else {
+            return; // Bloqueia a navegação para evitar tela com erro
+          }
+        }
+      }
+    }
+
+    // Se passou na barreira ou se for plataforma nativa, executa a rota canônica
+    if (onOpenDatabaseManager) {
+      onOpenDatabaseManager();
+    }
+  };
 
   if (isAuditor && !canAccessModules) {
     return (
@@ -106,7 +164,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
           <div className="flex items-center gap-2">
             {isAdmin && onOpenDatabaseManager && (
               <button 
-                onClick={onOpenDatabaseManager}
+                onClick={handleDatabaseManagerClick}
                 className="flex items-center space-x-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition-all border border-slate-200 active:scale-95 group"
                 title="Gestor de Banco SQLite"
               >

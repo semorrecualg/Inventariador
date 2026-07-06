@@ -388,11 +388,33 @@ export class SqliteService {
     }
   }
 
-  public async getAddressesFromAssetsCounting(): Promise<string[]> {
+  public async getAddressesFromAssetsCounting(tenantId?: string): Promise<{ endereco: string; filial: string; lat?: number; lng?: number }[]> {
     try {
       const list = await db.ativos.toArray();
-      const addresses = Array.from(new Set(list.map(a => String(a.endereco || '')).filter(e => e && e.trim() !== '')));
-      return addresses;
+      const filtered = tenantId
+        ? list.filter(a => {
+            const val = (a.tenantId || a._tenantid || '').toLowerCase();
+            const q = tenantId.toLowerCase();
+            return val.includes(q) || q.includes(val);
+          })
+        : list;
+
+      const results: { endereco: string; filial: string; lat?: number; lng?: number }[] = [];
+      const seen = new Set<string>();
+
+      for (const a of filtered) {
+        const key = `${a.filial || ''}|${a.endereco || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push({
+            endereco: a.endereco || '',
+            filial: a.filial || '',
+            lat: a.gps_lat !== null && a.gps_lat !== undefined ? Number(a.gps_lat) : undefined,
+            lng: a.gps_lng !== null && a.gps_lng !== undefined ? Number(a.gps_lng) : undefined
+          });
+        }
+      }
+      return results;
     } catch {
       return [];
     }
@@ -727,6 +749,28 @@ export class SqliteService {
     }
     if (config.lastUpdated) {
       await this.setContextValue('last_updated', String(config.lastUpdated));
+    }
+  }
+
+  public async getInventoryConfig(): Promise<Record<string, unknown> | null> {
+    try {
+      const selectedUnit = await this.getContextValue('selected_unit');
+      const currentCampaignId = await this.getContextValue('active_campaign');
+      const tenantId = await this.getContextValue('tenant_id');
+      const lastUpdated = await this.getContextValue('last_updated');
+      
+      if (!selectedUnit && !currentCampaignId && !tenantId && !lastUpdated) {
+        return null;
+      }
+
+      return {
+        selectedUnit,
+        currentCampaignId,
+        tenantId,
+        lastUpdated
+      };
+    } catch {
+      return null;
     }
   }
 

@@ -819,8 +819,39 @@ export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promis
 
 let userWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+export function selectLocalFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.csv';
+    input.onchange = (e: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      const file = e.target.files?.[0];
+      resolve(file || null);
+    };
+    input.oncancel = () => {
+      resolve(null);
+    };
+    input.click();
+  });
+}
+
 export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: string; fileBlob: File | null } | null> {
   if (Capacitor.isNativePlatform()) return null;
+
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+  if (isIframe) {
+    console.log(">>> [SRE-iFrame] Detectado iFrame Sandbox no Database Manager. Abrindo seletor de arquivo nativo HTML...");
+    const file = await selectLocalFile();
+    if (file) {
+      sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
+      localStorage.setItem('gbr_physical_link_active', 'true');
+      return {
+        pathName: `iFrame Sandbox / ${file.name}`,
+        fileBlob: file
+      };
+    }
+    return null;
+  }
 
   try {
     // 1. Abre a seleção delegando ao Windows o foco na pasta de Documentos
@@ -860,6 +891,31 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
 }
 
 export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+  if (isIframe) {
+    try {
+      console.log("[SRE-iFrame] Armazenando snapshot simulado localmente...");
+      localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
+      
+      // Auto-download contingency physical JSON file
+      const jsonStr = JSON.stringify(dataPayload, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'GBR_BACKUP_INVENTARIO.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      return true;
+    } catch (e) {
+      console.error("[SRE-iFrame] Erro ao salvar snapshot no localStorage ou baixar arquivo", e);
+      return false;
+    }
+  }
+
   if (!userWorkspaceHandle) return false;
 
   try {

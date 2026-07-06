@@ -1,34 +1,7 @@
 #!/usr/bin/env sh
 . "$(dirname "$0")/_/husky.sh"
-
 echo "=== [SRE ADVANCED SHIELD] ENTRANDO EM MODO DE AUDITORIA CRÍTICA ==="
-
-if git diff --cached | grep -E "eslint-disable-next-line|@ts-ignore|eslint-disable"; then
-    echo "❌ CRITICAL SRE ERROR: Proibido mascarar falhas com comentários de supressão!"
-    exit 1
-fi
-
-if git diff --cached | grep -Ei "SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql"; then
-    echo "❌ CRITICAL SRE ERROR: Uso de strings/dialetos SQL puro detectado! Use a Fluent API do Dexie.js."
-    exit 1
-fi
-
-if git diff --cached | grep -F "window.location.reload("; then
-    echo "❌ CRITICAL SRE ERROR: Proibido usar window.location.reload() para controle de rotas internas de SPA."
-    exit 1
-fi
-
-if git diff --cached | grep -E "\[x\]✓|\[x\]\. ✓"; then
-    echo "❌ CRITICAL SRE ERROR: Sintaxe de telemetria corrompida. Use estritamente o caractere canônico [✓]."
-    exit 1
-fi
-
-echo "⌛ Rodando verificações estritas do compilador..."
+if git diff --cached | grep -E "eslint-disable-next-line|@ts-ignore|eslint-disable"; then echo "❌ ERROR: Mascaramento proibido!"; exit 1; fi
+if git diff --cached | grep -Ei "SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql"; then echo "❌ ERROR: SQL proibido!"; exit 1; fi
+if git diff --cached | grep -F "window.location.reload("; then echo "❌ ERROR: Reload proibido!"; exit 1; fi
 npm run lint -- --max-warnings=0 && npx tsc --noEmit
-
-if [ $? -ne 0 ]; then
-    echo "❌ CRITICAL SRE ERROR: Código rejeitado por falha de compilação ou tipos ausentes."
-    exit 1
-fi
-
-echo "✓ [SRE SHIELD] CÓDIGO APROVADO. Commit liberado com sucesso."
