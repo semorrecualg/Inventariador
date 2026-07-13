@@ -35,7 +35,7 @@ import { DatabaseManagerScreen } from './screens/DatabaseManagerScreen';
 import { registerToastCallback, validateAndPushRoute } from './services/NavigationGuardService';
 import { checkRuntimeIntegrity, startSecurityMonitor } from './services/securityService';
 import { AppModule, AppScreen, Asset, AuditLogEntry, DatabaseMode, DatabaseStatus, InventoryCampaign, InventorySearchMode, InventoryState, ModalConfig, NavigationParams, ScanFeedbackMode, ScannerMode, SearchFilters, TagInventario, TransactionOrigin, UnitConfig, User, UserRole } from './types';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { convertAltitudeToFloor, getCurrentLocation, startAutonomousTracking, stopAutonomousTracking, type GpsLocation } from './utils/gpsUtils';
 import { processarRoteamentoPosLoginSaas, SupabaseUserProfile } from './utils/routingUtils';
 import { getAssetUnit, matchUnitKeys, normalizeKey } from './utils/schema';
 
@@ -68,11 +68,12 @@ import * as XLSX from 'xlsx';
 import AIAssistant from './components/AIAssistant';
 import { APP_LOGO } from './constants';
 import { auditService } from './services/auditService';
+import { backupService } from './services/backupService';
 import { hasBiometricRegistered, isBiometricSupported } from './services/biometricService';
 import { backupInventory, clearInventory, clearMultipleInventories, loadInventory, restoreInventory, saveConfigOnly, saveInventory } from './services/persistenceService';
 import { db, sqliteService } from './services/sqliteService';
-import { clearCloudInventory, ensureUserProfile, fetchCampaigns, fetchFullInventory, fetchUnitConfigs, fetchUsersFromCloud, getAssetByTag, isInternalMode, logAuditEvent, subscribeToAssetChanges, subscribeToInventoryChanges, supabase, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud } from './services/supabaseService';
-import { getPendingSyncItems, photoSyncManager, processSyncQueue, syncService } from './services/syncService';
+import { clearCloudInventory, ensureUserProfile, fetchCampaigns, fetchFullInventory, fetchUnitConfigs, fetchUsersFromCloud, getAssetByTag, isInternalMode, logAuditEvent, signOut, subscribeToAssetChanges, subscribeToInventoryChanges, supabase, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud } from './services/supabaseService';
+import { getPendingSyncItems, getSyncQueueLength, getUnsyncedAssetsCount, photoSyncManager, processSyncQueue, syncService } from './services/syncService';
 import { telemetryService } from './services/telemetryService';
 import { safeStringify } from './services/utils';
 
@@ -1073,7 +1074,6 @@ const App: React.FC = () => {
 
     const checkSyncQueue = async () => {
       try {
-        const { getSyncQueueLength, getUnsyncedAssetsCount } = await import('./services/syncService');
         const len = await getSyncQueueLength();
         setSyncQueueLength(len);
 
@@ -2464,7 +2464,6 @@ const App: React.FC = () => {
       console.log('>>> [Sync] Perfil MOBILE_SINGLE detectado. Iniciando backup automático em cloud...');
       setIsSyncing(true);
       try {
-        const { backupService } = await import('./services/backupService');
         const res = await backupService.performMobileSingleBackup(user.id || user.email);
         if (res.success) {
           setLastSyncTime(new Date().toISOString());
@@ -3961,7 +3960,7 @@ const App: React.FC = () => {
             message: 'Sua sessão na nuvem expirou ou o token de acesso é inválido. Por favor, faça login novamente.',
             type: 'error',
             onConfirm: () => {
-              import('./services/supabaseService').then(m => m.signOut());
+              void signOut();
               setIsSessionValid(false);
               setUser(null);
               sessionStorage.removeItem('app_current_user');
@@ -4482,7 +4481,7 @@ const App: React.FC = () => {
           // Se falhar ou timeout, usa fallback da unidade
           loc = await Promise.race([
             getCurrentLocation(),
-            new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+            new Promise<GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
           ]).catch(e => {
             console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
             if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
@@ -4505,7 +4504,6 @@ const App: React.FC = () => {
 
         // GBR v25: Processamento Vertical (Z-Axis)
         assetWithHistory._altitude_metros = loc.altitude || 0;
-        const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
         assetWithHistory._id_andar = convertAltitudeToFloor(loc.altitude);
 
         // Atualiza a última entrada da trilha com a posição exata

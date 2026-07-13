@@ -114,15 +114,25 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'esbuild',
-    chunkSizeWarningLimit: 1600,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules/@capacitor')) return 'vendor-capacitor';
-          if (id.includes('node_modules/dexie')) return 'vendor-dexie';
-          if (id.includes('node_modules/html2canvas')) return 'vendor-html2canvas';
-          if (id.includes('src/services/supabaseService')) return 'service-supabase';
-          if (id.includes('src/services/sqliteService')) return 'service-sqlite';
+          if (id.includes('node_modules/@supabase') || id.includes('node_modules/postgrest-js')) {
+            return 'service-supabase';
+          }
+          if (id.includes('node_modules/dexie')) {
+            return 'vendor-dexie';
+          }
+          if (id.includes('node_modules/@capacitor')) {
+            return 'vendor-capacitor';
+          }
+          if (id.includes('node_modules/html2canvas')) {
+            return 'vendor-html2canvas';
+          }
+          if (id.includes('node_modules')) {
+            return 'vendor-others';
+          }
         }
       }
     }
