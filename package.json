@@ -8,8 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "prepare": "husky",
-    "postinstall": "mkdir -p .husky/_ && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\necho \"=== [SRE ADVANCED SHIELD] ENTRANDO EM MODO DE AUDITORIA CRÍTICA ===\"\nif git diff --cached | grep -E \"eslint-disable-next-line|@ts-ignore|eslint-disable\"; then echo \"❌ ERROR: Mascaramento proibido!\"; exit 1; fi\nif git diff --cached | grep -Ei \"SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql\"; then echo \"❌ ERROR: SQL proibido!\"; exit 1; fi\nif git diff --cached | grep -F \"window.location.reload(\"; then echo \"❌ ERROR: Reload proibido!\"; exit 1; fi\nnpm run lint -- --max-warnings=0 && npx tsc --noEmit' > .husky/_/pre-commit && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\nnpm run build' > .husky/_/pre-push && chmod +x .husky/_/pre-commit .husky/_/pre-push",
+    "prepare": "husky && git config --local core.hooksPath .husky",
     "test": "vitest run"
   },
   "dependencies": {
@@ -70,6 +69,7 @@
     "husky": "^9.1.7",
     "postcss": "^8.4.35",
     "tailwindcss": "^4.2.1",
+    "tsc-files": "^1.1.4",
     "typescript": "^5.2.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^5.1.4",

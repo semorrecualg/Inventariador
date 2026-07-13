@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  MapPin, 
-  Search, 
-  ChevronRight, 
-  Compass, 
-  RefreshCw, 
-  Lock
+import {
+  ChevronRight,
+  Compass,
+  Lock,
+  MapPin,
+  RefreshCw,
+  Search
 } from 'lucide-react';
-import BackButton from './BackButton';
+import React, { useEffect, useRef, useState } from 'react';
 import { localDb } from '../services/localDbService';
+import BackButton from './BackButton';
 
 interface AddressSelectorProps {
   selectedUnit: string;
@@ -27,42 +27,86 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [addresses, setAddresses] = useState<Array<{ displayName: string; total: number; checked: number; locKey: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    if (!selectedUnit) {
+      setDebouncedQuery('');
+      setIsLoading(false);
+      return;
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
       setDebouncedQuery(searchQuery);
+      setIsLoading(true);
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchQuery, selectedUnit]);
 
   useEffect(() => {
+    if (activeRequestRef.current) {
+      activeRequestRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
     let active = true;
+
     const fetchAddresses = async () => {
-      if (!selectedUnit) return;
-      setIsLoading(true);
-      try {
-        const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedQuery);
+      if (!selectedUnit) {
         if (active) {
+          setAddresses([]);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedQuery, controller.signal);
+        if (active && !controller.signal.aborted) {
           setAddresses(results || []);
         }
       } catch (err) {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+          return;
+        }
         console.error(">>> [SRE AddressSelector] Erro ao carregar localidades física do SQLite:", err);
       } finally {
-        if (active) setIsLoading(false);
+        if (active && !controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    fetchAddresses();
+    void fetchAddresses();
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [selectedUnit, debouncedQuery]);
 
   const handleBack = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    if (activeRequestRef.current) {
+      activeRequestRef.current.abort();
+    }
     setAddresses([]);
     setSearchQuery('');
     setDebouncedQuery('');
+    setIsLoading(false);
     onBack();
   };
 
@@ -82,7 +126,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
           <div className="flex-shrink-0 flex items-center">
             <BackButton id="address-back-btn" onClick={handleBack} label="Voltar" subLabel="Unidades" />
           </div>
-          
+
           {/* Bloco de Texto Centralizado Verticalmente */}
           <div className="flex-1 flex flex-col items-center justify-center text-center px-1">
             <h2 className="text-[13px] sm:text-sm font-black text-ink uppercase tracking-[0.1em] leading-tight select-none">
@@ -104,7 +148,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         {/* Input Buscador */}
         <div id="address-search-container" className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={16} />
-          <input 
+          <input
             type="text"
             id="address-search-input"
             placeholder="PESQUISAR ENDEREÇO / LOCALIDADE..."
@@ -157,17 +201,17 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
                           {checkedPercent}%
                         </span>
                       </div>
-                      
+
                       {/* Barra de Progresso Interna SRE */}
                       <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2.5 overflow-hidden">
-                        <div 
+                        <div
                           className={`h-full rounded-full transition-all duration-500 ${checkedPercent === 100 ? 'bg-emerald-500' : 'bg-accent'}`}
                           style={{ width: `${checkedPercent}%` }}
                         />
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="pl-3">
                     <ChevronRight size={16} className="text-slate-300 group-hover:text-accent group-hover:translate-x-1 transition-all" />
                   </div>

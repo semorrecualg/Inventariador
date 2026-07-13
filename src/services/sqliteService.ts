@@ -1,5 +1,5 @@
-import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
+import Dexie from 'dexie';
 import { DatabaseStatus } from '../types';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -96,6 +96,20 @@ export interface DexieCampaignSnapshot {
   _tenantid: string;
 }
 
+export interface DexieCrashReport {
+  id: string;
+  timestamp: string;
+  severity: string;
+  source: string;
+  message: string;
+  stack: string;
+  componentStack: string;
+  url: string;
+  user_email: string;
+  tenantId: string;
+  payload: string;
+}
+
 export interface DexieAddress {
   id?: number;
   tenantId: string;
@@ -115,6 +129,7 @@ class InventoryDexieDatabase extends Dexie {
   SYSTEM_CONTEXT!: Dexie.Table<DexieSystemContext, string>;
   unit_configs!: Dexie.Table<DexieUnitConfig, string>;
   campaign_snapshots!: Dexie.Table<DexieCampaignSnapshot, string>;
+  crash_reports!: Dexie.Table<DexieCrashReport, string>;
   addresses!: Dexie.Table<DexieAddress, number>;
 
   constructor() {
@@ -148,6 +163,18 @@ class InventoryDexieDatabase extends Dexie {
       unit_configs: 'id, filial',
       campaign_snapshots: 'id, campaign_id',
       addresses: '++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced'
+    });
+    this.version(4).stores({
+      local_assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      ativos: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      assets: 'primarykey, filial, _is_synced, [tenantId+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantId',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced',
+      crash_reports: 'id, timestamp, severity, tenantId, user_email'
     });
   }
 }
@@ -319,16 +346,16 @@ export class SqliteService {
       }
       const list = await db.local_assets.toArray();
       const nonDeleted = list.filter(a => a._is_deleted === 0);
-      
+
       const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
-      
+
       // Busca unidades configuradas
       const configList = await db.unit_configs.toArray();
       const filiaisConfigs = configList.map(c => String(c.filial || c.nome)).filter(f => f && f.trim() !== '');
-      
+
       // União única de todas as filiais do tenant
       const allFiliais = Array.from(new Set([...filiaisAssets.map(f => f.toUpperCase().trim()), ...filiaisConfigs.map(f => f.toUpperCase().trim())]));
-      
+
       const stats = allFiliais.map(f => {
         const filialAssets = nonDeleted.filter(a => String(a.filial || '').toUpperCase().trim() === f);
         const checkedAssets = filialAssets.filter(a => a._conferido === 1);
@@ -493,7 +520,7 @@ export class SqliteService {
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         for (let i = 0; i < total; i += CHUNK_SIZE) {
           const chunk = assets.slice(i, i + CHUNK_SIZE);
-          
+
           const mappedChunk: DexieAsset[] = chunk.map(asset => {
             const primaryKeyVal = String(asset.primarykey || asset.id || '');
             if (!primaryKeyVal) {
@@ -758,7 +785,7 @@ export class SqliteService {
       const currentCampaignId = await this.getContextValue('active_campaign');
       const tenantId = await this.getContextValue('tenant_id');
       const lastUpdated = await this.getContextValue('last_updated');
-      
+
       if (!selectedUnit && !currentCampaignId && !tenantId && !lastUpdated) {
         return null;
       }
@@ -928,7 +955,7 @@ export class SqliteService {
       userEmail,
       timestamp: Date.now()
     });
-    
+
     if (this.bufferedFieldChanges.length >= 5) {
       this.flushFieldChanges().catch(err => {
         console.error(">>> [sqliteService] Erro ao disparar flush automático:", err);
@@ -942,7 +969,7 @@ export class SqliteService {
 
   public async flushFieldChanges(): Promise<void> {
     if (this.bufferedFieldChanges.length === 0) return;
-    
+
     console.log(`>>> [sqliteService] flushFieldChanges acionado para ${this.bufferedFieldChanges.length} alterações...`);
     const changesToProcess = [...this.bufferedFieldChanges];
     this.bufferedFieldChanges = [];
@@ -959,7 +986,7 @@ export class SqliteService {
           id: primaryKeyVal,
           _is_synced: 0
         } as DexieAsset;
-        
+
         await db.ativos.put(updatedItem);
         await db.assets.put(updatedItem);
         await db.local_assets.put(updatedItem);

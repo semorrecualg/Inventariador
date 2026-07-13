@@ -1,7 +1,7 @@
 
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -115,5 +115,16 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild',
     chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/@capacitor')) return 'vendor-capacitor';
+          if (id.includes('node_modules/dexie')) return 'vendor-dexie';
+          if (id.includes('node_modules/html2canvas')) return 'vendor-html2canvas';
+          if (id.includes('src/services/supabaseService')) return 'service-supabase';
+          if (id.includes('src/services/sqliteService')) return 'service-sqlite';
+        }
+      }
+    }
   }
 });

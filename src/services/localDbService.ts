@@ -1,10 +1,38 @@
-import { db, DexieAsset, sqliteService } from './sqliteService';
-import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
-import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import localforage from 'localforage';
+import { Asset, AuditLogEntry, CampaignStatus, InventoryCampaign, UnitConfig, User } from '../types';
+import { db, DexieAsset, sqliteService } from './sqliteService';
 
 type SqlValue = string | number | boolean | null;
+
+class HardwareSafeguardError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HardwareSafeguardError';
+  }
+}
+
+const getBatterySnapshot = () => {
+  if (typeof navigator === 'undefined') return null;
+  const battery = (navigator as Navigator & { battery?: { level?: number; charging?: boolean } }).battery;
+  if (!battery) return null;
+  return {
+    level: typeof battery.level === 'number' ? battery.level : 1,
+    charging: !!battery.charging
+  };
+};
+
+const assertHardwareSafeguard = () => {
+  const battery = getBatterySnapshot();
+  if (battery && battery.level < 0.05 && !battery.charging) {
+    const message = 'Bloqueio de segurança: bateria abaixo de 5% sem carregador.';
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr-hardware-safeguard', { detail: { message, level: battery.level } }));
+    }
+    throw new HardwareSafeguardError(message);
+  }
+};
 
 // Create a localForage instance dedicated for user profiles and offline login persistence
 const usersStore = localforage.createInstance({
@@ -41,7 +69,7 @@ const handleDemoAuditIncrement = () => {
 function toDexieAsset(asset: Asset): DexieAsset {
   const obj: Record<string, unknown> = { ...asset } as unknown as Record<string, unknown>;
   const boolKeys = [
-    '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
+    '_conferido', '_is_deleted', '_is_synced', '_plaquetado',
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
@@ -73,7 +101,7 @@ function toDexieAsset(asset: Asset): DexieAsset {
 function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
   const asset: Record<string, unknown> = { ...row } as unknown as Record<string, unknown>;
   const boolKeys = [
-    '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
+    '_conferido', '_is_deleted', '_is_synced', '_plaquetado',
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
@@ -98,52 +126,55 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
 export const localDb = {
   assets: {
     add: async (asset: Asset, userId?: string) => {
+      assertHardwareSafeguard();
       const dexieAsset = toDexieAsset(asset);
-      await db.ativos.put(dexieAsset);
-      await db.assets.put(dexieAsset);
-      await db.local_assets.put(dexieAsset);
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
+        await db.ativos.put(dexieAsset);
+        await db.assets.put(dexieAsset);
+        await db.local_assets.put(dexieAsset);
+        if (userId) {
+          await db.audit_logs.put({
+            id: `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            usuario: userId,
+            acao: 'CREATE',
+            tabela: 'ativos',
+            registro_id: dexieAsset.primarykey,
+            details: 'Criação de ativo manual',
+            delta: JSON.stringify(asset),
+            updated_at: new Date().toISOString()
+          });
+        }
+      });
       handleDemoAuditIncrement();
-      if (userId) {
-        await localDb.auditLogs.add({
-          timestamp: new Date().toISOString(),
-          user: userId,
-          user_email: userId,
-          action: 'CREATE',
-          table_name: 'ativos',
-          record_id: dexieAsset.primarykey,
-          details: 'Criação de ativo manual',
-          new_data: asset,
-          tenantId: getCurrentTenantId()
-        });
-      }
     },
-    
+
     // In-memory operation buffer mimicking the SRE GBR v25 batched-mutation rules
     _mutationBuffer: [] as { asset: Asset; userId?: string }[],
-    
+
     put: async (asset: Asset, userId?: string) => {
       localDb.assets._mutationBuffer.push({ asset, userId });
       handleDemoAuditIncrement();
-      
+
       if (localDb.assets._mutationBuffer.length >= 10) {
         await localDb.assets.flush();
       }
     },
-    
+
     flush: async () => {
       if (localDb.assets._mutationBuffer.length === 0) return;
+      assertHardwareSafeguard();
       console.log(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações em Dexie.js`);
-      
+
       const bufferCopy = [...localDb.assets._mutationBuffer];
       localDb.assets._mutationBuffer = [];
-      
+
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
         for (const item of bufferCopy) {
           const dexieAsset = toDexieAsset(item.asset);
           await db.ativos.put(dexieAsset);
           await db.assets.put(dexieAsset);
           await db.local_assets.put(dexieAsset);
-          
+
           if (item.userId) {
             const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             await db.audit_logs.put({
@@ -178,29 +209,30 @@ export const localDb = {
       for (let i = 0; i < assets.length; i += BATCH_SIZE) {
         const chunk = assets.slice(i, i + BATCH_SIZE);
         const mappedChunk: DexieAsset[] = [];
-        
+
         for (let j = 0; j < chunk.length; j++) {
           const a = chunk[j];
           // Sanitização forçada obrigatória (SRE)
           const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
           const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
           const serial = String(a.serial || '').trim().toUpperCase();
-          
+
           a.tenantId = tenantId;
           a._tenantid = tenantId;
           a.filial = filial;
           a._unitid = filial;
           a.serial = serial;
-          
+
           mappedChunk.push(toDexieAsset(a));
         }
 
+        assertHardwareSafeguard();
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
           await db.ativos.bulkPut(mappedChunk);
           await db.assets.bulkPut(mappedChunk);
           await db.local_assets.bulkPut(mappedChunk);
         });
-        
+
         // Respiro para SRE e GC (Garbage Collector)
         await new Promise(resolve => setTimeout(resolve, 1));
       }
@@ -212,11 +244,11 @@ export const localDb = {
 
     update: async (id: string, changes: Partial<Asset>, userId?: string) => {
       const cleanId = String(id);
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      assertHardwareSafeguard();
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
         const existing = await db.ativos.get(cleanId);
         if (existing) {
           const mappedChanges: Record<string, unknown> = { ...changes } as unknown as Record<string, unknown>;
-          // Format boolean values properly
           ['_conferido', '_is_deleted', '_is_synced', '_plaquetado', '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'].forEach(k => {
             if (k in mappedChanges) {
               mappedChanges[k] = mappedChanges[k] ? 1 : 0;
@@ -226,23 +258,22 @@ export const localDb = {
           await db.ativos.put(updated);
           await db.assets.put(updated);
           await db.local_assets.put(updated);
+          if (userId) {
+            await db.audit_logs.put({
+              id: `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              usuario: userId,
+              acao: 'UPDATE',
+              tabela: 'ativos',
+              registro_id: cleanId,
+              details: 'Atualização de ativo',
+              delta: JSON.stringify(changes),
+              updated_at: new Date().toISOString()
+            });
+          }
         }
       });
 
       handleDemoAuditIncrement();
-      if (userId) {
-        await localDb.auditLogs.add({
-          timestamp: new Date().toISOString(),
-          user: userId,
-          user_email: userId,
-          action: 'UPDATE',
-          table_name: 'ativos',
-          record_id: cleanId,
-          details: 'Atualização de ativo',
-          new_data: changes,
-          tenantId: getCurrentTenantId()
-        });
-      }
     },
 
     count: async () => {
@@ -252,9 +283,12 @@ export const localDb = {
     },
 
     clear: async () => {
-      await db.ativos.clear();
-      await db.assets.clear();
-      await db.local_assets.clear();
+      assertHardwareSafeguard();
+      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+        await db.ativos.clear();
+        await db.assets.clear();
+        await db.local_assets.clear();
+      });
     },
 
     toArray: async (): Promise<Asset[]> => {
@@ -308,21 +342,31 @@ export const localDb = {
       })
     }),
 
-    getLocationsWithStats: async (unitId: string, searchTerm = '') => {
+    getLocationsWithStats: async (unitId: string, searchTerm = '', signal?: AbortSignal) => {
       const tenant = getCurrentTenantId().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
       const cleanSearch = searchTerm.toLowerCase().trim();
-      
+
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+
       const query = db.addresses.where('[tenantId+filial]').equals([tenant, uIdUpper]);
       let addrList = await query.toArray();
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
 
       if (cleanSearch !== '') {
         addrList = addrList.filter(a => String(a.codigo_endereco || '').toLowerCase().startsWith(cleanSearch));
       }
-      
+
       // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente de ativos (ativos)
       if (addrList.length === 0) {
         const assets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+        if (signal?.aborted) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         assets.forEach(a => {
           const addrStr = String(a.endereco || '').trim();
@@ -345,6 +389,9 @@ export const localDb = {
 
       // 4. Busca reativa das estatísticas de conferência em db.ativos
       const listAssets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
@@ -435,17 +482,17 @@ export const localDb = {
     scanAsset: async (term: string, filial: string): Promise<Asset | null> => {
       const termUpper = String(term).trim().toUpperCase();
       const unitClean = String(filial).trim().toUpperCase();
-      
+
       const list = await db.ativos.toArray();
       const match = list.find(a => {
         const eq = String(a.etiqueta || '').trim().toUpperCase();
         const pk = String(a.primarykey || '').trim().toUpperCase();
         const f = String(a.filial || a._unitid || '').trim().toUpperCase();
         const isNotDeleted = a._is_deleted !== 1;
-        
+
         return (eq === termUpper || pk === termUpper) && f === unitClean && isNotDeleted;
       });
-      
+
       return match ? toReactAsset(match) : null;
     }
   },
@@ -610,25 +657,25 @@ export const localDb = {
       for (let i = 0; i < items.length; i += BATCH_SIZE) {
         const chunk = items.slice(i, i + BATCH_SIZE);
         const mappedChunk: DexieAsset[] = [];
-        
+
         for (let j = 0; j < chunk.length; j++) {
           const a = chunk[j];
           // Sanitização forçada obrigatória (SRE)
           const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
           const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
           const serial = String(a.serial || '').trim().toUpperCase();
-          
+
           a.tenantId = tenantId;
           a._tenantid = tenantId;
           a.filial = filial;
           a._unitid = filial;
           a.serial = serial;
-          
+
           mappedChunk.push(toDexieAsset(a));
         }
-        
+
         await db.ativos.bulkPut(mappedChunk);
-        
+
         await new Promise(resolve => setTimeout(resolve, 1));
       }
     },
@@ -695,7 +742,7 @@ export const localDb = {
       return await (callback as () => Promise<void>)();
     }
   },
-  
+
   purgeDatabase: async () => {
     console.log('>>> [DBA] Executando purge manual das tabelas operacionais em Dexie.js (preservando sessões)...');
     try {
@@ -710,17 +757,17 @@ export const localDb = {
       await db.unit_configs.clear();
       await db.campaign_snapshots.clear();
       await db.addresses.clear();
-      
+
       // 3. Restaurar processamento de segundo plano
       sqliteService.setImportingMode(false);
-      
+
       console.log('>>> [DBA] Purge operacional de Dexie.js concluído com sucesso via .clear().');
     } catch (err) {
       console.error('>>> [DBA] Falha crítica no purge operacional do banco Dexie:', err);
       sqliteService.setImportingMode(false);
     }
   },
-  
+
   forceInjectDemoSeed: async () => {
     console.log('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de ativos Demo).');
     const { demoService } = await import('./demoService');
@@ -729,20 +776,20 @@ export const localDb = {
       throw new Error("Erro de processamento da transação interna no initDemoSession");
     }
   },
-  
+
   validateLocalCredentials: async (username: string, password?: string): Promise<boolean> => {
     try {
       const dbUsers = await localDb.users.toArray();
       const normUser = username.trim().toLowerCase();
-      if ((normUser === 'admin' || normUser === 'admin gbr' || normUser === 'semorr@gmail.com') && 
+      if ((normUser === 'admin' || normUser === 'admin gbr' || normUser === 'semorr@gmail.com') &&
           (password === 'admin' || password === 'Glaucio@1970')) {
         return true;
       }
       if (normUser === 'admin' && password === '123456') {
         return true;
       }
-      return dbUsers.some(u => 
-        (u!.email.toLowerCase() === normUser || u!.username.toLowerCase() === normUser) && 
+      return dbUsers.some(u =>
+        (u!.email.toLowerCase() === normUser || u!.username.toLowerCase() === normUser) &&
         u!.password === password
       );
     } catch {
@@ -802,7 +849,7 @@ export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promis
 
   try {
     const payloadString = JSON.stringify(assetsData);
-    
+
     // Força a criação física do diretório estrutural e do arquivo de dados real
     await Filesystem.writeFile({
       path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
@@ -863,7 +910,7 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
     try {
       // 2. Vincula e valida a subpasta específica do projeto
       userWorkspaceHandle = await rootDocuments.getDirectoryHandle('GBR_Inventario', { create: false });
-      
+
       const permissionStatus = await userWorkspaceHandle.requestPermission({ mode: 'readwrite' });
       if (permissionStatus !== 'granted') return null;
 
@@ -872,7 +919,7 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
         if (entry.kind === 'file' && (entry.name.endsWith('.xlsx') || entry.name.endsWith('.csv'))) {
           const fileHandle = await userWorkspaceHandle.getFileHandle(entry.name);
           const fileBlob = await fileHandle.getFile();
-          
+
           console.log(`[SRE INFRA] Planilha de origem localizada: ${entry.name}`);
           return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob };
         }
@@ -896,7 +943,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
     try {
       console.log("[SRE-iFrame] Armazenando snapshot simulado localmente...");
       localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
-      
+
       // Auto-download contingency physical JSON file
       const jsonStr = JSON.stringify(dataPayload, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -908,7 +955,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
+
       return true;
     } catch (e) {
       console.error("[SRE-iFrame] Erro ao salvar snapshot no localStorage ou baixar arquivo", e);
@@ -933,7 +980,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
     return true;
   } catch (error) {
     console.error("[SRE CRÍTICO] Falha de I/O de escrita na pasta do Windows:", error);
-    return false; 
+    return false;
   }
 }
 
