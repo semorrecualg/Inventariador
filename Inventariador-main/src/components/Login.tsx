@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
+import { isAdminEmail } from '../utils/authUtils';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -48,23 +49,31 @@ const Login: React.FC<LoginProps> = ({
 
   const [hasBio, setHasBio] = useState(false);
 
+  // Vercel Best Practice: derive during render, no useMemo for simple primitives
+  // (rerender-simple-expression-in-memo)
+  const normalizedUsername = username.trim().toLowerCase();
+
   // Check for biometrics when username changes
+  // Vercel Best Practice: Lazy state init for derived async state
+  // (rerender-lazy-state-init, rerender-split-combined-hooks)
   React.useEffect(() => {
+    let cancelled = false;
     const checkBio = async () => {
-      if (username.length > 3) {
+      if (normalizedUsername.length > 3) {
         const supported = await isBiometricSupported();
-        if (supported) {
-          const registered = await hasBiometricRegistered(username.trim().toLowerCase());
-          setHasBio(registered);
-        } else {
+        if (supported && !cancelled) {
+          const registered = await hasBiometricRegistered(normalizedUsername);
+          if (!cancelled) setHasBio(registered);
+        } else if (!cancelled) {
           setHasBio(false);
         }
-      } else {
+      } else if (!cancelled) {
         setHasBio(false);
       }
     };
     checkBio();
-  }, [username]);
+    return () => { cancelled = true; };
+  }, [normalizedUsername]);
 
   const handleBiometricLogin = async () => {
     if (!username) return;
@@ -193,6 +202,8 @@ const Login: React.FC<LoginProps> = ({
     }
   };
 
+  // Vercel Best Practice: derive during render, no redundant bool for simple checks
+  // (rerender-simple-expression-in-memo)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -214,7 +225,7 @@ const Login: React.FC<LoginProps> = ({
     try {
       const normalizedUsername = username.trim().toLowerCase();
       
-      const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || normalizedUsername === 'semorr@gmail.com') && 
+      const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
                             (password === 'admin' || password === 'Glaucio@1970')) ||
                             (normalizedUsername === 'admin' && password === '123456');
       
@@ -245,7 +256,7 @@ const Login: React.FC<LoginProps> = ({
           let loggedUser: User;
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
-            if (loggedUser.email && loggedUser.email.toLowerCase() === 'semorr@gmail.com') {
+            if (isAdminEmail(loggedUser.email)) {
               loggedUser.tenantId = 'DEMO_DEFAULT';
             }
           } else if (normalizedUsername === 'admin' && password === '123456') {
@@ -262,14 +273,14 @@ const Login: React.FC<LoginProps> = ({
             };
           } else {
             // Se for mestre mas não estiver cadastrado no array (ou tabela SQLite ainda vazia), criamos a sessão mestre inicial
-            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
+            const adminUser = users.find(u => isAdminEmail(u.email));
             if (adminUser) {
               loggedUser = { ...adminUser };
             } else {
               loggedUser = {
                 username: 'semorr',
                 name: 'Glaucio (Admin Mestre)',
-                email: 'semorr@gmail.com',
+                email: ADMIN_EMAIL || 'admin@system.local',
                 role: UserRole.ADMIN,
                 is_admin: true,
                 isAdmin: true,
@@ -327,11 +338,11 @@ const Login: React.FC<LoginProps> = ({
         );
 
         if (!localUser) {
-          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || username.trim().toLowerCase() === 'semorr@gmail.com' || username.trim().toLowerCase() === 'admin') && 
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin') && 
                                   (password === 'admin' || password === 'Glaucio@1970');
           
           if (isAdminFallback) {
-            const adminUser = users.find(u => u.email.toLowerCase() === 'semorr@gmail.com');
+            const adminUser = users.find(u => isAdminEmail(u.email));
             if (adminUser) {
               return { ...adminUser };
             }
@@ -403,7 +414,7 @@ const Login: React.FC<LoginProps> = ({
           const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
             .catch(err => {
               console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
-              const is_master = (authData.user.email?.toLowerCase() === 'semorr@gmail.com');
+              const is_master = (isAdminEmail(authData.user.email));
               return {
                 email: authData.user.email,
                 username: authData.user.email?.split('@')[0],
@@ -428,7 +439,7 @@ const Login: React.FC<LoginProps> = ({
             return trimmed;
           };
 
-          const is_master = (cloudUser.email.toLowerCase() === 'semorr@gmail.com');
+          const is_master = (isAdminEmail(cloudUser.email));
           const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
 
           let tenantId = normalizeValue(cloudUser.tenantId || cloudUser._tenantid || cloudUser.tenantid || '');
@@ -561,6 +572,10 @@ const Login: React.FC<LoginProps> = ({
 
   const config = getFieldConfig();
 
+  // Vercel Best Practice: use ternary for JSX conditionals (rendering-conditional-render)
+  // Derived booleans inline — avoids '0' or unexpected falsy rendering
+  const hasBioAvailable = hasBio && !isLoading;
+
   const handleTitleClick = () => {
     const newCount = clickCount + 1;
     
@@ -648,12 +663,12 @@ const Login: React.FC<LoginProps> = ({
       {/* O Bloco Condicional 'CARGA LOCAL VAZIA' foi completamente expurgado daqui */}
 
       <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
-            <AlertCircle size={16} className="mr-3 shrink-0" />
-            <span className="flex-1">{error}</span>
-          </div>
-        )}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
+              <AlertCircle size={16} className="mr-3 shrink-0" />
+              <span className="flex-1">{error}</span>
+            </div>
+          )}
         
         <div className="space-y-1.5">
           <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{config.userLabel}</label>
@@ -706,7 +721,7 @@ const Login: React.FC<LoginProps> = ({
           )}
         </button>
 
-        {hasBio && !isLoading && (
+        {hasBioAvailable && (
           <button 
             type="button"
             onClick={handleBiometricLogin}

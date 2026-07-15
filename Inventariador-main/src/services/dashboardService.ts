@@ -1,4 +1,5 @@
 import { db, DexieAsset } from './sqliteService';
+import { isAdminEmail } from '../utils/authUtils';
 
 export interface MasterDashboardStats {
   tenantId: string;
@@ -53,12 +54,12 @@ function detectUserEmail(userEmail?: string): string {
 /**
  * Visão do Administrador Master:
  * Calcula o resumo da campanha filtrando estritamente por tenantId.
- * Se o operador for 'semorr@gmail.com', ignora a barreira de inquilino (Master Omnisciente)
+ * Se o operador for o e-mail admin configurado, ignora a barreira de inquilino (Master Omnisciente)
  * e injeta o token 'GBR_SUPER_ADMIN_CORINGA' agregando dados de todos os inquilinos.
  */
 export async function getMasterDashboardStats(tenantId: string, userEmail?: string): Promise<MasterDashboardStats> {
   const email = detectUserEmail(userEmail);
-  const isSuperAdmin = email === 'semorr@gmail.com';
+  const isSuperAdmin = isAdminEmail(email);
   const targetTenant = isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId;
 
   try {
@@ -109,7 +110,7 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
  */
 export async function getAuditorProgress(tenantId: string, filial: string, userEmail?: string): Promise<AuditorProgress> {
   const email = detectUserEmail(userEmail);
-  const isSuperAdmin = email === 'semorr@gmail.com';
+  const isSuperAdmin = isAdminEmail(email);
   
   const tenantClean = String(tenantId).trim();
   const filialClean = String(filial).trim();

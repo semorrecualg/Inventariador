@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Asset } from '../types';
-import { motion } from 'framer-motion';
+import { motion } from 'motion';
 import { Layers, Info } from 'lucide-react';
 
 interface AssetUnitizeModalProps {

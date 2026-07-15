@@ -4,6 +4,7 @@ import { ShieldAlert, Unlock, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
+import { isAdminEmail } from '../utils/authUtils';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
 
 interface GPSComplianceGuardProps {
@@ -45,19 +46,19 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           uRole === 'GESTOR' || 
           u.isAdmin === true || 
           u.is_admin === true ||
-          uEmail === 'semorr@gmail.com'
+          isAdminEmail(uEmail)
         ) {
           return true;
         }
       }
     } catch { /* ignore */ }
 
-    // Verificação adicional direta de e-mail de bypass imutável 'semorr@gmail.com'
+    // Verificação adicional direta do e-mail de bypass administrativo
     try {
       const rawEmail = sessionStorage.getItem('userEmail') || localStorage.getItem('userEmail') || sessionStorage.getItem('email') || localStorage.getItem('email');
       if (rawEmail) {
         const cleanEmail = rawEmail.replace(/%22|%2522|"/g, '').trim().toLowerCase();
-        if (cleanEmail === 'semorr@gmail.com') return true;
+        if (isAdminEmail(cleanEmail)) return true;
       }
     } catch { /* ignore */ }
 

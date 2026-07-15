@@ -18,6 +18,7 @@ import BackButton from './BackButton';
 import { DatabaseMode, UnitConfig } from '../types';
 import * as turf from '@turf/turf';
 import { localDb } from '../services/localDbService';
+import { isAdminEmail } from '../utils/authUtils';
 import { db } from '../services/sqliteService';
 
 interface UnitSelectorProps {
@@ -282,7 +283,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // Cálculo de geocerca real em metros do ponto âncora com Turf.js
   const getGeofenceStatus = (filialName: string) => {
-    // 1. Verificação de Bypass Administrativo (semorr@gmail.com ou roles ADMIN/MASTER/GESTOR)
+    // 1. Verificação de Bypass Administrativo (admin email ou roles ADMIN/MASTER/GESTOR)
     let isBypass = false;
     try {
       const storedUser = sessionStorage.getItem('app_current_user');
@@ -290,7 +291,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         const parsedUser = JSON.parse(storedUser) as { email?: string; role?: string };
         const email = (parsedUser.email || '').toLowerCase().trim();
         const role = (parsedUser.role || '').toUpperCase().trim();
-        if (email === 'semorr@gmail.com' || role === 'ADMIN' || role === 'MASTER' || role === 'GESTOR') {
+        if (isAdminEmail(email) || role === 'ADMIN' || role === 'MASTER' || role === 'GESTOR') {
           isBypass = true;
         }
       }

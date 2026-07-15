@@ -27,6 +27,7 @@ import {
   ArrowUp
 } from 'lucide-react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { isAdminEmail } from '../utils/authUtils';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
 
 interface UserManagementProps {
@@ -191,8 +192,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       email,
       password,
       role: newRole,
-      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
-      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com'),
+      is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
+      isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
       mustChangePassword: true,
       _tenantid: normTenantId,
       _unitid: normUnitId,
@@ -315,7 +316,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
     };
 
-    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || (email.toLowerCase() === 'semorr@gmail.com');
+    const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || isAdminEmail(email);
     const normTenantId = normalizeValue(editTenantId);
     const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
     const normUnits = normalizeArray(editUnits);
@@ -362,7 +363,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   };
 
   const removeUser = (email: string) => {
-    if (email.toLowerCase() === "semorr@gmail.com") {
+    if (isAdminEmail(email)) {
       showModal("Operação Negada", "O administrador mestre não pode ser excluído.", "warning");
       return;
     }
@@ -422,7 +423,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
           data={users.filter(u => {
             // Admin global vê tudo
-            if (currentUser?.email === "semorr@gmail.com" || currentUser?.role === UserRole.ADMIN) return true;
+            if (isAdminEmail(currentUser?.email) || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
             if (currentUser?.role === UserRole.MASTER) {
               return u.tenantid === currentUser.tenantid || (u.tenants && u.tenants.includes(currentUser.tenantid || ''));
@@ -620,7 +621,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
-                  {(currentUser?.role === UserRole.ADMIN || currentUser?.email === "semorr@gmail.com") && (
+                  {(currentUser?.role === UserRole.ADMIN || isAdminEmail(currentUser?.email)) && (
                     <>
                       <button 
                         type="button"
@@ -824,7 +825,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
-                  {(currentUser?.role === UserRole.ADMIN || currentUser?.email === "semorr@gmail.com") && (
+                  {(currentUser?.role === UserRole.ADMIN || isAdminEmail(currentUser?.email)) && (
                     <>
                       <button 
                         type="button"

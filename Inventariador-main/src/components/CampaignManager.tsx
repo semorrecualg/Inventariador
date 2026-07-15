@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
+import { isAdminUser } from '../utils/authUtils';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { Device } from '@capacitor/device';
@@ -158,7 +159,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return;
     }
     
-    const isAdmin = !!(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com');
+    const isAdmin = !!(isAdminUser(user));
     let tenantId = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || '').trim();
     if (!tenantId && isAdmin) tenantId = 'CICOPAL';
 
@@ -325,7 +326,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
     let tenantId = user?._tenantid || user?.tenantId || user?.tenantid;
-    const isAdmin = user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com';
+    const isAdmin = isAdminUser(user);
     if (!tenantId && isAdmin) tenantId = 'CICOPAL';
 
     if (tenantId) {
@@ -525,7 +526,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   </button>
                 </div>
 
-                {(user?.isAdmin || user?.role === 'ADMIN' || user?.role === 'MASTER' || user?.email?.toLowerCase() === 'semorr@gmail.com') && (
+                {(isAdminUser(user)) && (
                   <button 
                     onClick={() => {
                       setDeletingCampaignId(selectedCampaign.id);

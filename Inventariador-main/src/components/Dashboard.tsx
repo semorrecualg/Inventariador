@@ -27,7 +27,81 @@ import {
   ArrowDownRight
 } from 'lucide-react';
 
+/** StatCard props */
+interface StatCardProps {
+  label: string;
+  value: number;
+  total: number;
+  colorClass: string;
+  icon: React.ElementType;
+  onClick: () => void;
+  onHintTrigger?: (label: string, text: string) => void;
+}
+
+/**
+ * Individual stat card used in the Quick Stats grid.
+ * Extracted to module level with React.memo to prevent remount on every Dashboard render
+ * (Vercel Best Practice: rerender-no-inline-components).
+ */
+const StatCard = React.memo(function StatCard({
+  label,
+  value,
+  total,
+  colorClass,
+  icon: Icon,
+  onClick,
+  onHintTrigger,
+}: StatCardProps) {
+  const percentage = total > 0
+    ? Math.min(100, Math.round((value / total) * 100))
+    : 0;
+
+  const handleHintTrigger = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (DASHBOARD_HINTS[label]) {
+      onHintTrigger?.(label, DASHBOARD_HINTS[label]);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white border border-border rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group"
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className={`w-8 h-8 rounded-lg ${colorClass} bg-opacity-20 flex items-center justify-center`}>
+          <Icon size={16} className={colorClass.replace('bg-', 'text-').replace('400', '500')} />
+        </div>
+        <div className="text-right flex flex-col items-end">
+          <div className="flex items-center space-x-1">
+            <span className="text-lg font-bold text-ink">{value}</span>
+            {DASHBOARD_HINTS[label] && (
+              <button onClick={handleHintTrigger} className="p-1 text-ink-muted/30 hover:text-accent transition-colors">
+                <Info size={8} />
+              </button>
+            )}
+          </div>
+          <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">{percentage}%</p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">{label}</span>
+        <Download size={8} className="text-ink-muted/30 group-hover:text-accent transition-colors" />
+      </div>
+      <div className="h-1 w-full bg-bg-main rounded-full overflow-hidden">
+        <div className={`h-full ${colorClass} transition-all duration-1000`} style={{ width: `${percentage}%` }} />
+      </div>
+    </div>
+  );
+});
+
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899'];
+
+// Vercel Best Practice: hoist pure utility functions outside component
+// (rerender-no-inline-components) — avoids recreating on every render
+const formatCurrency = (val: number) => {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+};
 
 const DASHBOARD_HINTS: Record<string, string> = {
   'Falta Etiquetar': 'Ativos marcados com "ETIQUETAR" na planilha original. Necessário aplicar plaqueta física em campo.',
@@ -72,6 +146,13 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
+
+  // Vercel Best Practice: stable callback for StatCard hint triggers
+  // (rerender-memo) — prevents inline arrow from defeating React.memo
+  const handleHint = useCallback(
+    (label: string, text: string) => setHintOverlay({ label, text }),
+    []
+  );
 
   const handleNavigate = useCallback((screen: AppScreen) => {
     const currentUnit = selectedUnit || user?.unitid || '';
@@ -256,108 +337,71 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 5);
   }, [assets]);
 
-  const exportFilteredData = (filterFn: (a: Asset) => boolean, fileName: string) => {
-    const filtered = assets.filter(filterFn);
-    if (filtered.length === 0) return;
+  // Vercel Best Practice: StatCard extracted to module level with React.memo
+  // formatCurrency hoisted to module level
+  // (rerender-no-inline-components)
 
-    const wsData = filtered.map(a => {
-      const res: { [key: string]: string | number | boolean | null | undefined } = {
-        'TENANT': a._tenantid || user?.tenantId || user?.tenantid || '',
-        'UNIDADE': a._unitid || user?.unitid || '',
-      };
-      
-      Object.keys(a).forEach(k => { 
-        if (!k.startsWith('_') && k !== 'id') {
-          const val = a[k];
-          const colName = `PARA_${k}`;
-          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = safeStringify(val);
-          } else {
-            res[colName] = val as string | number | boolean | null | undefined;
-          }
-          res[k] = res[colName];
-        }
-      });
-      
-      const originalValues = a._valoresOriginais;
-      if (originalValues) {
-        Object.keys(originalValues).forEach(key => {
-          const val = originalValues[key];
-          const colName = `DE_${key}`;
-          if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
-            res[colName] = safeStringify(val);
-          } else {
-            res[colName] = val as string | number | boolean | null | undefined;
-          }
-        });
-      } else {
+  // Vercel Best Practice: memoize callback for stable reference across renders
+  // (rerender-memo)
+  const handleExport = useCallback(
+    (filterFn: (a: Asset) => boolean, fileName: string) => {
+      const filtered = assets.filter(filterFn);
+      if (filtered.length === 0) return;
+
+      const wsData = filtered.map(a => {
+        const res: { [key: string]: string | number | boolean | null | undefined } = {
+          'TENANT': a._tenantid || user?.tenantId || user?.tenantid || '',
+          'UNIDADE': a._unitid || user?.unitid || '',
+        };
+
         Object.keys(a).forEach(k => {
           if (!k.startsWith('_') && k !== 'id') {
-            res[`DE_${k}`] = a[k] as string | number | boolean | null | undefined;
+            const val = a[k];
+            const colName = `PARA_${k}`;
+            if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+              res[colName] = safeStringify(val);
+            } else {
+              res[colName] = val as string | number | boolean | null | undefined;
+            }
+            res[k] = res[colName];
           }
         });
-      }
-      
-      res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
-      res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-      res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
-      res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
-      res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';
-      return res;
-    });
 
-    const ws = XLSX.utils.json_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
-    XLSX.writeFile(wb, `GBR_${fileName}_${new Date().getTime()}.xlsx`);
-  };
+        const originalValues = a._valoresOriginais;
+        if (originalValues) {
+          Object.keys(originalValues).forEach(key => {
+            const val = originalValues[key];
+            const colName = `DE_${key}`;
+            if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+              res[colName] = safeStringify(val);
+            } else {
+              res[colName] = val as string | number | boolean | null | undefined;
+            }
+          });
+        } else {
+          Object.keys(a).forEach(k => {
+            if (!k.startsWith('_') && k !== 'id') {
+              res[`DE_${k}`] = a[k] as string | number | boolean | null | undefined;
+            }
+          });
+        }
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-  };
+        res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
+        res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
+        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+        res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+        res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
+        res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';
+        return res;
+      });
 
-  const StatCard = ({ label, value, total, colorClass, icon: Icon, onClick }: { label: string; value: number; total: number; colorClass: string; icon: React.ElementType; onClick: () => void }) => {
-    const percentage = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
-    
-    const handleHintTrigger = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (DASHBOARD_HINTS[label]) {
-        setHintOverlay({ label, text: DASHBOARD_HINTS[label] });
-      }
-    };
-
-    return (
-      <div 
-        onClick={onClick}
-        className="bg-white border border-border rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group"
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className={`w-8 h-8 rounded-lg ${colorClass} bg-opacity-20 flex items-center justify-center`}>
-            <Icon size={16} className={colorClass.replace('bg-', 'text-').replace('400', '500')} />
-          </div>
-          <div className="text-right flex flex-col items-end">
-            <div className="flex items-center space-x-1">
-              <span className="text-lg font-bold text-ink">{value}</span>
-              {DASHBOARD_HINTS[label] && (
-                <button onClick={handleHintTrigger} className="p-1 text-ink-muted/30 hover:text-accent transition-colors">
-                  <Info size={8} />
-                </button>
-              )}
-            </div>
-            <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">{percentage}%</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">{label}</span>
-          <Download size={8} className="text-ink-muted/30 group-hover:text-accent transition-colors" />
-        </div>
-        <div className="h-1 w-full bg-bg-main rounded-full overflow-hidden">
-          <div className={`h-full ${colorClass} transition-all duration-1000`} style={{ width: `${percentage}%` }} />
-        </div>
-      </div>
-    );
-  };
+      const ws = XLSX.utils.json_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
+      XLSX.writeFile(wb, `GBR_${fileName}_${new Date().getTime()}.xlsx`);
+    },
+    [assets, user]
+  );
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
@@ -417,7 +461,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           )}
 
           <button 
-            onClick={() => exportFilteredData(() => true, 'CONSOLIDADO_GERAL')}
+            onClick={() => handleExport(() => true, 'CONSOLIDADO_GERAL')}
             className="p-2 bg-bg-main border border-border rounded-xl text-ink-muted hover:text-accent transition-colors"
           >
             <Download size={18} />
@@ -735,37 +779,41 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
             {/* Quick Stats Grid */}
             <div className="grid grid-cols-2 gap-3">
-              <StatCard 
-                label="Divergência" 
-                value={stats.divergencia} 
-                total={stats.totalAtivos} 
-                colorClass="bg-rose-400" 
-                icon={ShieldAlert} 
-                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS')}
+              <StatCard
+                label="Divergência"
+                value={stats.divergencia}
+                total={stats.totalAtivos}
+                colorClass="bg-rose-400"
+                icon={ShieldAlert}
+                onHintTrigger={handleHint}
+                onClick={() => handleExport(a => a.TAG_INVENTARIO === TagInventario.DIVERGENCIA, 'DIVERGENCIAS')}
               />
-              <StatCard 
-                label="Novo Item" 
-                value={stats.novoItem} 
-                total={stats.totalAtivos} 
-                colorClass="bg-emerald-400" 
-                icon={CheckCircle2} 
-                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM, 'NOVOS_ITENS')}
+              <StatCard
+                label="Novo Item"
+                value={stats.novoItem}
+                total={stats.totalAtivos}
+                colorClass="bg-emerald-400"
+                icon={CheckCircle2}
+                onHintTrigger={handleHint}
+                onClick={() => handleExport(a => a.TAG_INVENTARIO === TagInventario.NOVO_ITEM, 'NOVOS_ITENS')}
               />
-              <StatCard 
-                label="Falta Etiquetar" 
-                value={stats.faltaEtiquetar} 
-                total={stats.totalAtivos} 
-                colorClass="bg-amber-400" 
-                icon={AlertTriangle} 
-                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR, 'FALTA_ETIQUETAR')}
+              <StatCard
+                label="Falta Etiquetar"
+                value={stats.faltaEtiquetar}
+                total={stats.totalAtivos}
+                colorClass="bg-amber-400"
+                icon={AlertTriangle}
+                onHintTrigger={handleHint}
+                onClick={() => handleExport(a => a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR, 'FALTA_ETIQUETAR')}
               />
-              <StatCard 
-                label="Adotado" 
-                value={stats.adotado} 
-                total={stats.totalAtivos} 
-                colorClass="bg-sky-400" 
-                icon={MapPin} 
-                onClick={() => exportFilteredData(a => a.TAG_INVENTARIO === TagInventario.ADOTADO, 'ADOTADOS')}
+              <StatCard
+                label="Adotado"
+                value={stats.adotado}
+                total={stats.totalAtivos}
+                colorClass="bg-sky-400"
+                icon={MapPin}
+                onHintTrigger={handleHint}
+                onClick={() => handleExport(a => a.TAG_INVENTARIO === TagInventario.ADOTADO, 'ADOTADOS')}
               />
             </div>
           </>

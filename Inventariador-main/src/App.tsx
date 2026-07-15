@@ -2,6 +2,7 @@
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 console.log(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
@@ -18,10 +19,10 @@ declare global {
   }
 }
 import Modal from './components/Modal';
-import Login from './components/Login';
+const Login = React.lazy(() => import('./components/Login'));
 import Register from './components/Register';
-import MainMenu from './components/MainMenu';
-import { DatabaseManagerScreen } from './screens/DatabaseManagerScreen';
+const MainMenu = React.lazy(() => import('./components/MainMenu'));
+const DatabaseManagerScreen = React.lazy(() => import('./screens/DatabaseManagerScreen').then(m => ({ default: m.DatabaseManagerScreen })));
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
 import ImpairmentReport from './components/ImpairmentReport';
@@ -33,7 +34,7 @@ import localforage from 'localforage';
 import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
-import Dashboard from './components/Dashboard';
+const Dashboard = React.lazy(() => import('./components/Dashboard'));
 import UserManagement from './components/UserManagement';
 import PublicKardex from './components/PublicKardex';
 import ChangePassword from './components/ChangePassword';
@@ -67,7 +68,20 @@ import { telemetryService } from './services/telemetryService';
 import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
-import { Building2, ShieldCheck, FileText, Cloud, Loader2, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, Activity, HardDrive, Database, CheckCircle2 } from 'lucide-react';
+import Building2 from 'lucide-react/dist/esm/icons/building-2';
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import FileText from 'lucide-react/dist/esm/icons/file-text';
+import Cloud from 'lucide-react/dist/esm/icons/cloud';
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import X from 'lucide-react/dist/esm/icons/x';
+import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import Activity from 'lucide-react/dist/esm/icons/activity';
+import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
+import Database from 'lucide-react/dist/esm/icons/database';
+import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session } from '@supabase/supabase-js';
@@ -5914,64 +5928,129 @@ const App: React.FC = () => {
               onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
             />
           )}
-          {screen === AppScreen.LOGIN && (
-            <Login 
-              users={users} 
-              databaseMode={databaseMode}
-              isDatabaseEmpty={isDatabaseEmpty}
-              isKeyboardVisible={isKeyboardVisible}
-              onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
-              onUpdateScreen={(s) => setHistory([s])}
-              onShowModal={(config) => setModalConfig((prev: ModalConfig) => ({ ...prev, ...config, isOpen: true }))}
-              onUpdateDatabaseMode={handleUpdateDatabaseMode}
-              isInitializing={isInitializing}
-              dbInitialized={dbInitialized}
-              onLogin={async (u) => { 
-                setUser(u); 
-                sessionStorage.setItem('app_current_user', safeStringify(u));
-
-                // Se logou via Supabase e não estamos em modo interno, garante que o modo está correto
-                if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
-                  setDatabaseMode(DatabaseMode.SUPABASE);
-                } else {
-                  setDatabaseMode(DatabaseMode.INTERNAL);
-                }
-
-                // Injeta imediatamente tenant real (ex: CICOPAL) e unidade correta no contexto para evitar 400 / placeholders
-                const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
-                const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
-                
-                setSelectedUnit(defaultUnit);
-                sessionStorage.setItem('tenantId', defaultTenant);
-                sessionStorage.setItem('filial', defaultUnit);
-
-                // Sempre tenta sincronizar de forma assíncrona e silenciosa em segundo plano no login para garantir dados frescos e permissões atualizadas (se não estiver em modo interno)
-                if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
-                  console.log('[App] Login detectado. Iniciando sincronização opcional e silenciosa com a nuvem...');
-                  syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
-                    console.warn('[Sync] Sincronização inicial em background falhou:', err);
-                  });
-                }
-                
-                // Oferecer registro de biometria se suportado e ainda não registrado
-                try {
-                  const bioSupported = await isBiometricSupported();
-                  if (bioSupported) {
-                    const username = (u.username || u.email || '').toLowerCase();
-                    if (username) {
-                      const alreadyRegistered = await hasBiometricRegistered(username);
-                      if (!alreadyRegistered) {
-                        // Coloca um delay mínimo para garantir que a navegação do dispatcher termine antes de empilhar a biometria
-                        setTimeout(() => pushScreen(AppScreen.BIOMETRIC_REGISTRATION), 500);
-                      }
+          <Routes>
+          {/* Phase 2 — URL-driven lazy-loaded routes */}
+          <Route path="/login" element={<Login
+            users={users}
+            databaseMode={databaseMode}
+            isDatabaseEmpty={isDatabaseEmpty}
+            isKeyboardVisible={isKeyboardVisible}
+            onOpenPrivacyCenter={() => setIsPrivacyCenterOpen(true)}
+            onUpdateScreen={(s) => setHistory([s])}
+            onShowModal={(config) => setModalConfig((prev) => ({ ...prev, ...config, isOpen: true }))}
+            onUpdateDatabaseMode={handleUpdateDatabaseMode}
+            isInitializing={isInitializing}
+            dbInitialized={dbInitialized}
+            onLogin={async (u) => {
+              setUser(u);
+              sessionStorage.setItem('app_current_user', safeStringify(u));
+              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
+                setDatabaseMode(DatabaseMode.SUPABASE);
+              } else {
+                setDatabaseMode(DatabaseMode.INTERNAL);
+              }
+              const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
+              const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
+              setSelectedUnit(defaultUnit);
+              sessionStorage.setItem('tenantId', defaultTenant);
+              sessionStorage.setItem('filial', defaultUnit);
+              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
+                console.log('[App] Login detectado. Iniciando sincronizacao silenciosa...');
+                syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
+                  console.warn('[Sync] Sincronizacao em background falhou:', err);
+                });
+              }
+              try {
+                const bioSupported = await isBiometricSupported();
+                if (bioSupported) {
+                  const username = (u.username || u.email || '').toLowerCase();
+                  if (username) {
+                    const alreadyRegistered = await hasBiometricRegistered(username);
+                    if (!alreadyRegistered) {
+                      setTimeout(() => pushScreen(AppScreen.BIOMETRIC_REGISTRATION), 500);
                     }
                   }
-                } catch (bioErr) {
-                  console.warn('[Biometric] Falha ao checar biometria pós-login:', bioErr);
                 }
-              }} 
-            />
-          )}
+              } catch (bioErr) {
+                console.warn('[Biometric] Falha ao checar biometria:', bioErr);
+              }
+            }}
+          />} />
+          <Route path="/menu" element={<MainMenu
+            onOpenHelp={() => setIsHelpMenuOpen(true)}
+            onNavigate={pushScreen}
+            onLogout={() => { setSelectedUnit(null); setStartWithDataMenu(false); pushScreen(AppScreen.UNIT_SELECTION); }}
+            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.UNIT_SELECTION); }}
+            onExport={handleExport}
+            onBackup={handleBackup}
+            onDownloadCloudData={handleDownloadCloudData}
+            onRestore={handleRestore}
+            onClearDatabase={handleClearDatabase}
+            onClearMultipleUnits={handleClearMultipleCompanies}
+            showModal={showModal}
+            user={user}
+            units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
+            databaseMode={databaseMode}
+            onUpdateDatabaseMode={handleUpdateDatabaseMode}
+            inventoryInfo={{ count: activeUnitAssetCount, totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, date: inventory.lastUpdated }}
+            autoConfirmOnScan={inventory.autoConfirmOnScan || false}
+            onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
+            onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
+            initialDataMenuOpen={startWithDataMenu}
+            selectedUnit={selectedUnit}
+            darkMode={inventory.darkMode || false}
+            onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
+            batterySaver={inventory.batterySaver || false}
+            onUpdateBatterySaver={(val) => updateConfig({ batterySaver: val })}
+            mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence || false}
+            onUpdateMandatoryPhotoOnDivergence={(val) => updateConfig({ mandatoryPhotoOnDivergence: val })}
+            mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
+            onUpdateMandatoryPhotoOnNewItem={(val) => updateConfig({ mandatoryPhotoOnNewItem: val })}
+            onSyncCloud={syncFromCloud}
+            isSyncing={isSyncing}
+            lastSyncTime={lastSyncTime}
+            syncError={syncError}
+            hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
+            pendingPhotosCount={pendingPhotosCount}
+            syncQueueLength={syncQueueLength}
+            unsyncedAssetsCount={unsyncedAssetsCount}
+            deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
+            impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
+            excludedAccounts={inventory.excludedAccounts}
+            onUpdateExcludedAccounts={(accounts) => { localStorage.setItem('app_excluded_accounts', safeStringify(accounts)); updateConfig({ excludedAccounts: accounts }); }}
+            protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
+            onUpdateProtheusIntegration={(val) => { localStorage.setItem('app_protheus_enabled', String(val)); updateConfig({ protheusIntegrationEnabled: val }); }}
+            protheusApiUrl={inventory.protheusApiUrl || ''}
+            onUpdateProtheusApiUrl={(val) => { localStorage.setItem('app_protheus_url', val); updateConfig({ protheusApiUrl: val }); }}
+            onResetGPS={handleResetGPS}
+            onToggleGpsBypass={handleToggleGpsBypass}
+            isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
+            onCheckIntegrity={handleCheckIntegrity}
+            isAIAssistantOpen={isAIAssistantOpen}
+            setIsAIAssistantOpen={setIsAIAssistantOpen}
+            campaignsCount={campaigns.length}
+            currentCampaignId={inventory.currentCampaignId}
+          />} />
+          <Route path="/db-manager" element={<DatabaseManagerScreen onBack={() => pushScreen(AppScreen.MODULE_SELECTION)} />} />
+          <Route path="/dashboard" element={<Dashboard
+            assets={filteredAssetsByUnit}
+            allAssets={inventory.assets}
+            currentCampaignId={inventory.currentCampaignId}
+            onBack={popScreen}
+            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.UNIT_SELECTION); }}
+            onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.ADDRESS_SELECTION) : pushScreen(AppScreen.UNIT_SELECTION)}
+            onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
+            onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
+            user={user}
+            sqlStats={databaseMode === DatabaseMode.INTERNAL ? sqlDashboardStats : null}
+            onNavigate={pushScreen}
+            selectedUnit={selectedUnit}
+          />} />
+              <Route path="*" element={(
+                <>
           {screen === AppScreen.BIOMETRIC_REGISTRATION && (
             <BiometricRegistration 
               username={user?.username || user?.email || ''} 
@@ -6011,87 +6090,6 @@ const App: React.FC = () => {
               }} 
             />
           )}
-          {screen === AppScreen.MAIN_MENU && (
-            <MainMenu 
-              onOpenHelp={() => setIsHelpMenuOpen(true)}
-              onNavigate={pushScreen} 
-              onLogout={() => { 
-                setSelectedUnit(null); 
-                setStartWithDataMenu(false);
-                pushScreen(AppScreen.UNIT_SELECTION); 
-              }} 
-              onChangeUnit={() => {
-                setSelectedUnit(null);
-                pushScreen(AppScreen.UNIT_SELECTION);
-              }}
-              onExport={handleExport} 
-              onBackup={handleBackup}
-              onDownloadCloudData={handleDownloadCloudData}
-              onRestore={handleRestore}
-              onClearDatabase={handleClearDatabase} 
-              onClearMultipleUnits={handleClearMultipleCompanies}
-              showModal={showModal}
-              user={user} 
-              units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
-              databaseMode={databaseMode}
-              onUpdateDatabaseMode={handleUpdateDatabaseMode}
-              inventoryInfo={{ 
-                count: activeUnitAssetCount, 
-                totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, 
-                date: inventory.lastUpdated 
-              }} 
-              autoConfirmOnScan={inventory.autoConfirmOnScan || false} 
-              onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })} 
-              isFullscreen={isFullscreen} 
-              onToggleFullscreen={toggleFullscreen} 
-              scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH} 
-              onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
-              initialDataMenuOpen={startWithDataMenu}
-              selectedUnit={selectedUnit}
-              darkMode={inventory.darkMode || false}
-              onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
-              batterySaver={inventory.batterySaver || false}
-              onUpdateBatterySaver={(val) => updateConfig({ batterySaver: val })}
-              mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence || false}
-              onUpdateMandatoryPhotoOnDivergence={(val) => updateConfig({ mandatoryPhotoOnDivergence: val })}
-              mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
-              onUpdateMandatoryPhotoOnNewItem={(val) => updateConfig({ mandatoryPhotoOnNewItem: val })}
-              onSyncCloud={syncFromCloud}
-              isSyncing={isSyncing}
-              lastSyncTime={lastSyncTime}
-              syncError={syncError}
-              hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
-              pendingPhotosCount={pendingPhotosCount}
-              syncQueueLength={syncQueueLength}
-              unsyncedAssetsCount={unsyncedAssetsCount}
-              deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
-              impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
-              excludedAccounts={inventory.excludedAccounts}
-              onUpdateExcludedAccounts={(accounts) => {
-                localStorage.setItem('app_excluded_accounts', safeStringify(accounts));
-                updateConfig({ excludedAccounts: accounts });
-              }}
-              protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
-              onUpdateProtheusIntegration={(val) => {
-                localStorage.setItem('app_protheus_enabled', String(val));
-                updateConfig({ protheusIntegrationEnabled: val });
-              }}
-              protheusApiUrl={inventory.protheusApiUrl || ''}
-              onUpdateProtheusApiUrl={(val) => {
-                localStorage.setItem('app_protheus_url', val);
-                updateConfig({ protheusApiUrl: val });
-              }}
-              onResetGPS={handleResetGPS}
-              onToggleGpsBypass={handleToggleGpsBypass}
-              isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
-              onCheckIntegrity={handleCheckIntegrity}
-               isAIAssistantOpen={isAIAssistantOpen}
-              setIsAIAssistantOpen={setIsAIAssistantOpen}
-              campaignsCount={campaigns.length}
-              currentCampaignId={inventory.currentCampaignId}
-            />
-          )}
-
           {/* Permission Modal removed in favor of PermissionGate */}
 
           {screen === AppScreen.INVENTORY && (
@@ -6212,11 +6210,7 @@ const App: React.FC = () => {
                 pushScreen(AppScreen.ASSET_DETAIL);
               }}
             />
-          )}
-          {screen === AppScreen.DATABASE_MANAGER && (
-            <DatabaseManagerScreen onBack={() => pushScreen(AppScreen.MODULE_SELECTION)} />
-          )}
-          {screen === AppScreen.SIGNATURE && (
+          )}{screen === AppScreen.SIGNATURE && (
             <Signature 
               assets={filteredAssetsByUnit.filter(a => a._conferido)}
               onBack={popScreen}
@@ -6332,27 +6326,7 @@ const App: React.FC = () => {
               onNavigate={pushScreen}
               initialUnit={selectedUnit}
             />
-          )}
-          {screen === AppScreen.DASHBOARD && (
-            <Dashboard 
-              assets={filteredAssetsByUnit} 
-              allAssets={inventory.assets}
-              currentCampaignId={inventory.currentCampaignId}
-              onBack={popScreen} 
-              onChangeUnit={() => {
-                setSelectedUnit(null);
-                pushScreen(AppScreen.UNIT_SELECTION);
-              }}
-              onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.ADDRESS_SELECTION) : pushScreen(AppScreen.UNIT_SELECTION)}
-              onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
-              onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
-              user={user}
-              sqlStats={databaseMode === DatabaseMode.INTERNAL ? sqlDashboardStats : null}
-              onNavigate={pushScreen}
-              selectedUnit={selectedUnit}
-            />
-          )}
-          {screen === AppScreen.ASSET_MAP && (
+          )}{screen === AppScreen.ASSET_MAP && (
             <AssetMap 
               assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} 
               onBack={popScreen} 
@@ -6485,6 +6459,9 @@ const App: React.FC = () => {
           {screen === AppScreen.ONBOARDING && (
             <OnboardingWizard onComplete={completeOnboarding} onCancel={popScreen} />
           )}
+                </>
+              )} />
+          </Routes>
         </div>
   
         {/* FloatingHelp agora é renderizado sempre que os termos forem aceitos, 

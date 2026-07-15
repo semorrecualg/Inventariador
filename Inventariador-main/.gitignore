@@ -41,3 +41,9 @@ capacitor.config.js
 *.sqlite
 *.sqlite3
 mock_databases/
+
+# Playwright E2E test artifacts
+/test-results/
+/playwright-report/
+/playwright/.cache/
+**/__screenshots__/

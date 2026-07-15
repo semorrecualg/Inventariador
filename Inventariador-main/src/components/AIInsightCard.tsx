@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Sparkles, ArrowRight } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion';
 
 interface AIInsightCardProps {
   title: string;

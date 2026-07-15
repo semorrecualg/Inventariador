@@ -666,7 +666,7 @@ export const signUp = async (email: string, password: string, username: string, 
 export const ensureUserProfile = async (email: string, metadata?: Record<string, any>, userId?: string): Promise<any> => {
   if (getDatabaseMode() === 'INTERNAL') {
     const lowerEmail = email.toLowerCase();
-    const is_admin_new = (lowerEmail === 'semorr@gmail.com');
+    const is_admin_new = isAdminEmail(lowerEmail);
     return {
       email: lowerEmail,
       username: lowerEmail.split('@')[0],
@@ -713,7 +713,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     const is_admin = (profile.is_admin === true || profile.isadmin === true || 
                      (profile.role && profile.role.trim().toUpperCase() === 'ADMIN') || 
                      (profile.role && profile.role.trim().toUpperCase() === 'MASTER') ||
-                     (lowerEmail === 'semorr@gmail.com'));
+                     isAdminEmail(lowerEmail));
     
     const finalRole = (profile.role || 'AUDITOR').trim().toUpperCase();
     
@@ -761,7 +761,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   console.log('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
   
   const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
-  const is_admin_new = (lowerEmail === 'semorr@gmail.com');
+  const is_admin_new = isAdminEmail(lowerEmail);
   const fallbackTenant = defaultTenant;
   
   const insertData = {
@@ -1250,7 +1250,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
-      const is_admin = role === 'ADMIN' || role === 'MASTER' || (email.toLowerCase() === 'semorr@gmail.com');
+      const is_admin = role === 'ADMIN' || role === 'MASTER' || isAdminEmail(email);
       const normTenantId = normalizeValue(tenantid || '');
       const normUnitId = normalizeValue(unitid || '');
 
@@ -1304,7 +1304,7 @@ export const syncUsersToCloud = async (users: User[]) => {
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
-      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
+      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || isAdminEmail(u.email);
       const tenantVal = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
       const _unitid = normalizeValue(u._unitid || u.unitid || '');
       return {
@@ -1407,7 +1407,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
-      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || (u.email.toLowerCase() === 'semorr@gmail.com');
+      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || isAdminEmail(u.email);
       const tenant_id = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
       const _unitid = normalizeValue(u._unitid || u.unitid || '');
       return {

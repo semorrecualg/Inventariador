@@ -1,5 +1,6 @@
-import { UserRole } from '../types'; 
+import { UserRole } from '../types';
 import { sqliteService } from '../services/sqliteService';
+import { isAdminEmail } from './authUtils';
 
 export interface SupabaseUserProfile {
   userId: string;
@@ -29,7 +30,7 @@ export async function processarRoteamentoPosLoginSaas(
   }
 
   const totalAtivosLocal = await sqliteService.countAtivos();
-  const isSuperAdmin = user.email.toLowerCase() === 'semorr@gmail.com';
+  const isSuperAdmin = isAdminEmail(user.email);
   const isMaster = String(user.role).toUpperCase() === 'MASTER';
 
   // 3. Fluxo para Base Totalmente Vazia (Lote 0)
