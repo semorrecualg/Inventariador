@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Inventariador GBR v2.6</title>
+    <style>
+      #gbr-initial-loader {
+        position: fixed;
+        inset: 0;
+        background: #0f172a;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.3s ease;
+      }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(16, 185, 129, 0.1);
+        border-top-color: #10b981;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="gbr-initial-loader">
+      <div class="spinner"></div>
+      <p style="color: white; font-family: sans-serif; margin-top: 1rem; font-weight: bold; letter-spacing: -0.025em;">CARREGANDO INVENTARIADOR GBR...</p>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+    <script>
+      // Emergency Reset: If React doesn't mount or data loading fails to complete, force hide loader as a safety fallback
+      setTimeout(() => {
+        const loader = document.getElementById('gbr-initial-loader');
+        if (loader && loader.style.display !== 'none') {
+          console.warn("[GBR-Emergency] Timeout safety fallback atingido. Forçando remoção do gbr-initial-loader...");
+          loader.style.opacity = '0';
+          setTimeout(() => { loader.style.display = 'none'; }, 500);
+        }
+      }, 95000); // 95s threshold keeps loader visible throughout the download of 12,636 assets
+    </script>
+  </body>
+</html>

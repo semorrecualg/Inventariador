@@ -1,0 +1,106 @@
+name: Build Android APK (Native Ready v2.6)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Generate APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps --force
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.6)
+        run: |
+          # 1. Garante a instalação do pacote core do Android
+          npm install @capacitor/android@6.2.1 --save-exact
+          
+          # 2. Cria a pasta nativa na máquina virtual se ela não existir
+          npx cap add android || true
+          
+          # 3. Força a escrita das nossas permissões oficiais direto no Manifesto recém-criado do robô
+          echo '<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="GBR KARDEK"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme"
+                  android:requestLegacyExternalStorage="true">
+                  <activity
+                      android:name="com.gbr.kardek.MainActivity"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:exported="true"
+                      android:label="GBR KARDEK"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:launchMode="singleTop">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths"></meta-data>
+                  </provider>
+              </application>
+          </manifest>' > android/app/src/main/AndroidManifest.xml
+
+          # 4. Injeta dinamicamente a versão 2.6.0 no build.gradle gerado pelo robô
+          sed -i 's/versionCode 1/versionCode 26/g' android/app/build.gradle
+          sed -i 's/versionName "1.0"/versionName "2.6.0"/g' android/app/build.gradle
+          sed -i 's/io.ionic.starter/com.gbr.kardek/g' android/app/build.gradle
+          sed -i 's/com.example.app/com.gbr.kardek/g' android/app/build.gradle
+
+          # 5. Sincroniza os ativos web do React
+          npx cap sync android
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
+
+      - name: Upload Android Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbr-inventario-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

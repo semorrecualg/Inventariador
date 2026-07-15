@@ -1,0 +1,12 @@
+{
+  "name": "Inventariador GBR v2.6",
+  "description": "Inventariador GBR v2.6 - Sistema Industrial de Inventário de Ativos (Soberania Nativa, Delta Auditoria, Carga Expert Estabilizada).",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation",
+    "storage"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

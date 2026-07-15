@@ -1,0 +1,204 @@
+
+import React, { useState } from 'react';
+import { Loader2, AlertCircle } from 'lucide-react';
+import BackButton from './BackButton';
+import { signUp } from '../services/supabaseService';
+import { DatabaseMode, UserRole } from '../types';
+
+interface RegisterProps {
+  onRegister: () => void;
+  onGoToLogin: () => void;
+  databaseMode: DatabaseMode;
+}
+
+// Register Component
+const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
+  const [username, setUsername] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [tenantid, setTenantid] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
+
+    if (!tenantid || tenantid.length < 3) {
+      setError("O nome do Grupo Empresarial deve ter pelo menos 3 caracteres.");
+      setIsLoading(false);
+      return;
+    }
+
+    let finalEmail = email.toLowerCase().trim();
+    // Removida restrição forçada de @gbr.com para permitir gbrauditor1@gmail.com e outros
+    if (!finalEmail.includes('@')) {
+      finalEmail = `${finalEmail}@gbr.com`;
+    }
+
+    try {
+      await signUp(
+        finalEmail, 
+        password, 
+        username, 
+        tenantid.toLowerCase().trim(), 
+        UserRole.ADMIN,
+        name.trim()
+      );
+      setIsSuccess(true);
+      setTimeout(() => {
+        onRegister();
+      }, 5000);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || "Erro ao criar acesso.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isSuccess) {
+    return (
+      <div className="p-8 h-full flex flex-col items-center justify-center animate-fadeIn bg-bg-main text-center">
+        <div className="w-20 h-20 bg-accent-soft text-accent rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-accent/10">
+          <Loader2 size={32} className="animate-spin" />
+        </div>
+        <h2 className="text-2xl font-bold text-ink uppercase tracking-tight">Acesso Criado!</h2>
+        <p className="text-ink-muted mt-4 text-xs font-medium leading-relaxed max-w-xs">
+          Seu acesso foi registrado com sucesso. <br/><br/>
+          <span className="text-amber-600 font-bold uppercase tracking-widest">Importante:</span> <br/>
+          Verifique seu e-mail (<span className="text-ink font-bold">{email}</span>) para confirmar o cadastro. 
+          Não esqueça de olhar a pasta de <span className="text-amber-600 font-bold">SPAM</span>.
+        </p>
+        <p className="mt-8 text-[10px] text-ink-muted uppercase tracking-widest animate-pulse">
+          Redirecionando para o login...
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 h-full flex flex-col justify-start animate-fadeIn bg-bg-main overflow-y-auto no-scrollbar pt-2">
+      {/* Header compactado consistente com o Login */}
+      <div className="mb-3 text-center">
+        <h1 className="text-xl font-black text-ink tracking-tighter uppercase italic leading-none">
+          SISTEMA <span className="text-accent">AUDITORIA</span>
+        </h1>
+        <p className="text-ink-muted text-[8px] font-bold uppercase tracking-[0.2em] mt-1">
+          INVENTÁRIO DE ATIVO IMOBILIZADO
+        </p>
+      </div>
+
+      <div className="max-w-sm mx-auto w-full mb-4">
+        <BackButton onClick={onGoToLogin} label="Voltar" subLabel="Acesso ao Sistema" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto w-full">
+        {error && (
+          <div className="bg-red-50 border border-red-100 text-red-600 p-2.5 rounded-xl text-[9px] font-bold uppercase flex items-center mb-3 tracking-widest shadow-sm">
+            <AlertCircle size={14} className="mr-2 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Grupo Empresarial</label>
+          <input 
+            type="text" 
+            required
+            value={tenantid}
+            onChange={(e) => setTenantid(e.target.value.toLowerCase().replace(/\s/g, ''))}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: NOME_DO_GRUPO"
+          />
+          <p className="text-[7px] text-ink-muted uppercase tracking-widest ml-1">
+            Identificador único do seu grupo de empresas.
+          </p>
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Nome Completo</label>
+          <input 
+            type="text" 
+            required
+            value={name}
+            onChange={(e) => {
+              const val = e.target.value;
+              setName(val);
+              // Gerar username automático: primeiro.segundo nome em minúsculo
+              const parts = val.trim().toLowerCase().split(/\s+/);
+              let generated = '';
+              if (parts.length >= 2) {
+                generated = `${parts[0]}.${parts[1]}`;
+              } else if (parts.length === 1) {
+                generated = parts[0];
+              }
+              if (generated) {
+                setUsername(generated);
+                setEmail(generated + "@gbr.com");
+              }
+            }}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: Glaucio Silva"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Username de Login</label>
+          <input 
+            type="text" 
+            required
+            value={username}
+            onChange={(e) => {
+              const val = e.target.value.toLowerCase();
+              setUsername(val);
+              setEmail(val + "@gbr.com");
+            }}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="EX: joao.silva"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">E-mail Corporativo (Padrão @gbr.com)</label>
+          <input 
+            type="email" 
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="usuario@gbr.com"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[9px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-1">Senha</label>
+          <input 
+            type="password" 
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
+            placeholder="••••••••"
+          />
+        </div>
+        <button 
+          type="submit"
+          disabled={isLoading}
+          className="w-full bg-accent text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/10 hover:opacity-90 active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.2em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              <span>Criando Acesso...</span>
+            </>
+          ) : (
+            <span>Criar Meu Acesso</span>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default Register;

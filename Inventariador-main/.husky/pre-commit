@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+echo "=== [SRE ADVANCED SHIELD] ENTRANDO EM MODO DE AUDITORIA CRÍTICA ==="
+if git diff --cached | grep -E "eslint-disable-next-line|@ts-ignore|eslint-disable"; then echo "❌ ERROR: Mascaramento proibido!"; exit 1; fi
+if git diff --cached | grep -Ei "SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql"; then echo "❌ ERROR: SQL proibido!"; exit 1; fi
+if git diff --cached | grep -F "window.location.reload("; then echo "❌ ERROR: Reload proibido!"; exit 1; fi
+npm run lint -- --max-warnings=0 && npx tsc --noEmit
