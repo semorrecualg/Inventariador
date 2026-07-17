@@ -1,4 +1,5 @@
 import { db, DexieAsset, sqliteService } from './sqliteService';
+import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -734,7 +735,7 @@ export const localDb = {
     try {
       const dbUsers = await localDb.users.toArray();
       const normUser = username.trim().toLowerCase();
-      if ((normUser === 'admin' || normUser === 'admin gbr' || normUser === 'semorr@gmail.com') && 
+      if ((normUser === 'admin' || normUser === 'admin gbr' || isAdminEmail(normUser)) && 
           (password === 'admin' || password === 'Glaucio@1970')) {
         return true;
       }

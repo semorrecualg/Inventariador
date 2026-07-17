@@ -10,7 +10,12 @@
     "preview": "vite preview",
     "prepare": "husky",
     "postinstall": "mkdir -p .husky/_ && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\necho \"=== [SRE ADVANCED SHIELD] ENTRANDO EM MODO DE AUDITORIA CRÍTICA ===\"\nif git diff --cached | grep -E \"eslint-disable-next-line|@ts-ignore|eslint-disable\"; then echo \"❌ ERROR: Mascaramento proibido!\"; exit 1; fi\nif git diff --cached | grep -Ei \"SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql\"; then echo \"❌ ERROR: SQL proibido!\"; exit 1; fi\nif git diff --cached | grep -F \"window.location.reload(\"; then echo \"❌ ERROR: Reload proibido!\"; exit 1; fi\nnpm run lint -- --max-warnings=0 && npx tsc --noEmit' > .husky/_/pre-commit && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\nnpm run build' > .husky/_/pre-push && chmod +x .husky/_/pre-commit .husky/_/pre-push",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:install": "npx playwright install --with-deps"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^6.0.0",
@@ -31,7 +36,6 @@
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.0",
     "dexie": "^4.4.4",
-    "framer-motion": "^11.11.17",
     "html5-qrcode": "^2.3.8",
     "jeep-sqlite": "^2.6.0",
     "jspdf": "^4.2.1",
@@ -52,7 +56,9 @@
     "tailwind-merge": "^2.2.1",
     "tesseract.js": "^7.0.0",
     "vite-plugin-static-copy": "^1.0.6",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zustand": "^4.5.0",
+    "react-router-dom": "^6.26.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.1",

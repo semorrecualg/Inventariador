@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
 import { db, DexieAsset } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { isAdminEmail } from '../utils/authUtils';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -161,7 +162,7 @@ export class DatabaseLoaderService {
     onProgress: (batchIndex: number, insertedCount: number, totalInserted: number, finalPlanilhaTotal: number) => void
   ): Promise<number> {
     
-    // 1. Validação Preventiva de Bateria Crítica (< 5% sem fonte externa) com bypass para operador semorr@gmail.com
+    // 1. Validação Preventiva de Bateria Crítica (< 5% sem fonte externa) com bypass para operador homologado
     let currentBatteryLevel = 1.0;
     let isDeviceCharging = true;
     try {
@@ -183,12 +184,12 @@ export class DatabaseLoaderService {
 
     const activeUserJson = typeof window !== 'undefined' ? sessionStorage?.getItem('app_current_user') : null;
     const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
-    const activeEmail = activeUser?.email || 'semorr@gmail.com';
-    const emailValidoParaBypass = activeEmail?.trim()?.toLowerCase() === 'semorr@gmail.com';
+    const activeEmail = activeUser?.email || '';
+    const emailValidoParaBypass = isAdminEmail(activeEmail);
 
     if (currentBatteryLevel < 0.05 && !isDeviceCharging) {
       if (emailValidoParaBypass) {
-        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), porém OPERADOR HOMOLOGADO DETECTADO (semorr@gmail.com). Bypass síncrono ativado automaticamente.");
+        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), porém OPERADOR HOMOLOGADO DETECTADO. Bypass síncrono ativado automaticamente.");
       } else {
         throw new Error("FAILSAFE: Operação abortada. Bateria abaixo de 5% sem fonte externa. Risco de corrupção do cabeçalho .db.");
       }
@@ -440,12 +441,12 @@ export class DatabaseLoaderService {
 
     const activeUserJson = typeof window !== 'undefined' ? sessionStorage?.getItem('app_current_user') : null;
     const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
-    const activeEmail = activeUser?.email || 'semorr@gmail.com';
-    const emailValidoParaBypass = activeEmail?.trim()?.toLowerCase() === 'semorr@gmail.com';
+    const activeEmail = activeUser?.email || '';
+    const emailValidoParaBypass = isAdminEmail(activeEmail);
 
     if (currentBatteryLevel < 0.05 && !isDeviceCharging) {
       if (emailValidoParaBypass) {
-        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), bypass síncrono ativado para semorr@gmail.com.");
+        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), bypass síncrono ativado para administrador homologado.");
       } else {
         throw new Error("FAILSAFE: Operação abortada. Bateria abaixo de 5% sem fonte externa. Risco de corrupção do cabeçalho .db.");
       }

@@ -17,6 +17,7 @@ import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
+import { isAdminEmail } from '../utils/authUtils';
 import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
@@ -1799,7 +1800,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 const code = parts[0];
                 const name = parts.slice(1).join(' ') || locStr;
               
-                const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+                const isBypass = isAdminEmail(user?.email);
                 const isDisabled = !unitConfig && !isBypass;
               
                 return (
@@ -1865,7 +1866,7 @@ const Inventory: React.FC<InventoryProps> = ({
           {/* FAB - Criar Nova Localidade */}
           <div className="fixed bottom-8 left-0 right-0 px-6 flex justify-center pointer-events-none">
             {(() => {
-              const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+              const isBypass = isAdminEmail(user?.email);
               const isDisabled = !unitConfig && !isBypass;
               return (
                 <button 

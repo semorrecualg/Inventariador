@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Delete, Lock, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
+import { verifySecurityPin } from '../services/securityService';
 
 interface SecurityPinModalProps {
   isOpen: boolean;
@@ -22,8 +23,7 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   
-  // O PIN padrão para demonstração é "0000"
-  const CORRECT_PIN = "0000";
+  // PIN verificado via hash SHA-256 armazenado no IndexedDB
 
   useEffect(() => {
     if (!isOpen) {
@@ -50,10 +50,12 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
     
     setIsVerifying(true);
     
-    // Simula um delay de verificação criptográfica
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // Pequeno delay para feedback visual consistente
+    await new Promise(resolve => setTimeout(resolve, 400));
     
-    if (pin === CORRECT_PIN) {
+    const isValid = await verifySecurityPin(pin);
+    
+    if (isValid) {
       onSuccess();
       onClose();
     } else {

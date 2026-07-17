@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "playwright-generate-test": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-generate-test/SKILL.md",
+      "computedHash": "8f963da3e25f705ff39755b8b990f20da0c0320cb86ac83fcc4d2d4eca91f6e4"
+    },
+    "playwright-skill": {
+      "source": "testdino-hq/playwright-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "b422e6a5e3faf8f57954e88ce949c450caba53ea14d6b9e665fa9fc782c18383"
+    }
+  }
+}

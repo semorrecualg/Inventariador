@@ -3,16 +3,17 @@ import { db } from '../services/sqliteService';
 import { FileSystemStorageService } from '../services/FileSystemStorageService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { AppScreen } from '../types';
-import { 
-  Database, 
-  Trash2, 
-  ArrowLeft, 
-  ShieldAlert, 
-  Terminal, 
-  HardDrive, 
+import {
+  Database,
+  Trash2,
+  ArrowLeft,
+  ShieldAlert,
+  Terminal,
+  HardDrive,
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
+import { isAdminUser } from '../utils/authUtils';
 
 interface BaseManagerPanelProps {
   onBack?: () => void;
@@ -44,10 +45,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
         const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
         if (userStr) {
           const parsed = JSON.parse(userStr);
-          const email = parsed?.email?.toLowerCase() || '';
-          const roleStr = String(parsed?.role || '').toUpperCase();
-          const isAdm = parsed?.isAdmin || parsed?.is_admin;
-          return roleStr === 'ADMIN' || roleStr === 'MASTER' || roleStr === 'GESTOR' || !!isAdm || email === 'semorr@gmail.com';
+          return isAdminUser(parsed);
         }
       } catch { /* ignore */ }
       return false;

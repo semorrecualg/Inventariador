@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Asset } from '../types';
 import { AlertCircle, Calculator, CheckCircle2, DollarSign, TrendingDown } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion';
 
 interface ImpairmentTestModalProps {
   isOpen: boolean;
