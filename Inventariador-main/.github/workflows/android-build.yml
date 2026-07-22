@@ -1,9 +1,12 @@
-name: Build Android APK (Native Ready v2.6)
+name: Build Android APK (Native Ready v2.7)
 
 on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
+
+env:
+  NODE_OPTIONS: '--max-old-space-size=4096'
 
 jobs:
   build:
@@ -18,6 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps --force
@@ -32,16 +36,28 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.6)
+      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.7)
         run: |
-          # 1. Garante a instalação do pacote core do Android
-          npm install @capacitor/android@6.2.1 --save-exact
-          
+          set -euo pipefail
+
+          # 0. Extrair versão do package.json dinamicamente
+          APP_VERSION=$(node -e "console.log(require('./package.json').version)")
+          VERSION_CODE=$(echo "$APP_VERSION" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }' | sed 's/^0*//')
+          echo "📦 Versão detectada: $APP_VERSION (versionCode: $VERSION_CODE)"
+
+          # 1. Garante a instalação do pacote core do Android (sem modificar package.json do repositório)
+          npm install @capacitor/android@6.2.1 --no-save
+
           # 2. Cria a pasta nativa na máquina virtual se ela não existir
-          npx cap add android || true
-          
-          # 3. Força a escrita das nossas permissões oficiais direto no Manifesto recém-criado do robô
-          echo '<?xml version="1.0" encoding="utf-8"?>
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            echo "📁 Diretório android já existe — pulando cap add"
+          fi
+
+          # 3. Gera as permissões oficiais no Manifesto
+          cat > android/app/src/main/AndroidManifest.xml << 'MANIFEST_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.CAMERA" />
@@ -57,7 +73,8 @@ jobs:
                   android:roundIcon="@mipmap/ic_launcher_round"
                   android:supportsRtl="true"
                   android:theme="@style/AppTheme"
-                  android:requestLegacyExternalStorage="true">
+                  android:requestLegacyExternalStorage="true"
+                  android:usesCleartextTraffic="true">
                   <activity
                       android:name="com.gbr.kardek.MainActivity"
                       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -81,26 +98,47 @@ jobs:
                           android:resource="@xml/file_paths"></meta-data>
                   </provider>
               </application>
-          </manifest>' > android/app/src/main/AndroidManifest.xml
+          </manifest>
+          MANIFEST_EOF
 
-          # 4. Injeta dinamicamente a versão 2.6.0 no build.gradle gerado pelo robô
-          sed -i 's/versionCode 1/versionCode 26/g' android/app/build.gradle
-          sed -i 's/versionName "1.0"/versionName "2.6.0"/g' android/app/build.gradle
+          # 4. Injeta dinamicamente a versão extraída do package.json no build.gradle
+          sed -i "s/versionCode 1/versionCode ${VERSION_CODE}/g" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"${APP_VERSION}\"/g" android/app/build.gradle
           sed -i 's/io.ionic.starter/com.gbr.kardek/g' android/app/build.gradle
           sed -i 's/com.example.app/com.gbr.kardek/g' android/app/build.gradle
 
-          # 5. Sincroniza os ativos web do React
+          # 5. Gera gradle.properties com alocação de memória adequada para CI
+          cat > android/gradle.properties << 'GRADLE_EOF'
+          org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          android.useAndroidX=true
+          android.enableJetifier=true
+          GRADLE_EOF
+
+          # 6. Sincroniza os ativos web do React
           npx cap sync android
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
+          # gradle.properties já define Xmx2048m e demais flags (gerado no passo anterior)
           ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
+
+      - name: Renomear APK com versão
+        run: |
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          DATE=$(date +'%Y%m%d')
+          NEW_NAME="gbr-kardek-v${VERSION}-${DATE}.apk"
+          cp "$APK_PATH" "android/app/build/outputs/apk/debug/${NEW_NAME}"
+          echo "✅ APK gerado: ${NEW_NAME}"
 
       - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: gbr-inventario-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: gbr-kardek-apk
+          path: android/app/build/outputs/apk/debug/gbr-kardek-*.apk
           retention-days: 7
+          if-no-files-found: error
