@@ -9,7 +9,7 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "prepare": "husky",
-    "postinstall": "mkdir -p .husky/_ && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\necho \"=== [SRE ADVANCED SHIELD] ENTRANDO EM MODO DE AUDITORIA CRÍTICA ===\"\nif git diff --cached | grep -E \"eslint-disable-next-line|@ts-ignore|eslint-disable\"; then echo \"❌ ERROR: Mascaramento proibido!\"; exit 1; fi\nif git diff --cached | grep -Ei \"SELECT |INSERT INTO|CREATE TABLE|sqlite3|executeSql\"; then echo \"❌ ERROR: SQL proibido!\"; exit 1; fi\nif git diff --cached | grep -F \"window.location.reload(\"; then echo \"❌ ERROR: Reload proibido!\"; exit 1; fi\nnpm run lint -- --max-warnings=0 && npx tsc --noEmit' > .husky/_/pre-commit && echo '#!/usr/bin/env sh\n. \"$(dirname \"$0\")/_/husky.sh\"\nnpm run build' > .husky/_/pre-push && chmod +x .husky/_/pre-commit .husky/_/pre-push",
+    "postinstall": "node scripts/postinstall.cjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

@@ -2,7 +2,7 @@
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 console.log(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
@@ -5930,6 +5930,7 @@ const App: React.FC = () => {
           )}
           <Routes>
           {/* Phase 2 — URL-driven lazy-loaded routes */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login
             users={users}
             databaseMode={databaseMode}

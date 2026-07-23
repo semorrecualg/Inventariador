@@ -16,7 +16,7 @@ import {
   Target
 } from 'lucide-react';
 import { generateInventoryInsights, ProgressInsight } from '../services/geminiService';
-import { motion, AnimatePresence } from 'motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface GlobalPerformanceProps {
   assets: Asset[];

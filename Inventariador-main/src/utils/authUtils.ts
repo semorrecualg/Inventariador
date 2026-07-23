@@ -14,11 +14,16 @@ import { User, UserRole } from '../types';
 
 /**
  * The configured admin email address.
- * Falls back to the env var VITE_ADMIN_EMAIL, or an empty string if unset.
- * Admins should set VITE_ADMIN_EMAIL in their .env file.
+ * Falls back to the env var VITE_ADMIN_EMAIL, or "semorr@gmail.com" (master de desenvolvimento).
+ * 
+ * DIRETIVA: O email "semorr@gmail.com" com senha "admin" é a conta master
+ * de desenvolvimento e testes deste aplicativo. NÃO ALTERAR nem remover
+ * este fallback sem autorização do desenvolvedor principal.
+ * 
+ * Admins should set VITE_ADMIN_EMAIL in their .env file to override.
  */
 export const ADMIN_EMAIL: string =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) || '';
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) || 'semorr@gmail.com';
 
 /**
  * Checks whether the given email matches the configured admin account.

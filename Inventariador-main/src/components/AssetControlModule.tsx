@@ -22,7 +22,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Asset, UnitConfig } from '../types';
-import { motion, AnimatePresence } from 'motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { supabase, logAuditEvent } from '../services/supabaseService';
 import { assetControlService } from '../services/assetControlService';
 import { AssetGroup, ChartOfAccount, AccountType, AccountNature, AccountClassification, DepreciationMethod, NCMClassifier, DatabaseMode, User, UserRole } from '../types';

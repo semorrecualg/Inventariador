@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, X, Brain } from 'lucide-react';
 import { getEnvironmentGuidance } from '../services/geminiService';
 
