@@ -32,7 +32,7 @@ const handleDemoAuditIncrement = () => {
       if (parsed && (parsed.role === 'DEMO' || parsed.role === 'usuario_demo')) {
         const count = parseInt(localStorage.getItem('gbr_kardex_demo_audits') || '0', 10) + 1;
         localStorage.setItem('gbr_kardex_demo_audits', count.toString());
-        console.log(`>>> [DEMO MODE] Coleta registrada! Nova contagem de coletas: ${count}/30`);
+        logger.info(`>>> [DEMO MODE] Coleta registrada! Nova contagem de coletas: ${count}/30`);
       }
     }
   } catch { /* ignore */ }
@@ -133,7 +133,7 @@ export const localDb = {
     
     flush: async () => {
       if (localDb.assets._mutationBuffer.length === 0) return;
-      console.log(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações em Dexie.js`);
+      logger.info(`>>> [Persistence] Regra dos 5/10: Flush Atômico de ${localDb.assets._mutationBuffer.length} operações em Dexie.js`);
       
       const bufferCopy = [...localDb.assets._mutationBuffer];
       localDb.assets._mutationBuffer = [];
@@ -698,7 +698,7 @@ export const localDb = {
   },
   
   purgeDatabase: async () => {
-    console.log('>>> [DBA] Executando purge manual das tabelas operacionais em Dexie.js (preservando sessões)...');
+    logger.info('>>> [DBA] Executando purge manual das tabelas operacionais em Dexie.js (preservando sessões)...');
     try {
       // 1. Matar Processos em Segundo Plano (suspender listeners/workers do SQLite)
       sqliteService.setImportingMode(true);
@@ -715,15 +715,15 @@ export const localDb = {
       // 3. Restaurar processamento de segundo plano
       sqliteService.setImportingMode(false);
       
-      console.log('>>> [DBA] Purge operacional de Dexie.js concluído com sucesso via .clear().');
+      logger.info('>>> [DBA] Purge operacional de Dexie.js concluído com sucesso via .clear().');
     } catch (err) {
-      console.error('>>> [DBA] Falha crítica no purge operacional do banco Dexie:', err);
+      logger.error('>>> [DBA] Falha crítica no purge operacional do banco Dexie:', err);
       sqliteService.setImportingMode(false);
     }
   },
   
   forceInjectDemoSeed: async () => {
-    console.log('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de ativos Demo).');
+    logger.info('>>> [DBA] Disparando forceInjectDemoSeed (Injeção Atômica de ativos Demo).');
     const { demoService } = await import('./demoService');
     const res = await demoService.initDemoSession();
     if (!res) {
@@ -753,7 +753,7 @@ export const localDb = {
 };
 
 export async function requestPersistentStorage() {
-  console.log(">>> [DBA] Dexie.js Nativo configurado. Persistência de Storage garantida.");
+  logger.info(">>> [DBA] Dexie.js Nativo configurado. Persistência de Storage garantida.");
   return true;
 }
 
@@ -762,6 +762,7 @@ export async function isStoragePersisted() {
 }
 
 import { showRecoveryToast } from './NavigationGuardService';
+import { logger } from '../utils/logger';
 
 let winWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -769,14 +770,14 @@ export async function initializeWindowsDirectoryHandle(): Promise<boolean> {
   if (Capacitor.isNativePlatform()) return true;
 
   try {
-    console.log("[SRE INFRA] Vinculando manipulador para o diretório C:\\GBR_Inventario...");
+    logger.info("[SRE INFRA] Vinculando manipulador para o diretório C:\\GBR_Inventario...");
     winWorkspaceHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
       mode: 'readwrite',
       id: 'gbr_inventario_root'
     });
     return true;
   } catch (error) {
-    console.error("[SRE BARRAMENTO] Falha de privilégio no diretório C:\\GBR_Inventario:", error);
+    logger.error("[SRE BARRAMENTO] Falha de privilégio no diretório C:\\GBR_Inventario:", error);
     showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
     return false;
   }
@@ -790,9 +791,9 @@ export async function writeSnapshotToWindowsDirectory(dataPayload: any[]): Promi
     const writableStream = await fileHandle.createWritable();
     await writableStream.write(JSON.stringify(dataPayload));
     await writableStream.close();
-    console.log("[SRE TELEMETRIA] Espelhamento persistido com sucesso no diretório local.");
+    logger.info("[SRE TELEMETRIA] Espelhamento persistido com sucesso no diretório local.");
   } catch (error) {
-    console.error("[SRE CRÍTICO] Bloqueio de I/O do Windows detectado na gravação:", error);
+    logger.error("[SRE CRÍTICO] Bloqueio de I/O do Windows detectado na gravação:", error);
   }
 }
 
@@ -814,7 +815,7 @@ export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promis
     });
   } catch (error) {
     // SRE Protocol: Logs de diagnóstico expostos no barramento
-    console.error("[SRE GESTOR] Erro crítico de gravação física em hardware:", error);
+    logger.error("[SRE GESTOR] Erro crítico de gravação física em hardware:", error);
   }
 }
 
@@ -841,7 +842,7 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
 
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (isIframe) {
-    console.log(">>> [SRE-iFrame] Detectado iFrame Sandbox no Database Manager. Abrindo seletor de arquivo nativo HTML...");
+    logger.info(">>> [SRE-iFrame] Detectado iFrame Sandbox no Database Manager. Abrindo seletor de arquivo nativo HTML...");
     const file = await selectLocalFile();
     if (file) {
       sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
@@ -874,7 +875,7 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
           const fileHandle = await userWorkspaceHandle.getFileHandle(entry.name);
           const fileBlob = await fileHandle.getFile();
           
-          console.log(`[SRE INFRA] Planilha de origem localizada: ${entry.name}`);
+          logger.info(`[SRE INFRA] Planilha de origem localizada: ${entry.name}`);
           return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob };
         }
       }
@@ -886,7 +887,7 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
       return null;
     }
   } catch (error) {
-    console.error("[SRE INFRA] Operação cancelada ou negada pelo Windows:", error);
+    logger.error("[SRE INFRA] Operação cancelada ou negada pelo Windows:", error);
     return null;
   }
 }
@@ -895,7 +896,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (isIframe) {
     try {
-      console.log("[SRE-iFrame] Armazenando snapshot simulado localmente...");
+      logger.info("[SRE-iFrame] Armazenando snapshot simulado localmente...");
       localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
       
       // Auto-download contingency physical JSON file
@@ -912,7 +913,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
       
       return true;
     } catch (e) {
-      console.error("[SRE-iFrame] Erro ao salvar snapshot no localStorage ou baixar arquivo", e);
+      logger.error("[SRE-iFrame] Erro ao salvar snapshot no localStorage ou baixar arquivo", e);
       return false;
     }
   }
@@ -922,7 +923,7 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
   try {
     const permission = await userWorkspaceHandle.requestPermission({ mode: 'readwrite' });
     if (permission !== 'granted') {
-      console.error("[SRE CRÍTICO] Permissão de escrita negada pelo usuário.");
+      logger.error("[SRE CRÍTICO] Permissão de escrita negada pelo usuário.");
       return false;
     }
 
@@ -930,10 +931,10 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
     const writableStream = await fileHandle.createWritable();
     await writableStream.write(JSON.stringify(dataPayload));
     await writableStream.close();
-    console.log("[SRE TELEMETRIA] Snapshot gravado de forma resiliente em Documentos/GBR_Inventario.");
+    logger.info("[SRE TELEMETRIA] Snapshot gravado de forma resiliente em Documentos/GBR_Inventario.");
     return true;
   } catch (error) {
-    console.error("[SRE CRÍTICO] Falha de I/O de escrita na pasta do Windows:", error);
+    logger.error("[SRE CRÍTICO] Falha de I/O de escrita na pasta do Windows:", error);
     return false; 
   }
 }

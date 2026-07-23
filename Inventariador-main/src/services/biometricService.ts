@@ -1,5 +1,6 @@
 
 import localforage from 'localforage';
+import { logger } from '../utils/logger';
 
 const BIOMETRIC_STORE = 'gbr_biometric_credentials';
 
@@ -20,7 +21,7 @@ export const isBiometricSupported = async (): Promise<boolean> => {
     // Verifica se o autenticador de plataforma (biometria do dispositivo) está disponível
     return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
   } catch (err) {
-    console.error('[Biometric] Erro ao verificar suporte:', err);
+    logger.error('[Biometric] Erro ao verificar suporte:', err);
     return false;
   }
 };
@@ -29,9 +30,9 @@ export const isBiometricSupported = async (): Promise<boolean> => {
  * Registra a biometria para um usuário específico (Offline/Internal)
  */
 export const registerBiometric = async (username: string): Promise<boolean> => {
-  console.log('[Biometric] Iniciando registro para:', username);
+  logger.info('[Biometric] Iniciando registro para:', username);
   if (!isBiometricSupported()) {
-    console.warn('[Biometric] Não suportado pelo navegador');
+    logger.warn('[Biometric] Não suportado pelo navegador');
     return false;
   }
 
@@ -78,7 +79,7 @@ export const registerBiometric = async (username: string): Promise<boolean> => {
     }
     return false;
   } catch (err) {
-    console.error('[Biometric] Erro ao registrar:', err);
+    logger.error('[Biometric] Erro ao registrar:', err);
     return false;
   }
 };
@@ -113,7 +114,7 @@ export const authenticateBiometric = async (username: string): Promise<boolean> 
 
     return !!assertion;
   } catch (err) {
-    console.error('[Biometric] Erro ao autenticar:', err);
+    logger.error('[Biometric] Erro ao autenticar:', err);
     return false;
   }
 };

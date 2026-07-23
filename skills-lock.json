@@ -12,6 +12,12 @@
       "sourceType": "github",
       "skillPath": "SKILL.md",
       "computedHash": "b422e6a5e3faf8f57954e88ce949c450caba53ea14d6b9e665fa9fc782c18383"
+    },
+    "sre-auditor-gbr": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/sre-auditor-gbr/SKILL.md",
+      "computedHash": "local"
     }
   }
 }

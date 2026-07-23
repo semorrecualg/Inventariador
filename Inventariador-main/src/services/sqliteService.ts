@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
+import { logger } from '../utils/logger';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
 export interface DexieAsset {
@@ -187,20 +188,20 @@ export class SqliteService {
 
   public setImportingMode(active: boolean): void {
     this.isImportingBatch = active;
-    console.log(`>>> [SqliteService SRE] Modo de importação alterado para: ${active}`);
+    logger.info(`>>> [SqliteService SRE] Modo de importação alterado para: ${active}`);
   }
 
   public async init(isRecovery: boolean = false): Promise<boolean> {
     if (this.isInitialized) return true;
     try {
-      console.log(`>>> [Dexie SRE reboot] Inicializando armazenamento Dexie.js (isRecovery=${isRecovery})...`);
+      logger.info(`>>> [Dexie SRE reboot] Inicializando armazenamento Dexie.js (isRecovery=${isRecovery})...`);
       await db.open();
       this.isInitialized = true;
       this.dbStatus = DatabaseStatus.ACTIVE;
-      console.log(">>> [Dexie SRE reboot] Banco Dexie.js inicializado com sucesso.");
+      logger.info(">>> [Dexie SRE reboot] Banco Dexie.js inicializado com sucesso.");
       return true;
     } catch (error) {
-      console.error(">>> [Dexie SRE reboot] Erro fatal inicializando Dexie:", error);
+      logger.error(">>> [Dexie SRE reboot] Erro fatal inicializando Dexie:", error);
       this.isInitialized = false;
       this.dbStatus = DatabaseStatus.ERROR;
       return false;
@@ -224,7 +225,7 @@ export class SqliteService {
   }
 
   public async checkTableSchema(tableName: string): Promise<{ isValid: boolean; columns: string[] }> {
-    console.log(">>> [SqliteService] checkTableSchema requested for:", tableName);
+    logger.info(">>> [SqliteService] checkTableSchema requested for:", tableName);
     const cols = [
       'id', 'tenantId', '_tenantid', 'filial', '_unitid', 'status', 'etiqueta', 'tag', 'qt',
       'descricaodoativo', 'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal',
@@ -264,7 +265,7 @@ export class SqliteService {
   public async getUnitConfigs(tenantId: string): Promise<Record<string, unknown>[]> {
     try {
       if (tenantId) {
-        console.log(">>> [SqliteService] getUnitConfigs requested for tenant:", tenantId);
+        logger.info(">>> [SqliteService] getUnitConfigs requested for tenant:", tenantId);
       }
       const configs = await db.unit_configs.toArray();
       return configs as unknown as Record<string, unknown>[];
@@ -315,7 +316,7 @@ export class SqliteService {
   public async getOperationalUnitsWithStats(tenantId?: string): Promise<Record<string, unknown>[]> {
     try {
       if (tenantId) {
-        console.log(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantId);
+        logger.info(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantId);
       }
       const list = await db.local_assets.toArray();
       const nonDeleted = list.filter(a => a._is_deleted === 0);
@@ -487,7 +488,7 @@ export class SqliteService {
     const CHUNK_SIZE = 200;
 
     this.isImportingBatch = true;
-    console.log(`>>> [Dexie SRE Batch] Iniciando bulk insert de ${total} ativos...`);
+    logger.info(`>>> [Dexie SRE Batch] Iniciando bulk insert de ${total} ativos...`);
 
     try {
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
@@ -557,14 +558,14 @@ export class SqliteService {
       });
 
       const diskCount = await db.local_assets.count();
-      console.log(`>>> [Dexie SRE Batch] Contra-prova: total lido=${total}, gravado em disco=${diskCount}`);
+      logger.info(`>>> [Dexie SRE Batch] Contra-prova: total lido=${total}, gravado em disco=${diskCount}`);
       if (diskCount < total) {
         throw new Error(`[FATAL_IMPORT_CRASH] Contra-prova falhou: total esperado ${total}, mas em disco consta ${diskCount}.`);
       }
 
-      console.log(`>>> [Dexie SRE Batch] Sincronização concluída com sucesso! ${processed} itens persistidos.`);
+      logger.info(`>>> [Dexie SRE Batch] Sincronização concluída com sucesso! ${processed} itens persistidos.`);
     } catch (error) {
-      console.error('[FATAL_IMPORT_CRASH]', error);
+      logger.error('[FATAL_IMPORT_CRASH]', error);
       throw error;
     } finally {
       this.isImportingBatch = false;
@@ -670,7 +671,7 @@ export class SqliteService {
   }
 
   public setPermissionsGranted(granted: boolean): void {
-    console.log(">>> [SqliteService] setPermissionsGranted called with:", granted);
+    logger.info(">>> [SqliteService] setPermissionsGranted called with:", granted);
   }
 
   public async getFileStatus(): Promise<{ status: string; path: string; fileName?: string }> {
@@ -683,12 +684,12 @@ export class SqliteService {
   }
 
   public async requestFilePermission(): Promise<boolean> {
-    console.log(">>> [SqliteService] requestFilePermission called (Web/Dexie Simulation)");
+    logger.info(">>> [SqliteService] requestFilePermission called (Web/Dexie Simulation)");
     try {
       await this.init(true);
       return true;
     } catch (err) {
-      console.error(">>> [SqliteService] Error in requestFilePermission:", err);
+      logger.error(">>> [SqliteService] Error in requestFilePermission:", err);
       return false;
     }
   }
@@ -717,7 +718,7 @@ export class SqliteService {
       const list = await db.ativos.toArray();
       return list.filter(a => a._is_deleted === 0) as unknown as Record<string, unknown>[];
     } catch (err) {
-      console.error(">>> [SqliteService] Erro ao buscar todos os ativos:", err);
+      logger.error(">>> [SqliteService] Erro ao buscar todos os ativos:", err);
       return [];
     }
   }
@@ -737,7 +738,7 @@ export class SqliteService {
   }
 
   public async saveInventoryConfig(config: Record<string, unknown>): Promise<void> {
-    console.log(">>> [SqliteService] saveInventoryConfig called with:", config);
+    logger.info(">>> [SqliteService] saveInventoryConfig called with:", config);
     if (config.selectedUnit) {
       await this.setContextValue('selected_unit', String(config.selectedUnit));
     }
@@ -775,17 +776,17 @@ export class SqliteService {
   }
 
   public async closeCurrentConnection(): Promise<void> {
-    console.log(">>> [SqliteService] closeCurrentConnection called.");
+    logger.info(">>> [SqliteService] closeCurrentConnection called.");
     await this.closeConnection();
   }
 
   public async deleteCampaignSql(campaignId: string): Promise<void> {
-    console.log(">>> [SqliteService] deleteCampaignSql called for:", campaignId);
+    logger.info(">>> [SqliteService] deleteCampaignSql called for:", campaignId);
     await db.campaigns.delete(campaignId);
   }
 
   public async saveCampaign(c: Record<string, unknown>): Promise<void> {
-    console.log(">>> [SqliteService] saveCampaign called for:", c.id);
+    logger.info(">>> [SqliteService] saveCampaign called for:", c.id);
     const mapped = {
       id: String(c.id || ''),
       name: String(c.name || ''),
@@ -797,12 +798,12 @@ export class SqliteService {
   }
 
   public async persist(): Promise<void> {
-    console.log(">>> [SqliteService] persist (no-op for IndexedDB).");
+    logger.info(">>> [SqliteService] persist (no-op for IndexedDB).");
     return Promise.resolve();
   }
 
   public async saveUnitConfigToSql(config: Record<string, unknown>): Promise<void> {
-    console.log(">>> [SqliteService] saveUnitConfigToSql called.");
+    logger.info(">>> [SqliteService] saveUnitConfigToSql called.");
     await this.saveUnitConfigs([config]);
   }
 
@@ -814,13 +815,13 @@ export class SqliteService {
         return battery.level <= 0.05 && !battery.charging;
       }
     } catch (e) {
-      console.warn(">>> [SqliteService] Battery API error:", e);
+      logger.warn(">>> [SqliteService] Battery API error:", e);
     }
     return false;
   }
 
   public async forcePurgeAndConnect(): Promise<void> {
-    console.log(">>> [SqliteService SRE] Iniciando expurgo imperativo do banco local...");
+    logger.info(">>> [SqliteService SRE] Iniciando expurgo imperativo do banco local...");
     this.isImportingBatch = true;
     try {
       await db.ativos.clear();
@@ -830,9 +831,9 @@ export class SqliteService {
       await db.campaigns.clear();
       await db.SYSTEM_CONTEXT.clear();
       await db.unit_configs.clear();
-      console.log(">>> [SqliteService SRE] Tabelas físicas limpas e compactadas.");
+      logger.info(">>> [SqliteService SRE] Tabelas físicas limpas e compactadas.");
     } catch (err) {
-      console.error(">>> [SqliteService SRE] Falha crítica no forcePurgeAndConnect:", err);
+      logger.error(">>> [SqliteService SRE] Falha crítica no forcePurgeAndConnect:", err);
       throw err;
     } finally {
       this.isImportingBatch = false;
@@ -861,7 +862,7 @@ export class SqliteService {
       await this.flushFieldChanges();
       return true;
     } catch (err) {
-      console.error(">>> [SqliteService] Erro durante o forceSync:", err);
+      logger.error(">>> [SqliteService] Erro durante o forceSync:", err);
       return false;
     }
   }
@@ -900,7 +901,7 @@ export class SqliteService {
         avancoPercent
       };
     } catch (err) {
-      console.error(">>> [sqliteService] Erro calculando getDashboardStats:", err);
+      logger.error(">>> [sqliteService] Erro calculando getDashboardStats:", err);
       return {
         totalAtivos: 0,
         conferidoAtivos: 0,
@@ -919,7 +920,7 @@ export class SqliteService {
     newValue: string | null,
     userEmail: string
   ): void {
-    console.log(`>>> [sqliteService] bufferFieldChange registrado: Ativo=${asset.id}, Campo=${field}, Novo=${newValue}`);
+    logger.info(`>>> [sqliteService] bufferFieldChange registrado: Ativo=${asset.id}, Campo=${field}, Novo=${newValue}`);
     this.bufferedFieldChanges.push({
       asset,
       field,
@@ -931,7 +932,7 @@ export class SqliteService {
     
     if (this.bufferedFieldChanges.length >= 5) {
       this.flushFieldChanges().catch(err => {
-        console.error(">>> [sqliteService] Erro ao disparar flush automático:", err);
+        logger.error(">>> [sqliteService] Erro ao disparar flush automático:", err);
       });
     }
   }
@@ -943,7 +944,7 @@ export class SqliteService {
   public async flushFieldChanges(): Promise<void> {
     if (this.bufferedFieldChanges.length === 0) return;
     
-    console.log(`>>> [sqliteService] flushFieldChanges acionado para ${this.bufferedFieldChanges.length} alterações...`);
+    logger.info(`>>> [sqliteService] flushFieldChanges acionado para ${this.bufferedFieldChanges.length} alterações...`);
     const changesToProcess = [...this.bufferedFieldChanges];
     this.bufferedFieldChanges = [];
 
@@ -975,7 +976,7 @@ export class SqliteService {
         );
       }
     }
-    console.log(`>>> [sqliteService] flushFieldChanges concluído com sucesso.`);
+    logger.info(`>>> [sqliteService] flushFieldChanges concluído com sucesso.`);
   }
 }
 

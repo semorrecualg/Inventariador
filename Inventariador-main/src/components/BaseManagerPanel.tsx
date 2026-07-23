@@ -14,6 +14,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { isAdminUser } from '../utils/authUtils';
+import { logger } from '../utils/logger';
 
 interface BaseManagerPanelProps {
   onBack?: () => void;
@@ -92,7 +93,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
     addLog(`[SRE_PURGE] Iniciando esvaziamento controlado das tabelas...`);
     
     try {
-      console.log("[SRE_PURGE] Iniciando esvaziamento controlado das tabelas...");
+      logger.info("[SRE_PURGE] Iniciando esvaziamento controlado das tabelas...");
       
       // Simulação de regressão visual da purga atômica dividida em 4 etapas lógicas de SRE
       setProgresso(75); 
@@ -122,7 +123,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
       
       setProgresso(0);
       addLog(`[SRE_PURGE] Base totalmente higienizada.`);
-      console.log("[SRE_PURGE] Base totalmente higienizada.");
+      logger.info("[SRE_PURGE] Base totalmente higienizada.");
       
       // Força o histórico canônico e executa o reload de reset
       localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.MODULE_SELECTION, AppScreen.DASHBOARD, AppScreen.DATABASE_MANAGER]));
@@ -130,7 +131,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       addLog(`[SRE_PURGE] Erro crítico na purga: ${errMsg}`);
-      console.error("[SRE_PURGE] Erro crítico na purga:", err);
+      logger.error("[SRE_PURGE] Erro crítico na purga:", err);
       setOperacaoAtiva(null);
       setIsProcessing(false);
     }
@@ -170,7 +171,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       addLog(`[SRE_LOADER] Erro crítico na carga segmentada: ${errMsg}`);
-      console.error("[SRE_LOADER] Erro crítico na carga segmentada:", err);
+      logger.error("[SRE_LOADER] Erro crítico na carga segmentada:", err);
       setIsProcessing(false);
       setOperacaoAtiva(null);
       setProgresso(0);
@@ -184,7 +185,7 @@ export const BaseManagerPanel: React.FC<BaseManagerPanelProps> = ({ onBack, onRe
     } else {
       (async () => {
         addLog(`[SRE_LOADER] Invocando seletor de arquivos nativo do dispositivo móvel.`);
-        console.log("[SRE_LOADER] Invocando seletor de arquivos nativo do dispositivo móvel.");
+        logger.info("[SRE_LOADER] Invocando seletor de arquivos nativo do dispositivo móvel.");
         const arquivoBlob = await FileSystemStorageService.selecionarPlanilhaDoDispositivo();
         if (arquivoBlob) {
           await processarCargaFatiada(arquivoBlob);

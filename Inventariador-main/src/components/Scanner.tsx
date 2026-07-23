@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, Flashlight } from 'lucide-react';
 import { ScannerMode, ScanFeedbackMode } from '../types';
+import { logger } from '../utils/logger';
 
 interface ScannerProps {
   mode: ScannerMode;
@@ -139,7 +140,7 @@ const Scanner: React.FC<ScannerProps> = ({
         navigator.vibrate(batterySaver ? 50 : 100);
       }
     } catch (e) {
-      console.error('Feedback failed', e);
+      logger.error('Feedback failed', e);
     }
   };
 
@@ -154,7 +155,7 @@ const Scanner: React.FC<ScannerProps> = ({
     if (scannerRef.current) {
       isStoppingRef.current = true;
       try {
-        console.log(">>> [Scanner] Parando câmera...");
+        logger.info(">>> [Scanner] Parando câmera...");
         await scannerRef.current.stop();
         scannerRef.current = null;
         
@@ -165,11 +166,11 @@ const Scanner: React.FC<ScannerProps> = ({
         // Pequeno delay para o hardware liberar a câmera
         await new Promise(resolve => setTimeout(resolve, 300));
       } catch (err) {
-        console.warn("Scanner stop error (might already be stopped)", err);
+        logger.warn("Scanner stop error (might already be stopped)", err);
         scannerRef.current = null;
       } finally {
         isStoppingRef.current = false;
-        console.log(">>> [Scanner] Câmera parada.");
+        logger.info(">>> [Scanner] Câmera parada.");
       }
     }
   }, []);
@@ -203,7 +204,7 @@ const Scanner: React.FC<ScannerProps> = ({
             return;
           }
         } catch (perErr) {
-          console.warn(">>> [Scanner] Erro ao requisitar permissões do Capacitor:", perErr);
+          logger.warn(">>> [Scanner] Erro ao requisitar permissões do Capacitor:", perErr);
         }
       }
     }
@@ -271,7 +272,7 @@ const Scanner: React.FC<ScannerProps> = ({
               }
             }, 150);
           } catch (err) {
-            console.error(">>> [SCAN] Falha na persistência pós-scan:", err);
+            logger.error(">>> [SCAN] Falha na persistência pós-scan:", err);
             // Aqui poderíamos ter um feedback de erro visual se necessário
           }
         }
@@ -311,7 +312,7 @@ const Scanner: React.FC<ScannerProps> = ({
           }
         }
       } catch (e) {
-        console.warn("Scanner start failed", e);
+        logger.warn("Scanner start failed", e);
         throw e;
       }
 
@@ -335,13 +336,13 @@ const Scanner: React.FC<ScannerProps> = ({
           trackRef.current = track;
         }
       } catch (e) {
-        console.warn("Capability check failed", e);
+        logger.warn("Capability check failed", e);
       }
 
     } catch (err) {
       isStartingRef.current = false;
       if (isMounted.current) {
-        console.error("Scanner start error", err);
+        logger.error("Scanner start error", err);
         const errMsg = err instanceof Error ? err.message : "";
         const isPermissionDenied = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("not allowed") || errMsg.toLowerCase().includes("denied");
         if (isPermissionDenied) {
@@ -375,19 +376,19 @@ const Scanner: React.FC<ScannerProps> = ({
 
       try {
         const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
-        console.log(">>> [Scanner] Capabilities:", capabilities);
+        logger.info(">>> [Scanner] Capabilities:", capabilities);
         
         if (capabilities.torch) {
           // Hardware native command for torch mode
           await trackRef.current.applyConstraints({
             advanced: [{ torch: torch === 'on' }]
           } as unknown as MediaTrackConstraints);
-          console.log(`>>> [Scanner] Torch set to: ${torch}`);
+          logger.info(`>>> [Scanner] Torch set to: ${torch}`);
         } else {
-          console.warn(">>> [Scanner] Torch not supported by this camera track");
+          logger.warn(">>> [Scanner] Torch not supported by this camera track");
         }
       } catch (e) {
-        console.warn(">>> [Scanner] Torch applyConstraints failed", e);
+        logger.warn(">>> [Scanner] Torch applyConstraints failed", e);
       }
     };
     applyTorch();
@@ -423,7 +424,7 @@ const Scanner: React.FC<ScannerProps> = ({
         }
       }
     } catch (e) {
-      console.error("Zoom failed", e);
+      logger.error("Zoom failed", e);
     }
   };
 

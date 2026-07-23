@@ -3,6 +3,7 @@ import { db } from '../services/sqliteService';
 import { syncService, photoSyncManager } from '../services/syncService';
 import localforage from 'localforage';
 import { Cloud, CloudLightning, CloudOff, RefreshCw } from 'lucide-react';
+import { logger } from '../utils/logger';
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 
@@ -28,7 +29,7 @@ export const SyncBadge: React.FC = () => {
       setPendingData(dataCount);
       setPendingPhotos(photoKeys.length);
     } catch (err) {
-      console.error("Erro ao ler contadores de sincronização:", err);
+      logger.error("Erro ao ler contadores de sincronização:", err);
     }
   };
 
@@ -37,7 +38,7 @@ export const SyncBadge: React.FC = () => {
     const interval = setInterval(checkCounters, 5000); // Atualiza a cada 5s discretamente
 
     const handlePhysicalWrite = () => {
-      console.log(">>> [SyncBadge] Reatividade Física SRE acionada. Recalculando contadores...");
+      logger.info(">>> [SyncBadge] Reatividade Física SRE acionada. Recalculando contadores...");
       checkCounters();
     };
 
@@ -65,7 +66,7 @@ export const SyncBadge: React.FC = () => {
       await photoSyncManager.processPhotoSyncQueue();
       await checkCounters();
     } catch (err) {
-      console.error("Falha no disparo manual de sincronização:", err);
+      logger.error("Falha no disparo manual de sincronização:", err);
     } finally {
       setIsSyncing(false);
     }

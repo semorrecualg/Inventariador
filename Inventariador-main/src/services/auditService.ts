@@ -1,5 +1,6 @@
 import { localDb } from './localDbService';
 import { Asset } from '../types';
+import { logger } from '../utils/logger';
 
 export const auditService = {
   /**
@@ -47,10 +48,10 @@ export const auditService = {
         tenantId: updatedAsset.tenantId || updatedAsset._tenantid || 'CICOPAL'
       });
 
-      console.log(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id || updatedAsset.primarykey}`);
+      logger.info(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id || updatedAsset.primarykey}`);
       return { hasChanges: true };
     } catch (error) {
-      console.error(">>> [Audit Error] Falha ao registrar trilha de auditoria local:", error);
+      logger.error(">>> [Audit Error] Falha ao registrar trilha de auditoria local:", error);
       throw new Error("Bloqueio de segurança: Não é permitido salvar alterações sem trilha de auditoria.");
     }
   }

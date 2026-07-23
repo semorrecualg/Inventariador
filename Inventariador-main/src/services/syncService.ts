@@ -3,6 +3,7 @@ import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
+import { logger } from '../utils/logger';
 
 export interface UserSessionData {
   id: string;
@@ -65,12 +66,12 @@ export const checkHardwareSafety = async (): Promise<boolean> => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const battery: any = await (navigator as any).getBattery();
       if (battery && battery.level <= 0.05 && !battery.charging) {
-        console.warn(`>>> [Hardware Safety Check] BLOQUEIO DE BATERIA ATIVO: Carga atual de ${Math.round(battery.level * 100)}% sem fonte externa conectada. Sincronização e gravações físicas suspensas.`);
+        logger.warn(`>>> [Hardware Safety Check] BLOQUEIO DE BATERIA ATIVO: Carga atual de ${Math.round(battery.level * 100)}% sem fonte externa conectada. Sincronização e gravações físicas suspensas.`);
         return false;
       }
     }
   } catch (err) {
-    console.error(">>> [Hardware Safety Check] Erro de verificação do subsistema de energia:", err);
+    logger.error(">>> [Hardware Safety Check] Erro de verificação do subsistema de energia:", err);
   }
   return true;
 };
@@ -98,11 +99,11 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
                 'CICOPAL';
 
     if (isStringInvalid(tId)) {
-      console.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantId é inválido ou ausente.");
+      logger.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantId é inválido ou ausente.");
       return null;
     }
     
-    console.log(">>> [Sync Guard] Identificador de contrato (tenantId) resolvido com sucesso:", tId);
+    logger.info(">>> [Sync Guard] Identificador de contrato (tenantId) resolvido com sucesso:", tId);
     
     return {
       id: String(parsed.id),
@@ -112,7 +113,7 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
     };
   } catch (e: unknown) {
     const errorMsg = e instanceof Error ? e.message : String(e);
-    console.error(">>> [Sync Guard] Falha catastrófica ao decodificar sessão do operador no LocalStorage:", errorMsg);
+    logger.error(">>> [Sync Guard] Falha catastrófica ao decodificar sessão do operador no LocalStorage:", errorMsg);
     
     sqliteService.logAuditEvent(
       'SYSTEM',
@@ -121,7 +122,7 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
       'gbr_user_session',
       `Erro de decode de sessao: ${errorMsg}`
     ).catch(err => {
-      console.error(">>> [Sync Telemetry] Erro ao gravar log de falha de decodificação no SQLite:", err);
+      logger.error(">>> [Sync Telemetry] Erro ao gravar log de falha de decodificação no SQLite:", err);
     });
     
     return null;
@@ -161,7 +162,7 @@ export const addCampaignToSyncQueue = async (
     timestamp: Date.now()
   };
   await campaignQueueStore.setItem(id, item);
-  console.log(`>>> [Sync Campaign] Campanha ${campaignId} empilhada na fila delta (${action}).`);
+  logger.info(`>>> [Sync Campaign] Campanha ${campaignId} empilhada na fila delta (${action}).`);
   
   if (navigator.onLine) {
     processCampaignSyncQueue().catch(console.error);
@@ -190,7 +191,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
     if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
-      console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido ou ausente na fila de campanhas. Suspendendo processamento.");
+      logger.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido ou ausente na fila de campanhas. Suspendendo processamento.");
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('gbr_sync_warning', {
           detail: { message: "Parâmetros voláteis de rede (Tenant ou Filial) ausentes. Sincronização de campanhas postergada." }
@@ -209,7 +210,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
     const items = await getPendingCampaignSyncItems();
     if (items.length === 0) return { success: true, processedCount: 0 };
 
-    console.log(`>>> [Sync Campaign] Processando ${items.length} campanhas pendentes...`);
+    logger.info(`>>> [Sync Campaign] Processando ${items.length} campanhas pendentes...`);
     let processedCount = 0;
 
     for (const item of items) {
@@ -240,16 +241,16 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
         
         await campaignQueueStore.removeItem(item.id);
         processedCount++;
-        console.log(`>>> [Sync Campaign Success] Campanha ${item.campaignId} sincronizada com nuvem.`);
+        logger.info(`>>> [Sync Campaign Success] Campanha ${item.campaignId} sincronizada com nuvem.`);
       } catch (err) {
-        console.error(`>>> [Sync Campaign Fail] Erro ao sincronizar campanha ${item.campaignId}:`, err);
+        logger.error(`>>> [Sync Campaign Fail] Erro ao sincronizar campanha ${item.campaignId}:`, err);
         if (!navigator.onLine) break;
       }
     }
 
     return { success: true, processedCount };
   } catch (err) {
-    console.error(">>> [Sync Campaign Fatal] Falha ao varrer fila de campanhas:", err);
+    logger.error(">>> [Sync Campaign Fatal] Falha ao varrer fila de campanhas:", err);
     return { success: false, processedCount: 0 };
   }
 };
@@ -266,7 +267,7 @@ export const photoSyncManager = {
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
-        console.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido ou ausente na fila de fotos. Suspendendo processamento.");
+        logger.warn(">>> [Sync Fail-Safe] Identificador de Contrato ou Filial inválido ou ausente na fila de fotos. Suspendendo processamento.");
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('gbr_sync_warning', {
             detail: { message: "Parâmetros voláteis de rede (Tenant ou Filial) ausentes. Sincronização de fotos postergada." }
@@ -276,14 +277,14 @@ export const photoSyncManager = {
       return { success: false, uploadCount: 0, failedCount: 0 };
     }
     if (sqliteService.isImportingBatch) {
-      console.log('[Sync Photo] Sincronização suspensa: Importação em lote ativa.');
+      logger.info('[Sync Photo] Sincronização suspensa: Importação em lote ativa.');
       return { success: false, uploadCount: 0, failedCount: 0 };
     }
     if (!navigator.onLine) return { success: false, uploadCount: 0, failedCount: 0 };
 
     const currentMode = localStorage.getItem('app_database_mode');
     if (currentMode?.startsWith('INTERNAL')) {
-      console.log('[Sync Photo] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
+      logger.info('[Sync Photo] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
       return { success: false, uploadCount: 0, failedCount: 0 };
     }
 
@@ -297,7 +298,7 @@ export const photoSyncManager = {
         if (!item) continue;
 
         if (item.attempts >= 3) {
-          console.warn(`>>> [Sync Photo] Item ${item.id} atingiu o limite de tentativas. Expurgação telemetria.`);
+          logger.warn(`>>> [Sync Photo] Item ${item.id} atingiu o limite de tentativas. Expurgação telemetria.`);
           failedCount++;
           
           await sqliteService.logAuditEvent(
@@ -342,17 +343,17 @@ export const photoSyncManager = {
           await photoQueueStore.removeItem(key);
           uploadCount++;
           
-          console.log(`>>> [Sync Photo Success] Imagem do ativo ${item.assetId} enviada para o Supabase e limpa localmente.`);
+          logger.info(`>>> [Sync Photo Success] Imagem do ativo ${item.assetId} enviada para o Supabase e limpa localmente.`);
         } catch (uploadFail) {
           const uploadFailMsg = uploadFail instanceof Error ? uploadFail.message : String(uploadFail);
           item.error = uploadFailMsg || "Erro desconhecido no Storage";
           await photoQueueStore.setItem(key, item);
-          console.error(`>>> [Sync Photo Fail] Tentativa ${item.attempts} falhou para o item ${item.id}:`, uploadFail);
+          logger.error(`>>> [Sync Photo Fail] Tentativa ${item.attempts} falhou para o item ${item.id}:`, uploadFail);
           failedCount++;
           
           if (isQuotaExceededError(uploadFail)) {
             const errorMsg = 'LIMITE DE ARMAZENAMENTO ATINGIDO (Supabase Quota). Sincronização de fotos suspensa para evitar perda de dados. Contate o administrador.';
-            console.error(`[Sync Photo] ${errorMsg}`);
+            logger.error(`[Sync Photo] ${errorMsg}`);
             window.dispatchEvent(new CustomEvent('gbr_sync_quota_error', { 
               detail: { message: errorMsg } 
             }));
@@ -363,7 +364,7 @@ export const photoSyncManager = {
       
       return { success: failedCount === 0, uploadCount, failedCount };
     } catch (globalError) {
-      console.error(">>> [Sync Photo Fatal] Falha crítica ao processar fila de imagens:", globalError);
+      logger.error(">>> [Sync Photo Fatal] Falha crítica ao processar fila de imagens:", globalError);
       return { success: false, uploadCount, failedCount: failedCount + 1 };
     }
   }
@@ -386,7 +387,7 @@ const _syncService = {
     }
 
     if (sqliteService.isImportingBatch) {
-      console.warn(">>> [Sync Fail-Safe] Bloqueio imperativo: Operação suspensa por atividade na Carga Expert.");
+      logger.warn(">>> [Sync Fail-Safe] Bloqueio imperativo: Operação suspensa por atividade na Carga Expert.");
       return { success: false, processedCount: 0, error: "Sincronização suspensa: Importação em lote activa." };
     }
 
@@ -418,7 +419,7 @@ const _syncService = {
       for (const record of records) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
         if (!navigator.onLine) {
-          console.warn(">>> [Sync Guard] Conectividade perdida no meio do laço de processamento. Abortando ciclo.");
+          logger.warn(">>> [Sync Guard] Conectividade perdida no meio do laço de processamento. Abortando ciclo.");
           break;
         }
 
@@ -482,7 +483,7 @@ const _syncService = {
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
             const detailsStr = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
             
-            console.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
+            logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
 
             await sqliteService.logAuditEvent(
               user.id,
@@ -495,7 +496,7 @@ const _syncService = {
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
+          logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
           await sqliteService.logAuditEvent(
             user.id,
@@ -511,7 +512,7 @@ const _syncService = {
 
       // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente via Dexie sem usar SQL
       if (syncedPrimaryKeys.length > 0) {
-        console.log(`>>> [Sync ACID Engine] Processando atualização local sequencial via Dexie para ${syncedPrimaryKeys.length} registros...`);
+        logger.info(`>>> [Sync ACID Engine] Processando atualização local sequencial via Dexie para ${syncedPrimaryKeys.length} registros...`);
 
         await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
           for (let m = 0; m < syncedPrimaryKeys.length; m++) {
@@ -522,20 +523,20 @@ const _syncService = {
           }
         });
         
-        console.log(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso via Dexie.`);
+        logger.info(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso via Dexie.`);
       }
 
       // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco
       try {
-        console.log(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
+        logger.info(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const isoString = sevenDaysAgo.toISOString();
         
         await db.audit_logs.where('updated_at').below(isoString).delete();
-        console.log(">>> [Disk Saturation Guard] Expurgo concluído com sucesso via Dexie.");
+        logger.info(">>> [Disk Saturation Guard] Expurgo concluído com sucesso via Dexie.");
       } catch (logErr) {
-        console.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
+        logger.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
       }
 
       return {
@@ -546,7 +547,7 @@ const _syncService = {
 
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(">>> [Sync Service Engine] Falha catastrófica na fila de dados:", msg);
+      logger.error(">>> [Sync Service Engine] Falha catastrófica na fila de dados:", msg);
       return { success: false, processedCount: 0, error: msg };
     }
   },
@@ -574,7 +575,7 @@ const _syncService = {
       localStorage.setItem(backupKey, JSON.stringify(filtered));
       return true;
     } catch (e) {
-      console.error(">>> [Contingency Guard] Erro ao consolidar rascunho físico em localStorage via Dexie:", e);
+      logger.error(">>> [Contingency Guard] Erro ao consolidar rascunho físico em localStorage via Dexie:", e);
       return false;
     }
   }
@@ -611,7 +612,7 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
      
      return unsynced.length;
    } catch (e) {
-     console.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela local_assets via Dexie, tentando fallbackStore:", e);
+     logger.error(">>> [Sync Guard] Erro ao contar ativos pendentes na tabela local_assets via Dexie, tentando fallbackStore:", e);
      try {
        const assets = await fallbackStore.getItem<Record<string, unknown>[]>('loaded_assets') || [];
        const unsynced = assets.filter(a => a._is_synced === 0 || a._is_synced === false || a.sync_status === 'PENDING');
@@ -682,19 +683,19 @@ export const clearSyncQueue = async (): Promise<void> => {
  */
 export const processSyncQueue = async (): Promise<void> => {
   if (isSyncingLoopActive) {
-    console.warn(">>> [Sync Alias Guard] Concurrency prevented: a sync loop is already running.");
+    logger.warn(">>> [Sync Alias Guard] Concurrency prevented: a sync loop is already running.");
     return;
   }
   
   const safe = await checkHardwareSafety();
   if (!safe) {
-    console.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
+    logger.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
     return;
   }
 
   isSyncingLoopActive = true;
   try {
-    console.log(">>> [Sync Alias] Starting sequential manual synchronization...");
+    logger.info(">>> [Sync Alias] Starting sequential manual synchronization...");
     await syncService.processDataSyncQueue().catch(console.error);
     await photoSyncManager.processPhotoSyncQueue().catch(console.error);
   } finally {
@@ -710,7 +711,7 @@ export const processPhotoSyncQueue = async (): Promise<{ success: boolean; uploa
   
   const safe = await checkHardwareSafety();
   if (!safe) {
-    console.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
+    logger.warn(">>> [Sync Guard] Gravação física abortada preventivamente devido à bateria baixa (< 5%).");
     return { success: false, uploadCount: 0, failedCount: 0 };
   }
 
@@ -726,7 +727,7 @@ const scheduleNextCycle = () => {
   let nextDelay = 30000; // 30 segundos padrão
   if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
     nextDelay = 300000; // 5 minutos de resguardo para poupar bateria
-    console.error(`>>> [Sync Loop SRE] Sistema em avaria severa cumulativa. Backoff de segurança (5 minutos) ativado.`);
+    logger.error(`>>> [Sync Loop SRE] Sistema em avaria severa cumulativa. Backoff de segurança (5 minutos) ativado.`);
   }
   setTimeout(runSyncLoopCycle, nextDelay);
 };
@@ -760,29 +761,29 @@ const runSyncLoopCycle = async () => {
   
   try {
     if (navigator.onLine) {
-      console.log(">>> [Sync Loop] Ativando ciclo sequencial de sincronização SRE...");
+      logger.info(">>> [Sync Loop] Ativando ciclo sequencial de sincronização SRE...");
       
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(`>>> [Sync Loop Guard] Limite de falhas consecutivas atingido (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}). Prorrogando ciclo para poupar bateria.`);
+        logger.warn(`>>> [Sync Loop Guard] Limite de falhas consecutivas atingido (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}). Prorrogando ciclo para poupar bateria.`);
         hasFailure = true;
         return;
       }
 
       await syncService.processDataSyncQueue().catch(err => {
-        console.error(">>> [Sync Loop] Falha no ciclo de sincronização de dados:", err);
+        logger.error(">>> [Sync Loop] Falha no ciclo de sincronização de dados:", err);
         hasFailure = true;
       });
       await photoSyncManager.processPhotoSyncQueue().catch(err => {
-        console.error(">>> [Sync Loop] Falha no ciclo de sincronização de fotos:", err);
+        logger.error(">>> [Sync Loop] Falha no ciclo de sincronização de fotos:", err);
         hasFailure = true;
       });
       await processCampaignSyncQueue().catch(err => {
-        console.error(">>> [Sync Loop] Falha no ciclo de sincronização de campanhas:", err);
+        logger.error(">>> [Sync Loop] Falha no ciclo de sincronização de campanhas:", err);
         hasFailure = true;
       });
     }
   } catch (err) {
-    console.error(">>> [Sync Loop] Erro fatal no ciclo de sincronização geral:", err);
+    logger.error(">>> [Sync Loop] Erro fatal no ciclo de sincronização geral:", err);
     hasFailure = true;
   } finally {
     isSyncingLoopActive = false;

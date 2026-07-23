@@ -1,6 +1,7 @@
 import { UserRole } from '../types';
 import { sqliteService } from '../services/sqliteService';
 import { isAdminEmail } from './authUtils';
+import { logger } from './logger';
 
 export interface SupabaseUserProfile {
   userId: string;
@@ -13,11 +14,11 @@ export async function processarRoteamentoPosLoginSaas(
   user: SupabaseUserProfile, 
   navigate: (path: string) => void | Promise<void>
 ): Promise<void> {
-  console.log(`[GBR v2.6] Analisando regras de acesso seguras para: ${user.email}`);
+  logger.info(`[GBR v2.6] Analisando regras de acesso seguras para: ${user.email}`);
 
   // 1. Sandbox de Demonstração (DEMO) com bypass antecipado
   if (user.role === 'DEMO' || String(user.role).toUpperCase() === 'DEMO') {
-    console.log("[GBR v2.6] Inicializando Sandbox de Demonstração Livre.");
+    logger.info("[GBR v2.6] Inicializando Sandbox de Demonstração Livre.");
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
     navigate('/dashboard-demo');
     return;
@@ -25,7 +26,7 @@ export async function processarRoteamentoPosLoginSaas(
 
   // 2. Validação de Segurança de Perfil Corporativo
   if (String(user.role).toUpperCase() === 'MASTER' && !user.tenantId) {
-    console.error("[GBR v2.6] Bloqueio de Segurança: MASTER sem tenantId.");
+    logger.error("[GBR v2.6] Bloqueio de Segurança: MASTER sem tenantId.");
     throw new Error("Erro de consistência: Perfil MASTER sem empresa vinculada.");
   }
 
@@ -36,10 +37,10 @@ export async function processarRoteamentoPosLoginSaas(
   // 3. Fluxo para Base Totalmente Vazia (Lote 0)
   if (totalAtivosLocal === 0) {
     if (isSuperAdmin || isMaster) {
-      console.log("[Bootstrap] Base vazia. Redirecionando Admin para Carga Inicial.");
+      logger.info("[Bootstrap] Base vazia. Redirecionando Admin para Carga Inicial.");
       navigate('/load-database');
     } else {
-      console.warn("[Bootstrap] Auditor retido: Banco local vazio. Aguardando provisionamento do Admin.");
+      logger.warn("[Bootstrap] Auditor retido: Banco local vazio. Aguardando provisionamento do Admin.");
       navigate('/auditor/aguardando-carga');
     }
     return;

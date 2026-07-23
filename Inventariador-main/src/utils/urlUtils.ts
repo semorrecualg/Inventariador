@@ -1,3 +1,4 @@
+import { logger } from './logger';
 
 /**
  * Retorna a URL base do aplicativo para redirecionamentos.
@@ -28,7 +29,7 @@ export const getAppBaseUrl = (): string => {
     if (fullHref.includes('.run.app')) {
       const match = fullHref.match(/(https:\/\/[^/]+\.run\.app)/);
       if (match) {
-        console.log('[URL Utils] Localhost detectado, mas reconstruindo URL da nuvem:', match[1]);
+        logger.info('[URL Utils] Localhost detectado, mas reconstruindo URL da nuvem:', match[1]);
         return `${match[1]}/`;
       }
     }

@@ -29,6 +29,7 @@ import {
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
+import { logger } from '../utils/logger';
 
 interface UserManagementProps {
   users: User[];
@@ -42,7 +43,7 @@ interface UserManagementProps {
 }
 
 const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant, databaseMode }) => {
-  console.log('>>> [UserManagement] Rendered with:', { 
+  logger.info('>>> [UserManagement] Rendered with:', { 
     currentUserEmail: currentUser?.email, 
     currentUserTenant: currentUser?.tenantid,
     availableUnitsCount: availableUnits?.length,
@@ -288,7 +289,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || !editEmail) {
-      console.warn('[UserManagement] Tentativa de salvar edição com campos obrigatórios vazios.');
+      logger.warn('[UserManagement] Tentativa de salvar edição com campos obrigatórios vazios.');
       return;
     }
 
@@ -297,7 +298,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     const password = editPassword.trim() || selectedUser.password;
     const name = editName.trim();
 
-    console.log(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
+    logger.info(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
 
     // Verificar duplicidade (excluindo o próprio usuário)
     if (users.find(u => u.email !== selectedUser.email && (u.email.toLowerCase() === email || u.username.toUpperCase() === username.toUpperCase()))) {
@@ -338,14 +339,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     setUsers(prev => {
       const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
-      console.log('[UserManagement] Lista de usuários atualizada localmente.');
+      logger.info('[UserManagement] Lista de usuários atualizada localmente.');
       localStorage.setItem('app_users', safeStringify(updated));
       return updated;
     });
 
     // Se o usuário editado for o usuário logado, atualiza o estado global e o localStorage
     if (currentUser && selectedUser.email.toLowerCase() === currentUser.email.toLowerCase()) {
-      console.log('[UserManagement] Atualizando dados do usuário logado...');
+      logger.info('[UserManagement] Atualizando dados do usuário logado...');
       if (setUser) {
         setUser(updatedUser);
       }
@@ -384,7 +385,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             return updated;
           });
         } catch (err) {
-          console.error('Erro ao remover usuário da nuvem:', err);
+          logger.error('Erro ao remover usuário da nuvem:', err);
           showModal("Erro", "Não foi possível remover o usuário da nuvem. Tente novamente.", "error");
         }
       }

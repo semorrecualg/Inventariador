@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
+import { logger } from '../utils/logger';
 import { 
   Search, 
   Filter, 
@@ -310,7 +311,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     const TAMANHO_LOTE_SRE = 200;
     const allIdsArray = Array.from(selectedAssetIds);
     
-    console.log(`[SRE AUDIT] Iniciando conciliação em lote fracionada para ${allIdsArray.length} itens.`);
+    logger.info(`[SRE AUDIT] Iniciando conciliação em lote fracionada para ${allIdsArray.length} itens.`);
     
     for (let i = 0; i < allIdsArray.length; i += TAMANHO_LOTE_SRE) {
       const chunkIds = allIdsArray.slice(i, i + TAMANHO_LOTE_SRE);
@@ -321,7 +322,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
         _dataLeitura: new Date().toISOString()
       });
       
-      console.log(`[SRE AUDIT] Bloco de conciliação de ${i} até ${i + chunkIds.length} despachado.`);
+      logger.info(`[SRE AUDIT] Bloco de conciliação de ${i} até ${i + chunkIds.length} despachado.`);
     }
 
     setSelectedAssetIds(new Set());

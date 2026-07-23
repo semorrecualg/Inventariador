@@ -7,6 +7,7 @@ import { sqliteService, db, DexieAsset } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
+import { logger } from '../utils/logger';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -48,7 +49,7 @@ export const backupInventory = async (mode: DatabaseMode, customName?: string): 
       config = encryptedConfig ? await encryption.decrypt(encryptedConfig) as Record<string, unknown> : {};
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-        console.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
+        logger.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
         return false;
       }
       throw error;
@@ -78,7 +79,7 @@ export const backupInventory = async (mode: DatabaseMode, customName?: string): 
 
     return true;
   } catch (error) {
-    console.error('Erro ao gerar backup:', error);
+    logger.error('Erro ao gerar backup:', error);
     return false;
   }
 };
@@ -118,7 +119,7 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
 
         resolve(newState);
       } catch (error) {
-        console.error('Erro ao restaurar backup:', error);
+        logger.error('Erro ao restaurar backup:', error);
         resolve(null);
       }
     };
@@ -140,18 +141,18 @@ export const saveConfigOnly = async (data: Omit<InventoryState, 'assets'>): Prom
     const keys = getInventoryKeys(mode);
     const encryptedConfig = await encryption.encrypt(data);
     await localforage.setItem(keys.config, encryptedConfig);
-    console.log('>>> [Persistence] Configurações salvas (Fast Path).');
+    logger.info('>>> [Persistence] Configurações salvas (Fast Path).');
   } catch (error) {
-    console.error('Erro ao salvar configurações:', error);
+    logger.error('Erro ao salvar configurações:', error);
   }
 };
 
 export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   try {
     await localDb.assets.put(asset);
-    console.log(`>>> [Persistence] Ativo ${asset.ETIQUETA} salvo incrementalmente.`);
+    logger.info(`>>> [Persistence] Ativo ${asset.ETIQUETA} salvo incrementalmente.`);
   } catch (error) {
-    console.error('Erro no salvamento incremental:', error);
+    logger.error('Erro no salvamento incremental:', error);
     // Re-throw to allow the caller to handle the "Healthy Pessimism" logic
     throw new Error(`Erro SQL no salvamento local: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -201,7 +202,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     await FileSystemStorageService.salvarEmDiretorioLocal(dadosHigienizados);
     await backupDatabaseToPhysicalStorage(dadosHigienizados);
   } catch (err) {
-    console.error('[SRE] Erro ao espelhar em diretorio local:', err);
+    logger.error('[SRE] Erro ao espelhar em diretorio local:', err);
   }
 }
 
@@ -210,7 +211,7 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     const mode = data.databaseMode || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
     
-    console.log(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode}, skipSqlAssetsInsert: ${skipSqlAssetsInsert})...`);
+    logger.info(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode}, skipSqlAssetsInsert: ${skipSqlAssetsInsert})...`);
     
     // 1. Salva localmente primeiro (Offline-First)
     const config = { ...data } as Record<string, unknown>;
@@ -223,14 +224,14 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
 
     // 1.1 Persistência Global em SQLite (Soberania de Dados) / Injeção para o Jeep-SQLite
     // Sincroniza e insere no SQLite físico independente de modo (seja INTERNAL ou SUPABASE na nuvem)
-    console.log('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
+    logger.info('>>> [Persistence] Gravando metadados e configuração no SQLite físico...');
     await sqliteService.saveInventoryConfig(config);
     
     // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
     // persistimos os ativos na tabela SQL física de alta performance.
     const assetsToSave = dirtyAssets || assets;
     if (assetsToSave.length > 0 && !skipSqlAssetsInsert) {
-      console.log(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no SQLite físico via buffer...`);
+      logger.info(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no SQLite físico via buffer...`);
       await sqliteService.bulkInsertAssets(assetsToSave);
     }
     
@@ -244,7 +245,7 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     const integrityHash = await generateChecksum(assets);
     config._integrity_hash = integrityHash;
 
-    console.log(`>>> [Persistence] Criptografando e gravando cache IndexedDB...`);
+    logger.info(`>>> [Persistence] Criptografando e gravando cache IndexedDB...`);
     // Criptografamos os dados para o cache do Navegador (Legado/Fallback)
     const [encryptedConfig, encryptedAssets] = await Promise.all([
       encryption.encrypt(config),
@@ -267,28 +268,28 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
         }
       }
     } catch (dexieErr) {
-      console.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
+      logger.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
     }
 
-    console.log('>>> [Persistence] Gravado com sucesso no IndexedDB.');
+    logger.info('>>> [Persistence] Gravado com sucesso no IndexedDB.');
 
     // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se estiver em modo SUPABASE
     if (mode.startsWith('SUPABASE')) {
       const assetsToSync = dirtyAssets || [];
       
       if (assetsToSync.length > 0) {
-        console.log(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
-        syncAssetsToCloud(assetsToSync).catch(err => console.warn('Cloud sync failed (offline?):', err));
+        logger.info(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
+        syncAssetsToCloud(assetsToSync).catch(err => logger.warn('Cloud sync failed (offline?):', err));
         // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
       } else if (forceCloudSync) {
-        console.log('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => console.warn('Config sync failed (offline?):', err));
+        logger.info('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
       }
     }
 
   } catch (error) {
-    console.error('>>> [Persistence] Erro ao salvar inventário no IndexedDB:', error);
+    logger.error('>>> [Persistence] Erro ao salvar inventário no IndexedDB:', error);
     throw error;
   }
 };
@@ -304,7 +305,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
 
     if (mode === DatabaseMode.INTERNAL) {
       try {
-        console.log('>>> [Persistence] Tentando carregar dados do SQLite físico...');
+        logger.info('>>> [Persistence] Tentando carregar dados do SQLite físico...');
         
         // Antes de carregar, verificamos o status do arquivo
         const fileStatus = await sqliteService.getFileStatus();
@@ -314,7 +315,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         const isInitialized = sqliteService.getIsInitialized();
         
         if (!isAcessivel && !isInitialized && (fileStatus.status === 'permission_denied' || fileStatus.status === 'expired')) {
-          console.warn(`>>> [Persistence] SOBERANIA: Arquivo físico bloqueado (${fileStatus.status}) e sem cache inicializado. Impedindo carga.`);
+          logger.warn(`>>> [Persistence] SOBERANIA: Arquivo físico bloqueado (${fileStatus.status}) e sem cache inicializado. Impedindo carga.`);
           return {
             assets: [],
             companies: [],
@@ -334,12 +335,12 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
         sqlConfig = config as Partial<InventoryState>;
         
         if (sqlAssets.length > 0) {
-          console.log(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);
+          logger.info(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);
         } else {
-          console.warn('>>> [Persistence] SQLite físico/cache vazio ou sem ativos.');
+          logger.warn('>>> [Persistence] SQLite físico/cache vazio ou sem ativos.');
         }
       } catch (sqlErr) {
-        console.error('>>> [Persistence] Erro crítico ao ler SQLite físico:', sqlErr);
+        logger.error('>>> [Persistence] Erro crítico ao ler SQLite físico:', sqlErr);
       }
     }
 
@@ -360,16 +361,16 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     if (Object.keys(config).length === 0 && encryptedConfig) {
       try {
         config = await encryption.decrypt(encryptedConfig) as Record<string, unknown>;
-        console.log('>>> [Persistence] Configuração carregada do cache IndexedDB.');
+        logger.info('>>> [Persistence] Configuração carregada do cache IndexedDB.');
       } catch (err) {
-        console.warn('>>> [Persistence] Falha ao decriptografar config do cache:', err);
-        console.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de config. Limpando cache e forçando re-sync...');
+        logger.warn('>>> [Persistence] Falha ao decriptografar config do cache:', err);
+        logger.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de config. Limpando cache e forçando re-sync...');
         try {
           localStorage.clear();
           sessionStorage.clear();
           await localforage.clear();
         } catch (clearErr) {
-          console.error('Erro ao limpar localforage/storages:', clearErr);
+          logger.error('Erro ao limpar localforage/storages:', clearErr);
         }
         if (typeof window !== 'undefined') {
           window.location.reload();
@@ -385,16 +386,16 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     if (finalAssets.length === 0 && encryptedAssets) {
       try {
         finalAssets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
-        console.log(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
+        logger.info(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
       } catch (err) {
-        console.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
-        console.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de ativos. Limpando cache e forçando re-sync...');
+        logger.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
+        logger.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de ativos. Limpando cache e forçando re-sync...');
         try {
           localStorage.clear();
           sessionStorage.clear();
           await localforage.clear();
         } catch (clearErr) {
-          console.error('Erro ao limpar localforage/storages:', clearErr);
+          logger.error('Erro ao limpar localforage/storages:', clearErr);
         }
         if (typeof window !== 'undefined') {
           window.location.reload();
@@ -411,7 +412,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
       const currentHash = await generateChecksum(normalizedAssets);
       if (storedHash !== currentHash) {
-        console.warn('>>> [Integrity] Checksum divergente (Normal se houve alterações incrementais fora do saveFull).');
+        logger.warn('>>> [Integrity] Checksum divergente (Normal se houve alterações incrementais fora do saveFull).');
       }
     }
 
@@ -420,7 +421,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       const currentConfig = config as Record<string, unknown>;
       const currentCompanies = currentConfig.companies as string[] || [];
       if (currentCompanies.length === 0) {
-        console.log('>>> [Persistence] Auto-populando lista de empresas a partir dos ativos normalizados...');
+        logger.info('>>> [Persistence] Auto-populando lista de empresas a partir dos ativos normalizados...');
         const extracted = [...new Set(normalizedAssets.map(a => a.filial))].filter(Boolean);
         currentConfig.companies = extracted;
       }
@@ -432,7 +433,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       databaseMode: mode
     } as InventoryState;
   } catch (error) {
-    console.error('Error loading inventory:', error);
+    logger.error('Error loading inventory:', error);
     return null;
   }
 };
@@ -450,7 +451,7 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
       assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-        console.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
+        logger.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
         await localforage.removeItem(keys.assets);
         return;
       }
@@ -465,7 +466,7 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     const encryptedRemaining = await encryption.encrypt(remainingAssets);
     await localforage.setItem(keys.assets, encryptedRemaining);
   } catch (error) {
-    console.error('Error clearing multiple inventories from IndexedDB:', error);
+    logger.error('Error clearing multiple inventories from IndexedDB:', error);
     throw error;
   }
 };
@@ -482,7 +483,7 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
         assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
       } catch (error: unknown) {
         if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-          console.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
+          logger.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
           await localforage.removeItem(keys.assets);
           return;
         }
@@ -504,7 +505,7 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
       }
     }
   } catch (error) {
-    console.error('Error clearing inventory from IndexedDB:', error);
+    logger.error('Error clearing inventory from IndexedDB:', error);
     throw error;
   }
 };

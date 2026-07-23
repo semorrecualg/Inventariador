@@ -46,6 +46,7 @@ import SecurityPinModal from './SecurityPinModal';
 import AIChatModal from './AIChatModal';
 
 import { sqliteService } from '../services/sqliteService';
+import { logger } from '../utils/logger';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen, params?: NavigationParams) => void;
@@ -217,7 +218,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         return false;
       }
     } catch (e) {
-      console.warn("Falha ao ler status da bateria:", e);
+      logger.warn("Falha ao ler status da bateria:", e);
     }
     return true;
   };
@@ -257,7 +258,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         onNavigate(AppScreen.UNIT_SELECTION);
       }
     } catch (e) {
-      console.error(">>> [SessionStorage Error] Falha técnica de persistência:", e);
+      logger.error(">>> [SessionStorage Error] Falha técnica de persistência:", e);
       showModal(
         "Falha de Armazenamento", 
         "O armazenamento volátil do dispositivo está temporariamente indisponível. Libere memória no sistema.", 
@@ -272,7 +273,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     if (isCheckingIntegrity) return; 
     
     try {
-      console.log(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
+      logger.info(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
       
       const isBatteryOk = await validateBatteryLevel();
       if (!isBatteryOk) return;
@@ -294,7 +295,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       try {
         await sqliteService.forceSync();
       } catch (syncErr) {
-        console.error(">>> [SQLite IO Error] Falha crítica de escrita física:", syncErr);
+        logger.error(">>> [SQLite IO Error] Falha crítica de escrita física:", syncErr);
         showModal("Falha de Gravação", "O driver nativo do banco de dados falhou ao realizar o Disk Flush físico. Verifique permissões.", "error");
         return;
       }
@@ -308,7 +309,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         "success"
       );
     } catch (err: unknown) {
-      console.error(err);
+      logger.error(err);
       showModal("Erro na Validação", "Não foi possível validar a soberania: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setIsCheckingIntegrity(false); // Restaura o estado de escuta de forma segura

@@ -6,6 +6,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
+import { logger } from '../utils/logger';
 
 interface GPSComplianceGuardProps {
   children: React.ReactNode;
@@ -132,7 +133,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             }
           }
         } catch (err) {
-          console.error('[Geofencing] Erro Turf.js ao calcular perímetro em thread desacoplada:', err);
+          logger.error('[Geofencing] Erro Turf.js ao calcular perímetro em thread desacoplada:', err);
           if (isAdminUser) {
             setStatus('bypassed');
             onGpsStatusChange?.(true);
@@ -156,7 +157,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         let geoResult;
         try {
           if (isAdminUser || isIframe) {
-            console.warn('[Sandbox GPS Bypass Active] Ignorando detecção devido a Sandbox/iFrame ou Admin.');
+            logger.warn('[Sandbox GPS Bypass Active] Ignorando detecção devido a Sandbox/iFrame ou Admin.');
             setStatus('bypassed');
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
@@ -167,7 +168,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           geoResult = await getCurrentDeviceLocation(roleStr, anchorCoords);
         } catch (locationErr: unknown) {
           const errMsg = locationErr instanceof Error ? locationErr.message : String(locationErr);
-          console.warn('[Sandbox GPS Bypass Active] Rejeição ou violação de política ao capturar coordenadas:', errMsg);
+          logger.warn('[Sandbox GPS Bypass Active] Rejeição ou violação de política ao capturar coordenadas:', errMsg);
           if (isAdminUser || isIframe) {
             setStatus('bypassed');
             setUserLocation(anchorCoords);
@@ -183,7 +184,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         if (!isActive) return;
 
         if (geoResult.isBypassed || geoResult.source === 'admin_bypass') {
-          console.warn("[GBR v2.6] Utilizando bypass administrativo em tela.");
+          logger.warn("[GBR v2.6] Utilizando bypass administrativo em tela.");
           setStatus('bypassed');
           setUserLocation({ lat: geoResult.latitude, lng: geoResult.longitude });
           setCurrentDistance(0);
@@ -201,11 +202,11 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       } catch (err: unknown) {
         if (!isActive) return;
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', errMsg);
+        logger.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', errMsg);
         
         const isIframe = typeof window !== 'undefined' && window.self !== window.top;
         if (isAdminUser || isIframe) {
-          console.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo devido a Sandbox/iFrame ou perfil Admin.');
+          logger.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo devido a Sandbox/iFrame ou perfil Admin.');
           setStatus('bypassed');
           setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
           setCurrentDistance(0);
@@ -230,13 +231,13 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             }
           },
           (err) => {
-            console.warn('[Geofencing/Watch] Erro no monitoramento contínuo (capturado e silenciado na guarda):', err.message);
+            logger.warn('[Geofencing/Watch] Erro no monitoramento contínuo (capturado e silenciado na guarda):', err.message);
           },
           { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
         );
       }
     } catch (watchErr) {
-      console.warn('[Geofencing/Watch] Falha síncrona ao registrar watchPosition (silenciada):', watchErr);
+      logger.warn('[Geofencing/Watch] Falha síncrona ao registrar watchPosition (silenciada):', watchErr);
     }
 
     return () => {
@@ -245,7 +246,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         try {
           navigator.geolocation.clearWatch(watchId);
         } catch (e) {
-          console.warn('Erro ao limpar clearWatch:', e);
+          logger.warn('Erro ao limpar clearWatch:', e);
         }
       }
     };
@@ -273,19 +274,19 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           alert('Permissão de geolocalização não concedida pelo sistema operacional.');
         }
       } catch (err) {
-        console.error('Falha ao solicitar permissão via Capacitor Geolocation:', err);
+        logger.error('Falha ao solicitar permissão via Capacitor Geolocation:', err);
         alert('Dispositivo ou sandbox não suporta solicitação nativa de permissão.');
       }
     };
 
     const handleUseReferenceCoordinates = () => {
       if (!isAdminUser) {
-        console.warn('[GBR v2.6] Tentativa não autorizada de bypass de coordenadas.');
+        logger.warn('[GBR v2.6] Tentativa não autorizada de bypass de coordenadas.');
         alert('Acesso negado: Essa funcionalidade de contingência é limitada a Administradores e Gestores.');
         return;
       }
       if (unitConfig && unitConfig.lat && unitConfig.lng) {
-        console.log('[GBR v2.6] Ativando coordenadas estimadas/failsafe para fins de conformidade operacional.');
+        logger.info('[GBR v2.6] Ativando coordenadas estimadas/failsafe para fins de conformidade operacional.');
         setStatus('bypassed');
         setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
         setCurrentDistance(0);

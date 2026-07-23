@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShieldCheck, Lock, Database, CheckCircle2, ChevronRight, Info, Eye, ShieldAlert, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { logger } from '../utils/logger';
 
 interface TrustOnboardingProps {
   onAccept: () => void;
@@ -264,14 +265,14 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
 
           <button
             onClick={() => {
-              console.log("TrustOnboarding click - step:", step, "acceptedTerms:", acceptedTerms);
+              logger.info("TrustOnboarding click - step:", step, "acceptedTerms:", acceptedTerms);
               if (step < steps.length) {
                 setStep(step + 1);
               } else if (acceptedTerms) {
-                console.log("TrustOnboarding calling onAccept()");
+                logger.info("TrustOnboarding calling onAccept()");
                 onAccept();
               } else {
-                console.log("TrustOnboarding cannot call onAccept - terms not accepted");
+                logger.info("TrustOnboarding cannot call onAccept - terms not accepted");
               }
             }}
             disabled={step === steps.length && !acceptedTerms}

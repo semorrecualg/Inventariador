@@ -1,4 +1,5 @@
 import { Geolocation } from '@capacitor/geolocation';
+import { logger } from './logger';
 
 /**
  * Utilitário para captura de geolocalização (GPS)
@@ -94,7 +95,7 @@ export async function getCurrentDeviceLocation(
 
   // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER, GESTOR), garanta o bypass síncrono definitivo da validação
   if (isAdmin) {
-    console.log(">>> [SRE GPS Bypass] Perfil administrativo detectado. Aplicando bypass síncrono definitivo.");
+    logger.info(">>> [SRE GPS Bypass] Perfil administrativo detectado. Aplicando bypass síncrono definitivo.");
     showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'Soberania Admin (Ativa)');
     return {
       latitude: finalAnchor.lat,
@@ -107,7 +108,7 @@ export async function getCurrentDeviceLocation(
 
   // Se a API navigator.geolocation não existir ou se estivermos em iframe sandbox onde ela pode estar desabilitada
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    console.warn(">>> [SRE GPS Fallback] API navigator.geolocation inexistente ou desativada no documento. Aplicando fallback automático.");
+    logger.warn(">>> [SRE GPS Fallback] API navigator.geolocation inexistente ou desativada no documento. Aplicando fallback automático.");
     showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'API Inexistente (Bypass Fallback)');
     return {
       latitude: finalAnchor.lat,
@@ -156,7 +157,7 @@ export async function getCurrentDeviceLocation(
     };
   } catch (errorVal: unknown) {
     const errorMsg = errorVal instanceof Error ? errorVal.message : String(errorVal || '');
-    console.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
+    logger.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
     
     // Tratamento específico de erro de Permissions Policy, sandbox, denied, ou timeout
     // Em caso de falha de permissão (como em ambiente web sandbox/iFrame), aplique um FALLBACK AUTOMÁTICO
@@ -190,10 +191,10 @@ let isReconnectingGps = false;
 export const startAutonomousTracking = async () => {
   if (watchId !== null || isReconnectingGps) return;
 
-  console.log('Iniciando Rastreamento Autônomo (Capacitor/Web)...');
+  logger.info('Iniciando Rastreamento Autônomo (Capacitor/Web)...');
   
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    console.warn('Autônomo: Geolocation desativado ou indisponível.');
+    logger.warn('Autônomo: Geolocation desativado ou indisponível.');
     return;
   }
 
@@ -206,7 +207,7 @@ export const startAutonomousTracking = async () => {
       },
       (position, err) => {
         if (err) {
-          console.warn('Autônomo: Erro no rastreio', err.message);
+          logger.warn('Autônomo: Erro no rastreio', err.message);
           
           const isPermissionDenied = err.message && (
             err.message.toLowerCase().includes('permission') || 
@@ -215,7 +216,7 @@ export const startAutonomousTracking = async () => {
           );
           
           if (isPermissionDenied) {
-            console.warn('Autônomo: Permissão negada ou desabilitada por política. Desativando rastreamento autônomo definitivo para evitar loops.');
+            logger.warn('Autônomo: Permissão negada ou desabilitada por política. Desativando rastreamento autônomo definitivo para evitar loops.');
             if (watchId !== null) {
               Geolocation.clearWatch({ id: watchId }).catch(() => {});
               watchId = null;
@@ -227,7 +228,7 @@ export const startAutonomousTracking = async () => {
                             (err.message && (err.message.toLowerCase().includes('timeout') || err.message.toLowerCase().includes('expired')));
           
           if (isTimeout) {
-            console.warn('Autônomo: Erro por timeout/expired capturado na WebView. Decoplando e limpando watch de rede...');
+            logger.warn('Autônomo: Erro por timeout/expired capturado na WebView. Decoplando e limpando watch de rede...');
             
             // Limpa imperativamente o listener ativo para evitar vazamento de WebView
             if (watchId !== null) {
@@ -247,7 +248,7 @@ export const startAutonomousTracking = async () => {
                 }
               }
             } catch (e) {
-              console.warn("Falha ao recuperar chave ou perfil de usuário:", e);
+              logger.warn("Falha ao recuperar chave ou perfil de usuário:", e);
             }
 
             if (isAdmin) {
@@ -261,11 +262,11 @@ export const startAutonomousTracking = async () => {
                   }
                 }
               } catch (e) {
-                console.warn("Falha ao ler gbr_current_unit_config:", e);
+                logger.warn("Falha ao ler gbr_current_unit_config:", e);
               }
               lastLocation = { lat: anchor.lat, lng: anchor.lng, accuracy: 1.0 };
               lastTimestamp = Date.now();
-              console.warn('[Bypass Admin Ativo] Aplicando coordenadas de ancoragem admin síncronas de conformidade por timeout.');
+              logger.warn('[Bypass Admin Ativo] Aplicando coordenadas de ancoragem admin síncronas de conformidade por timeout.');
             } else {
               // Envia coordenada nula controlada
               lastLocation = null;
@@ -293,11 +294,11 @@ export const startAutonomousTracking = async () => {
         }
       }
     ).catch((e: unknown) => {
-      console.warn('Autônomo [Promise Catch]: erro ao registrar watchPosition (silenciado):', e);
+      logger.warn('Autônomo [Promise Catch]: erro ao registrar watchPosition (silenciado):', e);
       return null;
     });
   } catch (e) {
-    console.error('Falha ao iniciar watchPosition:', e);
+    logger.error('Falha ao iniciar watchPosition:', e);
   }
 };
 
@@ -308,7 +309,7 @@ export const stopAutonomousTracking = async () => {
   if (watchId !== null) {
     await Geolocation.clearWatch({ id: watchId });
     watchId = null;
-    console.log('Rastreamento Autônomo Finalizado.');
+    logger.info('Rastreamento Autônomo Finalizado.');
   }
 };
 
@@ -339,14 +340,14 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
       return newLoc;
     }
   } catch (err) {
-    console.warn('>>> [GPS] Falha no Geolocation.getCurrentPosition Nativo, tentando Web API...', err);
+    logger.warn('>>> [GPS] Falha no Geolocation.getCurrentPosition Nativo, tentando Web API...', err);
   }
 
   // Fallback para Web Geolocation API com Try/Catch robusto
   return new Promise((resolve) => {
     try {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        console.log('>>> [GPS] Geolocalização não suportada ou indisponível.');
+        logger.info('>>> [GPS] Geolocalização não suportada ou indisponível.');
         resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
         return;
       }
@@ -365,13 +366,13 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
         },
         (err) => {
           // Captura silenciosa de erros de permissão ou política
-          console.warn('>>> [GPS] Fallback Web Geolocation erro (silenciado):', err.message);
+          logger.warn('>>> [GPS] Fallback Web Geolocation erro (silenciado):', err.message);
           resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
         },
         { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
       );
     } catch (e) {
-      console.warn('>>> [GPS] Geolocation Web API lançou exceção (silenciada):', e);
+      logger.warn('>>> [GPS] Geolocation Web API lançou exceção (silenciada):', e);
       resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
     }
   });

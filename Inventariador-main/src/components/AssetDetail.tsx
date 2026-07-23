@@ -44,6 +44,7 @@ import { createWorker } from 'tesseract.js';
 
 import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata } from '../services/tagService';
+import { logger } from '../utils/logger';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -130,10 +131,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           const parsedDraft = JSON.parse(savedDraft);
           // Auto-restaurar rascunho temporário
           setWorkingAsset(parsedDraft);
-          console.log(`>>> [AssetDetail] Rascunho restaurado dinamicamente para ativo: ${workingAsset.id}`);
+          logger.info(`>>> [AssetDetail] Rascunho restaurado dinamicamente para ativo: ${workingAsset.id}`);
         }
       } catch (err) {
-        console.error('Erro ao ler rascunho do Ativo:', err);
+        logger.error('Erro ao ler rascunho do Ativo:', err);
       }
     }
   }, [assets?.[0]?.id]);
@@ -145,7 +146,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         const key = `kardek_draft_asset_${workingAsset.id}`;
         sessionStorage.setItem(key, JSON.stringify(workingAsset));
       } catch (err) {
-        console.error('Erro ao guardar rascunho do Ativo:', err);
+        logger.error('Erro ao guardar rascunho do Ativo:', err);
       }
     }
   }, [workingAsset]);
@@ -237,7 +238,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         setOcrTargetField(null);
       }
     } catch (err) {
-      console.error('Erro no OCR:', err);
+      logger.error('Erro no OCR:', err);
     } finally {
       setIsOCRProcessing(false);
       if (ocrInputRef.current) ocrInputRef.current.value = '';
@@ -282,16 +283,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           }
           
           // Feedback visual de sucesso (opcional, mas bom para UX)
-          console.log('Endereço capturado:', result.address);
+          logger.info('Endereço capturado:', result.address);
         } catch (err) {
-          console.error('Erro ao obter endereço:', err);
+          logger.error('Erro ao obter endereço:', err);
           alert('Não foi possível obter o endereço automaticamente. Verifique sua conexão.');
         } finally {
           setIsGeocoding(false);
         }
       },
       (err) => {
-        console.error('Erro de GPS:', err);
+        logger.error('Erro de GPS:', err);
         setIsGeocoding(false);
         alert('Erro ao acessar GPS: ' + err.message);
       },
@@ -343,7 +344,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           dispLng = (Math.random() - 0.5) * 0.001;
         }
       } catch (gpsErr) {
-        console.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
+        logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
         // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
         dispLat = (Math.random() - 0.5) * 0.0005;
         dispLng = (Math.random() - 0.5) * 0.0005;
@@ -359,7 +360,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         longitude: String(finalLng)
       }));
     } catch (e) {
-      console.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
+      logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
     }
   };
 
@@ -545,7 +546,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     try {
       sessionStorage.removeItem(`kardek_draft_asset_${workingAsset.id}`);
     } catch (e) {
-      console.warn(e);
+      logger.warn(e);
     }
 
     onBack();
@@ -626,7 +627,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       onUpdate(updated);
       
     } catch (err) {
-      console.error('Erro ao processar foto:', err);
+      logger.error('Erro ao processar foto:', err);
     } finally {
       setIsUploadingPhoto(false);
     }

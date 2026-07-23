@@ -22,6 +22,7 @@ import { isAdminUser } from '../utils/authUtils';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { Device } from '@capacitor/device';
+import { logger } from '../utils/logger';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -85,15 +86,15 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       const currentTenant = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
       const currentFilial = (initialUnit || '').trim();
       
-      console.log(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
+      logger.info(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
       
       const parsedCampaigns = await localDb.campaigns.toArray(currentTenant, currentFilial);
-      console.log(`>>> [Dexie Native] Campanhas lidas do banco local:`, parsedCampaigns);
+      logger.info(`>>> [Dexie Native] Campanhas lidas do banco local:`, parsedCampaigns);
       
       setLocalCampaigns(parsedCampaigns);
       return parsedCampaigns;
     } catch (err) {
-      console.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
+      logger.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
       if (campaigns && campaigns.length > 0) {
         setLocalCampaigns(campaigns);
       }
@@ -123,7 +124,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       }
       await fetchLocalCampaignsOnScreen();
     } catch (err) {
-      console.error(">>> [Refresh] Erro ao atualizar dados:", err);
+      logger.error(">>> [Refresh] Erro ao atualizar dados:", err);
     } finally {
       setIsRefreshing(false);
     }
@@ -151,7 +152,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         isCharging = battery.charging ?? true;
       }
     } catch (err) {
-      console.warn('>>> [Battery Safety] Erro na leitura de bateria:', err);
+      logger.warn('>>> [Battery Safety] Erro na leitura de bateria:', err);
     }
 
     if (batteryLevel < 0.05 && !isCharging) {
@@ -172,7 +173,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     setIsSaving(true);
     try {
       const finalUnit = newCampaignUnit.trim();
-      console.log(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantId}, Unit: ${finalUnit || 'TODAS'}`);
+      logger.info(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantId}, Unit: ${finalUnit || 'TODAS'}`);
       
       const newCampaign: Partial<InventoryCampaign> = {
         name: newCampaignName.trim(),
@@ -203,7 +204,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setTimeout(() => setErrorMessage(null), 3000);
       }
     } catch (err) {
-      console.error('Erro ao criar campanha:', err);
+      logger.error('Erro ao criar campanha:', err);
       setErrorMessage('Erro técnico ao criar campanha');
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {
@@ -223,7 +224,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         isLowBattery = true;
       }
     } catch (err) {
-      console.warn(">>> [Hardware Check] Erro na requisição Device.getBatteryInfo():", err);
+      logger.warn(">>> [Hardware Check] Erro na requisição Device.getBatteryInfo():", err);
       try {
         const nav = typeof navigator !== 'undefined' ? (navigator as unknown as { getBattery?: () => Promise<{ level?: number; charging?: boolean }> }) : null;
         if (nav && typeof nav.getBattery === 'function') {
@@ -235,7 +236,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
           }
         }
       } catch (e2) {
-        console.warn(">>> [Hardware Check] Erro de fallback navigator:", e2);
+        logger.warn(">>> [Hardware Check] Erro de fallback navigator:", e2);
       }
     }
 
@@ -248,7 +249,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
     setIsSaving(true);
     try {
-      console.log(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
+      logger.info(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
       
       await localDb.campaigns.delete(campaignId);
       
@@ -259,7 +260,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       try {
         await deleteCampaign(campaignId);
       } catch (sbErr) {
-        console.warn(">>> [Supabase Sync] Deletar campanha remoto indisponível:", sbErr);
+        logger.warn(">>> [Supabase Sync] Deletar campanha remoto indisponível:", sbErr);
       }
 
       setSuccessMessage('Campanha excluída com sucesso');
@@ -273,12 +274,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       // Re-fetch automático para limpar a tela ou usar navegação se zerar
       const remaining = await fetchLocalCampaignsOnScreen();
       if (remaining.length === 0) {
-        console.log(">>> [Governance] Lista de campanhas zerou. Voltando.");
+        logger.info(">>> [Governance] Lista de campanhas zerou. Voltando.");
         onBack();
       }
       
     } catch (err) {
-      console.error('>>> [Dexie] Erro ao excluir campanha:', err);
+      logger.error('>>> [Dexie] Erro ao excluir campanha:', err);
       setErrorMessage('Erro técnico ao persistir exclusão no Dexie');
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {
@@ -287,14 +288,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   const handleUpdateStatus = async (id: string, status: CampaignStatus) => {
-    console.log(`>>> [Governance] Iniciando transição de status para ID: ${id}. Aguardando confirmação do banco...`);
+    logger.info(`>>> [Governance] Iniciando transição de status para ID: ${id}. Aguardando confirmação do banco...`);
     setUpdatingStatusId(id);
     
     try {
       if (status === CampaignStatus.CLOSED) {
         const snapSuccess = await createCampaignSnapshot(id, user?.email || 'admin');
         if (!snapSuccess) {
-          console.warn('>>> [Governance] Falha ao criar snapshot. Continuando encerramento mas sem histórico imutável.');
+          logger.warn('>>> [Governance] Falha ao criar snapshot. Continuando encerramento mas sem histórico imutável.');
         }
       }
 
@@ -303,7 +304,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         if (onRefresh) await onRefresh();
         await fetchLocalCampaignsOnScreen();
         
-        console.log('>>> [Database] Operação confirmada. Atualizando interface...');
+        logger.info('>>> [Database] Operação confirmada. Atualizando interface...');
         setSuccessMessage('Operação confirmada no banco');
         setTimeout(() => setSuccessMessage(null), 3000);
         
@@ -315,7 +316,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         setTimeout(() => setErrorMessage(null), 3000);
       }
     } catch (err) {
-      console.error('>>> [Database] Falha crítica na conexão:', err);
+      logger.error('>>> [Database] Falha crítica na conexão:', err);
       setErrorMessage('Erro de rede: Banco indisponível');
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {

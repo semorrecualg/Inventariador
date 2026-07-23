@@ -1,5 +1,6 @@
 import { db, DexieAsset } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
+import { logger } from '../utils/logger';
 
 export interface MasterDashboardStats {
   tenantId: string;
@@ -33,7 +34,7 @@ function detectUserEmail(userEmail?: string): string {
       }
     }
   } catch (e) {
-    console.warn(">>> [DashboardService] Falha silenciosa ao detectar user no storage:", e);
+    logger.warn(">>> [DashboardService] Falha silenciosa ao detectar user no storage:", e);
   }
 
   try {
@@ -45,7 +46,7 @@ function detectUserEmail(userEmail?: string): string {
       }
     }
   } catch (e) {
-    console.warn(">>> [DashboardService] Falha silenciosa ao detectar token de auth:", e);
+    logger.warn(">>> [DashboardService] Falha silenciosa ao detectar token de auth:", e);
   }
 
   return '';
@@ -81,7 +82,7 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
     const pendentesAtivos = totalAtivos - conferidoAtivos;
     const avancoPercent = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
 
-    console.log(`>>> [DashboardService SRE] getMasterDashboardStats executado. Tenant: ${targetTenant}, Total: ${totalAtivos}, Conferidos: ${conferidoAtivos}`);
+    logger.info(`>>> [DashboardService SRE] getMasterDashboardStats executado. Tenant: ${targetTenant}, Total: ${totalAtivos}, Conferidos: ${conferidoAtivos}`);
 
     return {
       tenantId: targetTenant,
@@ -91,7 +92,7 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
       avancoPercent
     };
   } catch (err) {
-    console.error(">>> [DashboardService SRE] Erro ao calcular getMasterDashboardStats:", err);
+    logger.error(">>> [DashboardService SRE] Erro ao calcular getMasterDashboardStats:", err);
     return {
       tenantId: targetTenant,
       totalAtivos: 0,
@@ -138,7 +139,7 @@ export async function getAuditorProgress(tenantId: string, filial: string, userE
     const totalPendenteSincronizacao = totalLocal - totalSincronizado;
     const percentualSincronizado = totalLocal > 0 ? Math.round((totalSincronizado / totalLocal) * 100) : 0;
 
-    console.log(`>>> [DashboardService SRE] getAuditorProgress executado. Filial: ${filialClean}, Local: ${totalLocal}, Sincronizado: ${totalSincronizado}`);
+    logger.info(`>>> [DashboardService SRE] getAuditorProgress executado. Filial: ${filialClean}, Local: ${totalLocal}, Sincronizado: ${totalSincronizado}`);
 
     return {
       tenantId: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId,
@@ -149,7 +150,7 @@ export async function getAuditorProgress(tenantId: string, filial: string, userE
       percentualSincronizado
     };
   } catch (err) {
-    console.error(">>> [DashboardService SRE] Erro ao calcular getAuditorProgress:", err);
+    logger.error(">>> [DashboardService SRE] Erro ao calcular getAuditorProgress:", err);
     return {
       tenantId: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId,
       filial: filialClean,

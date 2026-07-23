@@ -1,6 +1,7 @@
 import { supabase } from './supabaseService';
 import { localDb } from './localDbService';
 import { db } from './sqliteService';
+import { logger } from '../utils/logger';
 
 export const backupService = {
   /**
@@ -12,7 +13,7 @@ export const backupService = {
         return { success: false, error: 'Dispositivo em modo offline' };
       }
 
-      console.log(`>>> [Backup Service] Iniciando backup automático em cloud para o usuário: ${userId}`);
+      logger.info(`>>> [Backup Service] Iniciando backup automático em cloud para o usuário: ${userId}`);
 
       // 1. Coleta dados locais de ativos de forma limpa
       const assets = await localDb.assets.toArray();
@@ -51,10 +52,10 @@ export const backupService = {
         throw uploadError;
       }
 
-      console.log(`>>> [Backup Service Success] Backup automático concluído com sucesso para o arquivo: ${filePath}`);
+      logger.info(`>>> [Backup Service Success] Backup automático concluído com sucesso para o arquivo: ${filePath}`);
       return { success: true };
     } catch (err) {
-      console.error('>>> [Backup Service Fail] Erro crítico no backup automatizado do usuário:', err);
+      logger.error('>>> [Backup Service Fail] Erro crítico no backup automatizado do usuário:', err);
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }

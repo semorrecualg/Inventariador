@@ -1,6 +1,6 @@
 
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
-console.log(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
+logger.info(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
@@ -94,6 +94,7 @@ import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
+import { logger } from './utils/logger';
 
 export class AppBootstrapError extends Error {
   constructor(message: string) {
@@ -142,7 +143,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     return { hasError: true, error };
   }
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("App Crash:", error, errorInfo);
+    logger.error("App Crash:", error, errorInfo);
     try {
       const activeUserJson = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
       const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
@@ -159,9 +160,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
           componentStack: errorInfo.componentStack
         }).substring(0, 5000),
         tenantId: tenantId
-      }).catch(err => console.warn("Erro ao registrar log de crash:", err));
+      }).catch(err => logger.warn("Erro ao registrar log de crash:", err));
     } catch (logErr) {
-      console.warn("Falha ao tentar logar crash:", logErr);
+      logger.warn("Falha ao tentar logar crash:", logErr);
     }
   }
   render() {
@@ -234,7 +235,7 @@ const removerLoaderEstatico = () => {
   try {
     const loader = document.getElementById('gbr-initial-loader') || document.getElementById('app-loader');
     if (loader && loader.style.display !== 'none') {
-      console.log(">>> [App] Removendo gbr-initial-loader de forma limpa e coordenada.");
+      logger.info(">>> [App] Removendo gbr-initial-loader de forma limpa e coordenada.");
       loader.style.opacity = '0';
       setTimeout(() => {
         loader.style.display = 'none';
@@ -242,7 +243,7 @@ const removerLoaderEstatico = () => {
       }, 200);
     }
   } catch (err) {
-    console.warn(">>> [GBR-Emergency] Erro ao remover loader estático", err);
+    logger.warn(">>> [GBR-Emergency] Erro ao remover loader estático", err);
   }
 };
 
@@ -275,7 +276,7 @@ const App: React.FC = () => {
   /*
   if (typeof window !== 'undefined' && window.self !== window.top) {
     if (!sessionStorage.getItem('gbr_session_active')) {
-      console.warn(">>> [GBR-Compliance] Ambiente iFrame detectado. Injetando sessão estática de barreira contra Wipe.");
+      logger.warn(">>> [GBR-Compliance] Ambiente iFrame detectado. Injetando sessão estática de barreira contra Wipe.");
       sessionStorage.setItem('gbr_tenant_id', 'CICOPAL');
       const cachedFilial = localStorage.getItem('filial') || localStorage.getItem('selectedUnit') || '';
       sessionStorage.setItem('gbr_unit_id', cachedFilial);
@@ -319,7 +320,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isDatabaseLoaded) {
-      console.log('>>> [DATABASE] Banco de dados inicializado de forma reativa.');
+      logger.info('>>> [DATABASE] Banco de dados inicializado de forma reativa.');
     }
   }, [isDatabaseLoaded]);
 
@@ -370,7 +371,7 @@ const App: React.FC = () => {
         }
 
         if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedFilial || resolvedFilial === 'NULL' || resolvedFilial === 'UNDEFINED') {
-          console.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user da sessão. Aplicando Fallback Físico ao invés de interromper.");
+          logger.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user da sessão. Aplicando Fallback Físico ao invés de interromper.");
           try {
             // Em vez de limpar e matar a sessão, injetamos a unidade de segurança para evitar loops em IFrames sem GPS/Permissões
             const safeTenant = 'CICOPAL';
@@ -384,7 +385,7 @@ const App: React.FC = () => {
             parsed.filial = safeFilial;
             sessionStorage.setItem('app_current_user', JSON.stringify(parsed));
           } catch (fallbackErr) {
-            console.error("Erro ao aplicar fallback de sessão:", fallbackErr);
+            logger.error("Erro ao aplicar fallback de sessão:", fallbackErr);
           }
         }
 
@@ -494,19 +495,19 @@ const App: React.FC = () => {
       try {
         // 1. Abre a conexão com o banco Dexie de forma isolada
         await db.open();
-        console.log("[SRE_BOOT] Motor IndexedDB carregado com sucesso.");
+        logger.info("[SRE_BOOT] Motor IndexedDB carregado com sucesso.");
 
         // Validação se o IndexedDB está zerado no carregamento e restauração via FileSystemStorageService
         const totalLocalAssets = await db.local_assets.count();
         if (totalLocalAssets === 0) {
-          console.log("[SRE_BOOT] IndexedDB zerado. Tentando recuperar dados do FileSystem físico de salvaguarda...");
+          logger.info("[SRE_BOOT] IndexedDB zerado. Tentando recuperar dados do FileSystem físico de salvaguarda...");
           const restored = await verifyAndRestorePhysicalBackup();
           if (restored) {
-            console.log("[SRE_BOOT] Recuperação de desastre física (Capacitor FileSystem) restaurada com sucesso.");
+            logger.info("[SRE_BOOT] Recuperação de desastre física (Capacitor FileSystem) restaurada com sucesso.");
           } else {
             const dadosFisicos = await FileSystemStorageService.carregarDeDiretorioLocal();
             if (dadosFisicos && dadosFisicos.length > 0) {
-              console.log(`[SRE_BOOT] Recuperação física legada ativada. Restaurando ${dadosFisicos.length} registros...`);
+              logger.info(`[SRE_BOOT] Recuperação física legada ativada. Restaurando ${dadosFisicos.length} registros...`);
               await db.transaction('rw', [db.local_assets, db.ativos], async () => {
                 // Restaura estritamente o inventário coletado pelo usuário (coletas locais)
                 await db.local_assets.bulkPut(dadosFisicos as DexieAsset[]);
@@ -518,9 +519,9 @@ const App: React.FC = () => {
                   }
                 }
               });
-              console.log("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
+              logger.info("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
             } else {
-              console.log("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
+              logger.info("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
             }
           }
         }
@@ -536,16 +537,16 @@ const App: React.FC = () => {
         const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
         const hasUser = !!sessionStorage.getItem('app_current_user');
         if (justCleared && hasUser) {
-          console.log("[SRE_NAV] Preservando viewport no Gestor de Base após purga bem-sucedida.");
+          logger.info("[SRE_NAV] Preservando viewport no Gestor de Base após purga bem-sucedida.");
           sessionStorage.removeItem('app_just_cleared_data');
           setHistory([AppScreen.DATABASE_MANAGER]);
         } else {
-          console.log("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
+          logger.info("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
           setHistory([AppScreen.LOGIN]);
         }
 
       } catch (error) {
-        console.error("[FATAL_BOOT_ROUTE_CRASH]", error);
+        logger.error("[FATAL_BOOT_ROUTE_CRASH]", error);
         setHistory([AppScreen.LOGIN]);
       }
     };
@@ -577,23 +578,23 @@ const App: React.FC = () => {
     const unitIdToPersist = params?.unitName;
     if (unitIdToPersist && databaseMode === DatabaseMode.INTERNAL) {
       try {
-        console.log(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
+        logger.info(`>>> [Failsafe Navigation/pushScreen] Gravando '${unitIdToPersist}' na tabela SYSTEM_CONTEXT de forma síncrona...`);
         await sqliteService.setContextValue('selected_unit', unitIdToPersist);
         
         if (params?.campaign) {
           await sqliteService.setContextValue('active_campaign', params.campaign.id);
         }
-        console.log(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
+        logger.info(">>> [Failsafe Navigation/pushScreen] Confirmou gravação física .db concluída com sucesso.");
       } catch (err) {
-        console.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
+        logger.error(">>> [Failsafe Navigation/pushScreen] Erro de escrita nas configurações:", err);
       }
     }
 
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
-      console.log(`>>> [Navigation] Resetting history to: ${s}`);
+      logger.info(`>>> [Navigation] Resetting history to: ${s}`);
       setHistory([s]);
     } else {
-      console.log(`>>> [Navigation] Pushing screen: ${s}`);
+      logger.info(`>>> [Navigation] Pushing screen: ${s}`);
       setHistory(prev => {
         const current = prev[prev.length - 1];
         if (current === s) return prev; // Previne duplicidade de viewports
@@ -601,7 +602,7 @@ const App: React.FC = () => {
         // Barreira Canônica: Bloqueia navegação órfã se não houver Filial ativa
         const validatedScreen = validateAndPushRoute(s, selectedUnit);
         if (validatedScreen !== s) {
-          console.warn(`>>> [SRE-GUARD] Interceptação: Tentativa de acessar ${s} sem selectedUnit.`);
+          logger.warn(`>>> [SRE-GUARD] Interceptação: Tentativa de acessar ${s} sem selectedUnit.`);
           const fallback = prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION];
           localStorage.setItem('gbr_kardek_history', JSON.stringify(fallback));
           return fallback;
@@ -830,12 +831,12 @@ const App: React.FC = () => {
     setIsReconnecting(true);
     
     try {
-      console.log(">>> [DBA] Iniciando processo de reconexão manual...");
+      logger.info(">>> [DBA] Iniciando processo de reconexão manual...");
       // v24.50.6 - Correção SRE: Captura Dinâmica de Diretório via File System Access API para Windows/Desktop
       if (!Capacitor.isNativePlatform()) {
         const isIframe = window.self !== window.top;
         if (isIframe) {
-          console.log(">>> [DBA-iFrame] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
+          logger.info(">>> [DBA-iFrame] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
           const virtualFolderName = 'GBR_Inventario_Virtual';
           await sqliteService.init(true);
           sessionStorage.setItem('gbr_physical_folder_name', virtualFolderName);
@@ -854,7 +855,7 @@ const App: React.FC = () => {
         }
 
         try {
-          console.log(">>> [DBA-Desktop] Abrindo seletor dinâmico de diretório do Windows...");
+          logger.info(">>> [DBA-Desktop] Abrindo seletor dinâmico de diretório do Windows...");
           
           // Invoca a API nativa do navegador para o usuário selecionar a pasta local de trabalho
           const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -862,7 +863,7 @@ const App: React.FC = () => {
           });
 
           if (directoryHandle) {
-            console.log(`>>> [DBA-Desktop] Pasta vinculada com sucesso: ${directoryHandle.name}`);
+            logger.info(`>>> [DBA-Desktop] Pasta vinculada com sucesso: ${directoryHandle.name}`);
             
             await sqliteService.init(true);
             
@@ -885,10 +886,10 @@ const App: React.FC = () => {
             return;
           }
         } catch (pickerErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-          console.error(">>> [DBA-Security] Usuário cancelou ou Windows bloqueou o seletor:", pickerErr);
+          logger.error(">>> [DBA-Security] Usuário cancelou ou Windows bloqueou o seletor:", pickerErr);
           
           if (pickerErr?.name === 'SecurityError' || String(pickerErr?.message || '').includes('Cross origin') || String(pickerErr?.message || '').includes('sub frames')) {
-            console.warn(">>> [DBA-Security] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
+            logger.warn(">>> [DBA-Security] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
             const virtualFolderName = 'GBR_Inventario_Virtual';
             await sqliteService.init(true);
             sessionStorage.setItem('gbr_physical_folder_name', virtualFolderName);
@@ -920,24 +921,24 @@ const App: React.FC = () => {
         if (loaded && (loaded as InventoryState).status !== DatabaseStatus.ERROR) {
           // Garantir que empresas estão extraídas
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
-             console.log(">>> [DBA] Extraindo unidades de " + loaded.assets.length + " ativos...");
+             logger.info(">>> [DBA] Extraindo unidades de " + loaded.assets.length + " ativos...");
              loaded.companies = [...new Set(loaded.assets.map(a => {
                return (a.filial || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
           }
           
           if (loaded.assets.length > 0 && loaded.companies.length === 0) {
-            console.error(">>> [DBA] CRÍTICO: Ativos carregados mas nenhuma unidade operacional mapeada!");
+            logger.error(">>> [DBA] CRÍTICO: Ativos carregados mas nenhuma unidade operacional mapeada!");
             showModal("Atenção", "Os dados foram carregados, mas nenhuma 'Unidade Operacional' foi identificada. Verifique se as colunas da planilha Excel estão corretas (Ex: UNIDADE, LOCAL, FILIAL).", "warning");
           } else {
-            console.log(">>> [DBA] Carga de unidades OK: " + loaded.companies.length + " encontradas.");
+            logger.info(">>> [DBA] Carga de unidades OK: " + loaded.companies.length + " encontradas.");
           }
           
           // v24.50.1: Refresh unit list using optimized query
           if (loaded.assets.length > 0) {
              const units = await sqliteService.getOperationalUnits();
              if (units && units.length > 0) {
-                console.log(`>>> [DBA] Unidades sincronizadas via Query: ${units.length}`);
+                logger.info(`>>> [DBA] Unidades sincronizadas via Query: ${units.length}`);
                 loaded.companies = units;
              }
           }
@@ -950,26 +951,26 @@ const App: React.FC = () => {
           // v24.50.5: Tenta extrair unidades mesmo que o fallback de assets tenha falhado
           const units = await sqliteService.getOperationalUnits();
           if (units && units.length > 0) {
-             console.log(`>>> [DBA] Unidades sincronizadas via Query Real-Time: ${units.length}`);
+             logger.info(`>>> [DBA] Unidades sincronizadas via Query Real-Time: ${units.length}`);
              setInventory(prev => ({ ...prev, companies: units }));
           } else {
-             console.warn(">>> [DBA] Nenhuma unidade encontrada via Query após reconexão.");
+             logger.warn(">>> [DBA] Nenhuma unidade encontrada via Query após reconexão.");
           }
           
           if (loaded.assets.length > 0 || units.length > 0) {
             setSqliteStatus('ACTIVE');
             await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
           }
-          console.log(`>>> [DBA] Reconexão manual concluída: ${loaded.assets.length} ativos carregados.`);
+          logger.info(`>>> [DBA] Reconexão manual concluída: ${loaded.assets.length} ativos carregados.`);
         } else {
-          console.error(">>> [DBA] Falha ao recarregar inventário após permissão.");
+          logger.error(">>> [DBA] Falha ao recarregar inventário após permissão.");
         }
       } else {
         // Se falhou ou usuário cancelou, não fazemos nada, o overlay permanece.
-        console.warn(">>> [DBA] Permissão não concedida ou negada.");
+        logger.warn(">>> [DBA] Permissão não concedida ou negada.");
       }
     } catch (err) {
-      console.error('Erro ao reconectar arquivo:', err);
+      logger.error('Erro ao reconectar arquivo:', err);
     } finally {
       setIsReconnecting(false);
     }
@@ -1011,12 +1012,12 @@ const App: React.FC = () => {
         const totalPending = len + unsyncedCount;
         if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
           setIsSyncLocked(true);
-          console.warn(`>>> [Bootstrap Guard] Sincronização travada: fila de sincronização excedeu o limite de segurança (${MAX_SYNC_QUEUE_SIZE} itens).`);
+          logger.warn(`>>> [Bootstrap Guard] Sincronização travada: fila de sincronização excedeu o limite de segurança (${MAX_SYNC_QUEUE_SIZE} itens).`);
         } else if (totalPending < MAX_SYNC_QUEUE_SIZE && isSyncLocked) {
           setIsSyncLocked(false);
         }
       } catch (err) {
-        console.warn(">>> [Sync] Falha ao verificar fila:", err);
+        logger.warn(">>> [Sync] Falha ao verificar fila:", err);
       }
     };
 
@@ -1044,7 +1045,7 @@ const App: React.FC = () => {
       }
 
       isSyncRunningRef.current = true;
-      console.log(">>> [Background Sync] Iniciando ciclo automático de atualização...");
+      logger.info(">>> [Background Sync] Iniciando ciclo automático de atualização...");
 
       try {
         // 1. Processa primeiro o lote de metadados de ativos (Até 200 registros por loop)
@@ -1054,10 +1055,10 @@ const App: React.FC = () => {
         const photoResult = await photoSyncManager.processPhotoSyncQueue();
         
         if (dataResult.processedCount > 0 || photoResult.uploadCount > 0) {
-          console.log(`>>> [Background Sync Completed] Dados: ${dataResult.processedCount}, Fotos: ${photoResult.uploadCount}`);
+          logger.info(`>>> [Background Sync Completed] Dados: ${dataResult.processedCount}, Fotos: ${photoResult.uploadCount}`);
         }
       } catch (syncError) {
-        console.error(">>> [Background Sync Fail] Erro no agendador oculto:", syncError);
+        logger.error(">>> [Background Sync Fail] Erro no agendador oculto:", syncError);
       } finally {
         // Libera a trava para o próximo ciclo de 60 segundos ou evento
         isSyncRunningRef.current = false;
@@ -1069,7 +1070,7 @@ const App: React.FC = () => {
 
     // Gatilho reativo: Dispara imediatamente se o auditor sair de uma zona de sombra e o sinal voltar
     const handleNetworkReconnection = () => {
-      console.log(">>> [Network Guard] Conexão restaurada detectada. Forçando sincronização...");
+      logger.info(">>> [Network Guard] Conexão restaurada detectada. Forçando sincronização...");
       triggerBackgroundSync();
     };
 
@@ -1107,7 +1108,7 @@ const App: React.FC = () => {
         .then((result) => {
           const { error } = result as { error: { message: string } | null; data: { session: unknown; user: unknown } };
           if (error && (error.message.includes('refresh_token_not_found') || error.message.includes('Refresh Token Not Found'))) {
-            console.warn('[Supabase] Sessão inválida detectada. Limpando...');
+            logger.warn('[Supabase] Sessão inválida detectada. Limpando...');
             sessionStorage.removeItem('app_current_user');
             
             const hasReloaded = sessionStorage.getItem('app_session_error_reloaded');
@@ -1117,7 +1118,7 @@ const App: React.FC = () => {
                 window.location.reload();
               });
             } else {
-              console.error('[Supabase] Loop detectado. Mantendo offline.');
+              logger.error('[Supabase] Loop detectado. Mantendo offline.');
               setUser(null);
               setTimeout(() => sessionStorage.removeItem('app_session_error_reloaded'), 5000);
             }
@@ -1126,7 +1127,7 @@ const App: React.FC = () => {
           }
         })
         .catch(err => {
-          console.warn('[Supabase] Falha ao verificar sessão (Timeout ou Rede):', err);
+          logger.warn('[Supabase] Falha ao verificar sessão (Timeout ou Rede):', err);
         });
     }
   }, [databaseMode, isEngineReady]);
@@ -1135,11 +1136,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const timeout = setTimeout(async () => {
       if (isInitializing && !bootstrapError) {
-        console.warn(">>> [App] Inicialização demorou demais (>35s). Forçando Fallback em Memória de Contingência...");
+        logger.warn(">>> [App] Inicialização demorou demais (>35s). Forçando Fallback em Memória de Contingência...");
         try {
           await sqliteService.init(true);
         } catch (e) {
-          console.error(">>> [App] Erro crítico ao forçar fallback:", e);
+          logger.error(">>> [App] Erro crítico ao forçar fallback:", e);
         }
         setDbInitialized(true);
         setSqliteStatus('ACTIVE');
@@ -1154,7 +1155,7 @@ const App: React.FC = () => {
     
     if (isEngineReady) return;
     
-    console.log(">>> [App] Iniciando inicialização da infraestrutura local com proteção robusta ferveg...");
+    logger.info(">>> [App] Iniciando inicialização da infraestrutura local com proteção robusta ferveg...");
 
     const initApp = async () => {
       try {
@@ -1178,13 +1179,13 @@ const App: React.FC = () => {
                 if (hasLocalUsers || assetCount > 0) {
                   // Sessão legítima e progressos existentes no IndexedDB. Não limpar!
                   isSessionValid = true;
-                  console.log(`>>> [SRE-REBOOT] Boot Resiliente (F5): Autenticação de ${parsedUser.email} e progresso físico (${assetCount} ativos) validados no IndexedDB. Preservando sessão.`);
+                  logger.info(`>>> [SRE-REBOOT] Boot Resiliente (F5): Autenticação de ${parsedUser.email} e progresso físico (${assetCount} ativos) validados no IndexedDB. Preservando sessão.`);
                 }
               }
             }
           }
         } catch (err) {
-          console.warn(">>> [SRE-REBOOT] Falha na validação prévia de boot:", err);
+          logger.warn(">>> [SRE-REBOOT] Falha na validação prévia de boot:", err);
         }
 
         // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais se NÃO for um boot resiliente (F5 legítimo)
@@ -1206,7 +1207,7 @@ const App: React.FC = () => {
         const isNative = Capacitor.isNativePlatform();
         
         if (!isNative) {
-          console.log(">>> [App] Ambiente WEB / iFrame detectado. Inicialização instantânea.");
+          logger.info(">>> [App] Ambiente WEB / iFrame detectado. Inicialização instantânea.");
           success = await sqliteService.init(true);
           if (isMounted) {
             setDbInitialized(true);
@@ -1221,15 +1222,15 @@ const App: React.FC = () => {
         }
 
         try {
-          console.log(">>> [App] Tentando inicializar SQLite Nativo (Primeira tentativa)...");
+          logger.info(">>> [App] Tentando inicializar SQLite Nativo (Primeira tentativa)...");
           success = await sqliteService.init(false);
         } catch (firstErr) {
-          console.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
+          logger.warn(">>> [App - Warning] Falha na primeira tentativa de bootstrap do SQLite Nativo:", firstErr);
           try {
-            console.log(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
+            logger.info(">>> [App] Tentando inicializar SQLite Nativo (Segunda e última tentativa)...");
             success = await sqliteService.init(true);
           } catch (secondErr) {
-            console.error(">>> [App - Failsafe] Falha crítica na segunda tentativa do SQLite Nativo.", secondErr);
+            logger.error(">>> [App - Failsafe] Falha crítica na segunda tentativa do SQLite Nativo.", secondErr);
             throw new Error(`Falha crítica de inicialização do Banco de Dados Local: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
           }
         }
@@ -1245,12 +1246,12 @@ const App: React.FC = () => {
         if (!isMounted) return;
 
         if (success) {
-          console.log(">>> [App] SQLite pronto em ambiente seguro. Validando Schema...");
+          logger.info(">>> [App] SQLite pronto em ambiente seguro. Validando Schema...");
           
           try {
               // 1. GARANTIA SRE: Validação física estrita antes de liberar isEngineReady
               await localDb.users.toArray();
-              console.log(">>> [MOBILE-SHIELD] Schema local 100% íntegro. Liberando concorrência (Engine Ready).");
+              logger.info(">>> [MOBILE-SHIELD] Schema local 100% íntegro. Liberando concorrência (Engine Ready).");
               setIsEngineReady(true);
               
               if (!isMounted) return;
@@ -1260,7 +1261,7 @@ const App: React.FC = () => {
               const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
               if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
-                console.log(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
+                logger.info(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
                 setDatabaseMode(DatabaseMode.INTERNAL);
                 localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
               }
@@ -1269,12 +1270,12 @@ const App: React.FC = () => {
                 const dbUsers = await localDb.users.toArray();
                 if (dbUsers.length > 0) {
                   setUsers(dbUsers);
-                  console.log(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
+                  logger.info(`>>> [App] ${dbUsers.length} usuários carregados do SQLite.`);
                 }
 
                 if (isFilePresent && isDbLocked) {
-                  console.log(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
-                  console.log(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
+                  logger.info(">>> [BOOT BLINDADO] Arquivo físico gbr_kardek.db encontrado e Status de Blindagem como PROTEGIDO.");
+                  logger.info(">>> [BOOT BLINDADO] Reutilização obrigatória ativa: pulando todas as verificações online.");
                 }
                 try {
                   const savedUser = sessionStorage.getItem('app_current_user');
@@ -1301,7 +1302,7 @@ const App: React.FC = () => {
                   }
                   
                   if (recoveredUnit) {
-                    console.log(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
+                    logger.info(`>>> [Boot] Recobrimento de contexto de unidade ativo do SQLite: ${recoveredUnit}, Campanha: ${recoveredCampaign}`);
                     setSelectedUnit(recoveredUnit);
                     
                     if (recoveredCampaign) {
@@ -1315,10 +1316,10 @@ const App: React.FC = () => {
                     // Comentado para cumprir com o Regime v4.50-PROD: remoção de bypass automatizado no primeiro render
                     /*
                     if (parsedUser && recoveredUnit && recoveredCampaign) {
-                      console.log(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
+                      logger.info(`>>> [Boot] Pulando a triagem de Unidade Operacional. Direcionando direto para MAIN_MENU.`);
                       setHistory([AppScreen.MAIN_MENU]);
                     } else if (parsedUser) {
-                      console.log(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
+                      logger.info(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
                       setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
                     }
                     */
@@ -1326,14 +1327,14 @@ const App: React.FC = () => {
                   } else {
                     /*
                     if (parsedUser) {
-                      console.log(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
+                      logger.info(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
                       setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
                     }
                     */
                     setHistory([AppScreen.LOGIN]);
                   }
                 } catch (bootErr) {
-                  console.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
+                  logger.error(">>> [Boot] Erro ao recuperar contexto de unidade:", bootErr);
                   setBootstrapError(new AppBootstrapError(bootErr instanceof Error ? bootErr.message : String(bootErr)));
                 }
               }
@@ -1345,17 +1346,17 @@ const App: React.FC = () => {
                 const isNetworkOffline = !navigator.onLine;
 
                 if (isNetworkOffline && hasCachedUser) {
-                  console.log(">>> [Boot Offline Bypass] Conexão indisponível mas usuário em cache detectado. Efetuando bypass na nuvem!");
+                  logger.info(">>> [Boot Offline Bypass] Conexão indisponível mas usuário em cache detectado. Efetuando bypass na nuvem!");
                   try {
                     const parsed = JSON.parse(currentUserStr || '');
                     setUser(parsed);
                   } catch (e) {
-                    console.warn("Falha ao carregar usuário temporário:", e);
+                    logger.warn("Falha ao carregar usuário temporário:", e);
                   }
                   setIsSessionValid(true);
                 } else {
                   try {
-                    console.log(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
+                    logger.info(">>> [Boot - Supabase JWT Check] Verificando sessão na nuvem...");
                     
                     const sessionPromise = supabase.auth.getSession();
                     const timeoutPromise = new Promise<{ data: { session: null } }>(resolve => 
@@ -1383,18 +1384,18 @@ const App: React.FC = () => {
                       }
 
                       if (isLocal) {
-                        console.log("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
+                        logger.info("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
                         setIsSessionValid(true);
                         if (currentUserStr) {
                           try {
                             const parsed = JSON.parse(currentUserStr);
                             setUser(parsed);
                           } catch (e) {
-                            console.warn("Erro ao fazer parse de currentUserStr:", e);
+                            logger.warn("Erro ao fazer parse de currentUserStr:", e);
                           }
                         }
                       } else {
-                        console.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
+                        logger.warn('[Boot - Supabase JWT Check] Sem JWT válido no dispositivo. Forçando formulário de Login Unificado.');
                         removerLoaderEstatico();
                         setIsDataLoaded(true);
                         setUser(null);
@@ -1402,10 +1403,10 @@ const App: React.FC = () => {
                         setHistory([AppScreen.LOGIN]);
                       }
                     } else {
-                      console.log(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
+                      logger.info(">>> [Boot - Supabase JWT Check] Sessão ativa na nuvem válida para:", session.user?.email);
                     }
                   } catch (jwtErr) {
-                    console.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
+                    logger.error("[Boot - Supabase JWT Check] Falha ao verificar JWT ativo, verificando se há usuário local soberano para ignorar e reter sessão:", jwtErr);
                     const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
                     const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
 
@@ -1422,13 +1423,13 @@ const App: React.FC = () => {
                     }
 
                     if (isLocal || isNetworkError) {
-                      console.log("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
+                      logger.info("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
                       if (currentUserStr) {
                         try {
                           const parsed = JSON.parse(currentUserStr);
                           setUser(parsed);
                         } catch (e) {
-                          console.warn("Falha no parse ao reter sessão local:", e);
+                          logger.warn("Falha no parse ao reter sessão local:", e);
                         }
                       }
                       setIsSessionValid(true);
@@ -1445,7 +1446,7 @@ const App: React.FC = () => {
                 }
               }
             } catch (asyncErr) {
-              console.error(">>> [App - Async Boot Error] Erro crítico no fluxo assíncrono pós-boot (Acionando Rota de Escape SRE):", asyncErr);
+              logger.error(">>> [App - Async Boot Error] Erro crítico no fluxo assíncrono pós-boot (Acionando Rota de Escape SRE):", asyncErr);
               if (isMounted) {
                 setBootstrapError(null);
                 setIsInitializing(false);
@@ -1467,7 +1468,7 @@ const App: React.FC = () => {
           throw new Error("Falha ao inicializar o motor SQL.");
         }
       } catch (err) {
-        console.error(">>> [App] Erro fatal na inicialização (Acionando Rota de Escape SRE):", err);
+        logger.error(">>> [App] Erro fatal na inicialização (Acionando Rota de Escape SRE):", err);
         if (isMounted) {
           setBootstrapError(null);
           setIsInitializing(false);
@@ -1492,7 +1493,7 @@ const App: React.FC = () => {
 
     const handleInitFailed = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      console.error(">>> [App] Evento de falha capturado (Acionando Rota de Escape SRE):", detail?.error);
+      logger.error(">>> [App] Evento de falha capturado (Acionando Rota de Escape SRE):", detail?.error);
       if (isMounted) {
         setBootstrapError(null);
         setIsInitializing(false);
@@ -1515,7 +1516,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleSessionExpired = (e: Event) => {
       try {
-        console.warn(">>> [Session] Evento de Sessão Expirada capturado. Inicializando canal assíncrono de proteção de hardware...");
+        logger.warn(">>> [Session] Evento de Sessão Expirada capturado. Inicializando canal assíncrono de proteção de hardware...");
         
         const eventDetail = (e as CustomEvent)?.detail;
         const customMessage = eventDetail?.message || "Sua sessão expirou ou o identificador de Contrato foi perdido. Por favor, faça login novamente.";
@@ -1527,18 +1528,18 @@ const App: React.FC = () => {
             const checkAndResolve = async () => {
               const isImporting = sqliteService.isImportingBatch || (typeof window !== 'undefined' && !!((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch);
               if (isImporting && elapsedTime < 5000) {
-                console.warn(`>>> [Session] Escrevendo lote em andamento (isImportingBatch). Aguardando conclusão para garantir integridade física do SQLite... (${elapsedTime}ms/5000ms)`);
+                logger.warn(`>>> [Session] Escrevendo lote em andamento (isImportingBatch). Aguardando conclusão para garantir integridade física do SQLite... (${elapsedTime}ms/5000ms)`);
                 elapsedTime += 200;
                 setTimeout(checkAndResolve, 200);
               } else {
                 if (elapsedTime >= 5000) {
-                  console.warn(">>> [Session] Limite de segurança de 5 segundos esgotado no escape do lote. Forçando gravação atômica emergencial.");
+                  logger.warn(">>> [Session] Limite de segurança de 5 segundos esgotado no escape do lote. Forçando gravação atômica emergencial.");
                 }
                 try {
-                  console.log(">>> [Session] Gravando estado físico atômico (saveDatabase)...");
+                  logger.info(">>> [Session] Gravando estado físico atômico (saveDatabase)...");
                   await sqliteService.saveDatabase();
                 } catch (dbErr) {
-                  console.error(">>> [Session] Falha ao persistir alterações antes do encerramento da sessão:", dbErr);
+                  logger.error(">>> [Session] Falha ao persistir alterações antes do encerramento da sessão:", dbErr);
                 }
                 resolve();
               }
@@ -1561,14 +1562,14 @@ const App: React.FC = () => {
 
           setHistory([AppScreen.LOGIN]);
         }).catch((err) => {
-          console.error(">>> [Session] Erro inesperado na segurança física de expiração:", err);
+          logger.error(">>> [Session] Erro inesperado na segurança física de expiração:", err);
           setUser(null);
           sessionStorage.clear();
           setHistory([AppScreen.LOGIN]);
         });
 
       } catch (redirectErr) {
-        console.error(">>> [Session] Falha crítica de ciclo de vida ao tentar redirecionar no handleSessionExpired:", redirectErr);
+        logger.error(">>> [Session] Falha crítica de ciclo de vida ao tentar redirecionar no handleSessionExpired:", redirectErr);
         try {
           showModal("Sessão Expirada", "Sua sessão expirou. Por favor, re-autentique o aplicativo.", "error");
         } catch { /* ignore */ }
@@ -1629,10 +1630,10 @@ const App: React.FC = () => {
           recoveredCampaign = await sqliteService.getContextValue('active_campaign');
           if (recoveredCampaign === '') recoveredCampaign = null;
           
-          console.log(`>>> [SYSTEM_CONTEXT] Recuperado via getContextValue: Unidade=${recoveredUnit}, Campanha=${recoveredCampaign}`);
+          logger.info(`>>> [SYSTEM_CONTEXT] Recuperado via getContextValue: Unidade=${recoveredUnit}, Campanha=${recoveredCampaign}`);
         }
       } catch (err) {
-        console.error(">>> [SYSTEM_CONTEXT] Erro ao ler contexto do SQLite:", err);
+        logger.error(">>> [SYSTEM_CONTEXT] Erro ao ler contexto do SQLite:", err);
       }
 
       // Tratamento com coalescência elegante prático
@@ -1686,9 +1687,9 @@ const App: React.FC = () => {
       if (databaseMode === DatabaseMode.INTERNAL) {
         try {
           await sqliteService.setContextValue('selected_unit', selectedUnit || '');
-          console.log(`>>> [SYSTEM_CONTEXT] Persistido com sucesso no SQLite: '${selectedUnit}'`);
+          logger.info(`>>> [SYSTEM_CONTEXT] Persistido com sucesso no SQLite: '${selectedUnit}'`);
         } catch (err) {
-          console.error(">>> [SYSTEM_CONTEXT] Erro ao persistir no SQLite:", err);
+          logger.error(">>> [SYSTEM_CONTEXT] Erro ao persistir no SQLite:", err);
         }
       }
     };
@@ -1712,7 +1713,7 @@ const App: React.FC = () => {
     );
 
     if (databaseMode === DatabaseMode.INTERNAL && !isDbReady) {
-      console.warn(">>> [Bootstrap Failsafe] sqliteStatus não está totalmente inicializado/conectado ainda. Retornando array vazio.");
+      logger.warn(">>> [Bootstrap Failsafe] sqliteStatus não está totalmente inicializado/conectado ainda. Retornando array vazio.");
       return [];
     }
     if (!selectedUnit) return inventory.assets; 
@@ -1802,10 +1803,10 @@ const App: React.FC = () => {
         const count = filtered.length;
         if (active) {
           setActiveUnitAssetCount(count);
-          console.log(`>>> [ActiveCount] ${count} ativos para Unidade: ${selectedUnit}, Campanha: ${inventory.currentCampaignId}`);
+          logger.info(`>>> [ActiveCount] ${count} ativos para Unidade: ${selectedUnit}, Campanha: ${inventory.currentCampaignId}`);
         }
       } catch (err) {
-        console.error(">>> [ActiveCount] Erro ao obter contagem:", err);
+        logger.error(">>> [ActiveCount] Erro ao obter contagem:", err);
       }
     };
     fetchActiveCount();
@@ -1828,21 +1829,21 @@ const App: React.FC = () => {
     let active = true;
     const fetchUnitAssets = async () => {
       if (!dbInitialized || sqliteStatus.loading) {
-        console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
+        logger.info("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
         return;
       }
       if (!user) {
-        console.log("⏸️ [Bootstrap Guard] Aguardando login do operador antes de buscar dados locais...");
+        logger.info("⏸️ [Bootstrap Guard] Aguardando login do operador antes de buscar dados locais...");
         if (active) setSqliteUnitAssets([]);
         return;
       }
       if (!currentUnit || currentUnit.toUpperCase().trim() === 'CARREGANDO...' || currentUnit.toUpperCase().trim() === 'CARREGANDO') {
-        console.log("⏸️ [Kardek Guard] Ignorando busca prematura de ativos locais porque a unidade está em estado de carregamento.");
+        logger.info("⏸️ [Kardek Guard] Ignorando busca prematura de ativos locais porque a unidade está em estado de carregamento.");
         if (active) setSqliteUnitAssets([]);
         return;
       }
       try {
-        console.log(`>>> [KARDEK] Buscando ativos via SQLite indexado para filial: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
+        logger.info(`>>> [KARDEK] Buscando ativos via SQLite indexado para filial: "${currentUnit}", Campanha: "${inventory.currentCampaignId || 'Nenhuma'}"`);
         const normalizedUnit = currentUnit.toUpperCase().trim();
         const unitCode = normalizedUnit.match(/^\d+/)?.[0];
 
@@ -1912,10 +1913,10 @@ const App: React.FC = () => {
 
         if (active) {
           setSqliteUnitAssets(parsedAssets);
-          console.log(`>>> [KARDEK] Sucesso: ${parsedAssets.length} ativos carregados do SQLite indexado para o endereço "${currentAddr || 'TODOS'}".`);
+          logger.info(`>>> [KARDEK] Sucesso: ${parsedAssets.length} ativos carregados do SQLite indexado para o endereço "${currentAddr || 'TODOS'}".`);
         }
       } catch (e) {
-        console.error(">>> [KARDEK] Erro ao carregar ativos para a unidade via SQLite:", e);
+        logger.error(">>> [KARDEK] Erro ao carregar ativos para a unidade via SQLite:", e);
       }
     };
 
@@ -2019,12 +2020,12 @@ const App: React.FC = () => {
           const isReallyDisconnected = !sqliteService.getIsInitialized() || result.status === 'permission_denied' || result.status === 'expired';
           
           if (!showReconnectOverlay && isReallyDisconnected && (!isDataLoaded || inventoryRef.current.assets.length === 0 || screen === 'DASHBOARD')) {
-            console.warn(`>>> [DBA] Vínculo expirado ou inacessível (${result.status}). Abrindo overlay.`);
+            logger.warn(`>>> [DBA] Vínculo expirado ou inacessível (${result.status}). Abrindo overlay.`);
             setShowReconnectOverlay(true);
           }
         } else if (result.status === 'linked' || result.status === 'granted') {
           if (showReconnectOverlay) {
-            console.log(">>> [DBA] Vínculo reestabelecido. Fechando overlay.");
+            logger.info(">>> [DBA] Vínculo reestabelecido. Fechando overlay.");
             setShowReconnectOverlay(false);
           }
           
@@ -2032,7 +2033,7 @@ const App: React.FC = () => {
           if (!isDataLoaded || inventoryRef.current.assets.length === 0) {
             const status = sqliteService.getDbStatus();
             if (status === DatabaseStatus.ACTIVE) {
-              console.log(">>> [DBA] Permissão reestabelecida. Recarregando banco físico com soberania...");
+              logger.info(">>> [DBA] Permissão reestabelecida. Recarregando banco físico com soberania...");
               const loaded = await loadInventory(databaseMode);
               if (loaded && loaded.assets && loaded.assets.length > 0) {
                 setInventory(prev => ({ ...prev, ...loaded, assets: loaded.assets }));
@@ -2056,7 +2057,7 @@ const App: React.FC = () => {
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
     if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
-      console.log("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
+      logger.info("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
       return;
     }
     let tenantId = currentTenantId;
@@ -2070,11 +2071,11 @@ const App: React.FC = () => {
       }
     }
 
-    console.log(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
-    console.log(`>>> [Governance] Contexto: Tenant=${tenantId}, Unidade=${unitId || 'TODAS'}, Modo=${databaseMode}`);
+    logger.info(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
+    logger.info(`>>> [Governance] Contexto: Tenant=${tenantId}, Unidade=${unitId || 'TODAS'}, Modo=${databaseMode}`);
     
     if (!tenantId) {
-      console.warn(">>> [Governance] refreshCampaigns ABORTADO: Sem TenantID!");
+      logger.warn(">>> [Governance] refreshCampaigns ABORTADO: Sem TenantID!");
       return;
     }
 
@@ -2082,13 +2083,13 @@ const App: React.FC = () => {
       // v25.60: Garantia de Soberania - Se banco local, força re-leitura do binário para evitar limbo de cache desincronizado
       if (databaseMode === DatabaseMode.INTERNAL) {
         await sqliteService.forceSync();
-        console.log(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
+        logger.info(">>> [Governance] Motor SQL sincronizado com persistência física/cache.");
 
         // v24.50: Recuperação de Contexto (Auto-Select Unit se vindo do SQL)
         if (!selectedUnit) {
           const sqlConfigs = await sqliteService.getUnitConfigs(tenantId);
           if (sqlConfigs && sqlConfigs.length > 0 && sqlConfigs[0].selectedUnit) {
-            console.log(`>>> [Governance] Contexto recuperado do SQL: ${sqlConfigs[0].selectedUnit}`);
+            logger.info(`>>> [Governance] Contexto recuperado do SQL: ${sqlConfigs[0].selectedUnit}`);
             setSelectedUnit(sqlConfigs[0].selectedUnit as string);
           }
         }
@@ -2104,7 +2105,7 @@ const App: React.FC = () => {
       const fetchUnitId = screen === AppScreen.CAMPAIGN_MANAGEMENT ? null : unitId;
       const campaignData = await fetchCampaigns(tenantId, fetchUnitId);
       const resultMsg = `Campanhas encontradas: ${campaignData?.length || 0}`;
-      console.log(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
+      logger.info(`>>> [Governance] ${resultMsg} (Filtro Unidade: ${fetchUnitId || 'SEM FILTRO'})`);
       setLastQueryLog(resultMsg);
       
       setCampaigns([...(campaignData || [])]);
@@ -2113,7 +2114,7 @@ const App: React.FC = () => {
       if (databaseMode === DatabaseMode.INTERNAL) {
         const sqlUnits = await sqliteService.getOperationalUnitsWithStats(tenantId);
         setSqliteOperationalUnits(sqlUnits);
-        console.log(`>>> [Governance] ${sqlUnits.length} Unidades carregadas via SQL.`);
+        logger.info(`>>> [Governance] ${sqlUnits.length} Unidades carregadas via SQL.`);
 
         // Busca métricas do Dashboard se houver unidade selecionada
         if (selectedUnit) {
@@ -2128,7 +2129,7 @@ const App: React.FC = () => {
 
       setRefreshVersion(prev => prev + 1);
     } catch (err) {
-      console.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
+      logger.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
     }
   }, [currentTenantId, currentUnitId, databaseMode, user, screen]);
 
@@ -2142,7 +2143,7 @@ const App: React.FC = () => {
          setUnitConfigs(configs);
          setInventory(prev => ({ ...prev, unitConfigs: configs }));
        }).catch(err => {
-         console.error(">>> [App] Erro ao carregar UnitConfigs:", err);
+         logger.error(">>> [App] Erro ao carregar UnitConfigs:", err);
          setModalConfig({
            isOpen: true,
            title: "Erro de Geocerca",
@@ -2163,7 +2164,7 @@ const App: React.FC = () => {
     ];
     
     if (criticalScreens.includes(screen)) {
-      console.log(`>>> [Governance] Re-leitura obrigatória do banco ao focar: ${screen}`);
+      logger.info(`>>> [Governance] Re-leitura obrigatória do banco ao focar: ${screen}`);
       refreshCampaigns();
     }
   }, [screen, refreshCampaigns]);
@@ -2178,7 +2179,7 @@ const App: React.FC = () => {
       setIsImportingBatchState(!!currentState);
 
       if (lastImportingState && !currentState) {
-        console.log(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
+        logger.info(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
         const tenantId = user?.tenantId || 'CICOPAL';
         
         // Se for Mobile Nativo, força salvar para flush total
@@ -2186,9 +2187,9 @@ const App: React.FC = () => {
         if (Capacitor.isNativePlatform()) {
           try {
             await sqliteService.saveDatabase();
-            console.log(">>> [Re-calibração Mobile] Banco de dados salvo com sucesso.");
+            logger.info(">>> [Re-calibração Mobile] Banco de dados salvo com sucesso.");
           } catch (e) {
-            console.error(">>> [Re-calibração Mobile] Erro ao salvar banco:", e);
+            logger.error(">>> [Re-calibração Mobile] Erro ao salvar banco:", e);
           }
         }
         
@@ -2196,9 +2197,9 @@ const App: React.FC = () => {
         try {
           const sqlUnits = await sqliteService.getOperationalUnitsWithStats(tenantId);
           setSqliteOperationalUnits(sqlUnits);
-          console.log(`>>> [Re-calibração Mobile] Contadores atualizados via SQL do disco: ${sqlUnits.length} filiais encontradas.`);
+          logger.info(`>>> [Re-calibração Mobile] Contadores atualizados via SQL do disco: ${sqlUnits.length} filiais encontradas.`);
         } catch (e) {
-          console.error(">>> [Re-calibração Mobile] Erro ao refrescar unidades de contagem:", e);
+          logger.error(">>> [Re-calibração Mobile] Erro ao refrescar unidades de contagem:", e);
         }
         
         setRefreshVersion(prev => prev + 1);
@@ -2233,7 +2234,7 @@ const App: React.FC = () => {
       // o RouteGuard libere a navegação e suspenda o redirecionamento imperativo para 'UNIT_SELECTION'.
       const isConfigValid = !!selectedUnit;
       if (!isConfigValid) {
-        console.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
+        logger.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
         setScreenParams(null);
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
@@ -2258,7 +2259,7 @@ const App: React.FC = () => {
       });
 
       if (hasRepaired) {
-        console.log('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
+        logger.info('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
         setInventory(prev => ({ ...prev, assets: repairedAssets }));
         saveInventory({ ...inventory, assets: repairedAssets });
       }
@@ -2276,7 +2277,7 @@ const App: React.FC = () => {
     
     // GUARD: Check if online
     if (!navigator.onLine) {
-      console.log('Push ignorado: Dispositivo offline.');
+      logger.info('Push ignorado: Dispositivo offline.');
       return;
     }
     
@@ -2323,7 +2324,7 @@ const App: React.FC = () => {
         }
       } catch (err) {
         setSyncError('Erro ao enviar alterações locais');
-        console.error('Push error:', err);
+        logger.error('Push error:', err);
         throw err;
       } finally {
         if (!skipLoadingState) setIsSyncing(false);
@@ -2353,31 +2354,31 @@ const App: React.FC = () => {
     const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
     if (isDbLocked) {
-      console.log('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
+      logger.info('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
       return;
     }
     
     // BLINDAGEM TOTAL: Se o modo for INTERNAL ou isInternalMode for true, não permite nenhuma chamada de rede
     if (mode === DatabaseMode.INTERNAL || isInternalMode) {
-      console.log('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
+      logger.info('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
       return;
     }
 
     // GUARD: Check if online
     if (!navigator.onLine) {
-      console.log('Sincronização ignorada: Dispositivo offline.');
+      logger.info('Sincronização ignorada: Dispositivo offline.');
       return;
     }
 
     // GUARD: Check if on login screen (unless explicitTenantId is provided)
     if (screen === AppScreen.LOGIN && !explicitTenantId) {
-      console.log('Sincronização ignorada: Usuário na tela de login.');
+      logger.info('Sincronização ignorada: Usuário na tela de login.');
       return;
     }
 
     // GUARD: Check if user is logged in (unless explicitTenantId is provided, which happens during login/auth check)
     if (!user && !explicitTenantId) {
-      console.log('Sincronização ignorada: Usuário não autenticado.');
+      logger.info('Sincronização ignorada: Usuário não autenticado.');
       return;
     }
     
@@ -2389,7 +2390,7 @@ const App: React.FC = () => {
 
     // BACKUP PARA MOBILE_SINGLE
     if (user && user.role === ('MOBILE_SINGLE' as unknown as UserRole)) {
-      console.log('>>> [Sync] Perfil MOBILE_SINGLE detectado. Iniciando backup automático em cloud...');
+      logger.info('>>> [Sync] Perfil MOBILE_SINGLE detectado. Iniciando backup automático em cloud...');
       setIsSyncing(true);
       try {
         const { backupService } = await import('./services/backupService');
@@ -2404,7 +2405,7 @@ const App: React.FC = () => {
           setSyncError(res.error || 'Falha no backup cloud');
         }
       } catch (backupErr) {
-        console.error('[Sync] Falha crítica ao executar backup do Mobile Single:', backupErr);
+        logger.error('[Sync] Falha crítica ao executar backup do Mobile Single:', backupErr);
         setSyncError(String(backupErr));
       } finally {
         setIsSyncing(false);
@@ -2412,7 +2413,7 @@ const App: React.FC = () => {
       return;
     }
     
-    console.log(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
+    logger.info(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantId: ${JSON.stringify(rawTenantId)}, effectiveTenantId: ${tenantid || 'Global'}`);
     
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
@@ -2424,7 +2425,7 @@ const App: React.FC = () => {
         await pushLocalChanges(true); 
         await processSyncQueue();
       } catch (pushErr) {
-        console.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
+        logger.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
       }
       
       const pendingItems = await getPendingSyncItems();
@@ -2435,7 +2436,7 @@ const App: React.FC = () => {
       const cloudData = await fetchFullInventory(tenantid, explicitUnitId);
       const syncTimestamp = new Date().toISOString();
 
-      console.log(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
+      logger.info(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
 
       if (cloudData) {
         setInventory(prev => {
@@ -2447,7 +2448,7 @@ const App: React.FC = () => {
           // e não foi um erro de rede, pode ser um problema de tenantid.
           // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
           if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
-            console.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
+            logger.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
             return prev;
           }
 
@@ -2456,7 +2457,7 @@ const App: React.FC = () => {
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
           if (dirtyIds.length > 0) {
-            console.log(`>>> [Sync] Mesclando ${dirtyIds.length} alterações locais pendentes no pull da nuvem.`);
+            logger.info(`>>> [Sync] Mesclando ${dirtyIds.length} alterações locais pendentes no pull da nuvem.`);
             dirtyIds.forEach(id => {
               const localDirty = prev.assets.find(a => String(a.id) === id);
               if (localDirty) {
@@ -2471,7 +2472,7 @@ const App: React.FC = () => {
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
 
                   if (isConflict) {
-                    console.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.ETIQUETA}.`);
+                    logger.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.ETIQUETA}.`);
                     logAuditEvent({
                       user_email: user?.email || 'system',
                       action: 'SYNC_CONFLICT',
@@ -2503,7 +2504,7 @@ const App: React.FC = () => {
             status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
-          saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado:', e));
+          saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
           
           // Log de Auditoria na Nuvem
           if (mode === DatabaseMode.SUPABASE) {
@@ -2541,7 +2542,7 @@ const App: React.FC = () => {
       }
     } catch (error) {
       const err = error as Record<string, unknown>;
-      console.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
+      logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
       const errMsg = String(err?.message || error || '').toLowerCase();
       const isSuspendedNetwork = errMsg.includes('suspended') || 
                                 errMsg.includes('io') || 
@@ -2554,7 +2555,7 @@ const App: React.FC = () => {
                                 err?.status === 0;
 
       if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
-        console.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
+        logger.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
         
         // Chaveia estados para operação offline integrada
         setDatabaseMode(DatabaseMode.INTERNAL);
@@ -2572,7 +2573,7 @@ const App: React.FC = () => {
             setTimeout(() => setShowRecoveryToast(false), 5000);
           }
         } catch (sqliteLoadErr) {
-          console.error(">>> [Sync - Contingência] Não foi possível carregar dados estruturados via SQLite local pós-falha:", sqliteLoadErr);
+          logger.error(">>> [Sync - Contingência] Não foi possível carregar dados estruturados via SQLite local pós-falha:", sqliteLoadErr);
         }
 
         setModalConfig({
@@ -2613,7 +2614,7 @@ const App: React.FC = () => {
           assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
         };
         // Persist localmente para substituir o blob URL pela URL da nuvem no storage
-        saveInventory(newState).catch(err => console.error('[Sync] Erro ao persistir expurgo de foto:', err));
+        saveInventory(newState).catch(err => logger.error('[Sync] Erro ao persistir expurgo de foto:', err));
         return newState;
       });
       updatePendingCount();
@@ -2677,7 +2678,7 @@ const App: React.FC = () => {
         if (!hasChanges) return prev;
 
         const newState = { ...prev, assets: updatedAssets };
-        saveInventory(newState).catch(e => console.error('Erro ao salvar inventário sincronizado em tempo real:', e));
+        saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado em tempo real:', e));
         return newState;
       });
     });
@@ -2698,7 +2699,7 @@ const App: React.FC = () => {
     if (!user || !isCloudUpdatePending || isSyncing || databaseMode === DatabaseMode.INTERNAL) return;
 
     if (localStorage.getItem('is_system_locked') === 'true') {
-      console.log('>>> [Sync] Sincronização pendente abortada: Sistema blindado.');
+      logger.info('>>> [Sync] Sincronização pendente abortada: Sistema blindado.');
       return;
     }
 
@@ -2719,7 +2720,7 @@ const App: React.FC = () => {
             // 2. Baixa a nova base
             await syncFromCloud();
           } catch (e) {
-            console.error("Falha na sincronização segura:", e);
+            logger.error("Falha na sincronização segura:", e);
             setModalConfig({
               isOpen: true,
               title: 'Erro na Sincronização',
@@ -2753,14 +2754,14 @@ const App: React.FC = () => {
   // Load inventory from IndexedDB on mount only after the user session is synchronously established
   useEffect(() => {
     if (!user) {
-      console.log("App init - Aguardando confirmação síncrona do estado do usuário antes de iniciar o carregamento de dados...");
+      logger.info("App init - Aguardando confirmação síncrona do estado do usuário antes de iniciar o carregamento de dados...");
       return;
     }
     const init = async () => {
       // Solicita persistência durável para evitar perda de dados em limpeza de cache
       await requestPersistentStorage();
       
-      console.log(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
+      logger.info(`App init - Iniciando carregamento de dados para o modo ${databaseMode}...`);
       let savedInventory: InventoryState | null = null;
       try {
         savedInventory = await loadInventory(databaseMode);
@@ -2777,32 +2778,32 @@ const App: React.FC = () => {
         if (databaseMode === DatabaseMode.INTERNAL && savedInventory) {
           try {
             const count = await sqliteService.getAssetCount();
-            console.log(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
+            logger.info(`>>> [Auditoria] Verificação de Persistência SQLite: ${count} itens encontrados no banco físico.`);
             
             if (savedInventory.status === DatabaseStatus.ERROR && Capacitor.isNativePlatform()) {
-              console.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
+              logger.warn(">>> [Auditoria] Banco de dados bloqueado ou aguardando permissão.");
               setShowReconnectOverlay(true);
               return; 
             }
 
             // Discrepância real: O loadInventory trouxe dados (do cache?) mas o banco físico executado agora reporta 0
             if (count === 0 && savedInventory.assets.length > 0) {
-              console.warn(">>> [Auditoria SRE] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO. Iniciando Autorreparação de Emergência...");
+              logger.warn(">>> [Auditoria SRE] Discrepância detectada: Dados em cache mas Banco Físico acessível está VAZIO. Iniciando Autorreparação de Emergência...");
               try {
                 // Inserir os ativos cacheados diretamente no banco físico SQLite de alta performance
                 await sqliteService.bulkInsertAssets(savedInventory.assets);
                 await sqliteService.saveInventoryConfig(savedInventory);
                 const countPosReparo = await sqliteService.getAssetCount();
-                console.log(`>>> [Auditoria SRE] Autorreparação concluída! Registros reinseridos na camada nativa: ${countPosReparo}`);
+                logger.info(`>>> [Auditoria SRE] Autorreparação concluída! Registros reinseridos na camada nativa: ${countPosReparo}`);
                 setIntegrityFailed(false);
               } catch (reparoErr) {
-                console.error(">>> [Auditoria SRE ERR] Falha gravíssima ao autorreparar barramento SQL físico com cache local:", reparoErr);
+                logger.error(">>> [Auditoria SRE ERR] Falha gravíssima ao autorreparar barramento SQL físico com cache local:", reparoErr);
                 setIntegrityFailed(true);
               }
             } else if (count > 0) {
               // SUCESSO: Banco físico validado com dados. Silenciamos alerta de integridade se houver.
               if (integrityFailed) {
-                 console.log(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
+                 logger.info(">>> [Auditoria] Silenciando alerta de integridade: Banco físico validado com sucesso.");
                  setIntegrityFailed(false);
               }
             }
@@ -2812,7 +2813,7 @@ const App: React.FC = () => {
                // Verificação física de integridade
                const isHealthy = await sqliteService.checkIntegrity();
                if (!isHealthy) {
-                 console.error(">>> [Auditoria] FALHA CRÍTICA: Banco SQLite corrompido fisicamente.");
+                 logger.error(">>> [Auditoria] FALHA CRÍTICA: Banco SQLite corrompido fisicamente.");
                  setIntegrityFailed(true);
                  return;
                }
@@ -2822,13 +2823,13 @@ const App: React.FC = () => {
                   const required = ['ETIQUETA', 'DESCRICAODOATIVO', 'TAG_INVENTARIO'];
                   const missing = required.filter(col => !schema.find((s) => s['name'] === col));
                   if (missing.length > 0) {
-                    console.error(">>> [Auditoria] FALHA DE SCHEMA: Colunas ausentes no arquivo físico:", missing);
+                    logger.error(">>> [Auditoria] FALHA DE SCHEMA: Colunas ausentes no arquivo físico:", missing);
                     setIntegrityFailed(true);
                   }
                }
             }
           } catch (sqlErr) {
-            console.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
+            logger.error(">>> [Auditoria] Falha ao verificar banco SQLite:", sqlErr);
           }
         }
 
@@ -2842,7 +2843,7 @@ const App: React.FC = () => {
           const source = sqliteService.getStorageSource();
           setSqliteStatus(status);
           setRecoverySource(source === 'PHYSICAL' ? 'PHYSICAL' : 'CACHE');
-          console.log(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
+          logger.info(`>>> [Boot] Status do Banco SQLite: ${status} (Source: ${source})`);
         }
 
         if (saved && saved.assets && saved.assets.length > 0) {
@@ -2969,7 +2970,7 @@ const App: React.FC = () => {
         const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
         const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
         if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared && user) {
-          console.log('>>> [Boot Loader] Base local vazia detectada. Baixando 12.636 ativos via busca paginada antes de dispensar o splash...');
+          logger.info('>>> [Boot Loader] Base local vazia detectada. Baixando 12.636 ativos via busca paginada antes de dispensar o splash...');
           // Define flag indicando gravação em andamento para bloquear salvamentos parciais fast path
           if (typeof window !== 'undefined') {
             ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = true;
@@ -2981,15 +2982,15 @@ const App: React.FC = () => {
             async (loadedConfig) => {
               // Mova a chamada de persistência de configuração para ser executada uma única vez, de forma atômica, junto ao método onComplete() no final de toda a paginação de registros
               try {
-                console.log(">>> [onComplete] Persistindo configuração do tenant de forma única e atômica no final da paginação.");
+                logger.info(">>> [onComplete] Persistindo configuração do tenant de forma única e atômica no final da paginação.");
                 await saveConfigOnly(loadedConfig);
               } catch (e) {
-                console.warn(">>> [onComplete Fast Path Error] Falha ao persistir a configuração:", e);
+                logger.warn(">>> [onComplete Fast Path Error] Falha ao persistir a configuração:", e);
               }
             }
           );
           if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
-            console.log(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
+            logger.info(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
             const newState: InventoryState = {
               ...inventory,
               ...cloudData.config,
@@ -3010,9 +3011,9 @@ const App: React.FC = () => {
           }
         }
       } catch (e) { 
-        console.error("Data load failed", e); 
+        logger.error("Data load failed", e); 
       } finally {
-        console.log("App init - Finalizando carregamento de dados. isDataLoaded -> true");
+        logger.info("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
         const checkCount = savedInventory?.assets?.length || 0;
         if (checkCount > 0) {
@@ -3049,7 +3050,7 @@ const App: React.FC = () => {
                 const justClearedSec = sessionStorage.getItem('app_just_cleared_data') === 'true';
 
                 if (isLocalEmptySec && cloudData.assets && cloudData.assets.length > 0 && !justClearedSec) {
-                  console.log('Base local vazia detectada em verificação secundária. Sincronizando com a nuvem...');
+                  logger.info('Base local vazia detectada em verificação secundária. Sincronizando com a nuvem...');
                   const newState: InventoryState = {
                     ...inventory,
                     ...cloudData.config,
@@ -3064,7 +3065,7 @@ const App: React.FC = () => {
                   setShowRecoveryToast(true);
                   setTimeout(() => setShowRecoveryToast(false), 5000);
                 } else if (isLocalEmptySec && (!cloudData.assets || cloudData.assets.length === 0)) {
-                  console.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantId || user?.tenantid}`);
+                  logger.warn(`Nenhum dado encontrado na nuvem para a unidade: ${user?.tenantId || user?.tenantid}`);
                   if (!(user?.tenantId || user?.tenantid)) {
                     setSyncError(`Unidade não definida. Verifique se o Tenant ID do usuário está correto.`);
                   } else {
@@ -3093,7 +3094,7 @@ const App: React.FC = () => {
               }
             }
           } catch (err) {
-            console.warn('Falha ao verificar atualizações na nuvem no início:', err);
+            logger.warn('Falha ao verificar atualizações na nuvem no início:', err);
           }
         }
       }
@@ -3119,7 +3120,7 @@ const App: React.FC = () => {
           setPublicAsset(decoded as Asset);
         }
       } catch (e) {
-        console.error('Erro ao decodificar dados do QR Code:', e);
+        logger.error('Erro ao decodificar dados do QR Code:', e);
       }
     } else if (etqParam && !publicAsset) {
       // 1. Tenta encontrar no inventário local primeiro (mais rápido)
@@ -3185,7 +3186,7 @@ const App: React.FC = () => {
     if (currentScreen !== AppScreen.LOGIN && currentScreen !== AppScreen.REGISTER) return;
     
     const executePostLoginRouting = async () => {
-      console.log(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
+      logger.info(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
       
       const activeTenant = user.tenantId || user.tenantid || (Array.isArray(user.tenants) ? user.tenants[0] : user.tenants) || null;
       const profile: SupabaseUserProfile = {
@@ -3196,7 +3197,7 @@ const App: React.FC = () => {
       };
       
       const customNavigate = async (path: string) => {
-        console.log('[App] customNavigate interceptou rota pós-login:', path);
+        logger.info('[App] customNavigate interceptou rota pós-login:', path);
         
         if (user.mustChangePassword) { 
           await pushScreen(AppScreen.CHANGE_PASSWORD); 
@@ -3209,7 +3210,7 @@ const App: React.FC = () => {
       try {
         await processarRoteamentoPosLoginSaas(profile, customNavigate);
       } catch (routeErr: unknown) {
-        console.error('[Routing] Roteamento pós-login falhou:', routeErr);
+        logger.error('[Routing] Roteamento pós-login falhou:', routeErr);
         setModalConfig({
           isOpen: true,
           title: 'Erro de Consistência',
@@ -3235,7 +3236,7 @@ const App: React.FC = () => {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       if (isAdmin) {
         syncUsersToCloud(users).catch(err => {
-          console.warn('[Supabase] Falha na sincronização silenciosa de usuários:', err);
+          logger.warn('[Supabase] Falha na sincronização silenciosa de usuários:', err);
         });
       }
     }
@@ -3245,12 +3246,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     if (isAdmin && databaseMode === DatabaseMode.SUPABASE && user?.email) {
-      console.log("🔄 Buscando usuários da nuvem para sincronização...");
+      logger.info("🔄 Buscando usuários da nuvem para sincronização...");
       // Se for MASTER, busca apenas do seu tenant. Se for ADMIN global, busca todos.
       const fetchTenantId = user.role === UserRole.MASTER ? user.tenantid : undefined;
       fetchUsersFromCloud(fetchTenantId).then(cloudUsers => {
         if (cloudUsers && cloudUsers.length > 0) {
-          console.log(`✅ ${cloudUsers.length} usuários encontrados na nuvem.`);
+          logger.info(`✅ ${cloudUsers.length} usuários encontrados na nuvem.`);
           setUsers(prev => {
             // Criamos um mapa dos usuários locais para preservar dados locais (como senhas e nomes recém editados)
             const localMap = new Map(prev.map(u => [u.email.toLowerCase(), u]));
@@ -3285,7 +3286,7 @@ const App: React.FC = () => {
         }
         setHasFetchedUsers(true);
       }).catch(err => {
-        console.error("❌ Erro ao buscar usuários da nuvem:", err);
+        logger.error("❌ Erro ao buscar usuários da nuvem:", err);
         setHasFetchedUsers(true); // Permite sync mesmo em erro para não travar
       });
     } else {
@@ -3310,7 +3311,7 @@ const App: React.FC = () => {
                                    doc.msFullscreenEnabled;
 
         if (!isFullscreenEnabled) {
-          console.warn("O modo tela cheia não está habilitado ou permitido neste ambiente (comum em visualizações dentro de iframes).");
+          logger.warn("O modo tela cheia não está habilitado ou permitido neste ambiente (comum em visualizações dentro de iframes).");
           // Ativamos o modo imersivo apenas no estado interno para ocultar elementos da UI se necessário
           setInventory(prev => ({ ...prev, immersiveMode: true }));
           return;
@@ -3326,7 +3327,7 @@ const App: React.FC = () => {
 
         if (docEl.requestFullscreen) {
           docEl.requestFullscreen(options).catch((err: Error) => {
-            console.warn(`Falha ao solicitar tela cheia: ${err.message}. Isso pode ocorrer em ambientes de visualização.`);
+            logger.warn(`Falha ao solicitar tela cheia: ${err.message}. Isso pode ocorrer em ambientes de visualização.`);
           });
         } else if (docEl.webkitRequestFullScreen) {
           docEl.webkitRequestFullScreen(options);
@@ -3356,7 +3357,7 @@ const App: React.FC = () => {
         setInventory(prev => ({ ...prev, immersiveMode: false }));
       }
     } catch (e) {
-      console.error("Fullscreen toggle failed", e);
+      logger.error("Fullscreen toggle failed", e);
     }
   }, []);
 
@@ -3536,7 +3537,7 @@ const App: React.FC = () => {
               setSyncError(null);
             } catch (err) {
               setSyncError('Erro na sincronização');
-              console.error('Sync error:', err);
+              logger.error('Sync error:', err);
             } finally {
               setIsSyncing(false);
             }
@@ -3548,7 +3549,7 @@ const App: React.FC = () => {
             if (!isImporting) {
               await saveConfigOnly(config);
             } else {
-              console.log(">>> [Persistence] Ignorando persistência Fast Path de configuração durante importação massiva/ingestão.");
+              logger.info(">>> [Persistence] Ignorando persistência Fast Path de configuração durante importação massiva/ingestão.");
             }
           }
           
@@ -3566,7 +3567,7 @@ const App: React.FC = () => {
         localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
-      } catch { console.warn("Storage cap reached"); }
+      } catch { logger.warn("Storage cap reached"); }
     }, 3000); // Reduzido de 10s para 3s para maior segurança de dados
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
@@ -3606,12 +3607,12 @@ const App: React.FC = () => {
           ];
           
           if (!exemptScreens.includes(screen)) {
-            console.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
+            logger.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
             pushScreen(AppScreen.UNIT_SELECTION);
           }
         }
       } catch (e) {
-        console.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
+        logger.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
       }
     };
     
@@ -3643,7 +3644,7 @@ const App: React.FC = () => {
         const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
         const permissionsObj = permissions as unknown as Record<string, unknown>;
         const unifiedMetadataObj = unifiedMetadata as unknown as Record<string, unknown>;
-        console.log(`[Auth] Perfil carregado para ${session.user.email}:`, { 
+        logger.info(`[Auth] Perfil carregado para ${session.user.email}:`, { 
           dbTenant: permissions.tenantId || (permissionsObj.tenantid as string), 
           metaTenant: unifiedMetadata.tenantid || (unifiedMetadataObj.tenantId as string),
           finalTenant: permissions.tenantId || (permissionsObj.tenantid as string) || ''
@@ -3659,7 +3660,7 @@ const App: React.FC = () => {
         }
 
         if (!resolvedTenantId || resolvedTenantId === 'NULL' || resolvedTenantId === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') {
-          console.warn(`[Auth Fail-Safe] Usuário logado sem tenantId ou filial associado: ${session.user.email}`);
+          logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantId ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
           sessionStorage.removeItem('app_current_user');
@@ -3715,7 +3716,7 @@ const App: React.FC = () => {
             tenantId: loggedUser.tenantId
           });
         } catch (logErr) {
-          console.warn('[SRE Failsafe] Falha ao registrar log de auditoria na inicialização:', logErr);
+          logger.warn('[SRE Failsafe] Falha ao registrar log de auditoria na inicialização:', logErr);
         }
         
         // Se logou via Supabase, garante que o modo está correto
@@ -3733,7 +3734,7 @@ const App: React.FC = () => {
           }
         }
       } catch (err) {
-        console.error('Erro ao processar login automático:', err);
+        logger.error('Erro ao processar login automático:', err);
         // Fallback: se falhar a busca de permissões, tenta logar com dados básicos do Auth
         const fallbackUser: User = {
           username: session.user.email?.split('@')[0] || 'Usuário',
@@ -3816,7 +3817,7 @@ const App: React.FC = () => {
 
     // GBR KARDEK SRE: Ignora bypass de modo offline para forçar login unificado seguro no F5
     if (isNetworkOffline && currentUserStr) {
-      console.warn(">>> [Boot SRE] Conexão indisponível (F5 Offline). Proteção ativada: destruindo cache local fantasma.");
+      logger.warn(">>> [Boot SRE] Conexão indisponível (F5 Offline). Proteção ativada: destruindo cache local fantasma.");
       setIsSessionValid(false);
       setUser(null);
       sessionStorage.removeItem('app_current_user');
@@ -3831,7 +3832,7 @@ const App: React.FC = () => {
           processSession(session);
         } else {
           // GBR KARDEK SRE: Proibido recuperar sessões locais fantasmas em nova montagem (F5)
-          console.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
+          logger.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
           removerLoaderEstatico();
           setIsDataLoaded(true);
           setUser(null);
@@ -3842,7 +3843,7 @@ const App: React.FC = () => {
           setHistory([AppScreen.LOGIN]);
         }
       }).catch(err => {
-        console.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
+        logger.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
         // GBR KARDEK SRE: Em qualquer falha de boot ou sessão, destruir fantasma e exigir login
         setIsSessionValid(false);
         setUser(null);
@@ -3854,7 +3855,7 @@ const App: React.FC = () => {
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+      logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
       const isValid = !!session && !!session.user && typeof session.user.id === "string";
       setIsSessionValid(isValid);
       
@@ -3876,13 +3877,13 @@ const App: React.FC = () => {
         } catch { /* ignore */ }
 
         if (isLocalUser) {
-          console.log('[Supabase Auth Listener] Sincronização offline/Soberania Nativa ativa. Ignorando evento auth da nuvem para o usuário local:', currentUserStr);
+          logger.info('[Supabase Auth Listener] Sincronização offline/Soberania Nativa ativa. Ignorando evento auth da nuvem para o usuário local:', currentUserStr);
           setIsSessionValid(true); // Garante validação da sessão local
           return;
         }
 
         if (currentUserStr && databaseMode === DatabaseMode.SUPABASE && !isLocalUser && navigator.onLine) {
-          console.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
+          logger.warn('[Supabase] Sessão expirada ou Token inválido. Forçando logout...');
           setModalConfig({
             isOpen: true,
             title: 'Sessão Expirada',
@@ -3942,7 +3943,7 @@ const App: React.FC = () => {
             lastUpdated: new Date().toISOString() 
           } as Omit<InventoryState, 'assets'>, effectiveTenantId);
         } catch (syncErr) {
-          console.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
+          logger.warn('Limpeza concluída, mas falha ao atualizar timestamp na nuvem:', syncErr);
         }
 
         // Log de Auditoria na Nuvem
@@ -3980,7 +3981,7 @@ const App: React.FC = () => {
         type: 'info'
       });
     } catch (error: unknown) {
-      console.error('Erro na limpeza em massa:', error);
+      logger.error('Erro na limpeza em massa:', error);
       
       let errorMessage = 'Erro desconhecido';
       if (error instanceof Error) {
@@ -4005,7 +4006,7 @@ const App: React.FC = () => {
 
   const handleCheckIntegrity = async (): Promise<{ success: boolean; message: string }> => {
     try {
-      console.log('>>> [Integrity] Iniciando verificação manual...');
+      logger.info('>>> [Integrity] Iniciando verificação manual...');
       const loaded = await loadInventory(databaseMode);
       
       if (!loaded) {
@@ -4024,7 +4025,7 @@ const App: React.FC = () => {
         message: `Integridade verificada com sucesso! Todos os ${loaded.assets.length} ativos correspondem ao checksum SHA-256 gravado no último salvamento.` 
       };
     } catch (error) {
-      console.error('Erro ao verificar integridade:', error);
+      logger.error('Erro ao verificar integridade:', error);
       return { success: false, message: "Erro técnico durante a verificação de integridade." };
     }
   };
@@ -4033,7 +4034,7 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
-      console.log(`>>> [ModeSwitch] Salvando estado atual (${databaseMode}) antes da troca...`);
+      logger.info(`>>> [ModeSwitch] Salvando estado atual (${databaseMode}) antes da troca...`);
       await saveInventory(inventory);
 
       // 2. Troca o modo no localStorage e no estado de controle
@@ -4050,20 +4051,20 @@ const App: React.FC = () => {
       });
 
       // 3. Tenta carregar o estado do novo modo do IndexedDB
-      console.log(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
+      logger.info(`>>> [ModeSwitch] Carregando dados do novo modo (${mode})...`);
       const loaded = await loadInventory(mode);
       
       if (loaded && loaded.assets && loaded.assets.length > 0) {
-        console.log(`>>> [ModeSwitch] Dados encontrados para ${mode}. Restaurando...`);
+        logger.info(`>>> [ModeSwitch] Dados encontrados para ${mode}. Restaurando...`);
         setInventory(loaded);
       } else {
-        console.log(`>>> [ModeSwitch] Nenhum dado local para ${mode}. Iniciando base limpa.`);
+        logger.info(`>>> [ModeSwitch] Nenhum dado local para ${mode}. Iniciando base limpa.`);
         const cleanState = getInitialInventoryState(mode);
         setInventory(cleanState);
         
         // Se mudou para modo nuvem e está vazio, tenta sincronizar (apenas se houver usuário)
         if (mode.startsWith('SUPABASE') && user) {
-          console.log(`>>> [ModeSwitch] Modo Nuvem detectado. Iniciando sincronização automática...`);
+          logger.info(`>>> [ModeSwitch] Modo Nuvem detectado. Iniciando sincronização automática...`);
           await syncFromCloud(undefined, mode);
         }
       }
@@ -4083,7 +4084,7 @@ const App: React.FC = () => {
         }
       });
     } catch (error) {
-      console.error('Erro ao trocar modo de banco de dados:', error);
+      logger.error('Erro ao trocar modo de banco de dados:', error);
       setModalConfig({
         isOpen: true,
         title: 'Erro na Troca de Modo',
@@ -4115,7 +4116,7 @@ const App: React.FC = () => {
     setHistory(prev => {
       const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
       const newScreen = newHistory[newHistory.length - 1];
-      console.log(`>>> [Navigation] Popping screen back to: ${newScreen}`);
+      logger.info(`>>> [Navigation] Popping screen back to: ${newScreen}`);
       if (newScreen !== AppScreen.ASSET_DETAIL) {
         setSelectedAssets([]);
       }
@@ -4131,28 +4132,28 @@ const App: React.FC = () => {
 
   const completeOnboarding = useCallback(() => {
     try {
-      console.log("Finalizando onboarding - Início da função");
+      logger.info("Finalizando onboarding - Início da função");
       
       // 1. Persistência imediata
       localStorage.setItem('app_onboarding_completed', 'true');
-      console.log("Finalizando onboarding - LocalStorage persistido");
+      logger.info("Finalizando onboarding - LocalStorage persistido");
       
       // 2. Atualização de estado
       setInventory(prev => {
-        console.log("Finalizando onboarding - Atualizando estado do inventário");
+        logger.info("Finalizando onboarding - Atualizando estado do inventário");
         const newState = { ...prev, hasCompletedOnboarding: true };
-        saveInventory(newState).catch(e => console.error('Erro ao salvar no IndexedDB:', e));
+        saveInventory(newState).catch(e => logger.error('Erro ao salvar no IndexedDB:', e));
         return newState;
       });
       
       // 3. Navegação forçada se necessário
       const currentScreen = history[history.length - 1];
       if (currentScreen === AppScreen.ONBOARDING || currentScreen === AppScreen.LOGIN) {
-        console.log("Finalizando onboarding - Redirecionando usuário para MODULE_SELECTION");
+        logger.info("Finalizando onboarding - Redirecionando usuário para MODULE_SELECTION");
         setHistory([AppScreen.MODULE_SELECTION]);
       }
     } catch (error) {
-      console.error("Erro crítico no completeOnboarding:", error);
+      logger.error("Erro crítico no completeOnboarding:", error);
     }
   }, [history, user, ADMIN_EMAIL]);
 
@@ -4273,7 +4274,7 @@ const App: React.FC = () => {
 
     // 2) Gravação assíncrona/background para o DB nativo ou Sync em nuvem
     if (databaseMode === DatabaseMode.INTERNAL) {
-      console.log(`>>> [KARDEK] Persistindo no SQLite em background sem bloquear a UI...`);
+      logger.info(`>>> [KARDEK] Persistindo no SQLite em background sem bloquear a UI...`);
       Promise.resolve().then(async () => {
         try {
           if (existingAsset) {
@@ -4285,7 +4286,7 @@ const App: React.FC = () => {
                 updates
               );
             } catch (auditErr) {
-              console.error(">>> [Audit Error] Erro ao registrar trilha em background:", auditErr);
+              logger.error(">>> [Audit Error] Erro ao registrar trilha em background:", auditErr);
             }
 
             const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
@@ -4320,9 +4321,9 @@ const App: React.FC = () => {
           } else {
             await localDb.assets.put(updates, user?.email || 'SISTEMA');
           }
-          console.log(`>>> [KARDEK] Persistido com sucesso no SQLite para id: ${updates.id}`);
+          logger.info(`>>> [KARDEK] Persistido com sucesso no SQLite para id: ${updates.id}`);
         } catch (err) {
-          console.error(">>> [KARDEK] Falha ao persistir alterações no SQLite:", err);
+          logger.error(">>> [KARDEK] Falha ao persistir alterações no SQLite:", err);
         }
       });
     } else {
@@ -4330,9 +4331,9 @@ const App: React.FC = () => {
       try {
         await syncAssetsToCloud([updates], user?.tenantId || user?.tenantid);
         setRefreshVersion(prev => prev + 1);
-        console.log(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
+        logger.info(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
       } catch (err) {
-        console.error(">>> [KARDEK] Falha ao sincronizar com nuvem:", err);
+        logger.error(">>> [KARDEK] Falha ao sincronizar com nuvem:", err);
         showModal("Erro de Sincronização", "Erro SQL (Nuvem): " + (err instanceof Error ? err.message : String(err)), "error");
       } finally {
         setIsProcessing(false);
@@ -4390,18 +4391,18 @@ const App: React.FC = () => {
 
     // Captura GPS de forma ASSÍNCRONA mas PRIORITÁRIA para o primeiro commit
     if (updatedAsset._conferido) {
-      console.log(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
+      logger.info(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
       
       try {
         const metrics = await telemetryService.getDeviceMetrics();
-        console.log(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
+        logger.info(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
         
         const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
         const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
         
         let loc = { lat: 0, lng: 0, altitude: 0 };
         if (isAdmin || isGpsBypassed) {
-          console.log('>>> [GPS] Perfis administrativos/bypass detectado de forma síncrona: bypass imediato da malha de captura física.');
+          logger.info('>>> [GPS] Perfis administrativos/bypass detectado de forma síncrona: bypass imediato da malha de captura física.');
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
             loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
@@ -4412,20 +4413,20 @@ const App: React.FC = () => {
             getCurrentLocation(),
             new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
           ]).catch(e => {
-            console.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
+            logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
             if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
               return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
             }
             return { lat: 0, lng: 0, altitude: 0 };
           });
         } else {
-          console.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
+          logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
             loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
         }
 
-        console.log(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
+        logger.info(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
         
         // Injeta GPS no objeto e no registro da auditoria
         assetWithHistory.latitude = loc.lat;
@@ -4442,7 +4443,7 @@ const App: React.FC = () => {
           assetWithHistory._history[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}, Andar: ${assetWithHistory._id_andar}]`;
         }
       } catch (e) {
-        console.error(">>> [GPS] Erro fatal na lógica de captura:", e);
+        logger.error(">>> [GPS] Erro fatal na lógica de captura:", e);
       }
     }
 
@@ -4591,7 +4592,7 @@ const App: React.FC = () => {
         type: 'success'
       });
     } catch (err) {
-      console.error('>>> [DATABASE] Erro ao unitarizar ativo:', err);
+      logger.error('>>> [DATABASE] Erro ao unitarizar ativo:', err);
       showModal("Erro de Unitarização", "ERRO SQL (Unitarização): " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setIsProcessing(false);
@@ -4643,7 +4644,7 @@ const App: React.FC = () => {
         .delete()
         .eq('id', assetId);
       
-      if (error) console.error('Erro ao excluir permanentemente:', error);
+      if (error) logger.error('Erro ao excluir permanentemente:', error);
     }
   }, [databaseMode]);
 
@@ -4711,9 +4712,9 @@ const App: React.FC = () => {
         popScreen();
       }
       
-      console.log(`>>> [DATABASE] Exclusão confirmada para id: ${assetId}`);
+      logger.info(`>>> [DATABASE] Exclusão confirmada para id: ${assetId}`);
     } catch (err) {
-      console.error('>>> [DATABASE] Falha ao excluir ativo:', err);
+      logger.error('>>> [DATABASE] Falha ao excluir ativo:', err);
       showModal("Erro de Exclusão", "ERRO SQL (Exclusão): " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setIsProcessing(false);
@@ -4744,13 +4745,13 @@ const App: React.FC = () => {
         const loc = await getCurrentLocation();
         gpsCoords = { lat: loc.lat, lng: loc.lng };
       } else {
-        console.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
+        logger.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
         if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
           gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
         }
       }
     } catch (e) {
-      console.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
+      logger.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
       if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
         gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
       }
@@ -4849,7 +4850,7 @@ const App: React.FC = () => {
     // 2. PESIMISMO SAUDÁVEL: PERSISTÊNCIA ANTES DA UI
     setIsProcessing(true);
     try {
-      console.log(`>>> [DATABASE] Iniciando persistência em lote para ${updatedAssetsList.length} itens...`);
+      logger.info(`>>> [DATABASE] Iniciando persistência em lote para ${updatedAssetsList.length} itens...`);
       if (databaseMode === DatabaseMode.INTERNAL) {
         // SOBERANIA SQLITE: Transação atômica que NÃO sobrescreve dados antigos sem intenção (merge via spread)
         await sqliteService.bulkInsertAssets(updatedAssetsList);
@@ -4879,9 +4880,9 @@ const App: React.FC = () => {
       // MARCA IDs como sujos para back-sync
       ids.forEach(id => dirtyAssetsRef.current.add(String(id)));
       
-      console.log(`>>> [DATABASE] Operação em lote concluída com sucesso.`);
+      logger.info(`>>> [DATABASE] Operação em lote concluída com sucesso.`);
     } catch (err) {
-      console.error('>>> [DATABASE] Falha Crítica no Lote:', err);
+      logger.error('>>> [DATABASE] Falha Crítica no Lote:', err);
       showModal("Erro no Banco", `ERRO CRÍTICO NO BANCO:\n${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
       setIsProcessing(false);
@@ -5096,7 +5097,7 @@ const App: React.FC = () => {
         });
       }
     } catch (error) {
-      console.error('Erro ao baixar dados da nuvem:', error);
+      logger.error('Erro ao baixar dados da nuvem:', error);
       setModalConfig({
         isOpen: true,
         title: 'Erro no Download',
@@ -5141,17 +5142,17 @@ const App: React.FC = () => {
       
       // 3. FASE 1 (SRE): Nuvem Congelada. Expurgo 100% Offline via File System API
       if (databaseMode === DatabaseMode.SUPABASE) {
-        console.warn(">>> [SRE] Integração Supabase CONGELADA. Operando exclusão puramente local no disco físico.");
+        logger.warn(">>> [SRE] Integração Supabase CONGELADA. Operando exclusão puramente local no disco físico.");
       }
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const dirHandle = (window as any).globalSreDirectoryHandle;
         if (dirHandle) {
           await dirHandle.removeEntry(`PLANILHA_${unitName}.json`);
-          console.log(`>>> [SRE] Arquivo físico PLANILHA_${unitName}.json expurgado silenciosamente.`);
+          logger.info(`>>> [SRE] Arquivo físico PLANILHA_${unitName}.json expurgado silenciosamente.`);
         }
       } catch (ioErr) {
-        console.warn(">>> [SRE] Arquivo físico não encontrado ou já deletado:", ioErr);
+        logger.warn(">>> [SRE] Arquivo físico não encontrado ou já deletado:", ioErr);
       }
 
       // Atualiza o estado local removendo apenas os ativos da empresa limpa
@@ -5200,7 +5201,7 @@ const App: React.FC = () => {
         type: 'info'
       });
     } catch (error: unknown) {
-      console.error('Erro na limpeza do banco:', error);
+      logger.error('Erro na limpeza do banco:', error);
       let errorMessage = 'Erro desconhecido';
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -5257,7 +5258,7 @@ const App: React.FC = () => {
       });
       popScreen();
     } catch (error) {
-      console.error('Erro ao salvar assinatura:', error);
+      logger.error('Erro ao salvar assinatura:', error);
       setModalConfig({
         isOpen: true,
         title: 'Erro ao Finalizar',
@@ -5269,7 +5270,7 @@ const App: React.FC = () => {
   
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
-      console.log('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
+      logger.info('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
       return [];
     }
 
@@ -5279,15 +5280,15 @@ const App: React.FC = () => {
     const assets = inventory.assets;
     
     if (assets.length === 0) {
-      console.log('>>> [fullCompaniesWithStatus] Inventory assets is empty.');
+      logger.info('>>> [fullCompaniesWithStatus] Inventory assets is empty.');
     } else {
-      console.log(`>>> [fullCompaniesWithStatus] Processing ${assets.length} assets.`);
+      logger.info(`>>> [fullCompaniesWithStatus] Processing ${assets.length} assets.`);
     }
 
     if (inventory.companies && inventory.companies.length > 0) {
-      console.log(`>>> [fullCompaniesWithStatus] Inventory companies: ${JSON.stringify(inventory.companies)}`);
+      logger.info(`>>> [fullCompaniesWithStatus] Inventory companies: ${JSON.stringify(inventory.companies)}`);
     } else {
-      console.log('>>> [fullCompaniesWithStatus] Inventory companies is empty.');
+      logger.info('>>> [fullCompaniesWithStatus] Inventory companies is empty.');
     }
 
     // 1. Agrupar estatísticas e campanhas por empresa em um único loop O(N)
@@ -5361,7 +5362,7 @@ const App: React.FC = () => {
     });
 
     if (unitConfigs.length > 0) {
-      console.log(`>>> [App] GPS Configs: ${unitConfigs.length}, Units with GPS: ${Array.from(unitsWithGps).join(', ')}`);
+      logger.info(`>>> [App] GPS Configs: ${unitConfigs.length}, Units with GPS: ${Array.from(unitsWithGps).join(', ')}`);
     }
 
     // 2. Definir a lista base de empresas
@@ -5486,7 +5487,7 @@ const App: React.FC = () => {
     // de empresas resultou vazia (talvez por filtro de permissão equivocado), forçamos
     // a inclusão de todas as unidades encontradas nos ativos para evitar o bloqueio do app.
     if (result.length === 0 && assets.length > 0) {
-      console.warn('>>> [fullCompaniesWithStatus] CRITICAL: Assets exist but no units were extracted! Applying EMERGENCY extraction.');
+      logger.warn('>>> [fullCompaniesWithStatus] CRITICAL: Assets exist but no units were extracted! Applying EMERGENCY extraction.');
       const emergencyUnits = new Set<string>();
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
@@ -5523,7 +5524,7 @@ const App: React.FC = () => {
       return true;
     });
 
-    console.log(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
+    logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion, isImportingBatchState]);
 
@@ -5595,7 +5596,7 @@ const App: React.FC = () => {
   // Auto-sync on Company Selection has been disabled per Senior Offline-First architecture.
   // The user initiates any synchronization or database loads manually via physical buttons.
   useEffect(() => {
-    console.log('>>> [Offline-First] Auto-sync e redirecionamentos automáticos desativados. Aguardando ação física do operador.');
+    logger.info('>>> [Offline-First] Auto-sync e redirecionamentos automáticos desativados. Aguardando ação física do operador.');
   }, [screen]);
 
   // Auto-select unit if only one is available for the auditor
@@ -5633,7 +5634,7 @@ const App: React.FC = () => {
     AppScreen.SIGNATURE
   ].includes(screen);
   
-  console.log(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
+  logger.info(">>> [MOBILE-SHIELD] Render State & Auth Check:", {
     sqliteStatus: sqliteStatus.status,
     sqliteLoading: sqliteStatus.loading,
     isInitializing,
@@ -5648,7 +5649,7 @@ const App: React.FC = () => {
   });
 
   if (sqliteStatus.loading || isInitializing || authLoading) {
-    console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO LOADER (Splash Screen).");
+    logger.info(">>> [MOBILE-SHIELD] Renderizando BLOCO LOADER (Splash Screen).");
     return (
       <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center p-10 text-white font-sans">
         <div className="relative mb-10">
@@ -5666,7 +5667,7 @@ const App: React.FC = () => {
     );
   }
 
-  console.log(">>> [MOBILE-SHIELD] Renderizando BLOCO DA APLICAÇÃO PRINCIPAL. Screen:", screen);
+  logger.info(">>> [MOBILE-SHIELD] Renderizando BLOCO DA APLICAÇÃO PRINCIPAL. Screen:", screen);
 
   // INTERCEPTOR DE EXPIRAÇÃO DA DEMONSTRAÇÃO (PERFIL DEMO)
   if (user && user.role === ('DEMO' as unknown as UserRole) && demoService.checkDemoStatus().expired) {
@@ -5748,7 +5749,7 @@ const App: React.FC = () => {
           
           <button 
             onClick={async () => {
-              console.log(">>> [SRE Failsafe] Forçando expurgo físico emergencial por travamento de boot...");
+              logger.info(">>> [SRE Failsafe] Forçando expurgo físico emergencial por travamento de boot...");
               try {
                 // 1. Limpa todas as instâncias de fallback e chaves do localforage/localStorage/sessionStorage
                 await localforage.clear().catch(() => {});
@@ -5758,11 +5759,11 @@ const App: React.FC = () => {
                 // 2. Executa a purga física do banco de dados Dexie de forma limpa
                 await localDb.purgeDatabase();
                 
-                console.log(">>> [SRE Failsafe] Cache e descritores limpos. Forçando reload completo da página.");
+                logger.info(">>> [SRE Failsafe] Cache e descritores limpos. Forçando reload completo da página.");
                 // 3. Força o recarregamento total limpando a memória do iFrame
                 window.location.reload();
               } catch (err) {
-                console.error("Falha ao executar Failsafe Purge:", err);
+                logger.error("Falha ao executar Failsafe Purge:", err);
                 window.location.reload();
               }
             }}
@@ -5956,9 +5957,9 @@ const App: React.FC = () => {
               sessionStorage.setItem('tenantId', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
               if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
-                console.log('[App] Login detectado. Iniciando sincronizacao silenciosa...');
+                logger.info('[App] Login detectado. Iniciando sincronizacao silenciosa...');
                 syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
-                  console.warn('[Sync] Sincronizacao em background falhou:', err);
+                  logger.warn('[Sync] Sincronizacao em background falhou:', err);
                 });
               }
               try {
@@ -5973,7 +5974,7 @@ const App: React.FC = () => {
                   }
                 }
               } catch (bioErr) {
-                console.warn('[Biometric] Falha ao checar biometria:', bioErr);
+                logger.warn('[Biometric] Falha ao checar biometria:', bioErr);
               }
             }}
           />} />
@@ -6416,7 +6417,7 @@ const App: React.FC = () => {
                   try {
                     await sqliteService.salvarCampanhaAtiva(selectedUnit, id);
                   } catch (err) {
-                    console.error(">>> [App] Erro ao salvar campanha ativa corporativa no sqlite:", err);
+                    logger.error(">>> [App] Erro ao salvar campanha ativa corporativa no sqlite:", err);
                   }
                 } else if (selectedUnit) {
                   // Fallback para modo nuvem no localStorage para manter consistência rápida

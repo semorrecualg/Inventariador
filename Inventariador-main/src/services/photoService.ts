@@ -1,4 +1,5 @@
 import localforage from 'localforage';
+import { logger } from '../utils/logger';
 
 const PHOTO_STORE_NAME = 'gbr_local_photos_v24';
 
@@ -13,9 +14,9 @@ const photoStore = localforage.createInstance({
 export const saveLocalPhoto = async (assetId: string, photoBlob: Blob): Promise<void> => {
   try {
     await photoStore.setItem(assetId, photoBlob);
-    console.log(`[PhotoService] Foto salva localmente para o ativo ${assetId}`);
+    logger.info(`[PhotoService] Foto salva localmente para o ativo ${assetId}`);
   } catch (error) {
-    console.error('[PhotoService] Erro ao salvar foto localmente:', error);
+    logger.error('[PhotoService] Erro ao salvar foto localmente:', error);
   }
 };
 
@@ -26,7 +27,7 @@ export const getLocalPhoto = async (assetId: string): Promise<Blob | null> => {
   try {
     return await photoStore.getItem<Blob>(assetId);
   } catch (error) {
-    console.error('[PhotoService] Erro ao recuperar foto local:', error);
+    logger.error('[PhotoService] Erro ao recuperar foto local:', error);
     return null;
   }
 };
@@ -38,7 +39,7 @@ export const deleteLocalPhoto = async (assetId: string): Promise<void> => {
   try {
     await photoStore.removeItem(assetId);
   } catch (error) {
-    console.error('[PhotoService] Erro ao remover foto local:', error);
+    logger.error('[PhotoService] Erro ao remover foto local:', error);
   }
 };
 
@@ -56,7 +57,7 @@ export const getAllLocalPhotoIds = async (): Promise<string[]> => {
   try {
     return await photoStore.keys();
   } catch (error) {
-    console.error('[PhotoService] Erro ao recuperar chaves de fotos:', error);
+    logger.error('[PhotoService] Erro ao recuperar chaves de fotos:', error);
     return [];
   }
 };

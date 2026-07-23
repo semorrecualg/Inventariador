@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { logger } from '../utils/logger';
 
 interface ConsultationProps {
   assets: Asset[];

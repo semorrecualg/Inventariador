@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Asset } from '../types';
+import { logger } from '../utils/logger';
 
 export class ReportService {
   /**
@@ -7,7 +8,7 @@ export class ReportService {
    */
   async generateAuditReport(assets: Asset[]) {
     try {
-      console.log(`[GBR-Report] Gerando relatório para ${assets.length} ativos...`);
+      logger.info(`[GBR-Report] Gerando relatório para ${assets.length} ativos...`);
       
       const worksheet = XLSX.utils.json_to_sheet(assets.map(a => ({
         'ESTADO': a.C_STATUS_AUDIT === 'pending' ? 'PENDENTE' : 'CONFERIDO',
@@ -26,7 +27,7 @@ export class ReportService {
       XLSX.writeFile(workbook, `GBR_AUDITORIA_MASTER_${new Date().getTime()}.xlsx`);
       return true;
     } catch (err) {
-      console.error("[GBR-Report] Erro ao gerar Excel:", err);
+      logger.error("[GBR-Report] Erro ao gerar Excel:", err);
       return false;
     }
   }

@@ -1,4 +1,5 @@
 import { db } from './sqliteService';
+import { logger } from '../utils/logger';
 
 export const testPerformance = () => {};
 
@@ -21,10 +22,10 @@ export async function executeDatabaseStressTest(): Promise<{ totalTimeMs: number
   const totalTimeMs = endTime - startTime;
   const averageOpTimeMs = totalTimeMs / iterations;
 
-  console.log(`[SRE TELEMETRIA] Teste concluído. Tempo Total: ${totalTimeMs.toFixed(2)}ms. Média por Operação: ${averageOpTimeMs.toFixed(2)}ms.`);
+  logger.info(`[SRE TELEMETRIA] Teste concluído. Tempo Total: ${totalTimeMs.toFixed(2)}ms. Média por Operação: ${averageOpTimeMs.toFixed(2)}ms.`);
   
   if (averageOpTimeMs > 12) {
-    console.warn("[SRE ALERTA] Latência acima da meta canônica de 12ms! Verifique fragmentação de índices.");
+    logger.warn("[SRE ALERTA] Latência acima da meta canônica de 12ms! Verifique fragmentação de índices.");
   }
 
   return { totalTimeMs, averageOpTimeMs };

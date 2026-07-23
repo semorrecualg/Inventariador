@@ -1,5 +1,6 @@
 
 import { Asset } from '../types';
+import { logger } from '../utils/logger';
 
 /**
  * Serviço de Integração com o ERP Protheus (SIGAATF)
@@ -70,7 +71,7 @@ export const updateAssetInProtheus = async (
 
   const protheusData = normalizeToProtheus(asset);
   const finalApiUrl = apiUrl || import.meta.env.VITE_PROTHEUS_API_URL || 'https://api-protheus-simulada.gbr.com.br/rest';
-  console.log(`Enviando dados para Protheus (${finalApiUrl}):`, protheusData);
+  logger.info(`Enviando dados para Protheus (${finalApiUrl}):`, protheusData);
 
   // Simulação de chamada de API
   return new Promise((resolve) => {

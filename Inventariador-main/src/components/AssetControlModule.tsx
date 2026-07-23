@@ -39,6 +39,7 @@ import ImpairmentTestModal from './ImpairmentTestModal';
 import AssetUnitizeModal from './AssetUnitizeModal';
 import { getCurrentLocation } from '../utils/gpsUtils';
 import { Layers, ShieldCheck } from 'lucide-react';
+import { logger } from '../utils/logger';
 
 interface AssetControlModuleProps {
   onBack: () => void;
@@ -110,7 +111,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   // Auto-normalização se a base de unidades estiver vazia mas houver ativos
   useEffect(() => {
     if (!loading && assets.length > 0 && unitConfigs.length === 0 && databaseMode === DatabaseMode.SUPABASE) {
-      console.log('>>> [AssetControl] Detectada base de unidades vazia com ativos presentes. Sugerindo normalização...');
+      logger.info('>>> [AssetControl] Detectada base de unidades vazia com ativos presentes. Sugerindo normalização...');
       // Poderíamos disparar automaticamente, mas vamos deixar o botão em destaque no Dashboard
     }
   }, [assets, unitConfigs, loading, databaseMode]);
@@ -127,7 +128,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         setUnitConfigs(data || []);
       }
     } catch (err) {
-      console.error('Erro ao carregar unidades:', err);
+      logger.error('Erro ao carregar unidades:', err);
     }
   };
 
@@ -136,7 +137,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       const data = await assetControlService.getChartOfAccounts(tenantId);
       setChartOfAccounts(data);
     } catch (err) {
-      console.error('Erro ao carregar plano de contas:', err);
+      logger.error('Erro ao carregar plano de contas:', err);
     }
   };
 
@@ -144,12 +145,12 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     setLoading(true);
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
-        console.log('>>> [AssetControl] Carregando ativos da base LOCAL (Dexie)...');
+        logger.info('>>> [AssetControl] Carregando ativos da base LOCAL (Dexie)...');
         const localAssets = await localDb.assets.toArray();
         setAssets(localAssets);
       } else {
         if (!supabase) return;
-        console.log('>>> [AssetControl] Carregando ativos da base CLOUD (Supabase)...');
+        logger.info('>>> [AssetControl] Carregando ativos da base CLOUD (Supabase)...');
         const { data, error } = await supabase
           .from('assets')
           .select('*')
@@ -159,7 +160,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         setAssets(data || []);
       }
     } catch (err) {
-      console.error('Erro ao carregar ativos contábeis:', err);
+      logger.error('Erro ao carregar ativos contábeis:', err);
     } finally {
       setLoading(false);
     }
@@ -172,7 +173,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       alert(`Normalização concluída! ${result.discovered} unidades encontradas na base de ativos, ${result.created} novas configurações criadas.`);
       fetchUnits();
     } catch (err) {
-      console.error('Erro ao normalizar unidades:', err);
+      logger.error('Erro ao normalizar unidades:', err);
       alert('Erro ao normalizar unidades: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoading(false);
@@ -184,7 +185,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       const data = await assetControlService.getAssetGroups(tenantId);
       setAssetGroups(data);
     } catch (err) {
-      console.error('Erro ao carregar grupos contábeis:', err);
+      logger.error('Erro ao carregar grupos contábeis:', err);
     }
   };
 
@@ -193,7 +194,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       const data = await assetControlService.getNCMClassifiers(tenantId);
       setNcmClassifiers(data);
     } catch (err) {
-      console.error('Erro ao carregar classificadores NCM:', err);
+      logger.error('Erro ao carregar classificadores NCM:', err);
     }
   };
 
@@ -214,7 +215,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchChartOfAccounts();
     } catch (err) {
-      console.error('Erro ao salvar conta:', err);
+      logger.error('Erro ao salvar conta:', err);
     }
   };
 
@@ -237,7 +238,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchChartOfAccounts();
     } catch (err) {
-      console.error('Erro ao excluir conta:', err);
+      logger.error('Erro ao excluir conta:', err);
     }
   };
 
@@ -260,7 +261,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       }
       await fetchChartOfAccounts();
     } catch (err) {
-      console.error('Erro ao semear plano de contas:', err);
+      logger.error('Erro ao semear plano de contas:', err);
     } finally {
       setLoading(false);
     }
@@ -282,7 +283,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchAssetGroups();
     } catch (err) {
-      console.error('Erro ao salvar grupo:', err);
+      logger.error('Erro ao salvar grupo:', err);
     }
   };
 
@@ -305,7 +306,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchAssetGroups();
     } catch (err) {
-      console.error('Erro ao excluir grupo:', err);
+      logger.error('Erro ao excluir grupo:', err);
     }
   };
 
@@ -326,7 +327,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       }
       await fetchAssetGroups();
     } catch (err) {
-      console.error('Erro ao semear grupos:', err);
+      logger.error('Erro ao semear grupos:', err);
     } finally {
       setLoading(false);
     }
@@ -349,7 +350,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchNCMClassifiers();
     } catch (err) {
-      console.error('Erro ao salvar classificador NCM:', err);
+      logger.error('Erro ao salvar classificador NCM:', err);
     }
   };
 
@@ -372,7 +373,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchNCMClassifiers();
     } catch (err) {
-      console.error('Erro ao excluir classificador NCM:', err);
+      logger.error('Erro ao excluir classificador NCM:', err);
     }
   };
 
@@ -390,7 +391,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       }
       await fetchNCMClassifiers();
     } catch (err) {
-      console.error('Erro ao semear classificadores NCM:', err);
+      logger.error('Erro ao semear classificadores NCM:', err);
     } finally {
       setLoading(false);
     }
@@ -413,7 +414,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         }));
       }
     } catch (err) {
-      console.error('Erro ao buscar NCM:', err);
+      logger.error('Erro ao buscar NCM:', err);
     }
   };
 
@@ -430,9 +431,9 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       try {
         const loc = await getCurrentLocation(true);
         gpsData = { latitude: loc.lat, longitude: loc.lng };
-        console.log('>>> [GPS] Localização capturada para o ativo:', gpsData);
+        logger.info('>>> [GPS] Localização capturada para o ativo:', gpsData);
       } catch (gpsErr) {
-        console.warn('>>> [GPS] Falha ao capturar localização, salvando sem coordenadas:', gpsErr);
+        logger.warn('>>> [GPS] Falha ao capturar localização, salvando sem coordenadas:', gpsErr);
       }
 
       const assetToSave = {
@@ -494,7 +495,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       });
       fetchAssets();
     } catch (err) {
-      console.error('Erro ao salvar ativo:', err);
+      logger.error('Erro ao salvar ativo:', err);
       alert('Erro ao salvar ativo. Verifique os dados.');
     } finally {
       setLoading(false);
@@ -529,7 +530,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       fetchAssets();
     } catch (err) {
-      console.error('Erro ao salvar impairment:', err);
+      logger.error('Erro ao salvar impairment:', err);
     } finally {
       setLoading(false);
     }
@@ -638,7 +639,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       fetchAssets();
       alert('Unitarização contábil concluída com sucesso!');
     } catch (err) {
-      console.error('Erro na unitarização:', err);
+      logger.error('Erro na unitarização:', err);
       alert('Erro ao processar unitarização.');
     } finally {
       setLoading(false);

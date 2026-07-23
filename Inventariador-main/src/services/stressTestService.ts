@@ -1,13 +1,14 @@
 
 import { localDb } from './localDbService';
 import { Asset, AuditLogEntry, TagInventario, ConservationState } from '../types';
+import { logger } from '../utils/logger';
 
 export const stressTestService = {
   /**
    * Popula o banco de dados com uma grande quantidade de dados para teste de estresse.
    */
   async populateData(assetCount: number = 5000, logCount: number = 1000) {
-    console.log(`>>> [STRESS TEST] Iniciando população de dados: ${assetCount} ativos, ${logCount} logs...`);
+    logger.info(`>>> [STRESS TEST] Iniciando população de dados: ${assetCount} ativos, ${logCount} logs...`);
     
     // 1. Gerar Ativos
     const assets: Asset[] = [];
@@ -55,7 +56,7 @@ export const stressTestService = {
     localStorage.setItem('STRESS_TEST_KEY_TO_CLEAN', 'This should be gone');
     localStorage.setItem('inventory_assets_v24_internal_secure_STRESS', 'This should stay');
 
-    console.log('>>> [STRESS TEST] População concluída.');
+    logger.info('>>> [STRESS TEST] População concluída.');
     return { assetCount, logCount };
   },
 

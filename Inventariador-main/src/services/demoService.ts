@@ -1,6 +1,7 @@
 import { getDemoSeedAssets } from './demoSeed';
 import { localDb } from './localDbService';
 import { User, UserRole } from '../types';
+import { logger } from '../utils/logger';
 
 const DEMO_START_KEY = 'gbr_kardex_demo_start';
 const DEMO_AUDIT_COUNT_KEY = 'gbr_kardex_demo_audits';
@@ -41,7 +42,7 @@ export const demoService = {
 
     // Carrega seed data no Dexie
     try {
-      console.log('[Demo] Iniciando carga de demonstração com Dexie...');
+      logger.info('[Demo] Iniciando carga de demonstração com Dexie...');
       
       // Limpa quaisquer dados locais legados
       await localDb.assets.clear();
@@ -91,10 +92,10 @@ export const demoService = {
         await localDb.assets.bulkPut(chunk);
       }
 
-      console.log('[Demo Success] Carga concluída! 50+ ativos fictícios e usuário demo implantados com sucesso via Dexie.');
+      logger.info('[Demo Success] Carga concluída! 50+ ativos fictícios e usuário demo implantados com sucesso via Dexie.');
       return true;
     } catch (err) {
-      console.error('[Demo Ultimate Error] Falha na inicialização do Demo local:', err);
+      logger.error('[Demo Ultimate Error] Falha na inicialização do Demo local:', err);
       
       // SALVA O LOG DE TELEMETRIA LOCAL
       const errorMsg = err instanceof Error ? err.message : String(err);

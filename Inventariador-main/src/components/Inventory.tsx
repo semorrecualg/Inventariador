@@ -99,7 +99,7 @@ const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) 
 const isOfflineValidationEnabled = false;
 if (isOfflineValidationEnabled) {
   const _keypadRef = <NumericKeypad onInput={() => {}} onDelete={() => {}} onClose={() => {}} />;
-  console.log(_keypadRef);
+  logger.info(_keypadRef);
 }
 
 const normalizeKeyFast = (s: string | null | undefined) => {
@@ -133,6 +133,7 @@ const AssetCard = React.memo(({
 AssetCard.displayName = 'AssetCard';
 
 import { getAllLocalPhotoIds } from '../services/photoService';
+import { logger } from '../utils/logger';
 
 interface InventoryProps {
   assets: Asset[];
@@ -220,7 +221,7 @@ const Inventory: React.FC<InventoryProps> = ({
   // No evento de desmonte do componente (useEffect cleanup), invoque MemoryGuardService.releaseMassiveArray
   useEffect(() => {
     return () => {
-      console.log(">>> [MemoryGuard] Componente Inventory desmontado. Limpando arrays massivos de cache...");
+      logger.info(">>> [MemoryGuard] Componente Inventory desmontado. Limpando arrays massivos de cache...");
       MemoryGuardService.releaseMassiveArray(globalSearchResults);
       MemoryGuardService.releaseMassiveArray(dbLocations);
     };
@@ -279,9 +280,9 @@ const Inventory: React.FC<InventoryProps> = ({
       backupArray.push(cleanAsset);
       
       localStorage.setItem(backupKey, JSON.stringify(backupArray));
-      console.log(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.ETIQUETA}) espelhado com sucesso no localStorage.`);
+      logger.info(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.ETIQUETA}) espelhado com sucesso no localStorage.`);
     } catch (e) {
-      console.warn(">>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:", e);
+      logger.warn(">>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:", e);
     }
     
     await onUpdateAsset(cleanAsset);
@@ -306,7 +307,7 @@ const Inventory: React.FC<InventoryProps> = ({
         const backupArray: Asset[] = JSON.parse(rawBackup);
         if (!Array.isArray(backupArray) || backupArray.length === 0) return;
         
-        console.log(`>>> [Recovery Boot] Encontrados ${backupArray.length} registros remanescentes de contingência no localStorage.`);
+        logger.info(`>>> [Recovery Boot] Encontrados ${backupArray.length} registros remanescentes de contingência no localStorage.`);
         
         let recoveredCount = 0;
         for (const backedAsset of backupArray) {
@@ -314,16 +315,16 @@ const Inventory: React.FC<InventoryProps> = ({
           const isAlreadyConferido = currentLocalObj && (currentLocalObj._conferido || String(currentLocalObj.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
           
           if (!isAlreadyConferido) {
-            console.log(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.ETIQUETA})`);
+            logger.info(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.ETIQUETA})`);
             await onUpdateAsset(backedAsset);
             recoveredCount++;
           }
         }
         
-        console.log(`>>> [Recovery Boot] Rotina concluída. ${recoveredCount} ativos recuperados e reinseridos.`);
+        logger.info(`>>> [Recovery Boot] Rotina concluída. ${recoveredCount} ativos recuperados e reinseridos.`);
         localStorage.removeItem(backupKey);
       } catch (err) {
-        console.warn('>>> [Recovery Boot] Erro durante processamento da rotina autônoma de retomada:', err);
+        logger.warn('>>> [Recovery Boot] Erro durante processamento da rotina autônoma de retomada:', err);
         hasRecoveredRef.current = false;
       }
     };
@@ -454,7 +455,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (savedIndex && virtuosoRef.current) {
       const index = parseInt(savedIndex, 10);
       if (index > 0) {
-        console.log(`>>> [UX] Restaurando posição de scroll para o índice: ${index}`);
+        logger.info(`>>> [UX] Restaurando posição de scroll para o índice: ${index}`);
         // Pequeno delay para garantir que a renderização do Virtuoso completou
         const timer = setTimeout(() => {
           virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
@@ -480,7 +481,7 @@ const Inventory: React.FC<InventoryProps> = ({
         const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedLocTerm);
         setDbLocations(results || []);
       } catch (err) {
-        console.error(">>> [DBA] Erro ao buscar localidades:", err);
+        logger.error(">>> [DBA] Erro ao buscar localidades:", err);
       } finally {
         setIsLocSearching(false);
       }
@@ -682,7 +683,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setShowGlobalSearchResolution(extractedEtiqueta);
 
     } catch (err) {
-      console.error(">>> [Inventory SRE] Erro físico ou de consulta Dexie:", err);
+      logger.error(">>> [Inventory SRE] Erro físico ou de consulta Dexie:", err);
       setIsHierarchyLoading(false);
       
       // 4. BANIMENTO DE RECHARGES E ALERTS:
@@ -699,7 +700,7 @@ const Inventory: React.FC<InventoryProps> = ({
           tenantId: user?._tenantid || 'CICOPAL'
         });
       } catch (innerErr) {
-        console.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);
+        logger.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);
       }
 
       setSreNotification({
@@ -723,7 +724,7 @@ const Inventory: React.FC<InventoryProps> = ({
         handleCreateNewFromHierarchy();
       }
     } catch (err) {
-      console.error(">>> [Inventory] Erro na busca global:", err);
+      logger.error(">>> [Inventory] Erro na busca global:", err);
       alert(`Falha ao realizar a busca global de ativos: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsHierarchyLoading(false);
@@ -771,7 +772,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setCommittedSearch('');
       setDisplayValue('');
     } catch (err) {
-      console.error(">>> [Inventory] Erro ao vincular ativo:", err);
+      logger.error(">>> [Inventory] Erro ao vincular ativo:", err);
       alert(`Falha técnica ao vincular/adotar ativo de outra unidade operacional: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsHierarchyLoading(false);
@@ -919,7 +920,7 @@ const Inventory: React.FC<InventoryProps> = ({
         }
       }
     } catch (err) {
-      console.error('Erro no Smart OCR:', err);
+      logger.error('Erro no Smart OCR:', err);
     } finally {
       setIsOCRProcessing(false);
       if (ocrInputRef.current) ocrInputRef.current.value = '';
@@ -945,14 +946,14 @@ const Inventory: React.FC<InventoryProps> = ({
             ENDERECO: result.address
           }));
         } catch (err) {
-          console.error('Erro ao obter endereço:', err);
+          logger.error('Erro ao obter endereço:', err);
           alert('Erro ao obter endereço automático.');
         } finally {
           setIsGeocoding(false);
         }
       },
       (err) => {
-        console.error('Erro GPS:', err);
+        logger.error('Erro GPS:', err);
         setIsGeocoding(false);
         alert('Erro GPS: ' + err.message);
       },
@@ -972,7 +973,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (onNavigate) {
       onNavigate(AppScreen.UNIT_CONFIGURATOR, { initialUnit: selectedUnit });
     } else {
-      console.error('onNavigate não disponível no Inventory.tsx');
+      logger.error('onNavigate não disponível no Inventory.tsx');
       // Fallback para pushScreen global se App.tsx injetar
       if (window.pushScreen) {
         window.pushScreen(AppScreen.UNIT_CONFIGURATOR, { initialUnit: selectedUnit });
@@ -1090,7 +1091,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setCommittedSearch('');
       setDisplayValue('');
     } catch (err) {
-      console.error(">>> [Inventory] Erro na gravação de lote:", err);
+      logger.error(">>> [Inventory] Erro na gravação de lote:", err);
       alert(`Falha crítica na injeção ou atualização em lote: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -1196,7 +1197,7 @@ const Inventory: React.FC<InventoryProps> = ({
       try {
         await onBulkUpdateAssets(ids);
       } catch (err) {
-        console.error(">>> [Inventory] Erro na gravação de lote em massa:", err);
+        logger.error(">>> [Inventory] Erro na gravação de lote em massa:", err);
         alert(`Falha na atualização em lote de ativos selecionados: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -1231,7 +1232,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   // Satisfy ESLint unused checks
   if (isOfflineValidationEnabled) {
-    console.log({
+    logger.info({
       showNumericKeypad,
       setShowNumericKeypad,
       showScrollTop,
@@ -1277,7 +1278,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onerror = (event: any) => {
-      console.error('Erro no reconhecimento de voz:', event.error);
+      logger.error('Erro no reconhecimento de voz:', event.error);
       setIsListening(null);
     };
 
@@ -1320,7 +1321,7 @@ const Inventory: React.FC<InventoryProps> = ({
           stream.getTracks().forEach(track => track.stop());
           setIsScannerOpen(true);
         } catch (err) {
-          console.error('Erro ao acessar a câmera:', err);
+          logger.error('Erro ao acessar a câmera:', err);
           // Opcional: Mostrar um alerta amigável se a permissão for negada
         }
       }
@@ -1528,7 +1529,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         setScannedAsset(null);
                         onSelectAsset(cleanAsset); // Abre detalhes para foto
                       } catch (err) {
-                        console.error('>>> Erro na persistência de ativo com foto:', err);
+                        logger.error('>>> Erro na persistência de ativo com foto:', err);
                         alert('Falha crítica na persistência: ' + (err instanceof Error ? err.message : String(err)));
                       } finally {
                         setIsPersistingScan(false);
@@ -1581,7 +1582,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         await handleUpdateAssetWithBackup(cleanAsset);
                         setScannedAsset(null);
                       } catch (err) {
-                        console.error('>>> Erro na persistência síncrona de ativo:', err);
+                        logger.error('>>> Erro na persistência síncrona de ativo:', err);
                         alert('Falha crítica na persistência: ' + (err instanceof Error ? err.message : String(err)));
                       } finally {
                         setIsPersistingScan(false);

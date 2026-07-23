@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
+import { logger } from '../utils/logger';
 
 interface UnitConfiguratorProps {
   user: User;
@@ -81,7 +82,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   }, []);
 
   useEffect(() => {
-    console.log('>>> [MAP] SRE CPU-Bound 2D Motor gráfico ativo por padrão (Garantia de 0% GPU / Mobile-First).');
+    logger.info('>>> [MAP] SRE CPU-Bound 2D Motor gráfico ativo por padrão (Garantia de 0% GPU / Mobile-First).');
   }, []);
 
   // Veto SRE: Inicializações de MapLibre GL JS removidas para conformidade rigorosa com processamento puro CPU 2D.
@@ -324,7 +325,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     setSearching(true);
     try {
       // 🚀 PRIMEIRO PASSO: Soberania Local-First. Busca de endereços/localidades na tabela local assets_counting / ativos
-      console.log(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
+      logger.info(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
       const { default: sqliteService } = await import('../services/sqliteService');
       const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantId || user?.tenantid || 'CICOPAL');
       
@@ -334,7 +335,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       );
 
       if (exactMatch && exactMatch.lat !== undefined && exactMatch.lng !== undefined && !isNaN(exactMatch.lat) && !isNaN(exactMatch.lng)) {
-        console.log(`>>> [Local-First Search] Sucesso local! Encontrado ponto físico persistido no Lote 0: Lat ${exactMatch.lat}, Lng ${exactMatch.lng}`);
+        logger.info(`>>> [Local-First Search] Sucesso local! Encontrado ponto físico persistido no Lote 0: Lat ${exactMatch.lat}, Lng ${exactMatch.lng}`);
         const newLat = exactMatch.lat;
         const newLng = exactMatch.lng;
         
@@ -355,7 +356,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       }
 
       // Se não encontrou localmente ou não tem coordenadas válidas, tenta georreferenciamento de nuvem Nominatim
-      console.log(">>> [Local-First Search] Nenhuma coordenada local correspondente. Recorrendo à nuvem...");
+      logger.info(">>> [Local-First Search] Nenhuma coordenada local correspondente. Recorrendo à nuvem...");
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
 
@@ -395,7 +396,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         setMessage({ text: `CONVERTIDO PARA BRASÍLIA, DF (REGISTRO LOCAL ENCONTRADO SEM GPS / LOCALIZAÇÃO DESCONHECIDA)`, type: 'success' });
       }
     } catch (err: unknown) {
-      console.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
+      logger.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
       const defaultLat = -15.793889;
       const defaultLng = -47.882778;
       setMapCenter([defaultLat, defaultLng]);
@@ -458,7 +459,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         hasPhysicalGPS = true;
       }
     } catch (e) {
-      console.warn('>>> [GPS] Não foi possível ler localização real via hardware para validação espacial:', e);
+      logger.warn('>>> [GPS] Não foi possível ler localização real via hardware para validação espacial:', e);
       // Simulação: se não conseguir ler, distancia a coordenada em ~1.2km (0.01 graus de lat/lng) para ativar a regra de georeferenciamento
       currentPhysicalLat = l_lat + 0.01;
       currentPhysicalLng = l_lng + 0.01;
@@ -486,7 +487,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           }
         }
       } catch (turfErr) {
-        console.error('>>> [Spatial Error]', turfErr);
+        logger.error('>>> [Spatial Error]', turfErr);
       }
     }
 
@@ -609,7 +610,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
               if (typeof onBack === 'function') {
                 onBack();
               } else {
-                console.warn('onBack prop is not a function');
+                logger.warn('onBack prop is not a function');
               }
             }}
             title="Retornar para Unidades"

@@ -23,6 +23,7 @@ import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
+import { logger } from '../utils/logger';
 
 interface AuditLogsProps {
   user: User | null;
@@ -121,7 +122,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
           setLogs(localLogs as unknown as AuditLogDB[]);
         }
       } catch (error) {
-        console.error('Erro ao carregar logs:', error);
+        logger.error('Erro ao carregar logs:', error);
       } finally {
         setLoading(false);
       }
@@ -505,7 +506,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    console.log('Dados Brutos:', { old: log.old_data, new: log.new_data });
+                                    logger.info('Dados Brutos:', { old: log.old_data, new: log.new_data });
                                     alert('Dados brutos enviados para o console do desenvolvedor.');
                                   }}
                                   className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:underline"

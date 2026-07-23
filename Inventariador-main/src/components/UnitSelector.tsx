@@ -20,6 +20,7 @@ import * as turf from '@turf/turf';
 import { localDb } from '../services/localDbService';
 import { isAdminEmail } from '../utils/authUtils';
 import { db } from '../services/sqliteService';
+import { logger } from '../utils/logger';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -81,7 +82,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(">>> [UnitSelector] Erro ao carregar configurações de GPS do banco:", errMsg);
+        logger.error(">>> [UnitSelector] Erro ao carregar configurações de GPS do banco:", errMsg);
       }
     };
     loadConfigs();
@@ -103,7 +104,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             }
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            console.warn('[UnitSelector] Falha ao ler tenantId do sessionStorage:', errMsg);
+            logger.warn('[UnitSelector] Falha ao ler tenantId do sessionStorage:', errMsg);
           }
           
           const currentTenantId = tenantId ? tenantId.trim().toUpperCase() : '';
@@ -140,7 +141,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                   });
                 }
               } catch (err) {
-                console.warn("Error parsing virtual snapshot backup:", err);
+                logger.warn("Error parsing virtual snapshot backup:", err);
               }
             }
           }
@@ -178,7 +179,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error('>>> [UnitSelector] Erro ao carregar unidades com estatísticas do SQLite:', errMsg);
+        logger.error('>>> [UnitSelector] Erro ao carregar unidades com estatísticas do SQLite:', errMsg);
       }
     };
 
@@ -214,7 +215,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         if (activeUnitConfigs.length > 0) {
           const firstValid = activeUnitConfigs.find(c => c.lat && c.lng);
           if (firstValid) {
-            console.log('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
+            logger.info('>>> [UnitSelector GPS Fallback] Aplicando Ponto Zero de Calibração:', firstValid.lat, firstValid.lng);
             setDeviceCoords({ lat: Number(firstValid.lat), lng: Number(firstValid.lng) });
           }
         }
@@ -230,14 +231,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         },
         (err: unknown) => {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn('[UnitSelector GPS] getCurrentPosition falhou:', errMsg);
+          logger.warn('[UnitSelector GPS] getCurrentPosition falhou:', errMsg);
           applyGpsFallback();
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn('[UnitSelector GPS] getCurrentPosition Exception caught silently:', errMsg);
+      logger.warn('[UnitSelector GPS] getCurrentPosition Exception caught silently:', errMsg);
       applyGpsFallback();
     }
 
@@ -249,14 +250,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         },
         (err: unknown) => {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn('[UnitSelector GPS/Watch] watchPosition falhou:', errMsg);
+          logger.warn('[UnitSelector GPS/Watch] watchPosition falhou:', errMsg);
           applyGpsFallback();
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
       );
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn('[UnitSelector GPS/Watch] watchPosition Exception caught silently:', errMsg);
+      logger.warn('[UnitSelector GPS/Watch] watchPosition Exception caught silently:', errMsg);
       applyGpsFallback();
     }
 
@@ -266,7 +267,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           navigator.geolocation.clearWatch(watchId);
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn('[UnitSelector] clearWatch error:', errMsg);
+          logger.warn('[UnitSelector] clearWatch error:', errMsg);
         }
       }
     };
@@ -297,7 +298,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn('[UnitSelector] Erro ao decodificar usuário para bypass de geocerca', errMsg);
+      logger.warn('[UnitSelector] Erro ao decodificar usuário para bypass de geocerca', errMsg);
     }
 
     const config = getUnitConfigForFilial(filialName);
@@ -360,7 +361,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error('[Geofence Turf status err]', errMsg);
+      logger.error('[Geofence Turf status err]', errMsg);
       return { hasGps: true, message: 'ERRO DE COORDENADA', isInside: false, distance: null };
     }
   };
@@ -396,9 +397,9 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // Log para depuração de unidades
   if (displayUnitsList.length === 0) {
-    console.warn('>>> [UnitSelector] Recebeu 0 unidades purificadas para exibir.');
+    logger.warn('>>> [UnitSelector] Recebeu 0 unidades purificadas para exibir.');
   } else {
-    console.log(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${displayUnitsList.length} unidades de exibição.`);
+    logger.info(`>>> [UnitSelector] Exibindo ${filteredUnits.length} de ${displayUnitsList.length} unidades de exibição.`);
   }
 
   // Helper para gerar ícone e cor consistente baseada no nome
@@ -584,11 +585,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                               try { 
                                 Promise.resolve(onConfigGPS(displayName)).catch((err: unknown) => {
                                   const errMsg = err instanceof Error ? err.message : String(err);
-                                  console.error("[GPS MODAL CRASH PREVENTED]", errMsg);
+                                  logger.error("[GPS MODAL CRASH PREVENTED]", errMsg);
                                 }); 
                               } catch (err: unknown) { 
                                 const errMsg = err instanceof Error ? err.message : String(err);
-                                console.error("[GPS MODAL CRASH PREVENTED]", errMsg); 
+                                logger.error("[GPS MODAL CRASH PREVENTED]", errMsg); 
                               } 
                             }
                           }}

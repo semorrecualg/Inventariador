@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../services/sqliteService';
 import { Capacitor } from '@capacitor/core';
+import { logger } from '../utils/logger';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
@@ -45,7 +46,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
               const parsed = JSON.parse(virtualData);
               if (Array.isArray(parsed)) count = parsed.length;
             } catch (err) {
-              console.warn("Error parsing virtualData:", err);
+              logger.warn("Error parsing virtualData:", err);
             }
           }
         }
@@ -56,7 +57,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
           setCanAccessModules(hasLocalData || isOnlineSession);
         }
       } catch (e) {
-        console.error("Error checking asset count in ModuleSelector:", e);
+        logger.error("Error checking asset count in ModuleSelector:", e);
       }
     };
     runCheck();
@@ -74,11 +75,11 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
     const hasFolderLinked = !!sessionStorage.getItem('gbr_physical_folder_name');
 
     if (!isNative && !hasFolderLinked) {
-      console.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Windows. Forçando Picker...");
+      logger.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Windows. Forçando Picker...");
       
       const isIframe = window.self !== window.top;
       if (isIframe) {
-        console.warn(">>> [SRE-GUARD] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
+        logger.warn(">>> [SRE-GUARD] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
         sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
         localStorage.setItem('gbr_physical_link_active', 'true');
       } else {
@@ -89,15 +90,15 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
           if (directoryHandle) {
             sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
             localStorage.setItem('gbr_physical_link_active', 'true');
-            console.log(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
+            logger.info(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
           } else {
             return; // Aborta navegação se o usuário cancelar
           }
         } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-          console.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
+          logger.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
           
           if (err?.name === 'SecurityError' || String(err?.message || '').includes('Cross origin') || String(err?.message || '').includes('sub frames')) {
-            console.warn(">>> [SRE-GUARD] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
+            logger.warn(">>> [SRE-GUARD] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
             sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
             localStorage.setItem('gbr_physical_link_active', 'true');
           } else {

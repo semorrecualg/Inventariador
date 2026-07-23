@@ -5,6 +5,7 @@ import * as turf from '@turf/turf';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff, Loader2 } from 'lucide-react';
+import { logger } from '../utils/logger';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -64,11 +65,11 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
       map.on('load', () => {
         mapInstance.current = map;
         setMapReady(true);
-        console.log('>>> [MAP] Asset Map LibLibre Inicializado (Offline Sovereignty).');
+        logger.info('>>> [MAP] Asset Map LibLibre Inicializado (Offline Sovereignty).');
         renderMapData();
       });
     } catch (err) {
-      console.error('>>> [MAP] Falha ao inicializar Asset Map:', err);
+      logger.error('>>> [MAP] Falha ao inicializar Asset Map:', err);
     }
   };
 
@@ -136,7 +137,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
             };
           }
         } catch (e) {
-          console.warn(`[Turf] Erro no Convex Hull de ${loc}`, e);
+          logger.warn(`[Turf] Erro no Convex Hull de ${loc}`, e);
         }
         return null;
       })
@@ -282,7 +283,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
         }
       }
     } catch (err) {
-      console.warn('>>> [MAP] Erro ao renderizar dados no MapLibre:', err);
+      logger.warn('>>> [MAP] Erro ao renderizar dados no MapLibre:', err);
     }
   };
 

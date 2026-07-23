@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { db, DexieAsset } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
+import { logger } from '../utils/logger';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -146,7 +147,7 @@ export class DatabaseLoaderService {
       if (onProgresso) {
         onProgresso(Math.round((registrosProcessados / dadosBrutos.length) * 100));
       }
-      console.log(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
+      logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
     return registrosProcessados;
   }
@@ -179,7 +180,7 @@ export class DatabaseLoaderService {
         }
       }
     } catch (energyErr) {
-      console.warn(">>> [Hardware Check] Falha ao consultar subsistema de energia em DatabaseLoaderService:", energyErr);
+      logger.warn(">>> [Hardware Check] Falha ao consultar subsistema de energia em DatabaseLoaderService:", energyErr);
     }
 
     const activeUserJson = typeof window !== 'undefined' ? sessionStorage?.getItem('app_current_user') : null;
@@ -189,7 +190,7 @@ export class DatabaseLoaderService {
 
     if (currentBatteryLevel < 0.05 && !isDeviceCharging) {
       if (emailValidoParaBypass) {
-        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), porém OPERADOR HOMOLOGADO DETECTADO. Bypass síncrono ativado automaticamente.");
+        logger.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), porém OPERADOR HOMOLOGADO DETECTADO. Bypass síncrono ativado automaticamente.");
       } else {
         throw new Error("FAILSAFE: Operação abortada. Bateria abaixo de 5% sem fonte externa. Risco de corrupção do cabeçalho .db.");
       }
@@ -223,10 +224,10 @@ export class DatabaseLoaderService {
         const writable = await fileHandle.createWritable();
         await writable.write(JSON.stringify(rawRows));
         await writable.close();
-        console.log(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
+        logger.info(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
       }
     } catch (ioErr) {
-      console.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
+      logger.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
     }
 
     try {
@@ -382,7 +383,7 @@ export class DatabaseLoaderService {
             }
           });
         } catch (txErr) {
-          console.error(">>> [FATAL_IMPORT_CRASH] Falha crítica de integridade na transação Dexie:", txErr);
+          logger.error(">>> [FATAL_IMPORT_CRASH] Falha crítica de integridade na transação Dexie:", txErr);
           throw new Error(`[FATAL_IMPORT_CRASH] Falha de integridade do lote: ${txErr instanceof Error ? txErr.message : String(txErr)}`);
         }
 
@@ -401,7 +402,7 @@ export class DatabaseLoaderService {
         message: err.message,
         stack: err.stack || 'Sem stack trace'
       };
-      console.error(">>> [CRITICAL IMPORT ERROR] Falha na gravação do lote:", JSON.stringify(errorMeta));
+      logger.error(">>> [CRITICAL IMPORT ERROR] Falha na gravação do lote:", JSON.stringify(errorMeta));
       throw importError;
     } finally {
       // Isolamento restabelecido sem dependência de sqliteService
@@ -436,7 +437,7 @@ export class DatabaseLoaderService {
         }
       }
     } catch (energyErr) {
-      console.warn(">>> [Hardware Check] Falha ao consultar subsistema de energia em importExcelBulkData:", energyErr);
+      logger.warn(">>> [Hardware Check] Falha ao consultar subsistema de energia em importExcelBulkData:", energyErr);
     }
 
     const activeUserJson = typeof window !== 'undefined' ? sessionStorage?.getItem('app_current_user') : null;
@@ -446,7 +447,7 @@ export class DatabaseLoaderService {
 
     if (currentBatteryLevel < 0.05 && !isDeviceCharging) {
       if (emailValidoParaBypass) {
-        console.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), bypass síncrono ativado para administrador homologado.");
+        logger.warn("⚡ [Soberania Admin] Bateria crítica (< 5%), bypass síncrono ativado para administrador homologado.");
       } else {
         throw new Error("FAILSAFE: Operação abortada. Bateria abaixo de 5% sem fonte externa. Risco de corrupção do cabeçalho .db.");
       }
@@ -479,7 +480,7 @@ export class DatabaseLoaderService {
       }
     }
     if (firstFilial) {
-      console.log(`>>> [SRE Loader] Unidade Física Real detectada no Index 1 (filial): ${firstFilial}`);
+      logger.info(`>>> [SRE Loader] Unidade Física Real detectada no Index 1 (filial): ${firstFilial}`);
       localStorage.setItem('filial', firstFilial);
       sessionStorage.setItem('filial', firstFilial);
       localStorage.setItem('selectedUnit', firstFilial);
@@ -500,10 +501,10 @@ export class DatabaseLoaderService {
         const writable = await fileHandle.createWritable();
         await writable.write(JSON.stringify(rawExcelData));
         await writable.close();
-        console.log(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
+        logger.info(`>>> [SRE] Backup físico 100% Offline ancorado silenciosamente`);
       }
     } catch (ioErr) {
-      console.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
+      logger.warn(">>> [SRE] Erro silencioso na ancoragem física:", ioErr);
     }
 
     try {
@@ -645,7 +646,7 @@ export class DatabaseLoaderService {
             }
           });
         } catch (txErr) {
-          console.error(">>> [FATAL_IMPORT_CRASH] Falha de integridade na transação em lote:", txErr);
+          logger.error(">>> [FATAL_IMPORT_CRASH] Falha de integridade na transação em lote:", txErr);
           throw new Error(`[FATAL_IMPORT_CRASH] Falha de integridade do lote: ${txErr instanceof Error ? txErr.message : String(txErr)}`);
         }
 
@@ -711,18 +712,18 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
 }
 
 export async function initializeLocalLoaderPipeline(): Promise<void> {
-  console.log("[SRE GESTOR] Inicializando barramento de carga estrutural local...");
+  logger.info("[SRE GESTOR] Inicializando barramento de carga estrutural local...");
   
   try {
     // Força a varredura e restauração a partir do diretório físico C:\GBR_Inventario independente da plataforma
     const hasData = await verifyAndRestorePhysicalBackup();
     
     if (hasData) {
-      console.log("[SRE GESTOR] Estado físico restaurado com sucesso a partir do disco local.");
+      logger.info("[SRE GESTOR] Estado físico restaurado com sucesso a partir do disco local.");
     } else {
-      console.log("[SRE GESTOR] Banco local limpo. Aguardando importação manual da planilha pelo painel.");
+      logger.info("[SRE GESTOR] Banco local limpo. Aguardando importação manual da planilha pelo painel.");
     }
   } catch (error) {
-    console.error("[SRE CRÍTICO] Falha ao acionar barramento interno de disco:", error);
+    logger.error("[SRE CRÍTICO] Falha ao acionar barramento interno de disco:", error);
   }
 }

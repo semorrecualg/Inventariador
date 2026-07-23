@@ -8,6 +8,7 @@ import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
+import { logger } from '../utils/logger';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -157,7 +158,7 @@ const Login: React.FC<LoginProps> = ({
           sessionStorage.clear();
           window.location.reload();
         } catch (err) {
-          console.error('Erro ao limpar sessão:', err);
+          logger.error('Erro ao limpar sessão:', err);
           window.location.reload();
         }
       }
@@ -165,7 +166,7 @@ const Login: React.FC<LoginProps> = ({
   };
 
   const handleDemoMode = (): void => {
-    console.log("[GBR v2.6] Inicializando Modo Demo");
+    logger.info("[GBR v2.6] Inicializando Modo Demo");
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
     handleDemoLogin();
   };
@@ -174,7 +175,7 @@ const Login: React.FC<LoginProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      console.log('[Login] Inicializando modo de degustação DEMO...');
+      logger.info('[Login] Inicializando modo de degustação DEMO...');
       const success = await demoService.initDemoSession();
       if (success) {
         // Altera modo para usar SQLite localmente como fonte da verdade
@@ -195,7 +196,7 @@ const Login: React.FC<LoginProps> = ({
         setError(`Erro ao iniciar base demonstrativa de dados locais${errorHint}.`);
       }
     } catch (err) {
-      console.error('[Login] Erro ao instanciar demonstração:', err);
+      logger.error('[Login] Erro ao instanciar demonstração:', err);
       setError(`Erro ao preparar banco de dados temporário: ${err instanceof Error ? err.message : String(err)}.`);
     } finally {
       setIsLoading(false);
@@ -208,14 +209,14 @@ const Login: React.FC<LoginProps> = ({
     e.preventDefault();
     setError(null);
     setIsLoading(true);
-    console.log('[Login] Iniciando autenticação...', { databaseMode, username });
+    logger.info('[Login] Iniciando autenticação...', { databaseMode, username });
     
     // Timeout de segurança para não travar a UI (Aumentado para 45s para maior resiliência)
     const loginTimeout = setTimeout(() => {
       setIsLoading(prev => {
         if (prev) {
           setError("A autenticação está demorando muito. Verifique sua conexão ou tente novamente.");
-          console.warn('[Login] Timeout de autenticação atingido (45s).');
+          logger.warn('[Login] Timeout de autenticação atingido (45s).');
           return false;
         }
         return prev;
@@ -237,21 +238,21 @@ const Login: React.FC<LoginProps> = ({
       // BUSCA DIRETA NO SQlite SE O ARRAY DE PROPS ESTIVER VAZIO OU STALE
       if (!matchedLocalUser) {
         try {
-          console.log('[Login] [CHECK 1] Buscando usuário local na tabela física "users" do SQLite/localforage...');
+          logger.info('[Login] [CHECK 1] Buscando usuário local na tabela física "users" do SQLite/localforage...');
           const dbUsers = await localDb.users.toArray();
           matchedLocalUser = dbUsers.find(u => 
             (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
             u.password === password
           );
         } catch (sqliteErr) {
-          console.warn('[Login] Erro ao ler tabela de usuários local diretamente do SQLite:', sqliteErr);
+          logger.warn('[Login] Erro ao ler tabela de usuários local diretamente do SQLite:', sqliteErr);
         }
       }
  
       // BARREIRA LOCAL OFFLINE (Passo 1): 
       // Se as credenciais casarem com o padrão admin físico local ou usuário SQLite cadastrado, login é aceito no ato, 100% offline
       if (isMasterLocal || matchedLocalUser) {
-        console.log('[Login] [CHECK 3] [BARREIRA LOCAL] Login Offline-First Solo efetuado com sucesso via credenciais locais!');
+        logger.info('[Login] [CHECK 3] [BARREIRA LOCAL] Login Offline-First Solo efetuado com sucesso via credenciais locais!');
         try {
           let loggedUser: User;
           if (matchedLocalUser) {
@@ -291,7 +292,7 @@ const Login: React.FC<LoginProps> = ({
             }
           }
 
-          console.log('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
+          logger.info('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
           sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
           
           logAuditEvent({
@@ -306,13 +307,13 @@ const Login: React.FC<LoginProps> = ({
           setIsLoading(false);
           return; // ENCERRA O LOGOUT SEM COCORRER CÓDIGOS DO SUPABASE
         } catch (localErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-          console.error('[Login] Falha inesperada na barreira local:', localErr);
+          logger.error('[Login] Falha inesperada na barreira local:', localErr);
         }
       }
 
       // SOBERANIA LOCAL: Se a licença ativa não for PLUS, o login só é permitido se bater com as credenciais locais acima.
       if (databaseMode !== DatabaseMode.SUPABASE_PLUS) {
-        console.log('[Login] [CHECK 2] Licença SOLO/Local ativa (Soberania Offline). Bloqueando tentativa de autenticação direta no Supabase Cloud.');
+        logger.info('[Login] [CHECK 2] Licença SOLO/Local ativa (Soberania Offline). Bloqueando tentativa de autenticação direta no Supabase Cloud.');
         setIsLoading(false);
         setError("Usuário ou senha inválidos no banco de dados local. A licença ativa é SOLO (Offline-First).");
         clearTimeout(loginTimeout);
@@ -331,7 +332,7 @@ const Login: React.FC<LoginProps> = ({
       const isOnline = navigator.onLine;
 
       const doLocalAuthFallback = (): User => {
-        console.log('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
+        logger.info('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
         const localUser = users.find(u => 
           (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
           u.password === password
@@ -354,11 +355,11 @@ const Login: React.FC<LoginProps> = ({
       };
 
       if (isOnline) {
-        console.log('[Login] Autenticando via Supabase Auth (Soberania de Rede)...', { loginEmail: username.trim().toLowerCase() });
+        logger.info('[Login] Autenticando via Supabase Auth (Soberania de Rede)...', { loginEmail: username.trim().toLowerCase() });
         
         // ISOLAMENTO PREVENTIVO: se o objeto 'supabase' ou 'supabase.auth' estiver inacessível no hardware nativo, tratamos amigavelmente
         if (!supabase || !supabase.auth) {
-          console.warn('[Login] Objeto supabase.auth inacessível no hardware nativo.');
+          logger.warn('[Login] Objeto supabase.auth inacessível no hardware nativo.');
           setIsLoading(false);
           setError("Sistema de nuvem inacessível no hardware móvel. Tente o acesso via usuário administrador local.");
           clearTimeout(loginTimeout);
@@ -369,7 +370,7 @@ const Login: React.FC<LoginProps> = ({
         
         // Se não for um e-mail, tenta buscar o e-mail pelo username
         if (!loginEmail.includes('@')) {
-          console.log('[Login] Username detectado, buscando e-mail correspondente para a Nuvem...');
+          logger.info('[Login] Username detectado, buscando e-mail correspondente para a Nuvem...');
           try {
             const foundEmail = await getEmailByUsername(username.trim());
             if (!foundEmail) {
@@ -377,13 +378,13 @@ const Login: React.FC<LoginProps> = ({
             }
             loginEmail = foundEmail;
           } catch (unameErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-            console.error('[Login] Erro ao obter e-mail por username:', unameErr);
+            logger.error('[Login] Erro ao obter e-mail por username:', unameErr);
             throw new Error(unameErr.message || "Username não encontrado na nuvem.");
           }
         }
 
         try {
-          console.log('[Login] Chamando signInWithPassword...');
+          logger.info('[Login] Chamando signInWithPassword...');
           // 1. Autenticação via Supabase Auth (Oficial) com timeout
           const signInPromise = supabase.auth.signInWithPassword({
             email: loginEmail,
@@ -394,7 +395,7 @@ const Login: React.FC<LoginProps> = ({
             signInPromise,
             new Promise<null>((_, reject) => setTimeout(() => reject(new Error("AUTH_TIMEOUT")), 30000))
           ]).catch(err => {
-            console.error('[Login] Erro ou Timeout no Auth:', err.message);
+            logger.error('[Login] Erro ou Timeout no Auth:', err.message);
             if (err.message === "AUTH_TIMEOUT") {
               throw new Error("O servidor de autenticação está demorando muito para responder. Isso pode ser instabilidade na rede. Tente novamente em alguns instantes.");
             }
@@ -402,7 +403,7 @@ const Login: React.FC<LoginProps> = ({
           }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
           if (authResult.error) {
-            console.error('[Login] Erro Supabase Auth:', authResult.error);
+            logger.error('[Login] Erro Supabase Auth:', authResult.error);
             throw authResult.error;
           }
           
@@ -410,10 +411,10 @@ const Login: React.FC<LoginProps> = ({
           if (!authData.user) throw new Error("Falha ao recuperar dados do usuário.");
 
           // 2. Garante que o usuário tenha um perfil na tabela user_permissions
-          console.log('[Login] Chamando ensureUserProfile...');
+          logger.info('[Login] Chamando ensureUserProfile...');
           const cloudUser = await ensureUserProfile(authData.user.email!, authData.user.user_metadata, authData.user.id)
             .catch(err => {
-              console.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
+              logger.warn('[Login] Erro ao garantir perfil, usando dados básicos:', err);
               const is_master = (isAdminEmail(authData.user.email));
               return {
                 email: authData.user.email,
@@ -425,7 +426,7 @@ const Login: React.FC<LoginProps> = ({
               } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             });
           
-          console.log('[Login] Perfil processado.');
+          logger.info('[Login] Perfil processado.');
           
           const finalUsername = !username.includes('@') ? username.trim() : (cloudUser.username || authData.user.email!.split('@')[0]);
 
@@ -464,7 +465,7 @@ const Login: React.FC<LoginProps> = ({
           };
 
           if (!tenantId && !is_master) {
-            console.warn('[Login] Bloqueando login pois tenantId está nulo ou vazio no perfil.');
+            logger.warn('[Login] Bloqueando login pois tenantId está nulo ou vazio no perfil.');
             if (supabase) {
               await supabase.auth.signOut();
             }
@@ -483,13 +484,13 @@ const Login: React.FC<LoginProps> = ({
               tenantId: loggedUser.tenantId,
               filial: loggedUser.filial
             };
-            console.log('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
+            logger.info('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
             await localDb.users.add(userToPersist as unknown as User);
           } catch (dbPersistErr) {
-            console.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
+            logger.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
           }
         } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-          console.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
+          logger.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
           
           const rawMessage = typeof supErr === 'string' 
             ? supErr 
@@ -507,7 +508,7 @@ const Login: React.FC<LoginProps> = ({
             supErr?.message === 'AUTH_TIMEOUT';
 
           if (isNetError) {
-            console.log('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
+            logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
             loggedUser = doLocalAuthFallback();
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
@@ -534,7 +535,7 @@ const Login: React.FC<LoginProps> = ({
       }
 
       if (loggedUser) {
-        console.log('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
+        logger.info('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
         
         // Salva no sessionStorage para persistência (Token Local)
         sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
@@ -551,7 +552,7 @@ const Login: React.FC<LoginProps> = ({
       }
     } catch (err: unknown) {
       const error = err as Error;
-      console.error('[Login] Erro durante o processo:', error);
+      logger.error('[Login] Erro durante o processo:', error);
       setError(error.message || "Erro ao autenticar. Verifique seus dados.");
     } finally {
       clearTimeout(loginTimeout);
