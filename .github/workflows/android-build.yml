@@ -13,6 +13,11 @@ jobs:
     name: Generate APK
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        # O projeto está dentro de Inventariador-main/ no repositório
+        working-directory: Inventariador-main
+
     steps:
       - name: Checkout Code 
         uses: actions/checkout@v4
@@ -22,9 +27,10 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: Inventariador-main/package-lock.json
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps --force
+        run: npm install --legacy-peer-deps
 
       - name: Build Web Application
         run: npm run build
@@ -45,10 +51,7 @@ jobs:
           VERSION_CODE=$(echo "$APP_VERSION" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }' | sed 's/^0*//')
           echo "📦 Versão detectada: $APP_VERSION (versionCode: $VERSION_CODE)"
 
-          # 1. Garante a instalação do pacote core do Android (sem modificar package.json do repositório)
-          npm install @capacitor/android@6.2.1 --no-save
-
-          # 2. Cria a pasta nativa na máquina virtual se ela não existir
+          # 1. Cria a pasta nativa se não existir
           if [ ! -d "android" ]; then
             npx cap add android
           else
@@ -87,7 +90,6 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-
                   <provider
                       android:name="androidx.core.content.FileProvider"
                       android:authorities="${applicationId}.fileprovider"
@@ -101,13 +103,13 @@ jobs:
           </manifest>
           MANIFEST_EOF
 
-          # 4. Injeta dinamicamente a versão extraída do package.json no build.gradle
+          # 4. Injeta versão no build.gradle
           sed -i "s/versionCode 1/versionCode ${VERSION_CODE}/g" android/app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"${APP_VERSION}\"/g" android/app/build.gradle
           sed -i 's/io.ionic.starter/com.gbr.kardek/g' android/app/build.gradle
           sed -i 's/com.example.app/com.gbr.kardek/g' android/app/build.gradle
 
-          # 5. Gera gradle.properties com alocação de memória adequada para CI
+          # 5. Gera gradle.properties
           cat > android/gradle.properties << 'GRADLE_EOF'
           org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
           org.gradle.parallel=true
@@ -116,15 +118,14 @@ jobs:
           android.enableJetifier=true
           GRADLE_EOF
 
-          # 6. Sincroniza os ativos web do React
+          # 6. Sincroniza os ativos web
           npx cap sync android
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
-          # gradle.properties já define Xmx2048m e demais flags (gerado no passo anterior)
-          ./gradlew assembleDebug --no-build-cache --no-daemon --stacktrace
+          ./gradlew assembleDebug --stacktrace
 
       - name: Renomear APK com versão
         run: |
@@ -139,6 +140,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gbr-kardek-apk
-          path: android/app/build/outputs/apk/debug/gbr-kardek-*.apk
+          path: ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk
           retention-days: 7
           if-no-files-found: error

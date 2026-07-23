@@ -1,0 +1,19 @@
+# Freebuff worktree internal data
+.freebuff/
+
+# Freebuff skills lock file
+skills-lock.json
+
+# Archive files — never commit zips of the project
+*.zip
+*.7z
+*.rar
+*.tar.gz
+
+# Duplicate/invalid directories that appear in status
+Inventariador_Atual/
+Base_sql_inventrariador/
+nul
+
+# Windows helper scripts
+create_junction.bat
