@@ -1,7 +1,9 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { Asset, TagInventario, AuditLogEntry, AppScreen } from '../types';
 import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';
+import { db } from '../services/sqliteService';
+import { logger } from '../utils/logger';
 import BackButton from './BackButton';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, 
@@ -146,6 +148,28 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
   const [hintOverlay, setHintOverlay] = useState<{label: string, text: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'units'>('overview');
   const [filterByCampaign, setFilterByCampaign] = useState(false);
+  const [dexieAssets, setDexieAssets] = useState<Asset[] | null>(null);
+
+  // REQUISITO 2.1: ACOPLAMENTO FISICO DEXIE — fallback direto ao IndexedDB
+  // Se o array assets (memoria) estiver vazio, busca direto do db.ativos
+  useEffect(() => {
+    if (!assets || assets.length === 0) {
+      const tenantId = sessionStorage.getItem('tenantId') || 'DEMO_DEFAULT';
+      const filial = selectedUnit || sessionStorage.getItem('filial') || '';
+      logger.info('[DASHBOARD_DEXIE] Assets em memoria vazio. Consultando db.ativos diretamente...');
+      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+        .then((rows) => {
+          logger.info(`[DASHBOARD_DEXIE] ${rows.length} ativos carregados do IndexedDB.`);
+          setDexieAssets(rows as unknown as Asset[]);
+        })
+        .catch((err) => {
+          logger.error('[DASHBOARD_DEXIE] Erro ao consultar db.ativos:', err);
+          setDexieAssets(null);
+        });
+    } else {
+      setDexieAssets(null);
+    }
+  }, [assets, selectedUnit]);
 
   // Vercel Best Practice: stable callback for StatCard hint triggers
   // (rerender-memo) — prevents inline arrow from defeating React.memo
@@ -198,9 +222,11 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     const now = new Date();
     const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
 
+    // ACOPLAMENTO FISICO DEXIE: usa assets do IndexedDB (dexieAssets) quando o array em memoria estiver vazio
+    const source = (dexieAssets && dexieAssets.length > 0) ? dexieAssets : assets;
     const filteredAssets = filterByCampaign && currentCampaignId 
-      ? assets.filter(a => a.currentCampaignId === currentCampaignId)
-      : assets;
+      ? source.filter(a => a.currentCampaignId === currentCampaignId)
+      : source;
 
     for (let i = 0; i < filteredAssets.length; i++) {
       const a = filteredAssets[i];
@@ -301,9 +327,12 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     return s;
   }, [assets, filterByCampaign, currentCampaignId, sqlStats]);
 
+  // ACOPLAMENTO FISICO DEXIE: usa source (dexieAssets fallback) em vez de assets puro
+  const auditSource = (dexieAssets && dexieAssets.length > 0) ? dexieAssets : assets;
+
   const auditActivityData = useMemo(() => {
     const userCounts: Record<string, number> = {};
-    assets.forEach(a => {
+    auditSource.forEach(a => {
       if (a._history && Array.isArray(a._history)) {
         a._history.forEach(h => {
           const userName = h.user || 'Desconhecido';
@@ -319,7 +348,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
   const recentActivity = useMemo(() => {
     const allHistory: (AuditLogEntry & { assetId: string | number; assetTag?: string; assetDesc?: string })[] = [];
-    assets.forEach(a => {
+    auditSource.forEach(a => {
       if (a._history && Array.isArray(a._history)) {
         a._history.forEach(h => {
           allHistory.push({
@@ -345,7 +374,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
   // (rerender-memo)
   const handleExport = useCallback(
     (filterFn: (a: Asset) => boolean, fileName: string) => {
-      const filtered = assets.filter(filterFn);
+      const exportSource = (dexieAssets && dexieAssets.length > 0) ? dexieAssets : assets;
+      const filtered = exportSource.filter(filterFn);
       if (filtered.length === 0) return;
 
       const wsData = filtered.map(a => {

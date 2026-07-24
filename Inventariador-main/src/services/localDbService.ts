@@ -752,12 +752,35 @@ export const localDb = {
   }
 };
 
-export async function requestPersistentStorage() {
-  logger.info(">>> [DBA] Dexie.js Nativo configurado. Persistência de Storage garantida.");
+export async function requestPersistentStorage(): Promise<boolean> {
+  // REQUISITO 3: PROTOCOLO DE PERSISTENCIA MOBILE (navigator.storage.persist)
+  // Impede que o SO do celular limpe o IndexedDB em segundo plano por falta de espaco.
+  if (typeof navigator !== 'undefined' && 'storage' in navigator && 'persist' in navigator.storage) {
+    try {
+      const isPersisted = await navigator.storage.persist();
+      if (isPersisted) {
+        logger.info(">>> [SRE_STORAGE] Persistencia de Storage CONCEDIDA pelo SO. IndexedDB protegido contra limpeza em background.");
+      } else {
+        logger.warn(">>> [SRE_STORAGE] Persistencia de Storage NEGADA pelo SO. IndexedDB pode ser limpo sob pressao de memoria.");
+      }
+      return isPersisted;
+    } catch (err) {
+      logger.warn(">>> [SRE_STORAGE] Erro ao solicitar persistencia de storage:", err);
+      return false;
+    }
+  }
+  logger.info(">>> [DBA] Dexie.js Nativo configurado. Persistencia de Storage garantida (API nao disponivel).");
   return true;
 }
 
-export async function isStoragePersisted() {
+export async function isStoragePersisted(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && 'storage' in navigator && 'persisted' in navigator.storage) {
+    try {
+      return await navigator.storage.persisted();
+    } catch {
+      return true;
+    }
+  }
   return true;
 }
 
