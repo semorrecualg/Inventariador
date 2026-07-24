@@ -5,16 +5,19 @@ import * as turf from '@turf/turf';
 import { Asset, TransactionOrigin, DatabaseMode } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff, Loader2 } from 'lucide-react';
+import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 
 interface AssetMapProps {
   assets: Asset[];
+  tenantId?: string;
+  filial?: string;
   onBack: () => void;
   databaseMode: DatabaseMode;
   onSelectLocation?: (location: string) => void;
 }
 
-const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => {
+const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantId, filial }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<maplibregl.Map | null>(null);
   
@@ -25,6 +28,21 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
   const [selectedFloor, setSelectedFloor] = useState<number>(0);
   const [heatmapMode, setHeatmapMode] = useState<'DENSITY' | 'VALUE' | 'AREA' | 'GRID'>('AREA');
   const [mapReady, setMapReady] = useState(false);
+  
+  // Dexie fallback: carrega ativos do IndexedDB se a prop estiver vazia
+  const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  
+  useEffect(() => {
+    if (assets.length === 0 && tenantId && filial) {
+      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+        .then((result) => setDexieAssets(result as unknown as Asset[]))
+        .catch(() => { /* fallback silencioso */ });
+    } else if (dexieAssets.length > 0) {
+      setDexieAssets([]);
+    }
+  }, [assets, tenantId, filial]);
+  
+  const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
 
   useEffect(() => {
     initMap();
@@ -81,7 +99,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
 
   const geojsonAssets = useMemo(() => {
     // GBR v25: Delegação para GPU. Enviamos todos os ativos (leves) e deixamos o shader filtrar.
-    const features = assets
+    const features = sourceAssets
       .filter(a => a.latitude && a.longitude)
       .map(a => {
         const val = Number(a.VLRAQUISIC) || 0;
@@ -106,7 +124,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
       });
 
     return { type: 'FeatureCollection', features };
-  }, [assets]);
+  }, [sourceAssets]);
 
   // Perímetros de Auditoria (Turf.js) Otimizados via Reduce e Cache por Piso
   const geojsonArea = useMemo(() => {
@@ -297,8 +315,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
 
   // Lista de localidades únicas para o filtro (Baseado no local onde foi INVENTARIADO)
   const locations = useMemo(() => {
-    const locs = new Set<string>();
-    assets.forEach(a => {
+    const locs = new Set<string>();      sourceAssets.forEach(a => {
       // REGRA: Apenas localidades que possuem itens INVENTARIADOS
       if (a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM') {
         const loc = a._localMaster || a.ENDERECO;
@@ -306,7 +323,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
       }
     });
     return Array.from(locs).sort();
-  }, [assets]);
+  }, [sourceAssets]);
 
   const originOptions = [
     { label: 'TODAS AS ORIGENS', value: 'ALL' },
@@ -318,7 +335,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
   // Lista de andares únicos presentes nos ativos
   const availableFloors = useMemo(() => {
     const floors = new Set<number>();
-    assets.forEach(a => {
+    sourceAssets.forEach(a => {
       if (a._id_andar !== undefined) {
         floors.add(a._id_andar);
       } else {
@@ -326,11 +343,11 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
       }
     });
     return Array.from(floors).sort((a, b) => b - a); // Ordem decrescente (topo para base)
-  }, [assets]);
+  }, [sourceAssets]);
 
   const filteredAssets = useMemo(() => {
     // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
-    let filtered = assets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    let filtered = sourceAssets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
     
     // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
     // Porém para cálculos de BI e grid aqui, ainda filtramos
@@ -344,7 +361,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode }) => 
     }
 
     return filtered;
-  }, [assets, selectedOrigin, selectedLocation, selectedFloor]);
+  }, [sourceAssets, selectedOrigin, selectedLocation, selectedFloor]);
 
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 

@@ -61,6 +61,7 @@ const formatReadingTime = (isoStr?: string) => {
 
 interface AssetDetailProps {
   assets: Asset[];
+  initialAssetId?: string;
   onBack: () => void;
   onUpdate: (asset: Asset) => void;
   onDelete?: (id: string) => void;
@@ -81,6 +82,7 @@ interface AssetDetailProps {
 
 const AssetDetail: React.FC<AssetDetailProps> = ({ 
   assets, 
+  initialAssetId,
   onBack, 
   onUpdate, 
   onDelete,
@@ -98,6 +100,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   mandatoryPhotoOnNewItem = false,
   databaseMode
 }) => {
+  // Dexie fallback: hidratação via chave primária quando o array de props estiver vazio
+  const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  
+  useEffect(() => {
+    if (assets.length === 0 && initialAssetId && tenantid) {
+      localDb.ativos.where({ tenantId: tenantid }).toArray()
+        .then((allAssets) => {
+          const matched = allAssets.filter((a) => a.id === initialAssetId || a.ETIQUETA === initialAssetId);
+          setDexieAssets(matched as unknown as Asset[]);
+        })
+        .catch(() => { /* silencioso */ });
+    } else if (dexieAssets.length > 0) {
+      setDexieAssets([]);
+    }
+  }, [assets, initialAssetId, tenantid]);
   const isBatch = (assets?.length || 0) > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>(() => ({ ...assets?.[0] } as Asset));
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -371,7 +388,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   }, [workingAsset?.id]);
 
 
-  useEffect(() => { if (assets?.length > 0) setWorkingAsset({ ...assets[0] }); }, [assets]);
+  const effectiveAssets = dexieAssets.length > 0 ? dexieAssets : assets;
+
+  useEffect(() => { if (effectiveAssets?.length > 0) setWorkingAsset({ ...effectiveAssets[0] }); }, [effectiveAssets]);
 
   useEffect(() => {
     if (editingField) {

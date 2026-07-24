@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
@@ -18,10 +18,13 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 
 interface ConsultationProps {
   assets: Asset[];
+  tenantId?: string;
+  filial?: string;
   onBack: () => void;
   onSelectAsset: (asset: Asset) => void;
   qrCodeFields: string[];
@@ -102,6 +105,8 @@ const NumericKeypad = ({
 
 const Consultation: React.FC<ConsultationProps> = ({ 
   assets, 
+  tenantId,
+  filial,
   onBack, 
   onSelectAsset, 
   scannerMode, 
@@ -115,6 +120,20 @@ const Consultation: React.FC<ConsultationProps> = ({
   onUpdateCommittedFilters,
   qrCodeFields
 }) => {
+  // Dexie fallback: consulta direta no IndexedDB quando o array da prop estiver vazio
+  const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  
+  useEffect(() => {
+    if (assets.length === 0 && tenantId && filial) {
+      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+        .then((result) => setDexieAssets(result as unknown as Asset[]))
+        .catch(() => { /* fallback silencioso — mantém array vazio */ });
+    } else if (dexieAssets.length > 0) {
+      setDexieAssets([]);
+    }
+  }, [assets, tenantId, filial]);
+  
+  const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [selectedAssetForQr, setSelectedAssetForQr] = useState<Asset | null>(null);
   const [activeField, setActiveField] = useState<keyof SearchFilters | null>(null);
@@ -158,7 +177,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     const contabilidade = new Set<string>();
     const custos = new Set<string>();
     
-    assets.forEach(asset => {
+    sourceAssets.forEach(asset => {
       const conta = asset.conta_contabil;
       if (conta) contabilidade.add(String(conta).trim());
       if (asset.CENTRODECUSTO) custos.add(String(asset.CENTRODECUSTO).trim());
@@ -168,7 +187,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       conta_contabil: Array.from(contabilidade).sort(),
       CENTRODECUSTO: Array.from(custos).sort()
     };
-  }, [assets]);
+  }, [sourceAssets]);
 
   const filteredSelectionValues = useMemo(() => {
     if (!selectionModal.field) return [];
@@ -181,7 +200,7 @@ const Consultation: React.FC<ConsultationProps> = ({
   const filteredAssets = useMemo(() => {
     if (!committedFilters) return [];
     
-    return assets.filter(asset => {
+    return sourceAssets.filter(asset => {
       // Standard text filters
       const textMatch = Object.entries(committedFilters).every(([key, value]) => {
         if (!value || key.startsWith('DATAAQUISIC_')) return true;
@@ -217,7 +236,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       // Prioridade 2: Ordem Numérica de Etiqueta
       return String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true });
     });
-  }, [assets, committedFilters]);
+  }, [sourceAssets, committedFilters]);
 
   const triggerSearch = () => {
     onUpdateCommittedFilters({ ...filters });
