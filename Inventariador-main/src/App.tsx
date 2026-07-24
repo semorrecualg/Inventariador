@@ -6488,7 +6488,7 @@ const App: React.FC = () => {
         />
 
         {/* Indicador de Banco de Dados Local (Soberania) */}
-        {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || fileStatus?.status === 'expired') && !isKeyboardVisible && (
+        {databaseMode === DatabaseMode.INTERNAL && (screen !== AppScreen.LOGIN || (fileStatus?.status === 'expired' && !Capacitor.isNativePlatform())) && !isKeyboardVisible && (
           <motion.div 
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}

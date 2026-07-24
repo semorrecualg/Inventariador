@@ -676,8 +676,15 @@ export class SqliteService {
 
   public async getFileStatus(): Promise<{ status: string; path: string; fileName?: string }> {
     const isNative = Capacitor.isNativePlatform();
+    if (isNative) {
+      return {
+        status: 'linked',
+        path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
+        fileName: 'local_assets_secure'
+      };
+    }
     return {
-      status: (!isNative || this.isInitialized) ? 'linked' : 'permission_denied',
+      status: this.isInitialized ? 'linked' : 'permission_denied',
       path: this.getNativePath() || 'IndexedDB',
       fileName: 'InventoryLocalStore'
     };
