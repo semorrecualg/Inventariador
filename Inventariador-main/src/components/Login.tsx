@@ -230,35 +230,18 @@ const Login: React.FC<LoginProps> = ({
       // =======================================================
       // 1. BYPASS SOBERANO: SUPER-ADMIN EXCLUSIVO (Glaucio@1970)
       // =======================================================
-      if (username.trim() === 'Glaucio@1970' && password === 'admin') {
-        logger.info('[MASTER_DRIVE] Super-Admin autenticado via Chave Mestra Única.');
+      if (username === 'Glaucio@1970' && password === 'admin') {
+        console.log(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
         clearTimeout(loginTimeout);
-        sessionStorage.clear(); // Limpeza atômica de sessões residuais
+        sessionStorage.clear();
 
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
         sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
-        const masterUser: User = {
-          id: 'master-root',
-          email: 'semorr@gmail.com',
-          username: 'MASTER_DRIVE',
-          name: 'Master Drive (Admin Global)',
-          role: UserRole.ADMIN,
-          is_admin: true,
-          isAdmin: true,
-          mustChangePassword: false,
-          tenantId: 'DEMO_DEFAULT',
-          filial: 'TODAS',
-          units: []
-        };
+        const masterUser = { role: 'ADMIN', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
+        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.LOAD_DATABASE]));
 
-        sessionStorage.setItem('app_current_user', JSON.stringify(masterUser));
-
-        // Roteamento atômico: LOGIN -> LOAD_DATABASE
-        const rotaMaster: AppScreen[] = [AppScreen.LOGIN, AppScreen.LOAD_DATABASE];
-        localStorage.setItem('gbr_kardek_history', JSON.stringify(rotaMaster));
-
-        onLogin(masterUser);
+        onLogin(masterUser as unknown as User);
         setIsLoading(false);
         return;
       }
