@@ -287,10 +287,11 @@ export function InitializeBootPipeline(): void {
   }
 }
 
-// Execução síncrona imediata no carregamento do arquivo
-InitializeBootPipeline();
-
 // App Component
+// NOTA: InitializeBootPipeline() NÃO é chamado em nível de módulo —
+// a chamada prematura remove o loader estático antes do React montar,
+// causando tela preta se algo falhar. A inicialização ocorre dentro
+// do useEffect no componente App, após o React montar com segurança.
 const App: React.FC = () => {
   // 🚀 INJEÇÃO DE SESSÃO PERMANENTE COM CONTEXTO FÍSICO (AI Studio iFrame)
   // Comentado para cumprir com o Regime v4.50-PROD de eliminação de bypass fantasma no boot
