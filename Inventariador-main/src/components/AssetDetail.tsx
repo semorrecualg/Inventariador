@@ -102,17 +102,21 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 }) => {
   // Dexie fallback: hidratação via chave primária quando o array de props estiver vazio
   const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  const [isDexieLoading, setIsDexieLoading] = useState(false);
   
   useEffect(() => {
     if (assets.length === 0 && initialAssetId && tenantid) {
+      setIsDexieLoading(true);
       localDb.ativos.where({ tenantId: tenantid }).toArray()
         .then((allAssets) => {
           const matched = allAssets.filter((a) => a.id === initialAssetId || a.ETIQUETA === initialAssetId);
           setDexieAssets(matched as unknown as Asset[]);
         })
-        .catch(() => { /* silencioso */ });
-    } else if (dexieAssets.length > 0) {
-      setDexieAssets([]);
+        .catch(() => { /* silencioso */ })
+        .finally(() => setIsDexieLoading(false));
+    } else {
+      if (dexieAssets.length > 0) setDexieAssets([]);
+      setIsDexieLoading(false);
     }
   }, [assets, initialAssetId, tenantid]);
   const isBatch = (assets?.length || 0) > 1;
@@ -713,6 +717,39 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     onUpdate(updated);
     setIsImpairmentModalOpen(false);
   };
+
+  // Tela de carregamento enquanto o Dexie fallback carrega os dados
+  if (isDexieLoading && assets.length === 0 && !effectiveAssets.length) {
+    return (
+      <div className="flex flex-col h-full bg-bg-main animate-fadeIn">
+        <div className="px-5 pt-12 pb-6 bg-slate-200 relative shadow-md z-20">
+          <div className="flex items-center justify-between mb-8">
+            <div className="h-10 w-32 bg-white/60 rounded-xl animate-pulse" />
+            <div className="h-10 w-36 bg-white/60 rounded-xl animate-pulse" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-24 bg-white/60 rounded-xl animate-pulse" />
+            <div className="h-24 bg-white/60 rounded-xl animate-pulse" />
+          </div>
+        </div>
+        <div className="flex-1 p-4 space-y-4">
+          {[1,2,3,4,5].map((i) => (
+            <div key={i} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-3">
+              <div className="h-4 bg-slate-100 rounded-lg w-1/3 animate-pulse" />
+              <div className="h-6 bg-slate-100 rounded-lg w-2/3 animate-pulse" />
+              <div className="h-3 bg-slate-50 rounded-lg w-1/2 animate-pulse" />
+            </div>
+          ))}
+          <div className="flex items-center justify-center py-8">
+            <div className="flex items-center space-x-3 text-accent">
+              <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <span className="text-[11px] font-black uppercase tracking-widest">Carregando dados do ativo...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-bg-main animate-fadeIn overflow-hidden">

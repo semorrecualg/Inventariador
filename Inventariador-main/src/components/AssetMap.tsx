@@ -31,14 +31,18 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   
   // Dexie fallback: carrega ativos do IndexedDB se a prop estiver vazia
   const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  const [isDexieLoading, setIsDexieLoading] = useState(false);
   
   useEffect(() => {
     if (assets.length === 0 && tenantId && filial) {
+      setIsDexieLoading(true);
       db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
-        .then((result) => setDexieAssets(result as unknown as Asset[]))
-        .catch(() => { /* fallback silencioso */ });
-    } else if (dexieAssets.length > 0) {
-      setDexieAssets([]);
+        .then((result) => { setDexieAssets(result as unknown as Asset[]); })
+        .catch(() => { /* fallback silencioso */ })
+        .finally(() => setIsDexieLoading(false));
+    } else {
+      if (dexieAssets.length > 0) setDexieAssets([]);
+      setIsDexieLoading(false);
     }
   }, [assets, tenantId, filial]);
   
@@ -451,7 +455,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
           id="gbr-asset-map" 
           className="w-full h-full"
         />
-        {!mapReady && (
+        {!mapReady ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-12 text-center">
             <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
               <Loader2 className="text-blue-500 animate-spin" size={32} />
@@ -461,7 +465,16 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
               Carregando Ambiente Cartográfico MapLibre GPU...
             </p>
           </div>
-        )}
+        ) : isDexieLoading && sourceAssets.length === 0 ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm p-12 text-center z-10">
+            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-5 animate-pulse">
+              <Loader2 className="text-blue-400 animate-spin" size={28} />
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest max-w-[220px] leading-relaxed">
+              Carregando ativos do banco local...
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {/* Seletor de Andar Flutuante (Vertical) */}

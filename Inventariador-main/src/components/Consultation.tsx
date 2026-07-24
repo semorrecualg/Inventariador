@@ -122,14 +122,18 @@ const Consultation: React.FC<ConsultationProps> = ({
 }) => {
   // Dexie fallback: consulta direta no IndexedDB quando o array da prop estiver vazio
   const [dexieAssets, setDexieAssets] = useState<Asset[]>([]);
+  const [isDexieLoading, setIsDexieLoading] = useState(false);
   
   useEffect(() => {
     if (assets.length === 0 && tenantId && filial) {
+      setIsDexieLoading(true);
       db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
-        .then((result) => setDexieAssets(result as unknown as Asset[]))
-        .catch(() => { /* fallback silencioso — mantém array vazio */ });
-    } else if (dexieAssets.length > 0) {
-      setDexieAssets([]);
+        .then((result) => { setDexieAssets(result as unknown as Asset[]); })
+        .catch(() => { /* fallback silencioso */ })
+        .finally(() => setIsDexieLoading(false));
+    } else {
+      if (dexieAssets.length > 0) setDexieAssets([]);
+      setIsDexieLoading(false);
     }
   }, [assets, tenantId, filial]);
   
@@ -397,6 +401,24 @@ const Consultation: React.FC<ConsultationProps> = ({
               </div>
             )} 
           />
+            ) : isDexieLoading ? (
+              <div className="flex flex-col px-6 py-8 space-y-4 animate-pulse">
+                {[1,2,3,4,5].map((i) => (
+                  <div key={i} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-center space-x-4">
+                    <div className="w-14 h-14 bg-slate-100 rounded-xl" />
+                    <div className="flex-1 space-y-3">
+                      <div className="h-4 bg-slate-100 rounded-lg w-3/4" />
+                      <div className="h-3 bg-slate-50 rounded-lg w-1/2" />
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-center justify-center py-6">
+                  <div className="flex items-center space-x-3 text-accent">
+                    <div className="w-3 h-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-accent">Carregando ativos...</span>
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center text-center py-20">
                 <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 mb-6 border border-slate-100">
