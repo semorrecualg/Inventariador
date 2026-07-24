@@ -35,6 +35,24 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
+      - name: Cache Key — Fix Gradle wrapper version for consistent cache
+        run: |
+          # Cria o gradle-wrapper.properties com Gradle 8.11.1 ANTES do setup-java
+          # para que o cache: 'gradle' calcule a chave baseada na versão REAL que usaremos.
+          # Sem isso: setup-java lê 8.2.1 (wrapper original do Capacitor), 
+          # o sed posterior muda para 8.11.1 → chave do cache nunca acerta.
+          mkdir -p android/gradle/wrapper
+          cat > android/gradle/wrapper/gradle-wrapper.properties << 'WRAPPEREOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          networkTimeout=10000
+          validateDistributionUrl=true
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          WRAPPEREOF
+          echo "✅ gradle-wrapper.properties criado com Gradle 8.11.1 para cache"
+
       - name: Setup Java JDK
         uses: actions/setup-java@v5
         with:
