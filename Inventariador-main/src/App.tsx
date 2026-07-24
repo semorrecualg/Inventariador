@@ -2,7 +2,7 @@
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 logger.info(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
@@ -95,6 +95,7 @@ import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
+import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
   constructor(message: string) {
@@ -5658,7 +5659,7 @@ const App: React.FC = () => {
           <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-50" size={24} />
         </div>
         <div className="flex flex-col items-center space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v2.6</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v{pkg.version}</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
             Carregando Ecossistema GBR...
           </p>
@@ -5786,7 +5787,7 @@ const App: React.FC = () => {
           setBootError={(errStr) => setBootstrapError(new AppBootstrapError(errStr || 'Erro de Permissão'))} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v{pkg.version} • MOBILE SOBERANO</p>
         </footer>
       </div>
     );
@@ -5840,7 +5841,7 @@ const App: React.FC = () => {
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
-                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v2.6</span>
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v{pkg.version}</span>
                   </div>
                   <div 
                     onClick={() => setIsAIAssistantOpen(true)}
@@ -5885,7 +5886,7 @@ const App: React.FC = () => {
               
               <div className="flex items-center shrink-0">
                 <span className="px-2.5 py-1 bg-slate-900 border border-slate-950 rounded-lg text-white font-extrabold text-[8px] uppercase tracking-widest shadow-sm font-sans">
-                  GBR v2.6
+                  GBR v{pkg.version}
                 </span>
               </div>
             </div>
@@ -5931,7 +5932,6 @@ const App: React.FC = () => {
           )}
           <Routes>
           {/* Phase 2 — URL-driven lazy-loaded routes */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login
             users={users}
             databaseMode={databaseMode}

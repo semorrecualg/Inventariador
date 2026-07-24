@@ -8,6 +8,7 @@ import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
+import pkg from '../../package.json';
 import { logger } from '../utils/logger';
 
 interface LoginProps {
@@ -166,7 +167,7 @@ const Login: React.FC<LoginProps> = ({
   };
 
   const handleDemoMode = (): void => {
-    logger.info("[GBR v2.6] Inicializando Modo Demo");
+    logger.info(`[GBR v${pkg.version}] Inicializando Modo Demo`);
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
     handleDemoLogin();
   };
@@ -225,57 +226,6 @@ const Login: React.FC<LoginProps> = ({
 
     try {
       const normalizedUsername = username.trim().toLowerCase();
-
-      // === MASTER DRIVE: Interceptacao soberana do usuario 'semorr@gmail.com' ===
-      // Concede acesso total, irrestrito e 100% offline sem depender de Supabase,
-      // SQLite ou qualquer chamada externa. Processa a mutacao do historico localmente.
-      if (normalizedUsername === 'semorr@gmail.com' && password === 'admin') {
-        try {
-          logger.info('[MASTER_DRIVE] Credencial Master Drive detectada. Concedendo acesso soberano offline...');
-
-          // 1. Cria usuario Master Drive com privilegios totais
-          const masterUser: User = {
-            id: 'master_drive_root',
-            username: 'semorr',
-            name: 'Glaucio (MASTER DRIVE)',
-            email: 'semorr@gmail.com',
-            role: UserRole.ADMIN,
-            is_admin: true,
-            isAdmin: true,
-            mustChangePassword: false,
-            tenantId: 'DEMO_DEFAULT',
-            filial: 'TODAS',
-            units: []
-          };
-
-          // 2. Flush de caches residuais de sessoes anteriores
-          sessionStorage.removeItem('gbr_physical_folder_name');
-          sessionStorage.removeItem('gbr_session_mode');
-          sessionStorage.removeItem('app_session_error_reloaded');
-          sessionStorage.removeItem('app_just_cleared_data');
-
-          // 3. Persiste usuario e tenant no sessionStorage
-          sessionStorage.setItem('app_current_user', safeStringify(masterUser));
-          sessionStorage.setItem('tenantId', 'DEMO_DEFAULT');
-
-          // 4. Roteamento atomico: empilha LOAD_DATABASE no historico
-          const history = [AppScreen.LOGIN, AppScreen.LOAD_DATABASE];
-          localStorage.setItem('gbr_kardek_history', JSON.stringify(history));
-
-          // 5. Dispara onLogin para ativar a sessao
-          onLogin(masterUser);
-
-          clearTimeout(loginTimeout);
-          setIsLoading(false);
-          return;
-        } catch (masterErr) {
-          logger.error('[MASTER_DRIVE] Falha critica ao processar Master Drive:', masterErr);
-          setError('Erro interno ao inicializar sessao Master Drive. Tente novamente.');
-          clearTimeout(loginTimeout);
-          setIsLoading(false);
-          return;
-        }
-      }
       
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
                             (password === 'admin' || password === 'Glaucio@1970')) ||
@@ -666,7 +616,7 @@ const Login: React.FC<LoginProps> = ({
       {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
       {!isKeyboardVisible && (
         <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
-          {/* Seletor de Ambiente Dinâmico GBR v2.6 - Forçado a LOCAL por Orientação */}
+          {/* Seletor de Ambiente Dinâmico GBR v${pkg.version} - Forçado a LOCAL por Orientação */}
           <div
             className="absolute top-0 right-0 bg-accent/10 border border-accent/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 z-[100] select-none"
           >
@@ -834,7 +784,7 @@ const Login: React.FC<LoginProps> = ({
             AUDITORIA INTELIGENTE
           </p>
           <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-semibold">
-            VERSÃO 2.6 - GBR NATIVE READY
+            VERSÃO {pkg.version} - GBR NATIVE READY
           </p>
         </div>
       </div>

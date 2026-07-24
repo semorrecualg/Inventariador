@@ -19,6 +19,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { db } from '../services/sqliteService';
+import pkg from '../../package.json';
 import { logger } from '../utils/logger';
 
 interface ConsultationProps {
@@ -450,7 +451,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       </div>
 
       <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-        <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
+        <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v{pkg.version} • MOBILE SOBERANO</p>
       </footer>
 
       {/* MODALS */}
