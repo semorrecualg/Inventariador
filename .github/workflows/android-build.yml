@@ -39,7 +39,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
-          java-version: '21'
+          java-version: '17'
           cache: 'gradle'
 
       - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.7)
@@ -58,8 +58,10 @@ jobs:
             echo "📁 Diretório android já existe — pulando cap add"
           fi
 
-          # 2. Atualiza Gradle wrapper para suportar Java 21 (bcprov-jdk18on exige class major 65)
-          cd android && chmod +x gradlew && ./gradlew wrapper --gradle-version=8.11.1 --no-daemon && cd ..
+          # 2. Atualiza Gradle wrapper via sed (NÃO usar ./gradlew wrapper — ele configura o projeto com o wrapper antigo e quebra no bcprov)
+          #    Gradle 8.2.1 (gerado pelo Capacitor) tem ASM que não suporta Java 21 class files (major version 65)
+          #    Esta edição direta faz o ./gradlew seguinte baixar 8.11.1 já com ASM compatível
+          sed -i 's|distributionUrl=.*gradle-[0-9.]*-.*|distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties
 
           # 3. Gera as permissões oficiais no Manifesto
           cat > android/app/src/main/AndroidManifest.xml << 'MANIFEST_EOF'
