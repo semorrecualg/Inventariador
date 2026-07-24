@@ -1,0 +1,147 @@
+name: Build Android APK (Native Ready v2.7)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+jobs:
+  build:
+    name: Generate APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Inventariador-main
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: Inventariador-main/package-lock.json
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.7)
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(node -e "console.log(require('./package.json').version)")
+          VERSION_CODE=$(echo "$APP_VERSION" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }' | sed 's/^0*//')
+          echo "📦 Versão detectada: $APP_VERSION (versionCode: $VERSION_CODE)"
+
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            echo "📁 Diretório android já existe — pulando cap add"
+          fi
+
+          sed -i 's|distributionUrl=.*gradle-[0-9.]*-.*|distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties
+
+          cat > android/app/src/main/AndroidManifest.xml << 'MANIFEST_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="GBR KARDEK"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme"
+                  android:requestLegacyExternalStorage="true"
+                  android:usesCleartextTraffic="true">
+                  <activity
+                      android:name="com.gbr.kardek.MainActivity"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:exported="true"
+                      android:label="GBR KARDEK"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:launchMode="singleTop">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths"></meta-data>
+                  </provider>
+              </application>
+          </manifest>
+          MANIFEST_EOF
+
+          sed -i "s/versionCode 1/versionCode ${VERSION_CODE}/g" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"${APP_VERSION}\"/g" android/app/build.gradle
+          sed -i 's/io.ionic.starter/com.gbr.kardek/g' android/app/build.gradle
+          sed -i 's/com.example.app/com.gbr.kardek/g' android/app/build.gradle
+
+          cat > android/gradle.properties << 'GRADLE_EOF'
+          org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          android.useAndroidX=true
+          android.enableJetifier=true
+          GRADLE_EOF
+
+          npx cap sync android
+
+      - name: Gradle Cache — Restore/Save com chave isolada
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-cache-${{ runner.os }}-v2.7-${{ hashFiles('Inventariador-main/package-lock.json') }}
+          restore-keys: |
+            gradle-cache-${{ runner.os }}-v2.7-
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Renomear APK com versão
+        run: |
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          DATE=$(date +'%Y%m%d')
+          NEW_NAME="gbr-kardek-v${VERSION}-${DATE}.apk"
+          cp "$APK_PATH" "android/app/build/outputs/apk/debug/${NEW_NAME}"
+          echo "✅ APK gerado localmente: ${NEW_NAME}"
+
+      - name: Upload Android Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbr-kardek-apk
+          path: ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk
+          retention-days: 7
+          if-no-files-found: error
