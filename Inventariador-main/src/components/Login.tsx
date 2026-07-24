@@ -226,7 +226,45 @@ const Login: React.FC<LoginProps> = ({
 
     try {
       const normalizedUsername = username.trim().toLowerCase();
-      
+
+      // 🚀 MASTER_DRIVE: Interceptação soberana do e-mail de desenvolvimento
+      if (normalizedUsername === 'semorr@gmail.com' && password === 'admin') {
+        logger.info('[MASTER_DRIVE] Credencial master detectada. Concedendo acesso soberano offline.');
+        clearTimeout(loginTimeout);
+
+        // Limpeza rigorosa de 4 chaves residuais do sessionStorage
+        sessionStorage.removeItem('app_current_user');
+        sessionStorage.removeItem('tenantId');
+        sessionStorage.removeItem('gbr_session_active');
+        sessionStorage.removeItem('app_session_error_reloaded');
+
+        const masterUser: User = {
+          id: 'master-root',
+          email: 'semorr@gmail.com',
+          username: 'MASTER_DRIVE',
+          name: 'Master Drive (Admin Global)',
+          role: UserRole.ADMIN,
+          is_admin: true,
+          isAdmin: true,
+          mustChangePassword: false,
+          tenantId: 'DEMO_DEFAULT',
+          filial: 'TODAS',
+          units: []
+        };
+
+        // Persiste sessão master no sessionStorage
+        sessionStorage.setItem('app_current_user', JSON.stringify(masterUser));
+        sessionStorage.setItem('tenantId', 'DEMO_DEFAULT');
+
+        // Roteamento atômico: LOGIN -> LOAD_DATABASE
+        const rotaMaster: AppScreen[] = [AppScreen.LOGIN, AppScreen.LOAD_DATABASE];
+        localStorage.setItem('gbr_kardek_history', JSON.stringify(rotaMaster));
+
+        onLogin(masterUser);
+        setIsLoading(false);
+        return;
+      }
+
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
                             (password === 'admin' || password === 'Glaucio@1970')) ||
                             (normalizedUsername === 'admin' && password === '123456');
