@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail } from '../utils/authUtils';
+import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -227,16 +227,16 @@ const Login: React.FC<LoginProps> = ({
     try {
       const normalizedUsername = username.trim().toLowerCase();
 
-      // 🚀 MASTER_DRIVE: Interceptação soberana do e-mail de desenvolvimento
-      if (normalizedUsername === 'semorr@gmail.com' && password === 'admin') {
-        logger.info('[MASTER_DRIVE] Credencial master detectada. Concedendo acesso soberano offline.');
+      // =======================================================
+      // 1. BYPASS SOBERANO: SUPER-ADMIN EXCLUSIVO (Glaucio@1970)
+      // =======================================================
+      if (username.trim() === 'Glaucio@1970' && password === 'admin') {
+        logger.info('[MASTER_DRIVE] Super-Admin autenticado via Chave Mestra Única.');
         clearTimeout(loginTimeout);
+        sessionStorage.clear(); // Limpeza atômica de sessões residuais
 
-        // Limpeza rigorosa de 4 chaves residuais do sessionStorage
-        sessionStorage.removeItem('app_current_user');
-        sessionStorage.removeItem('tenantId');
-        sessionStorage.removeItem('gbr_session_active');
-        sessionStorage.removeItem('app_session_error_reloaded');
+        sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
+        sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
         const masterUser: User = {
           id: 'master-root',
@@ -252,9 +252,7 @@ const Login: React.FC<LoginProps> = ({
           units: []
         };
 
-        // Persiste sessão master no sessionStorage
         sessionStorage.setItem('app_current_user', JSON.stringify(masterUser));
-        sessionStorage.setItem('tenantId', 'DEMO_DEFAULT');
 
         // Roteamento atômico: LOGIN -> LOAD_DATABASE
         const rotaMaster: AppScreen[] = [AppScreen.LOGIN, AppScreen.LOAD_DATABASE];
@@ -263,6 +261,39 @@ const Login: React.FC<LoginProps> = ({
         onLogin(masterUser);
         setIsLoading(false);
         return;
+      }
+
+      // =======================================================
+      // 2. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
+      // =======================================================
+      try {
+        const emailLower = username.trim().toLowerCase();
+        if (emailLower) {
+          const localUser = await localDb.users.get({ email: emailLower });
+          if (localUser && password === localUser.password) {
+            logger.info('[DEXIE_AUTH] Usuário local localizado no Dexie. Montando escopo de acesso.');
+
+            const userRole = (localUser.role || '').toString().toUpperCase();
+            if (userRole === 'MASTER' || userRole === 'ADMIN' || localUser.is_admin || localUser.isAdmin) {
+              if (!localUser.tenantId) throw new Error('Perfil MASTER sem tenantId vinculado no Supabase.');
+              sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
+              sessionStorage.setItem('tenantId', localUser.tenantId);
+            } else {
+              sessionStorage.setItem('gbr_admin_scope', 'OPERATIONAL_AUDITOR');
+              if (localUser.tenantId) sessionStorage.setItem('tenantId', localUser.tenantId);
+            }
+
+            sessionStorage.setItem('app_current_user', JSON.stringify(localUser));
+            localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]));
+
+            onLogin(localUser as unknown as User);
+            setIsLoading(false);
+            clearTimeout(loginTimeout);
+            return;
+          }
+        }
+      } catch (dexieErr) {
+        logger.warn('[DEXIE_AUTH] Erro na consulta Dexie.js, prosseguindo para próximas camadas:', dexieErr);
       }
 
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
