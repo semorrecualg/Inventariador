@@ -225,6 +225,57 @@ const Login: React.FC<LoginProps> = ({
 
     try {
       const normalizedUsername = username.trim().toLowerCase();
+
+      // === MASTER DRIVE: Interceptacao soberana do usuario 'semorr@gmail.com' ===
+      // Concede acesso total, irrestrito e 100% offline sem depender de Supabase,
+      // SQLite ou qualquer chamada externa. Processa a mutacao do historico localmente.
+      if (normalizedUsername === 'semorr@gmail.com' && password === 'admin') {
+        try {
+          logger.info('[MASTER_DRIVE] Credencial Master Drive detectada. Concedendo acesso soberano offline...');
+
+          // 1. Cria usuario Master Drive com privilegios totais
+          const masterUser: User = {
+            id: 'master_drive_root',
+            username: 'semorr',
+            name: 'Glaucio (MASTER DRIVE)',
+            email: 'semorr@gmail.com',
+            role: UserRole.ADMIN,
+            is_admin: true,
+            isAdmin: true,
+            mustChangePassword: false,
+            tenantId: 'DEMO_DEFAULT',
+            filial: 'TODAS',
+            units: []
+          };
+
+          // 2. Flush de caches residuais de sessoes anteriores
+          sessionStorage.removeItem('gbr_physical_folder_name');
+          sessionStorage.removeItem('gbr_session_mode');
+          sessionStorage.removeItem('app_session_error_reloaded');
+          sessionStorage.removeItem('app_just_cleared_data');
+
+          // 3. Persiste usuario e tenant no sessionStorage
+          sessionStorage.setItem('app_current_user', safeStringify(masterUser));
+          sessionStorage.setItem('tenantId', 'DEMO_DEFAULT');
+
+          // 4. Roteamento atomico: empilha LOAD_DATABASE no historico
+          const history = [AppScreen.LOGIN, AppScreen.LOAD_DATABASE];
+          localStorage.setItem('gbr_kardek_history', JSON.stringify(history));
+
+          // 5. Dispara onLogin para ativar a sessao
+          onLogin(masterUser);
+
+          clearTimeout(loginTimeout);
+          setIsLoading(false);
+          return;
+        } catch (masterErr) {
+          logger.error('[MASTER_DRIVE] Falha critica ao processar Master Drive:', masterErr);
+          setError('Erro interno ao inicializar sessao Master Drive. Tente novamente.');
+          clearTimeout(loginTimeout);
+          setIsLoading(false);
+          return;
+        }
+      }
       
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
                             (password === 'admin' || password === 'Glaucio@1970')) ||
