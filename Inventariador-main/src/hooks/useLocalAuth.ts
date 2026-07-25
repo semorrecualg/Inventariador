@@ -2,17 +2,22 @@ import { useState, useCallback } from 'react';
 import { authenticateLocalUser, AuthResult } from '../utils/authUtils';
 
 /**
- * Hook that wraps authenticateLocalUser with React state management.
+ * Hook that wraps authenticateLocalUser with optional React state management.
  *
- * Provides:
- * - `authenticate(finder, email, password)` — performs the auth and
- *   updates isLoading / error state automatically
- * - `isLoading` — true while the async auth is in flight
- * - `error` — string | null, set on auth failure, cleared on success
- *   or by calling clearError()
- * - `clearError()` — manually resets the error state
+ * When `manageState` is true (default):
+ * - `authenticate(finder, email, password)` updates isLoading / error state
+ * - `isLoading` tracks in-flight status
+ * - `error` is set on failure, cleared on success or via clearError()
+ * - `clearError()` resets the error
+ *
+ * When `manageState` is false, the hook returns stable false/null for
+ * isLoading/error and never calls setState internally. Use this when the
+ * consumer (e.g. Login.tsx) manages its own loading/error state and only
+ * needs the stable useCallback wrapper for authenticateLocalUser.
+ *
+ * @param manageState - Whether to manage isLoading/error state (default true)
  */
-export function useLocalAuth() {
+export function useLocalAuth(manageState = true) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,24 +29,35 @@ export function useLocalAuth() {
       email: string,
       password: string,
     ): Promise<AuthResult> => {
-      setIsLoading(true);
-      setError(null);
+      if (manageState) {
+        setIsLoading(true);
+        setError(null);
+      }
 
       const result = await authenticateLocalUser(findByEmail, email, password);
 
-      if (result.error) {
-        setError(result.error);
+      if (manageState) {
+        if (result.error) {
+          setError(result.error);
+        }
+        setIsLoading(false);
       }
 
-      setIsLoading(false);
       return result;
     },
-    [],
+    [manageState],
   );
 
   const clearError = useCallback(() => {
-    setError(null);
-  }, []);
+    if (manageState) {
+      setError(null);
+    }
+  }, [manageState]);
 
-  return { authenticate, isLoading, error, clearError };
+  return {
+    authenticate,
+    isLoading: manageState ? isLoading : false,
+    error: manageState ? error : null,
+    clearError,
+  };
 }

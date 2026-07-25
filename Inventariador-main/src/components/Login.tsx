@@ -52,9 +52,10 @@ const Login: React.FC<LoginProps> = ({
 
   const [hasBio, setHasBio] = useState(false);
   // Only the stable authenticate reference is needed — Login.tsx manages
-  // its own loading/error state for the entire multi-path auth flow,
-  // so the hook's internal isLoading/error are intentionally unused.
-  const { authenticate: localAuthenticate } = useLocalAuth();
+  // its own loading/error state for the entire multi-path auth flow.
+  // Passing false to useLocalAuth skips its internal setState calls,
+  // avoiding 2 wasted re-renders per Dexie auth call.
+  const { authenticate: localAuthenticate } = useLocalAuth(false);
 
   // Vercel Best Practice: derive during render, no useMemo for simple primitives
   // (rerender-simple-expression-in-memo)
