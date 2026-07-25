@@ -225,12 +225,15 @@ const Login: React.FC<LoginProps> = ({
     }, 45000);
 
     try {
+      const inputUser = username.trim();
+      console.log(`>>> [MOBILE-SHIELD] Validando credenciais para: ${inputUser}`);
+
       const normalizedUsername = username.trim().toLowerCase();
 
       // =======================================================
-      // 1. BYPASS SOBERANO: SUPER-ADMIN EXCLUSIVO (Glaucio@1970)
+      // A. MASTER DRIVE: BYPASS SOBERANO EXCLUSIVO (Glaucio@1970)
       // =======================================================
-      if (username === 'Glaucio@1970' && password === 'admin') {
+      if (inputUser === 'Glaucio@1970' && password === 'admin') {
         console.log(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
         clearTimeout(loginTimeout);
         sessionStorage.clear();
@@ -238,7 +241,8 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
         sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
-        const masterUser = { role: 'ADMIN', email: 'semorr@gmail.com', username: 'MASTER_DRIVE', name: 'Master Drive (Admin Global)', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
+        const masterUser = { role: 'ADMIN', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
+        // Usando DATABASE_MANAGER (AppScreen.LOAD_DATABASE nao existe no enum)
         localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
 
         onLogin(masterUser as unknown as User);

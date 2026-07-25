@@ -46,7 +46,7 @@ export default defineConfig({
     }),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.png', 'sql-wasm.wasm'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'GBR Auditoria Patrimonial',
         short_name: 'GBR Auditor',
@@ -69,8 +69,9 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,wasm}'],
-        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10MB to accommodate sql-wasm
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        dontCacheBustURLsMatching: /\.wasm$/,
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10MB
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
