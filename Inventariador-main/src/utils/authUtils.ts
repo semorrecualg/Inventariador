@@ -117,6 +117,56 @@ export const checkMasterDrive = (
   return { isMaster: false };
 };
 
+/** Result of a local user authentication against Dexie.js. */
+export interface AuthResult {
+  user?: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * Authenticates a user against the local Dexie.js database.
+ *
+ * Pure function (async): takes a finder function that wraps
+ * `localDb.users.get()`, an email, and a password. Returns the
+ * user record if found and password matches, or an error string.
+ *
+ * The finder is injected to make the function testable without
+ * requiring an actual Dexie database instance.
+ *
+ * @param findByEmail - Async function(email) => User | null | undefined
+ * @param email - Raw email input (trimmed + lowercased internally)
+ * @param password - Raw password to compare
+ * @returns AuthResult with user or error
+ */
+export const authenticateLocalUser = async (
+  findByEmail: (criteria: { email: string }) => Promise<Record<string, unknown> | null | undefined>,
+  email: string,
+  password: string,
+): Promise<AuthResult> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return { error: 'E-mail não informado' };
+  }
+
+  try {
+    const user = await findByEmail({ email: normalizedEmail });
+
+    if (!user) {
+      return { error: 'Usuário não encontrado' };
+    }
+
+    const storedPassword = user.password as string | undefined;
+    if (storedPassword !== password) {
+      return { error: 'Senha incorreta' };
+    }
+
+    return { user };
+  } catch (err) {
+    return { error: `Erro ao consultar banco Dexie: ${err instanceof Error ? err.message : String(err)}` };
+  }
+};
+
 /**
  * Applies the MASTER_DRIVE bypass including side effects.
  *
@@ -125,11 +175,11 @@ export const checkMasterDrive = (
  * would do on the MASTER_DRIVE path.
  *
  * Can be tested with mocked storage APIs in environments without jsdom.
+ * The AppScreen enum values (LOGIN, DATABASE_MANAGER) are hardcoded as
+ * stable strings — these enum members have not changed since v1.0.
  *
- * @param username - Raw username input
+ * @param username - Raw username input (trimmed internally)
  * @param password - Raw password input
- * @param appScreenLOGIN - The AppScreen.LOGIN value (injected to avoid cyclic deps)
- * @param appScreenDB - The target AppScreen value (injected to avoid cyclic deps)
  * @returns MasterDriveResult with isMaster flag
  */
 export const applyMasterDriveSession = (
