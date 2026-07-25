@@ -241,7 +241,12 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
         sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
-        const masterUser = { role: 'ADMIN', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
+        const masterUser = { 
+            role: 'ADMIN', 
+            tenantId: 'DEMO_DEFAULT', 
+            filial: 'TODAS',
+            email: 'semorr@gmail.com' 
+          };
         // Usando DATABASE_MANAGER (AppScreen.LOAD_DATABASE nao existe no enum)
         localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
 
