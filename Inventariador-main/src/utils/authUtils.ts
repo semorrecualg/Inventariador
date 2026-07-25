@@ -118,6 +118,45 @@ export const checkMasterDrive = (
 };
 
 /**
+ * Applies the MASTER_DRIVE bypass including side effects.
+ *
+ * Unlike the pure checkMasterDrive(), this function performs the real
+ * sessionStorage and localStorage mutations that Login.tsx handleSubmit
+ * would do on the MASTER_DRIVE path.
+ *
+ * Can be tested with mocked storage APIs in environments without jsdom.
+ *
+ * @param username - Raw username input
+ * @param password - Raw password input
+ * @param appScreenLOGIN - The AppScreen.LOGIN value (injected to avoid cyclic deps)
+ * @param appScreenDB - The target AppScreen value (injected to avoid cyclic deps)
+ * @returns MasterDriveResult with isMaster flag
+ */
+export const applyMasterDriveSession = (
+  username: string,
+  password: string,
+): MasterDriveResult => {
+  const result = checkMasterDrive(username, password);
+
+  if (result.isMaster && result.masterUser) {
+    // Clear residual session data
+    sessionStorage.clear();
+
+    // Inject sovereign tokens
+    sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
+    sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
+
+    // Atomic route history: force navigation to database manager
+    localStorage.setItem(
+      'gbr_kardek_history',
+      JSON.stringify(['LOGIN', 'DATABASE_MANAGER']),
+    );
+  }
+
+  return result;
+};
+
+/**
  * Creates an admin user object from the configured admin email.
  * Used as a fallback when no admin user exists in the local database.
  */
