@@ -30,7 +30,7 @@ export async function processarRoteamentoPosLoginSaas(
     throw new Error("Erro de consistência: Perfil MASTER sem empresa vinculada.");
   }
 
-  const totalAtivosLocal = await sqliteService.countAtivos();
+  const totalAtivosLocal = await sqliteService.countAtivos().catch(() => 0);
   const isSuperAdmin = isAdminEmail(user.email);
   const isMaster = String(user.role).toUpperCase() === 'MASTER';
 
