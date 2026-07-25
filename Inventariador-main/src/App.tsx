@@ -1156,19 +1156,16 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
-    const timeout = setTimeout(async () => {
+    // Timeout curto para garantir que a tela de login apareca mesmo
+    // se a inicializacao do SQLite/IndexedDB falhar ou travar no mobile.
+    const timeout = setTimeout(() => {
       if (isInitializing && !bootstrapError) {
-        logger.warn(">>> [App] Inicialização demorou demais (>35s). Forçando Fallback em Memória de Contingência...");
-        try {
-          await sqliteService.init(true);
-        } catch (e) {
-          logger.error(">>> [App] Erro crítico ao forçar fallback:", e);
-        }
+        logger.warn(">>> [App] Inicializacao excedeu o limite de 6s. Liberando renderizacao do Login.");
         setDbInitialized(true);
         setSqliteStatus('ACTIVE');
         setIsInitializing(false);
       }
-    }, 35000);
+    }, 6000);
     return () => clearTimeout(timeout);
   }, [isInitializing, bootstrapError]);
 
