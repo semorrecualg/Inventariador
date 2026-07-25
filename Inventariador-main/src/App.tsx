@@ -270,7 +270,7 @@ export function InitializeBootPipeline(): void {
 
   } catch (error) {
     // Fallback de contingência para evitar tela preta
-    console.error('[SRE_BOOT] Erro no pipeline de inicialização:', error);
+    logger.error('[SRE_BOOT] Erro no pipeline de inicialização:', error);
     try {
       localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN]));
     } catch { /* ignorar falha de localStorage */ }
