@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive } from '../utils/authUtils';
+import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive, authenticateLocalUser } from '../utils/authUtils';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -254,34 +254,43 @@ const Login: React.FC<LoginProps> = ({
       // =======================================================
       // 2. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
       // =======================================================
-      try {
-        const emailLower = username.trim().toLowerCase();
-        if (emailLower) {
-          const localUser = await localDb.users.get({ email: emailLower });
-          if (localUser && password === localUser.password) {
-            logger.info('[DEXIE_AUTH] Usuário local localizado no Dexie. Montando escopo de acesso.');
+      const dexieAuthResult = await authenticateLocalUser(
+        (criteria) => localDb.users.get(criteria),
+        username,
+        password,
+      );
 
-            const userRole = (localUser.role || '').toString().toUpperCase();
-            if (userRole === 'MASTER' || userRole === 'ADMIN' || localUser.is_admin || localUser.isAdmin) {
-              if (!localUser.tenantId) throw new Error('Perfil MASTER sem tenantId vinculado no Supabase.');
-              sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
-              sessionStorage.setItem('tenantId', localUser.tenantId);
-            } else {
-              sessionStorage.setItem('gbr_admin_scope', 'OPERATIONAL_AUDITOR');
-              if (localUser.tenantId) sessionStorage.setItem('tenantId', localUser.tenantId);
-            }
+      if (dexieAuthResult.user) {
+        logger.info('[DEXIE_AUTH] Usuário local localizado no Dexie. Montando escopo de acesso.');
 
-            sessionStorage.setItem('app_current_user', JSON.stringify(localUser));
-            localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]));
+        const localUser = dexieAuthResult.user as {
+          role?: string;
+          tenantId?: string;
+          is_admin?: boolean;
+          isAdmin?: boolean;
+        };
 
-            onLogin(localUser as unknown as User);
-            setIsLoading(false);
-            clearTimeout(loginTimeout);
-            return;
-          }
+        const userRole = (localUser.role || '').toString().toUpperCase();
+        if (userRole === 'MASTER' || userRole === 'ADMIN' || localUser.is_admin || localUser.isAdmin) {
+          if (!localUser.tenantId) throw new Error('Perfil MASTER sem tenantId vinculado no Supabase.');
+          sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
+          sessionStorage.setItem('tenantId', localUser.tenantId);
+        } else {
+          sessionStorage.setItem('gbr_admin_scope', 'OPERATIONAL_AUDITOR');
+          if (localUser.tenantId) sessionStorage.setItem('tenantId', localUser.tenantId);
         }
-      } catch (dexieErr) {
-        logger.warn('[DEXIE_AUTH] Erro na consulta Dexie.js, prosseguindo para próximas camadas:', dexieErr);
+
+        sessionStorage.setItem('app_current_user', JSON.stringify(dexieAuthResult.user));
+        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]));
+
+        onLogin(dexieAuthResult.user as unknown as User);
+        setIsLoading(false);
+        clearTimeout(loginTimeout);
+        return;
+      }
+
+      if (dexieAuthResult.error) {
+        logger.warn('[DEXIE_AUTH] Erro na consulta Dexie.js, prosseguindo para próximas camadas:', dexieAuthResult.error);
       }
 
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
