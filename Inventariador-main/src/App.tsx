@@ -293,35 +293,8 @@ export function InitializeBootPipeline(): void {
 // causando tela preta se algo falhar. A inicialização ocorre dentro
 // do useEffect no componente App, após o React montar com segurança.
 const App: React.FC = () => {
-  // 🚀 INJEÇÃO DE SESSÃO PERMANENTE COM CONTEXTO FÍSICO (AI Studio iFrame)
-  // Comentado para cumprir com o Regime v4.50-PROD de eliminação de bypass fantasma no boot
-  /*
-  if (typeof window !== 'undefined' && window.self !== window.top) {
-    if (!sessionStorage.getItem('gbr_session_active')) {
-      logger.warn(">>> [GBR-Compliance] Ambiente iFrame detectado. Injetando sessão estática de barreira contra Wipe.");
-      sessionStorage.setItem('gbr_tenant_id', 'CICOPAL');
-      const cachedFilial = localStorage.getItem('filial') || localStorage.getItem('selectedUnit') || '';
-      sessionStorage.setItem('gbr_unit_id', cachedFilial);
-      sessionStorage.setItem('gbr_session_active', 'true');
-      
-      const staticUser = {
-        id: "mock-iframe-id",
-        email: "semorr@gmail.com",
-        role: "MASTER",
-        tenantId: "CICOPAL"
-      };
-      if (!sessionStorage.getItem('app_current_user')) {
-         sessionStorage.setItem('app_current_user', JSON.stringify(staticUser));
-      }
-      if (!sessionStorage.getItem('selectedUnit')) {
-         sessionStorage.setItem('selectedUnit', cachedFilial);
-      }
-      if (!sessionStorage.getItem('filial')) {
-         sessionStorage.setItem('filial', cachedFilial);
-      }
-    }
-  }
-  */
+  // NOTA: Bloco de iFrame session injection removido no commit de limpeza —
+  // era código comentado desde o Regime v4.50-PROD.
 
   const [sqliteStatus, setSqliteStatusState] = useState(() => {
     const rawFilial = sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit');
