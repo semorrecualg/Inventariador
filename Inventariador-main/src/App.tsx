@@ -3234,6 +3234,7 @@ const App: React.FC = () => {
           '/saas/painel-global': AppScreen.MODULE_SELECTION,
           '/admin/painel-controle': AppScreen.MODULE_SELECTION,
           '/auditor/aguardando-carga': AppScreen.MODULE_SELECTION,
+          '/auditor/selecionar-filial': AppScreen.UNIT_SELECTION,
         };
         const targetScreen = pathToScreen[path] || AppScreen.MODULE_SELECTION;
         await pushScreen(targetScreen);
