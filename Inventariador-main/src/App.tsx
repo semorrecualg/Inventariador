@@ -3223,10 +3223,20 @@ const App: React.FC = () => {
         
         if (user.mustChangePassword) { 
           await pushScreen(AppScreen.CHANGE_PASSWORD); 
-        } else {
-          // Passo 2: Divisor de Módulos (MODULE_SELECTION)
-          await pushScreen(AppScreen.MODULE_SELECTION);
+          return;
         }
+        
+        // Mapeia o path para a tela correta, respeitando a rota definida
+        // por processarRoteamentoPosLoginSaas
+        const pathToScreen: Record<string, AppScreen> = {
+          '/load-database': AppScreen.DATABASE_MANAGER,
+          '/dashboard-demo': AppScreen.DASHBOARD,
+          '/saas/painel-global': AppScreen.MODULE_SELECTION,
+          '/admin/painel-controle': AppScreen.MODULE_SELECTION,
+          '/auditor/aguardando-carga': AppScreen.MODULE_SELECTION,
+        };
+        const targetScreen = pathToScreen[path] || AppScreen.MODULE_SELECTION;
+        await pushScreen(targetScreen);
       };
       
       try {
@@ -5972,7 +5982,7 @@ const App: React.FC = () => {
               } else {
                 setDatabaseMode(DatabaseMode.INTERNAL);
               }
-              const defaultTenant = String(u.tenants || u.tenantid || 'CICOPAL').toUpperCase().trim();
+              const defaultTenant = String(u.tenants || u.tenantid || u.tenantId || 'CICOPAL').toUpperCase().trim();
               const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantId', defaultTenant);

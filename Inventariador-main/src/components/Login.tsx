@@ -238,8 +238,8 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
         sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
-        const masterUser = { role: 'ADMIN', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
-        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.LOAD_DATABASE]));
+        const masterUser = { role: 'ADMIN', email: 'semorr@gmail.com', username: 'MASTER_DRIVE', name: 'Master Drive (Admin Global)', tenantId: 'DEMO_DEFAULT', filial: 'TODAS' };
+        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
 
         onLogin(masterUser as unknown as User);
         setIsLoading(false);
