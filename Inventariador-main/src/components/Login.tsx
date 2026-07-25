@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
+import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive } from '../utils/authUtils';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -234,7 +234,8 @@ const Login: React.FC<LoginProps> = ({
       // =======================================================
       // A. MASTER DRIVE: BYPASS SOBERANO EXCLUSIVO (Glaucio@1970)
       // =======================================================
-      if (inputUser === 'Glaucio@1970' && password === 'admin') {
+      const masterCheck = checkMasterDrive(inputUser, password);
+      if (masterCheck.isMaster && masterCheck.masterUser) {
         console.log(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
         clearTimeout(loginTimeout);
         sessionStorage.clear();
@@ -242,16 +243,10 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
         sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
 
-        const masterUser = { 
-            role: 'ADMIN', 
-            tenantId: 'DEMO_DEFAULT', 
-            filial: 'TODAS',
-            email: 'semorr@gmail.com' 
-          };
         // Usando DATABASE_MANAGER (AppScreen.LOAD_DATABASE nao existe no enum)
         localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
 
-        onLogin(masterUser as unknown as User);
+        onLogin(masterCheck.masterUser as unknown as User);
         setIsLoading(false);
         return;
       }

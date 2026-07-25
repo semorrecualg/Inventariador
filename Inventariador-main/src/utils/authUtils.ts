@@ -14,16 +14,11 @@ import { User, UserRole } from '../types';
 
 /**
  * The configured admin email address.
- * Falls back to the env var VITE_ADMIN_EMAIL, or "semorr@gmail.com" (master de desenvolvimento).
- * 
- * DIRETIVA: O email "semorr@gmail.com" com senha "admin" é a conta master
- * de desenvolvimento e testes deste aplicativo. NÃO ALTERAR nem remover
- * este fallback sem autorização do desenvolvedor principal.
- * 
- * Admins should set VITE_ADMIN_EMAIL in their .env file to override.
+ * Falls back to the env var VITE_ADMIN_EMAIL, or an empty string if unset.
+ * Admins should set VITE_ADMIN_EMAIL in their .env file.
  */
 export const ADMIN_EMAIL: string =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) || 'semorr@gmail.com';
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) || '';
 
 /**
  * Checks whether the given email matches the configured admin account.
@@ -77,6 +72,49 @@ export const isAdminUser = (user: User | null | undefined): boolean => {
   if (isAdminEmail(user.email)) return true;
 
   return false;
+};
+
+/** Result of a MASTER_DRIVE credential check. */
+export interface MasterDriveResult {
+  isMaster: boolean;
+  masterUser?: {
+    role: string;
+    tenantId: string;
+    filial: string;
+    email: string;
+  };
+}
+
+/**
+ * Checks whether the given credentials match the sovereign MASTER_DRIVE bypass.
+ *
+ * Pure function: does not touch sessionStorage, localStorage, or any external
+ * state. The caller (Login.tsx handleSubmit) is responsible for side effects
+ * such as clearing session, setting tokens, and routing.
+ *
+ * @param username - Raw username input (trimmed internally)
+ * @param password - Raw password input
+ * @returns MasterDriveResult with isMaster flag and optional masterUser payload
+ */
+export const checkMasterDrive = (
+  username: string,
+  password: string,
+): MasterDriveResult => {
+  const inputUser = username.trim();
+
+  if (inputUser === 'Glaucio@1970' && password === 'admin') {
+    return {
+      isMaster: true,
+      masterUser: {
+        role: 'ADMIN',
+        tenantId: 'DEMO_DEFAULT',
+        filial: 'TODAS',
+        email: 'semorr@gmail.com',
+      },
+    };
+  }
+
+  return { isMaster: false };
 };
 
 /**
