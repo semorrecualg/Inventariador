@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive, authenticateLocalUser } from '../utils/authUtils';
+import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive } from '../utils/authUtils';
+import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -50,6 +51,10 @@ const Login: React.FC<LoginProps> = ({
   }, [databaseMode]);
 
   const [hasBio, setHasBio] = useState(false);
+  // Only the stable authenticate reference is needed — Login.tsx manages
+  // its own loading/error state for the entire multi-path auth flow,
+  // so the hook's internal isLoading/error are intentionally unused.
+  const { authenticate: localAuthenticate } = useLocalAuth();
 
   // Vercel Best Practice: derive during render, no useMemo for simple primitives
   // (rerender-simple-expression-in-memo)
@@ -254,7 +259,7 @@ const Login: React.FC<LoginProps> = ({
       // =======================================================
       // 2. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
       // =======================================================
-      const dexieAuthResult = await authenticateLocalUser(
+      const dexieAuthResult = await localAuthenticate(
         (criteria) => localDb.users.get(criteria),
         username,
         password,
