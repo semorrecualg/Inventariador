@@ -228,7 +228,8 @@ const Login: React.FC<LoginProps> = ({
       const inputUser = username.trim();
       console.log(`>>> [MOBILE-SHIELD] Validando credenciais para: ${inputUser}`);
 
-      const normalizedUsername = username.trim().toLowerCase();
+      // normalizedUsername (declarado na linha 56) é usado via closure —
+      // evitamos redefini-lo aqui dentro para eliminar duplicação.
 
       // =======================================================
       // A. MASTER DRIVE: BYPASS SOBERANO EXCLUSIVO (Glaucio@1970)
