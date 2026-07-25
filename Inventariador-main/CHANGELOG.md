@@ -70,6 +70,13 @@ Three-tier authentication pipeline:
 - `fix(ci)`: Scoped Cache and Upload paths to `Inventariador-main/` subdirectory ([a92aadf])
 - `fix(build)`: Fixed Motion imports for ESM compatibility ([d4517fe])
 - `fix(pwa)`: Removed `.wasm` from glob patterns to fix conflicting cache entries ([2baff0f])
+- `fix(cleanup)`: Removed ~48 lines of dead commented code (iFrame session injection) from App.tsx ([546eb96])
+- `fix(observability)`: Replaced `console.error` with `logger.error` in InitializeBootPipeline for proper error capture in Capacitor WebView ([c508eee])
+
+### Code Cleanup
+
+- `refactor(login)`: Eliminated duplicated `normalizedUsername` declaration — outer scope variable used via closure ([d11b804])
+- `chore(docs)`: Upgraded CHANGELOG to Keep a Changelog format ([0cd1a3a])
 
 ### Chores
 
@@ -98,4 +105,4 @@ Three-tier authentication pipeline:
 3. If experiencing black screen, wait up to 6 seconds for the forced login render
 4. Clear browser/WebView cache if Service Worker conflict errors appear
 
-[2.6.0]: https://github.com/semorrecualg/Inventariador/commits/f93d658
+[2.6.0]: https://github.com/semorrecualg/Inventariador/compare/f93d658...d11b804
