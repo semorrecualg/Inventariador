@@ -97,13 +97,16 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true,
+    host: '0.0.0.0',
+    open: false,
+    allowedHosts: 'all',
     fs: {
       allow: ['..']
     },
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Access-Control-Allow-Origin': '*',
     }
   },
   optimizeDeps: {
