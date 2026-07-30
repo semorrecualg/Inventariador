@@ -778,7 +778,7 @@ export async function initializeWindowsDirectoryHandle(): Promise<boolean> {
     return true;
   } catch (error) {
     logger.error("[SRE BARRAMENTO] Falha de privilégio no diretório C:\\GBR_Inventario:", error);
-    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
+    if (sessionStorage.getItem('app_current_user')) showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
     return false;
   }
 }
@@ -880,10 +880,10 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
         }
       }
 
-      if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ ERRO: INSIRA A PLANILHA EXCEL DENTRO DA PASTA GBR_Inventario.", "blue");
+      if (sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ ERRO: INSIRA A PLANILHA EXCEL DENTRO DA PASTA GBR_Inventario.", "blue");
       return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob: null };
     } catch {
-      if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ DIRETÓRIO AUSENTE: CRIE A PASTA 'GBR_Inventario' EM SEUS DOCUMENTOS.", "blue");
+      if (sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ DIRETÓRIO AUSENTE: CRIE A PASTA 'GBR_Inventario' EM SEUS DOCUMENTOS.", "blue");
       return null;
     }
   } catch (error) {
