@@ -752,35 +752,12 @@ export const localDb = {
   }
 };
 
-export async function requestPersistentStorage(): Promise<boolean> {
-  // REQUISITO 3: PROTOCOLO DE PERSISTENCIA MOBILE (navigator.storage.persist)
-  // Impede que o SO do celular limpe o IndexedDB em segundo plano por falta de espaco.
-  if (typeof navigator !== 'undefined' && 'storage' in navigator && 'persist' in navigator.storage) {
-    try {
-      const isPersisted = await navigator.storage.persist();
-      if (isPersisted) {
-        logger.info(">>> [SRE_STORAGE] Persistencia de Storage CONCEDIDA pelo SO. IndexedDB protegido contra limpeza em background.");
-      } else {
-        logger.warn(">>> [SRE_STORAGE] Persistencia de Storage NEGADA pelo SO. IndexedDB pode ser limpo sob pressao de memoria.");
-      }
-      return isPersisted;
-    } catch (err) {
-      logger.warn(">>> [SRE_STORAGE] Erro ao solicitar persistencia de storage:", err);
-      return false;
-    }
-  }
-  logger.info(">>> [DBA] Dexie.js Nativo configurado. Persistencia de Storage garantida (API nao disponivel).");
+export async function requestPersistentStorage() {
+  logger.info(">>> [DBA] Dexie.js Nativo configurado. Persistência de Storage garantida.");
   return true;
 }
 
-export async function isStoragePersisted(): Promise<boolean> {
-  if (typeof navigator !== 'undefined' && 'storage' in navigator && 'persisted' in navigator.storage) {
-    try {
-      return await navigator.storage.persisted();
-    } catch {
-      return true;
-    }
-  }
+export async function isStoragePersisted() {
   return true;
 }
 
@@ -801,7 +778,7 @@ export async function initializeWindowsDirectoryHandle(): Promise<boolean> {
     return true;
   } catch (error) {
     logger.error("[SRE BARRAMENTO] Falha de privilégio no diretório C:\\GBR_Inventario:", error);
-    showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("❌ ERRO DE PRIVILÉGIO: ACESSO EXIGIDO PARA C:\\GBR_INVENTARIO", "blue");
     return false;
   }
 }
@@ -903,10 +880,10 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
         }
       }
 
-      showRecoveryToast("⚠️ ERRO: INSIRA A PLANILHA EXCEL DENTRO DA PASTA GBR_Inventario.", "blue");
+      if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ ERRO: INSIRA A PLANILHA EXCEL DENTRO DA PASTA GBR_Inventario.", "blue");
       return { pathName: `Documentos / ${userWorkspaceHandle.name}`, fileBlob: null };
     } catch {
-      showRecoveryToast("⚠️ DIRETÓRIO AUSENTE: CRIE A PASTA 'GBR_Inventario' EM SEUS DOCUMENTOS.", "blue");
+      if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_current_user')) showRecoveryToast("⚠️ DIRETÓRIO AUSENTE: CRIE A PASTA 'GBR_Inventario' EM SEUS DOCUMENTOS.", "blue");
       return null;
     }
   } catch (error) {

@@ -5909,7 +5909,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showRecoveryToast && (screen === AppScreen.DATABASE_MANAGER || screen === AppScreen.DASHBOARD || screen === AppScreen.INVENTORY) && (
+      {showRecoveryToast && (screen === AppScreen.DATABASE_MANAGER || screen === AppScreen.LOAD_DATABASE || screen === AppScreen.DASHBOARD || screen === AppScreen.INVENTORY) && (
             <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] ${recoverySource === 'PHYSICAL' ? 'bg-blue-600' : 'bg-emerald-600'} text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 animate-bounce w-[90%] max-w-xs`}>
               {recoverySource === 'PHYSICAL' ? <FileText size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
               <div className="flex flex-col">

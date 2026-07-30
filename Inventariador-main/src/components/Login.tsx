@@ -232,7 +232,7 @@ const Login: React.FC<LoginProps> = ({
 
     try {
       const inputUser = username.trim();
-      console.log(`>>> [MOBILE-SHIELD] Validando credenciais para: ${inputUser}`);
+      logger.info(`>>> [MOBILE-SHIELD] Validando credenciais para: ${inputUser}`);
 
       // normalizedUsername (declarado na linha 56) é usado via closure —
       // evitamos redefini-lo aqui dentro para eliminar duplicação.
@@ -242,7 +242,7 @@ const Login: React.FC<LoginProps> = ({
       // =======================================================
       const masterCheck = checkMasterDrive(inputUser, password);
       if (masterCheck.isMaster && masterCheck.masterUser) {
-        console.log(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
+        logger.info(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
         clearTimeout(loginTimeout);
         sessionStorage.clear();
 

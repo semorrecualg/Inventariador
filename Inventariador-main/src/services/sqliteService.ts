@@ -642,7 +642,8 @@ export class SqliteService {
   }
 
   public async getAssetsOffline(): Promise<Record<string, unknown>[]> {
-    return this.query("SELECT * FROM ativos;");
+    const assets = await db.ativos.toArray();
+    return assets as unknown as Record<string, unknown>[];
   }
 
   public getIsInitialized(): boolean {
@@ -676,6 +677,9 @@ export class SqliteService {
 
   public async getFileStatus(): Promise<{ status: string; path: string; fileName?: string }> {
     const isNative = Capacitor.isNativePlatform();
+    // Mobile (Capacitor Native): sempre 'linked' — o sistema de arquivos fisico
+    // (showDirectoryPicker / C:\GBR_Inventario) NAO se aplica ao ambiente nativo.
+    // O gerenciamento de arquivos mobile usa GBR_KARDEK_DATA/local_assets_secure.dat
     if (isNative) {
       return {
         status: 'linked',
@@ -683,6 +687,7 @@ export class SqliteService {
         fileName: 'local_assets_secure'
       };
     }
+    // Desktop/Web: retorna linked apenas se o SQLite ja foi inicializado
     return {
       status: this.isInitialized ? 'linked' : 'permission_denied',
       path: this.getNativePath() || 'IndexedDB',
