@@ -38,8 +38,8 @@ export interface ProvisionResult {
 // ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
 // o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
 // GBR FORCE LOCAL DEVELOPMENT - SUPABASE DISABLED PER ORIENTATION
-const rawSupabaseUrl = '';
-const rawSupabaseAnonKey = '';
+const rawSupabaseUrl = 'https://celiuyaycrnrhjuodydl.supabase.co';
+const rawSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlbGl1eWF5Y3JucmhqdW9keWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDgwMTYsImV4cCI6MjA4NzEyNDAxNn0.ehM2miB5XwUfJ5Gx3OcuCe_edddfFV8AM0HDMHHeynM';
 export const isInternalMode = true;
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
