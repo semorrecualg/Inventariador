@@ -1,4 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 describe('ErrorBoundary Component', () => {
@@ -70,12 +72,17 @@ describe('ErrorBoundary Component', () => {
     });
 
     it('renders fallback UI when there is an error', () => {
-      // Simulate error state
-      const instance = new ErrorBoundary({ children: 'test' });
-      instance.setState({ hasError: true, error: new Error('Test error') });
-      
-      expect(instance.state.hasError).toBe(true);
-      expect(instance.state.error?.message).toBe('Test error');
+      // A real render with a throwing child is required: calling setState on an
+      // unmounted class instance is a no-op in React 18 (ReactNoopUpdateQueue).
+      const Boom = () => {
+        throw new Error('Test error');
+      };
+      render(
+        <ErrorBoundary>
+          <Boom />
+        </ErrorBoundary>
+      );
+      expect(screen.getByText(/Ops! Algo deu errado/i)).toBeTruthy();
     });
   });
 
