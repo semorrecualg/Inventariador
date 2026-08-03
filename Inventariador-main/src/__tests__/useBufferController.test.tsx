@@ -132,12 +132,15 @@ describe('useBufferController - auto-flush integration', () => {
 
     const { result } = renderHook(() => useBufferController());
 
-    expect(result.current.pendingCount).toBe(0);
+    // The hook reads the buffer count synchronously in its mount effect,
+    // so pendingCount reflects the mocked count immediately.
+    expect(result.current.pendingCount).toBe(42);
 
     await act(async () => {
       vi.advanceTimersByTime(1100);
     });
 
+    // 42 < BUFFER_MAX_SIZE (50) → no auto-flush, count stays stable.
     expect(result.current.pendingCount).toBe(42);
     expect(typeof result.current.flush).toBe('function');
   });
@@ -148,12 +151,25 @@ describe('useBufferController - auto-flush integration', () => {
 
     renderHook(() => useBufferController());
 
+    // Mount triggers auto-flush #1, which rejects. The hook must not crash
+    // or leave the isFlushing guard stuck.
     await act(async () => {
       vi.advanceTimersByTime(1100);
     });
 
     expect(mockFlushFieldChanges).toHaveBeenCalledTimes(1);
 
+    // After the failed flush the count stays at BUFFER_MAX_SIZE, so the next
+    // poll returning the same value does NOT re-fire (no state change).
+    await act(async () => {
+      vi.advanceTimersByTime(1100);
+    });
+
+    expect(mockFlushFieldChanges).toHaveBeenCalledTimes(1);
+
+    // Recovery: when the storage layer works again and the poll observes a
+    // count change that is still >= limit, a new auto-flush runs and succeeds.
+    mockGetBufferedChangesCount.mockReturnValue(75);
     mockFlushFieldChanges.mockResolvedValue(undefined);
 
     await act(async () => {
