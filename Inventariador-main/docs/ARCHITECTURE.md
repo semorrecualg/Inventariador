@@ -305,6 +305,12 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
    `scripts/migrate-unitid-supabase.sql`. Interceptor `mapColumnName` no
    `supabaseService` mapeia chaves legadas na borda do Supabase (read-compat
    intencional — ver §7.6). → typecheck limpo + **119/119 testes verdes** (9 suítes).
+5. **Mapa de navegação consolidado (docs/FLOW_GRAPH.md)** — os **32 nós** do grafo de
+   negócio mapeados para `AppScreen`; removidas 2 telas órfãs (`SETTINGS`, `QR_CONFIGURATOR`)
+   que colidiam com rotas vivas (`/sync`, `/qr-config`). Decisões de transição registradas:
+   ONBOARDING → `MODULE_SELECTION` (não `DASHBOARD` — guarda da Barreira Canônica),
+   CHANGE_PWD → `UNIT_SELECTION` com desvio para `MAIN_MENU` em base vazia + admin.
+   Novo teste de contrato `navigationMap.test.ts` garante rota única por tela e zero órfãs.
 
 ---
 
@@ -312,7 +318,7 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 
 `npx vitest run` (script `npm test`). Suítes em `src/__tests__/`:
 `Login`, `localAuth`, `masterDrive` (+ integração), `ErrorBoundary`, `Modal`,
-`useBufferController`, `io_buffer`, `tenantUtils` (9 arquivos / 119 testes).
+`useBufferController`, `io_buffer`, `tenantUtils`, `navigationMap` (10 arquivos / 124 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 
@@ -354,3 +360,5 @@ Plano completo em fases (0–5, com garantias anti-perda, riscos e critérios de
 - `TROUBLESHOOTING.md` — problemas conhecidos e instalação (`--legacy-peer-deps`).
 - `docs/MIGRACAO_HIBRIDA.md` — **plano aprovado de migração híbrida de dados** (Dexie + SQLite
   nativo Android + Supabase), fases 0–5 com garantias anti-perda.
+- `docs/FLOW_GRAPH.md` — **mapa canônico de navegação** (GRAPH TD) com status por nó e
+  decisões de transição; validado por `src/__tests__/navigationMap.test.ts`.
