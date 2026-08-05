@@ -68,8 +68,11 @@ Antes de gerar qualquer código, refatoração ou resposta:
 
 - **Proibido** dialetos SQL (SELECT, INSERT, CREATE TABLE) — use Fluent API do Dexie.js
 - Toda manipulação via `db.transaction`, `bulkAdd`, `clear` com `Partial<DexieAsset>`
-- Indexação composta sub-12ms em `addresses`: `++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced`
-- Conversão de indexadores: regex `/[^A-Z0-9-]/g` + String limpa em caixa alta
+- Indexação composta sub-12ms em `addresses`: `++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced`
+- **Schema multi-tenant canônico**: `tenantid` (minúsculo) + `filial`. Escritas de
+  `_unitid`/`tenantId`/`tenant_id` **PROIBIDAS**; leitura retroativa apenas via
+  `utils/tenantUtils.ts` (fallback legado). Loader exige contrato rígido de 21 colunas
+  com `tenantid` na posição 0 (bloqueio se ausente/vazio).
 - **Proibido** early-return web que aborte carga física
 - Salvaguarda de hardware: travar gravação se bateria < 5% sem alimentação externa
 - Ação Purgar: `.clear()` assíncrono e transacional nas coleções críticas, mantendo banco aberto sem deslogar
