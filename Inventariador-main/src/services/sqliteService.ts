@@ -6,10 +6,12 @@ import { logger } from '../utils/logger';
 // Strict Type Declarations for the 21 accounting indices and metadata
 export interface DexieAsset {
   id: string; // matches primarykey
-  tenantId: string;
-  _tenantid: string;
-  filial: string;
-  _unitid: string;
+  tenantid: string;
+  filial: string; // Canônico (Índice 1) — substitui a coluna legada _unitid
+  // @deprecated Legado (somente leitura): registros locais antigos podem conter
+  // _unitid; a coluna canônica é 'filial' (a coluna _unitid foi removida no
+  // Supabase pela migração scripts/migrate-unitid-supabase.sql).
+  _unitid?: string;
   status: string;
   etiqueta: string;
   tag: string;
@@ -65,7 +67,7 @@ export interface DexieCampaign {
   id: string;
   name: string;
   status: string;
-  tenantId: string;
+  tenantid: string;
   created_at: string;
 }
 
@@ -94,12 +96,12 @@ export interface DexieCampaignSnapshot {
   metadata: string;
   closed_at: string;
   closed_by: string;
-  _tenantid: string;
+  tenantid: string;
 }
 
 export interface DexieAddress {
   id?: number;
-  tenantId: string;
+  tenantid: string;
   filial: string;
   codigo_endereco: string;
   setor: string;
@@ -149,6 +151,33 @@ class InventoryDexieDatabase extends Dexie {
       unit_configs: 'id, filial',
       campaign_snapshots: 'id, campaign_id',
       addresses: '++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced'
+    });
+    // v4 — termo canônico único `tenantid` (antes: tenantId/_tenantid/tenant_id).
+    // Migração idempotente e segura: copia as chaves legadas para `tenantid` e
+    // remove as antigas, preservando todos os registros existentes.
+    this.version(4).stores({
+      local_assets: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      ativos: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      assets: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced'
+    }).upgrade(tx => {
+      const tenantTables = ['local_assets', 'ativos', 'assets', 'campaigns', 'addresses'] as const;
+      return Promise.all(tenantTables.map(tableName =>
+        tx.table(tableName).toCollection().modify((rec) => {
+          const r = rec as Record<string, unknown>;
+          const legacy = r.tenantId ?? r._tenantid ?? r.tenant_id;
+          if (legacy != null && legacy !== '') {
+            r.tenantid = legacy;
+          }
+          delete r.tenantId;
+          delete r._tenantid;
+        })
+      ));
     });
   }
 }
@@ -227,7 +256,7 @@ export class SqliteService {
   public async checkTableSchema(tableName: string): Promise<{ isValid: boolean; columns: string[] }> {
     logger.info(">>> [SqliteService] checkTableSchema requested for:", tableName);
     const cols = [
-      'id', 'tenantId', '_tenantid', 'filial', '_unitid', 'status', 'etiqueta', 'tag', 'qt',
+      'id', 'tenantid', 'filial', 'status', 'etiqueta', 'tag', 'qt',
       'descricaodoativo', 'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal',
       'endereco', 'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey',
       'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno', '_is_synced', '_is_deleted',
@@ -262,10 +291,10 @@ export class SqliteService {
     return await this.getContextValue('selected_unit');
   }
 
-  public async getUnitConfigs(tenantId: string): Promise<Record<string, unknown>[]> {
+  public async getUnitConfigs(tenantid: string): Promise<Record<string, unknown>[]> {
     try {
-      if (tenantId) {
-        logger.info(">>> [SqliteService] getUnitConfigs requested for tenant:", tenantId);
+      if (tenantid) {
+        logger.info(">>> [SqliteService] getUnitConfigs requested for tenant:", tenantid);
       }
       const configs = await db.unit_configs.toArray();
       return configs as unknown as Record<string, unknown>[];
@@ -313,10 +342,10 @@ export class SqliteService {
     }
   }
 
-  public async getOperationalUnitsWithStats(tenantId?: string): Promise<Record<string, unknown>[]> {
+  public async getOperationalUnitsWithStats(tenantid?: string): Promise<Array<{ filial: string; displayName: string; total: number; checked: number }>> {
     try {
-      if (tenantId) {
-        logger.info(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantId);
+      if (tenantid) {
+        logger.info(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantid);
       }
       const list = await db.local_assets.toArray();
       const nonDeleted = list.filter(a => a._is_deleted === 0);
@@ -389,13 +418,13 @@ export class SqliteService {
     }
   }
 
-  public async getAddressesFromAssetsCounting(tenantId?: string): Promise<{ endereco: string; filial: string; lat?: number; lng?: number }[]> {
+  public async getAddressesFromAssetsCounting(tenantid?: string): Promise<{ endereco: string; filial: string; lat?: number; lng?: number }[]> {
     try {
       const list = await db.ativos.toArray();
-      const filtered = tenantId
+      const filtered = tenantid
         ? list.filter(a => {
-            const val = (a.tenantId || a._tenantid || '').toLowerCase();
-            const q = tenantId.toLowerCase();
+            const val = (a.tenantid || a.tenantid || '').toLowerCase();
+            const q = tenantid.toLowerCase();
             return val.includes(q) || q.includes(val);
           })
         : list;
@@ -504,10 +533,8 @@ export class SqliteService {
             const mapped: DexieAsset = {
               id: primaryKeyVal,
               primarykey: primaryKeyVal,
-              tenantId: String(asset.tenantId || asset._tenantid || asset.tenantid || 'CICOPAL'),
-              _tenantid: String(asset._tenantid || asset.tenantId || asset.tenantid || 'CICOPAL'),
+              tenantid: String(asset.tenantid || 'CICOPAL'),
               filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
-              _unitid: String(asset._unitid || asset.filial || asset.unitid || asset.unitId || ''),
               status: String(asset.status || 'P'),
               etiqueta: String(asset.etiqueta || ''),
               tag: String(asset.tag || asset.etiqueta || ''),
@@ -577,16 +604,20 @@ export class SqliteService {
       id: String(c.id || ''),
       name: String(c.name || ''),
       status: String(c.status || ''),
-      tenantId: String(c.tenantId || c.tenantid || ''),
+      tenantid: String(c.tenantid || c.tenantid || ''),
       created_at: String(c.created_at || '')
     }));
     await db.campaigns.bulkPut(mapped);
   }
 
-  public async getCampaigns(): Promise<Record<string, unknown>[]> {
+  public async getCampaigns(tenantid?: string | string[]): Promise<Record<string, unknown>[]> {
     try {
       const camps = await db.campaigns.toArray();
-      return camps as unknown as Record<string, unknown>[];
+      const tenants = Array.isArray(tenantid)
+        ? tenantid.map(t => String(t).trim().toUpperCase())
+        : tenantid ? [String(tenantid).trim().toUpperCase()] : [];
+      if (tenants.length === 0) return camps as unknown as Record<string, unknown>[];
+      return camps.filter(c => tenants.includes(String(c.tenantid || '').trim().toUpperCase())) as unknown as Record<string, unknown>[];
     } catch {
       return [];
     }
@@ -599,10 +630,8 @@ export class SqliteService {
     const item: DexieAsset = {
       id,
       primarykey,
-      tenantId: tenant,
-      _tenantid: tenant,
+      tenantid: tenant,
       filial,
-      _unitid: filial,
       status: conferido ? 'CONFERIDO' : 'P',
       etiqueta: id,
       tag: id,
@@ -757,8 +786,8 @@ export class SqliteService {
     if (config.currentCampaignId) {
       await this.setContextValue('active_campaign', String(config.currentCampaignId));
     }
-    if (config.tenantId) {
-      await this.setContextValue('tenant_id', String(config.tenantId));
+    if (config.tenantid) {
+      await this.setContextValue('tenantid', String(config.tenantid));
     }
     if (config.lastUpdated) {
       await this.setContextValue('last_updated', String(config.lastUpdated));
@@ -769,17 +798,17 @@ export class SqliteService {
     try {
       const selectedUnit = await this.getContextValue('selected_unit');
       const currentCampaignId = await this.getContextValue('active_campaign');
-      const tenantId = await this.getContextValue('tenant_id');
+      const tenantid = await this.getContextValue('tenantid');
       const lastUpdated = await this.getContextValue('last_updated');
       
-      if (!selectedUnit && !currentCampaignId && !tenantId && !lastUpdated) {
+      if (!selectedUnit && !currentCampaignId && !tenantid && !lastUpdated) {
         return null;
       }
 
       return {
         selectedUnit,
         currentCampaignId,
-        tenantId,
+        tenantid,
         lastUpdated
       };
     } catch {
@@ -803,7 +832,7 @@ export class SqliteService {
       id: String(c.id || ''),
       name: String(c.name || ''),
       status: String(c.status || ''),
-      tenantId: String(c.tenantId || c.tenantid || c.tenant_id || ''),
+      tenantid: String(c.tenantid || ''),
       created_at: String(c.created_at || '')
     };
     await db.campaigns.put(mapped);

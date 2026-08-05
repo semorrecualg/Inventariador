@@ -2,7 +2,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Asset, TagInventario, TransactionOrigin, AuditLogEntry, DatabaseMode } from '../types';
 import { TYPE_LABELS } from '../utils/schema';
-import { sqliteService } from '../services/sqliteService';
 import BackButton from './BackButton';
 import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
@@ -107,9 +106,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   useEffect(() => {
     if (assets.length === 0 && initialAssetId && tenantid) {
       setIsDexieLoading(true);
-      localDb.ativos.where({ tenantId: tenantid }).toArray()
+      localDb.ativos.toArray()
         .then((allAssets) => {
-          const matched = allAssets.filter((a) => a.id === initialAssetId || a.ETIQUETA === initialAssetId);
+          const matched = allAssets.filter((a) => (a.tenantid === tenantid || String(a.tenantid) === tenantid) && (a.id === initialAssetId || a.ETIQUETA === initialAssetId));
           setDexieAssets(matched as unknown as Asset[]);
         })
         .catch(() => { /* silencioso */ })
@@ -437,10 +436,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
   useEffect(() => {
     const fetchMappings = async () => {
-      const unit = await sqliteService.getMapping('UNIT');
-      const cc = await sqliteService.getMapping('COST_CENTER');
-      setUnitMapping(unit);
-      setCcMapping(cc);
+      setUnitMapping(null);
+      setCcMapping(null);
     };
     fetchMappings();
   }, []);

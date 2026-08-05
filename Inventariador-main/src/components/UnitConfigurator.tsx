@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Geolocation } from '@capacitor/geolocation';
+import * as turf from '@turf/turf';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
@@ -282,7 +283,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     if (sessionLat && sessionLng) {
       setCurrentConfig({
-        tenant_id: user.tenantid,
+        tenantid: user.tenantid,
         unit_id: unit,
         lat: Number(sessionLat),
         lng: Number(sessionLng),
@@ -295,7 +296,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       setMapCenter([existing.lat, existing.lng]);
     } else {
       setCurrentConfig({
-        tenant_id: user.tenantid,
+        tenantid: user.tenantid,
         unit_id: unit,
         lat: mapCenter[0],
         lng: mapCenter[1],
@@ -326,8 +327,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     try {
       // 🚀 PRIMEIRO PASSO: Soberania Local-First. Busca de endereços/localidades na tabela local assets_counting / ativos
       logger.info(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
-      const { default: sqliteService } = await import('../services/sqliteService');
-      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantId || user?.tenantid || 'CICOPAL');
+      const { sqliteService } = await import('../services/sqliteService');
+      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantid || user?.tenantid || 'CICOPAL');
       
       const exactMatch = localAddresses.find(
         addr => (addr.endereco && addr.endereco.toUpperCase().includes(searchQuery.toUpperCase())) || 
@@ -492,9 +493,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
 
     const configData: UnitConfig = {
-      _tenantid: user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL',
-      _unitid: selectedUnit,
-      tenant_id: user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL',
+      tenantid: user?.tenantid || 'CICOPAL',
+      filial: selectedUnit,
       unit_id: selectedUnit,
       lat: Number(l_lat),
       lng: Number(l_lng),

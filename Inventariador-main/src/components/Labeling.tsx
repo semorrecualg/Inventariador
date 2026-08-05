@@ -30,15 +30,12 @@ interface LabelingProps {
   scanFeedbackMode: ScanFeedbackMode;
 }
 
-const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit, onBack, onUpdateAsset, onBulkUpdateAssets, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
+const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit, onBack, onUpdateAsset, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
   const [dbAssets, setDbAssets] = useState<Asset[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  if (onBulkUpdateAssets) {
-    // Avoid ESLint unused vars
-  }
 
   
   // Lote
@@ -229,7 +226,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
                       {asset._camposAlterados && asset._camposAlterados.length > 0 && (
                         <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Auditoria DE/PARA:</p>
-                          {asset._camposAlterados.map(field => (
+                          {asset._camposAlterados.map((field: string) => (
                             <div key={field} className="flex flex-col bg-slate-50 p-2 rounded-xl border border-slate-100">
                               <div className="flex items-center justify-between">
                                 <span className="text-[8px] font-bold text-slate-400 uppercase">{String(field)}</span>

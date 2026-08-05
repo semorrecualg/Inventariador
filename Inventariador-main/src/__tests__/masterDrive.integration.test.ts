@@ -8,7 +8,7 @@ import { applyMasterDriveSession } from '../utils/authUtils';
  * testes usam mocks manuais de sessionStorage/localStorage para
  * validar que:
  * - sessionStorage.clear() é chamado no início
- * - Tokens corretos são definidos (gbr_admin_scope, tenantId)
+ * - Tokens corretos são definidos (gbr_admin_scope, tenantid)
  * - Roteamento atômico é gravado (gbr_kardek_history)
  * - Nenhum side effect ocorre para credenciais incorretas
  */
@@ -50,7 +50,7 @@ describe('MASTER_DRIVE — integrate (sessionStorage side effects)', () => {
   it('limpa sessionStorage e define tokens após MASTER_DRIVE bem-sucedido', () => {
     // Simula sessão anterior com dados residuais
     sessionStorage.setItem('app_current_user', JSON.stringify({ email: 'old@test.com' }));
-    sessionStorage.setItem('tenantId', 'OLD_TENANT');
+    sessionStorage.setItem('tenantid', 'OLD_TENANT');
     sessionStorage.setItem('gbr_admin_scope', 'OLD_SCOPE');
     expect(sessionStorage.length).toBeGreaterThanOrEqual(3);
 
@@ -64,7 +64,7 @@ describe('MASTER_DRIVE — integrate (sessionStorage side effects)', () => {
 
     // Tokens do MASTER_DRIVE devem estar definidos
     expect(sessionStorage.getItem('gbr_admin_scope')).toBe('GLOBAL_SUPER_ADMIN');
-    expect(sessionStorage.getItem('tenantId')).toBe('GBR_SUPER_ADMIN_CORINGA');
+    expect(sessionStorage.getItem('tenantid')).toBe('GBR_SUPER_ADMIN_CORINGA');
 
     // localStorage deve ter o histórico de roteamento
     const history = localStorage.getItem('gbr_kardek_history');

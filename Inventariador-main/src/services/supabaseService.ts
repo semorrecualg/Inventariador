@@ -7,6 +7,7 @@ import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
+import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -37,9 +38,14 @@ export interface ProvisionResult {
 
 // ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
 // o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
+// As credenciais são lidas do ambiente (API Keys). Se ausentes, caem para placeholders inofensivos.
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 // GBR FORCE LOCAL DEVELOPMENT - SUPABASE DISABLED PER ORIENTATION
-const rawSupabaseUrl = 'https://celiuyaycrnrhjuodydl.supabase.co';
-const rawSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlbGl1eWF5Y3JucmhqdW9keWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDgwMTYsImV4cCI6MjA4NzEyNDAxNn0.ehM2miB5XwUfJ5Gx3OcuCe_edddfFV8AM0HDMHHeynM';
+// Modo INTERNAL por padrão (sem rede). `SUPABASE_PLUS` habilita a nuvem com o schema
+// multi-tenant padronizado (`tenantid` + `filial`) — ver docs/ARCHITECTURE.md §10/§14.
+// Credenciais NUNCA hard-codadas no código-fonte: lidas de VITE_SUPABASE_URL /
+// VITE_SUPABASE_ANON_KEY (API Keys / env).
 export const isInternalMode = true;
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
@@ -104,6 +110,10 @@ const mapColumnName = (col: string, tableName?: string): string => {
   }
   
   if (tableName === 'assets' || tableName === 'assets_analytics') {
+    const lowA = col.toLowerCase().trim();
+    if (lowA === '_unitid' || lowA === 'unit_id' || lowA === 'unitid') {
+      return 'filial';
+    }
     return col;
   }
 
@@ -113,18 +123,20 @@ const mapColumnName = (col: string, tableName?: string): string => {
   }
   
   if (tableName === 'user_permissions') {
-    if (lower === 'tenantid' || lower === 'tenant_id' || lower === '_tenantid') {
-      return '_tenantid';
+    if (lower === 'tenantid' || lower === 'tenantid' || lower === 'tenantid') {
+      return 'tenantid';
     }
+    // Migração scripts/migrate-unitid-supabase.sql: user_permissions agora usa 'filial'
+    // (coluna legada _unitid foi removida do banco).
     if (lower === 'unitid' || lower === 'unit_id' || lower === '_unitid' || lower === 'filial') {
-      return '_unitid';
+      return 'filial';
     }
     return col;
   }
 
   if (tableName === 'inventory_config') {
-    if (lower === 'tenantid' || lower === 'tenant_id' || lower === '_tenantid') {
-      return '_tenantid';
+    if (lower === 'tenantid' || lower === 'tenantid' || lower === 'tenantid') {
+      return 'tenantid';
     }
     if (lower === 'unitid' || lower === 'unit_id' || lower === '_unitid' || lower === 'filial') {
       return 'filial';
@@ -132,8 +144,8 @@ const mapColumnName = (col: string, tableName?: string): string => {
     return col;
   }
 
-  if (lower === '_tenantid' || lower === 'tenant_id' || lower === 'tenantid') {
-    return 'tenantId';
+  if (lower === 'tenantid' || lower === 'tenantid' || lower === 'tenantid') {
+    return 'tenantid';
   }
   if (lower === '_unitid' || lower === 'unit_id' || lower === 'unitid') {
     return 'filial';
@@ -149,7 +161,7 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
     return { valid: true, data: payload };
   }
 
-  if (tableName === 'user_permissions' || tableName === 'assets' || tableName === 'assets_analytics') {
+  if (tableName === 'user_permissions' || tableName === 'assets_analytics') {
     return { valid: true, data: payload };
   }
 
@@ -198,17 +210,14 @@ const mapPayloadKeysAndValidate = (payload: any, tableName: string): InterceptRe
     if (typeof item !== 'object' || item === null) return item;
     const copy = { ...item };
     
-    // Map tenant keys to tenantId / "tenantId" delimited
-    const tenantKeys = ['_tenantid', 'tenant_id', 'tenantid', 'tenantId', '"tenantId"'];
+    // Map tenant keys to the canonical 'tenantid'
+    const tenantKeys = ['tenantid', 'tenant_id', '_tenantid', 'tenantId'];
     for (const k of tenantKeys) {
       if (k in copy) {
-        if (copy['"tenantId"'] === undefined) {
-          copy['"tenantId"'] = copy[k];
+        if (copy.tenantid === undefined) {
+          copy.tenantid = copy[k];
         }
-        if (copy.tenantId === undefined) {
-          copy.tenantId = copy[k];
-        }
-        if (k !== '"tenantId"' && k !== 'tenantId') {
+        if (k !== 'tenantid') {
           delete copy[k];
         }
       }
@@ -412,10 +421,7 @@ export const logAuditEvent = async (entry: {
   old_data?: unknown;
   new_data?: unknown;
   details?: string;
-  _tenantid?: string;
   tenantid?: string;
-  tenantId?: string;
-  tenant_id?: string;
   origin?: string;
 }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -444,7 +450,7 @@ export const logAuditEvent = async (entry: {
 
   try {
     // Sanitiza dados para evitar erros de estrutura circular
-    const tenantVal = entry.tenantId || entry._tenantid || entry.tenantid || entry.tenant_id || '';
+    const tenantVal = resolveTenantId(entry as unknown as Record<string, unknown>);
     const dbPayload: Record<string, unknown> = {
       user_email: entry.user_email,
       action: entry.action,
@@ -484,7 +490,7 @@ export const logAssetChange = async (entry: {
   action: 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPAIRMENT_TEST';
   old_data?: unknown;
   new_data?: unknown;
-  _tenantid?: string;
+  tenantid?: string;
 }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof window !== 'undefined' && (window as any).__isImportingBatch) {
@@ -544,7 +550,7 @@ export const getLocations = async (tenantid: string) => {
     const { data, error } = await supabase
       .from('locations')
       .select('*')
-      .eq('_tenantid', tenantid);
+      .eq('tenantid', tenantid);
       
     if (error) {
       logger.error('Erro ao buscar localidades:', error);
@@ -565,7 +571,7 @@ export const saveLocation = async (location: {
   description?: string;
   latitude?: number;
   longitude?: number;
-  _tenantid: string;
+  tenantid: string;
 }) => {
   if (getDatabaseMode() === 'INTERNAL') return null;
   if (!supabase) return null;
@@ -573,7 +579,7 @@ export const saveLocation = async (location: {
   try {
     const { data, error } = await supabase
       .from('locations')
-      .upsert([location], { onConflict: 'name, _tenantid' })
+      .upsert([location], { onConflict: 'name, tenantid' })
       .select()
       .single();
       
@@ -602,10 +608,9 @@ export const signUp = async (email: string, password: string, username: string, 
         username,
         name: name || username,
         role,
-        _tenantid: tenantid,
-        _unitid: unitid || '',
+        tenantid: tenantid,
+        filial: unitid || '',
         units: units || (unitid ? [unitid] : []),
-        tenants: [tenantid] // Legado
       },
     },
   });
@@ -632,10 +637,9 @@ export const signUp = async (email: string, password: string, username: string, 
         name: name || username,
         role,
         is_admin: role === 'ADMIN' || role === 'MASTER',
-        tenant_id: tenantid,
-        _unitid: unitid || '',
+        tenantid: tenantid,
+        filial: unitid || '',
         units: units || (unitid ? [unitid] : []),
-        tenants: [tenantid]
       }], { onConflict: 'email' });
       
     if (permError) {
@@ -652,7 +656,7 @@ export const signUp = async (email: string, password: string, username: string, 
       table_name: 'user_permissions',
       record_id: data.user.id,
       details: `Novo usuário cadastrado: ${username} (${role})`,
-      _tenantid: tenantid
+      tenantid: tenantid
     });
   }
 
@@ -674,11 +678,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       role: is_admin_new ? 'ADMIN' : 'AUDITOR',
       is_admin: is_admin_new,
       isAdmin: is_admin_new,
-      _tenantid: (metadata?._tenantid || '').trim(),
-      _unitid: '',
+      tenantid: (metadata?.tenantid || '').trim(),
+      filial: (metadata?.filial || metadata?._unitid || '').trim(),
       units: [],
-      tenants: []
-    };
+      };
   }
   if (!supabase) throw new Error("Supabase não configurado.");
   
@@ -748,10 +751,9 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
       role: finalRole,
       is_admin: is_admin,
       isAdmin: is_admin,
-      _tenantid: (profile.tenant_id || profile._tenantid || profile.tenantid || profile.tenantId || '').trim(),
-      _unitid: (profile._unitid || profile.unitid || profile.unitId || '').trim(),
-      units: parseArray(profile.units || profile.unitid || profile._unitid),
-      tenants: parseArray(profile.tenants || profile.tenant_id || profile.tenantid || profile._tenantid)
+      tenantid: (profile.tenantid || profile.tenantid || profile.tenantid || profile.tenantid || '').trim(),
+      filial: (profile.filial || profile._unitid || profile.unitid || profile.unitId || '').trim(),
+      units: parseArray(profile.units || profile.unitid || profile._unitid || profile.filial)
     };
 
     logger.info(`[Supabase] Perfil final processado para ${lowerEmail}:`, finalProfile);
@@ -761,7 +763,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   // 2. Se não encontrou ou deu timeout, tenta criar/atualizar (Upsert) com timeout
   logger.info('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
   
-  const defaultTenant = (metadata?._tenantid || metadata?.tenantId || metadata?.tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
+  const defaultTenant = (metadata?.tenantid || readLocalTenantId() || readSessionTenantId() || '').trim();
   const is_admin_new = isAdminEmail(lowerEmail);
   const fallbackTenant = defaultTenant;
   
@@ -771,8 +773,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     name: (metadata?.name || metadata?.username || lowerEmail.split('@')[0]).trim(),
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
-    _tenantid: fallbackTenant,
-    _unitid: (metadata?._unitid || metadata?.unitId || metadata?.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim(),
+    tenantid: fallbackTenant,
+    filial: (metadata?.filial || metadata?._unitid || metadata?.unitId || metadata?.unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim(),
     ...(userId ? { id: userId } : {})
   };
 
@@ -792,8 +794,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     return {
       ...d,
       isAdmin: d.is_admin,
-      _tenantid: d.tenant_id || d._tenantid || fallbackTenant,
-      _unitid: d._unitid || ''
+      tenantid: d.tenantid || d.tenantid || fallbackTenant,
+      filial: d.filial || d._unitid || ''
     };
   }
 
@@ -805,10 +807,9 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     role: is_admin_new ? 'ADMIN' : 'AUDITOR',
     is_admin: is_admin_new,
     isAdmin: is_admin_new,
-    _tenantid: fallbackTenant,
-    _unitid: '',
+    tenantid: fallbackTenant,
+    filial: '',
     units: [],
-    tenants: [fallbackTenant]
   };
 };
 
@@ -868,8 +869,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     throw new SupabaseBatteryException("Nível de bateria crítico (< 5%). Sincronização em massa abortada para proteção de hardware do Supabase.");
   }
 
-  const forcedTenantId = Array.isArray(tenantid) ? tenantid[0] : tenantid;
-  logger.info(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantId || 'Global'}`);
+  const forcedTenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
+  logger.info(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantid || 'Global'}`);
   
   const CHUNK_SIZE = 50; // Bloqueio em max 50 para evitar erro 400 (URL Too Long) na Nuvem
   const total = assets.length;
@@ -885,22 +886,22 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         delete cleanAsset._photoUrl;
       }
       
-      const assetGrupo = (cleanAsset.tenantId || cleanAsset._tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
-      let finalTenantId = '';
+      const assetGrupo = (cleanAsset.tenantid || cleanAsset.tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
+      let finalTenantid = '';
       if (tenantid) {
         if (Array.isArray(tenantid)) {
           const match = tenantid.find(t => t.toUpperCase().trim() === assetGrupo);
-          finalTenantId = match || tenantid[0] || '';
+          finalTenantid = match || tenantid[0] || '';
         } else {
-          finalTenantId = tenantid;
+          finalTenantid = tenantid;
         }
       } else {
-        finalTenantId = assetGrupo || (localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
+        finalTenantid = assetGrupo || (readLocalTenantId() || readSessionTenantId() || '').trim();
       }
 
       const finalFilial = (cleanAsset.filial || cleanAsset.FILIAL || cleanAsset._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || 'GERAL').trim().toUpperCase();
 
-      if (!finalTenantId || finalTenantId === 'undefined' || finalTenantId === 'null') {
+      if (!finalTenantid || finalTenantid === 'undefined' || finalTenantid === 'null') {
         logger.warn(">>> [Session] Falha crítica de isolamento em syncAssetsToCloud: Contrato ausente.");
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('gbr_session_expired', {
@@ -912,11 +913,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
       const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : (cleanAsset.PRIMARYKEY !== undefined && cleanAsset.PRIMARYKEY !== null ? cleanAsset.PRIMARYKEY : '')).trim() || String(cleanAsset.id || '');
 
-      // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando _tenantid e _unitid direto, preenchendo id com a propriedade primarykey
+      // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
       return {
         id: assetPrimaryKey,
-        _tenantid: finalTenantId,
-        _unitid: finalFilial,
+        tenantid: finalTenantid,
         filial: finalFilial,
         status: (cleanAsset.status || cleanAsset.STATUS || 'PENDENTE').trim().toUpperCase(),
         etiqueta: (cleanAsset.etiqueta || cleanAsset.ETIQUETA || '').trim(),
@@ -1012,22 +1012,22 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'mandatory_photo_on_divergence',
     'mandatory_photo_on_new_item',
     'database_mode',
-    '_tenantid'
+    'tenantid'
   ];
 
-  const resolvedTenantId = (
+  const resolvedTenantid = (
     (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
-    (config as Record<string, unknown>)._tenantid ||
-    (config as Record<string, unknown>).tenantId ||
-    localStorage.getItem('tenantId') ||
-    sessionStorage.getItem('tenantId') ||
+    (config as Record<string, unknown>).tenantid ||
+    (config as Record<string, unknown>).tenantid ||
+    readLocalTenantId() ||
+    readSessionTenantId() ||
     ''
   ).toString().trim();
 
-  const cleanTenantIdRaw = resolvedTenantId !== 'undefined' && resolvedTenantId !== 'null' ? resolvedTenantId : '';
+  const cleanTenantidRaw = resolvedTenantid !== 'undefined' && resolvedTenantid !== 'null' ? resolvedTenantid : '';
 
-  if (!cleanTenantIdRaw) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantId ausente.");
+  if (!cleanTenantidRaw) {
+    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('gbr_session_expired', {
         detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
@@ -1036,7 +1036,7 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     return; // Interrompe a operação de sync
   }
 
-  const cleanTenant = encodeURIComponent(cleanTenantIdRaw.replace(/[%_\s]+/g, ''));
+  const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
   if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('gbr_session_expired', {
@@ -1166,7 +1166,7 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
  * Nota: Como é um SPA, usamos signUp. Para evitar deslogar o admin,
  * criamos uma instância temporária do cliente.
  */
-export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantid?: string, tenants?: string[], name?: string, unitid?: string, units?: string[]): Promise<ProvisionResult> => {
+export const provisionUserInAuth = async (email: string, password?: string, username?: string, role?: string, tenantid?: string, name?: string, unitid?: string, units?: string[]): Promise<ProvisionResult> => {
   if (getDatabaseMode() === 'INTERNAL') throw new Error("Modo INTERNO não permite provisionamento na nuvem.");
   logger.info(`[Supabase] Provisionando usuário ${email}:`, { role, tenantid, unitid, units });
   if (!supabaseUrl || !supabaseAnonKey || !email || !password) {
@@ -1193,9 +1193,8 @@ export const provisionUserInAuth = async (email: string, password?: string, user
           name: name || username || email.split('@')[0],
           role: role || 'AUDITOR',
           tenantid: tenantid || '',
-          unitid: unitid || '',
+          filial: unitid || '',
           units: units || (unitid ? [unitid] : []),
-          tenants: tenants || (tenantid ? [tenantid] : []),
           provisioned_by: 'admin_dashboard'
         }
       }
@@ -1217,10 +1216,9 @@ export const provisionUserInAuth = async (email: string, password?: string, user
               name: name || username || email.split('@')[0],
               role: role || 'AUDITOR',
               is_admin: role === 'ADMIN' || role === 'MASTER',
-              _tenantid: tenantid || '',
-              _unitid: unitid || '',
+              tenantid: tenantid || '',
+              filial: unitid || '',
               units: units || (unitid ? [unitid] : []),
-              tenants: tenants || (tenantid ? [tenantid] : [])
             }], { onConflict: 'email' });
             
           if (permError) {
@@ -1252,7 +1250,7 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
       const is_admin = role === 'ADMIN' || role === 'MASTER' || isAdminEmail(email);
-      const normTenantId = normalizeValue(tenantid || '');
+      const normTenantid = normalizeValue(tenantid || '');
       const normUnitId = normalizeValue(unitid || '');
 
       const currentPayload = {
@@ -1262,10 +1260,9 @@ export const provisionUserInAuth = async (email: string, password?: string, user
         name: name || username || email.split('@')[0],
         role: role || 'AUDITOR',
         is_admin,
-        _tenantid: normTenantId,
-        _unitid: normUnitId,
+        tenantid: normTenantid,
+        filial: normUnitId,
         units: normalizeArray(units || (normUnitId ? [normUnitId] : [])),
-        tenants: normalizeArray(tenants || (normTenantId ? [normTenantId] : []))
       };
 
       const { error: permError } = await supabase
@@ -1306,18 +1303,17 @@ export const syncUsersToCloud = async (users: User[]) => {
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
       const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || isAdminEmail(u.email);
-      const tenantVal = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
-      const _unitid = normalizeValue(u._unitid || u.unitid || '');
+      const tenantVal = normalizeValue(u.tenantid || u.tenantid || u.tenantid || '');
+      const filialVal = normalizeValue(u.filial || u._unitid || u.unitid || '');
       return {
         email: u.email.toLowerCase().trim(),
         username: u.username,
         name: u.name || u.username,
         role: u.role,
         is_admin,
-        _tenantid: tenantVal,
-        _unitid,
-        units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
-        tenants: normalizeArray(u.tenants || (tenantVal ? [tenantVal] : []))
+        tenantid: tenantVal,
+        filial: filialVal,
+        units: normalizeArray(u.units || (filialVal ? [filialVal] : []))
       };
     });
 
@@ -1372,7 +1368,7 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     let query = supabase.from('user_permissions').select('*');
     
     if (tenantid && tenantid !== '') {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantid', tenantid);
     }
 
     const { data, error } = await query;
@@ -1385,19 +1381,18 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
     logger.info(`[Supabase] ${data?.length || 0} usuários encontrados na nuvem.`);
     
     if (data && data.length > 0) {
-      const felipe = data.find(u => u.email.toLowerCase() === 'felipe.messias@gmail.com');
+      const felipe = data.find((u: Record<string, unknown>) => String(u.email).toLowerCase() === 'felipe.messias@gmail.com');
       if (felipe) {
         logger.info('>>> [Supabase] Felipe found in cloud:', {
           email: felipe.email,
-          tenant_id: felipe.tenant_id,
-          _tenantid: felipe._tenantid,
-          _unitid: felipe._unitid,
+          tenantid: felipe.tenantid ?? felipe.tenantid ?? felipe.tenantid,
+          filial: felipe.filial ?? felipe._unitid,
           units: felipe.units
         });
       }
     }
 
-    return (data || []).map(u => {
+    return (data || []).map((u: Record<string, unknown>) => {
       const normalizeValue = (val: string) => {
         if (!val) return '';
         const upper = val.toUpperCase();
@@ -1408,24 +1403,22 @@ export const fetchUsersFromCloud = async (tenantid?: string): Promise<User[]> =>
         const array = Array.isArray(arr) ? arr : [arr];
         return array.map(v => String(v)).filter(v => normalizeValue(v) !== '');
       };
-      const is_admin = u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || isAdminEmail(u.email);
-      const tenant_id = normalizeValue(u.tenant_id || u._tenantid || u.tenantid || '');
-      const _unitid = normalizeValue(u._unitid || u.unitid || '');
+      const uEmail = String(u.email || '');
+      const is_admin = !!(u.is_admin || u.isAdmin || u.role === 'ADMIN' || u.role === 'MASTER' || isAdminEmail(uEmail));
+      const tenantVal = normalizeValue(String(u.tenantid || ''));
+      const filialVal = normalizeValue(String(u.filial || u._unitid || u.unitid || ''));
       return {
-        username: u.username || u.email.split('@')[0],
-        name: u.name || u.username || u.email.split('@')[0],
-        email: u.email,
+        username: String(u.username || uEmail.split('@')[0]),
+        name: String(u.name || u.username || uEmail.split('@')[0]),
+        email: uEmail,
         password: '', // Senhas não são expostas
         role: u.role as UserRole,
         is_admin,
         isAdmin: is_admin,
         mustChangePassword: false,
-        _tenantid: tenant_id,
-        _unitid,
-        tenantid: tenant_id,
-        unitid: _unitid,
-        units: normalizeArray(u.units || (_unitid ? [_unitid] : [])),
-        tenants: normalizeArray(u.tenants || (tenant_id ? [tenant_id] : []))
+        tenantid: tenantVal,
+        filial: filialVal,
+        units: normalizeArray(u.units || (filialVal ? [filialVal] : []))
       };
     });
   } catch (err) {
@@ -1451,7 +1444,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     query = query.or('_is_deleted.is.null,_is_deleted.eq.false');
     
     if (tenantid) {
-      query = query.eq('_tenantid', tenantid);
+      query = query.eq('tenantid', tenantid);
     }
 
     const { data, error } = await query.single();
@@ -1465,7 +1458,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           .eq('ETIQUETA', tag.toUpperCase().trim());
         
         if (tenantid) {
-          retryQuery = retryQuery.eq('_tenantid', tenantid);
+          retryQuery = retryQuery.eq('tenantid', tenantid);
         }
         
         const { data: retryData, error: retryError } = await retryQuery.single();
@@ -1497,18 +1490,18 @@ export const fetchFullInventory = async (
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
-  let resolvedTenantId: string | string[] | undefined = tenantid;
+  let resolvedTenantid: string | string[] | undefined = tenantid;
 
-  // Se resolvedTenantId for undefined, null, string "undefined" ou vazio, resolvemos via estado da sessão/perfil
-  if (!resolvedTenantId || resolvedTenantId === 'undefined' || (Array.isArray(resolvedTenantId) && resolvedTenantId.length === 0)) {
+  // Se resolvedTenantid for undefined, null, string "undefined" ou vazio, resolvemos via estado da sessão/perfil
+  if (!resolvedTenantid || resolvedTenantid === 'undefined' || (Array.isArray(resolvedTenantid) && resolvedTenantid.length === 0)) {
     logger.info(">>> [Supabase Param check] tenantid recebido como indefinido ou vazio. Resolvendo via Sessão Suprema do Usuário...");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.email) {
         const profile = await ensureUserProfile(session.user.email, undefined, session.user.id);
         if (profile) {
-          resolvedTenantId = profile._tenantid || (profile.tenants && profile.tenants.length > 0 ? profile.tenants : undefined);
-          logger.info(`>>> [Supabase Param resolved] tenantid sanitizado de undefined para perfil real: ${JSON.stringify(resolvedTenantId)}`);
+          resolvedTenantid = profile.tenantid || undefined;
+          logger.info(`>>> [Supabase Param resolved] tenantid sanitizado de undefined para perfil real: ${JSON.stringify(resolvedTenantid)}`);
         }
       }
     } catch (authErr) {
@@ -1516,7 +1509,7 @@ export const fetchFullInventory = async (
     }
   }
 
-  logger.info(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantId)}, unitid: ${unitid || 'GERAL'}`);
+  logger.info(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantid)}, unitid: ${unitid || 'GERAL'}`);
 
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid (PAGINADO)
@@ -1533,14 +1526,14 @@ export const fetchFullInventory = async (
         .select('*')
         .range(from, from + PAGE_SIZE - 1);
       
-      if (resolvedTenantId) {
-        if (Array.isArray(resolvedTenantId)) q = q.in('_tenantid', resolvedTenantId);
-        else q = q.eq('_tenantid', resolvedTenantId);
+      if (resolvedTenantid) {
+        if (Array.isArray(resolvedTenantid)) q = q.in('tenantid', resolvedTenantid);
+        else q = q.eq('tenantid', resolvedTenantid);
       }
       
       if (unitid && unitid !== '') {
         const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
-        q = q.eq('_unitid', cleanUnitId);
+        q = q.eq('filial', cleanUnitId);
       }
 
       const { data: pageData, error: assetsError } = await q;
@@ -1551,17 +1544,15 @@ export const fetchFullInventory = async (
       }
 
       if (pageData && pageData.length > 0) {
-        const mappedPage = pageData.map(a => {
-          const tId = String(a.tenantId || a._tenantid || a.tenant_id || a.tenantid || '').trim().toUpperCase();
-          const uId = String(a.filial || a._unitid || a.unit_id || a.unitid || '').trim().toUpperCase();
+        const mappedPage = pageData.map((a: Record<string, unknown>) => {
+          const tId = String(a.tenantid || '').trim().toUpperCase();
+          const uId = String(a.filial || a.unit_id || a.unitid || '').trim().toUpperCase();
+
           return {
             ...a,
             id: a.id as string | number,
-            tenantId: tId,
+            tenantid: tId,
             filial: uId,
-            _tenantid: tId,
-            _unitid: uId,
-            tenantid: tId, // Legado
             unitid: uId      // Legado
           };
         }) as Asset[];
@@ -1580,16 +1571,15 @@ export const fetchFullInventory = async (
           // Yield to main thread to keep UI responsive
           await new Promise(resolve => setTimeout(resolve, 0));
         }
-      } else {
-        hasMore = false;
-      }
-    }
+  } else {
+    hasMore = false;
+  }
+}    logger.info(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
-    logger.info(`>>> [Supabase] Busca concluída. Total: ${assets.length} ativos.`);
 
     // 2. Busca a configuração
-    const rawTenantid = resolvedTenantId 
-      ? (Array.isArray(resolvedTenantId) ? resolvedTenantId[0] : resolvedTenantId)
+    const rawTenantid = resolvedTenantid 
+      ? (Array.isArray(resolvedTenantid) ? resolvedTenantid[0] : resolvedTenantid)
       : '';
     // Sanitização rigorosa: envolve em encodeURIComponent, remove espaços em branco extras e símbolos % espúrios
     const cleanTenant = encodeURIComponent(String(rawTenantid).trim().replace(/[%_\s]+/g, ''));
@@ -1633,7 +1623,7 @@ export const fetchFullInventory = async (
       logger.warn(`>>> [SRE Fail-Safe] Interceptando falha ao ler configs da nuvem (Error: ${errMsg}). Injetando config Fallback...`);
       config = { 
         id: "config_CICOPAL", 
-        tenantId: "CICOPAL", 
+        tenantid: "CICOPAL", 
         status_operacao: "ATIVO", 
         sincronia_automatica: false, 
         geocerca_ativa: false 
@@ -1695,7 +1685,7 @@ export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<Inventor
         table: 'inventory_config',
         filter: 'id=eq.global_config'
       },
-      (payload) => {
+      (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
         onUpdate(payload.new);
       }
     )
@@ -1719,7 +1709,7 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         schema: 'public',
         table: 'assets'
       },
-      (payload) => {
+      (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
         // Filtra por tenantid no lado do cliente se necessário, 
         // embora o ideal seja o RLS do Supabase já filtrar se o usuário estiver logado.
         // No entanto, para canais de broadcast/realtime, às vezes precisamos de filtros extras.
@@ -1728,7 +1718,7 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         const targetAsset = newAsset || oldAsset;
 
         if (targetAsset && tenantid) {
-          const assetTenant = targetAsset._tenantid || targetAsset.tenantId;
+          const assetTenant = targetAsset.tenantid || targetAsset.tenantid;
           const isAllowed = Array.isArray(tenantid) 
             ? tenantid.includes(assetTenant || '')
             : (assetTenant || '') === tenantid;
@@ -1771,26 +1761,26 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
             logger.warn(`[Supabase] Array de unidades muito grande (${normalizedCompanies.length}). Dividindo em lotes...`);
             for (let i = 0; i < normalizedCompanies.length; i += 50) {
               const chunk = normalizedCompanies.slice(i, i + 50);
-              const chunkQuery = supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).in(colName, chunk);
+              const chunkQuery = supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid).in(colName, chunk);
               const { error: chunkError } = await chunkQuery;
               if (chunkError) throw chunkError;
             }
             return { error: null, count: null };
           } else {
-            return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).in(colName, normalizedCompanies);
+            return await supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid).in(colName, normalizedCompanies);
           }
         } else {
           const normalized = companyToClear.toUpperCase().trim();
-          return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).eq(colName, normalized);
+          return await supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid).eq(colName, normalized);
         }
       } else {
-         return await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid);
+         return await supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid);
       }
     };
 
     let assetsError, count;
     try {
-       const res = await executeDelete('_unitid');
+       const res = await executeDelete('filial');
        assetsError = res.error;
        count = res.count;
     } catch (e: unknown) {
@@ -1798,35 +1788,21 @@ export const clearCloudInventory = async (companyToClear?: string | string[], te
     }
 
     if (assetsError) {
-      // Se o erro for coluna inexistente (_unitid ou _tenantid), tentamos fallbacks
+      // A coluna '_unitid' foi removida do banco (migração scripts/migrate-unitid-supabase.sql).
+      // Em erro de coluna inexistente, parte direto para o delete radical (sem filtros de coluna).
       if (assetsError.code === '42703' || assetsError.code === 'PGRST204') {
-        logger.warn('[Supabase] Coluna não encontrada na limpeza. Tentando fallback para filial...');
-        let retryError, retryCount;
-        try {
-          const res = await executeDelete('filial');
-          retryError = res.error;
-          retryCount = res.count;
-        } catch (e: unknown) {
-          retryError = e as Error;
-        }
+        logger.warn('[Supabase] Coluna não encontrada na limpeza. Tentando delete radical...');
+        const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid).filter('id', 'not.is', null);
         
-        if (retryError) {
-          // Se ainda falhar, tenta o delete mais radical (sem filtros de coluna)
-          logger.warn('[Supabase] Fallback falhou. Tentando delete radical...');
-          const { error: finalError, count: finalCount } = await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).filter('id', 'not.is', null);
-          
-          if (finalError) throw finalError;
-          logger.info(`[Supabase] Limpeza radical concluída. Afetados: ${finalCount}`);
-          return;
-        }
-        logger.info(`[Supabase] Limpeza concluída via fallback. Afetados: ${retryCount}`);
+        if (finalError) throw finalError;
+        logger.info(`[Supabase] Limpeza radical concluída. Afetados: ${finalCount}`);
         return;
       }
       
       // Se o erro for de tipo (22P02), tentamos um filtro genérico
       if (assetsError.code === '22P02') {
         logger.warn('[Supabase] Erro de tipo detectado (bigint vs uuid). Tentando filtro genérico...');
-        const { error: numError, count: numCount } = await supabase.from('assets').delete({ count: 'exact' }).eq('_tenantid', tenantid).filter('id', 'not.is', null);
+        const { error: numError, count: numCount } = await supabase.from('assets').delete({ count: 'exact' }).eq('tenantid', tenantid).filter('id', 'not.is', null);
         if (numError) throw numError;
         logger.info(`[Supabase] Limpeza concluída via filtro genérico. Afetados: ${numCount}`);
         return;
@@ -1919,7 +1895,7 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
     if (bucketsError) {
       logger.warn('[Storage] Não foi possível verificar buckets:', bucketsError.message);
     } else {
-      const bucketExists = buckets?.some(b => b.name === 'asset-photos');
+      const bucketExists = buckets?.some((b: { name: string }) => b.name === 'asset-photos');
       if (!bucketExists) {
         const msg = 'Bucket "asset-photos" não encontrado. O administrador deve criá-lo no painel do Supabase via SQL Editor.';
         logger.error(`[Storage] ${msg}`);
@@ -2036,7 +2012,7 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
     let query = supabase
       .from('asset_logs')
       .select('*')
-      .eq('_tenantid', tenantid)
+      .eq('tenantid', tenantid)
       .order('timestamp', { ascending: false });
 
     if (assetId) {
@@ -2077,7 +2053,7 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
   const { data, error } = await supabase
     .from('assets')
     .select('*')
-    .eq('_tenantid', tenantid)
+    .eq('tenantid', tenantid)
     .in('ETIQUETA', variations)
     .maybeSingle();
 
@@ -2143,7 +2119,7 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
     .from('assets')
     .update({ _photoUrl: photoUrl })
     .eq('id', assetId)
-    .eq('_tenantid', tenantid);
+    .eq('tenantid', tenantid);
   if (error) throw error;
 };
 
@@ -2153,20 +2129,18 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
 export const fetchCampaigns = async (tenantid: string, unitid?: string | null): Promise<InventoryCampaign[]> => {
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
-  const cleanTenantId = (tenantid || '').trim();
+  const cleanTenantid = (tenantid || '').trim();
 
   // 1. SEMPRE BUSCA NO SQLITE PRIMEIRO (Soberania Local)
   let localCampaigns: InventoryCampaign[] = [];
   try {
     if (sqliteService.getIsInitialized()) {
-      const sqlCampaigns = await sqliteService.getCampaigns(cleanTenantId);
+      const sqlCampaigns = await sqliteService.getCampaigns(cleanTenantid);
       localCampaigns = (sqlCampaigns || []).map(c => ({
         ...c,
-        _tenantid: c.tenant_id || c._tenantid || cleanTenantId,
-        _unitid: c.unit_id || c._unitid,
-        tenant_id: c.tenant_id || c._tenantid || cleanTenantId,
-        unit_id: c.unit_id || c._unitid,
-        tenantid: c.tenant_id || c._tenantid || cleanTenantId,
+        tenantid: c.tenantid || cleanTenantid,
+        filial: c.filial || c.unit_id || c._unitid,
+        unit_id: c.filial || c.unit_id || c._unitid,
         status: c.status || 'ACTIVE'
       })) as InventoryCampaign[];
     } else {
@@ -2181,7 +2155,7 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
     if (unitid) {
       const cleanUnitId = unitid.trim().toUpperCase();
       return localCampaigns.filter(c => {
-        const cUnit = (String(c.unit_id || c._unitid || '')).trim().toUpperCase();
+        const cUnit = (String(c.filial || c.unit_id || c._unitid || '')).trim().toUpperCase();
         return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
       });
     }
@@ -2189,16 +2163,16 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
   }
 
   // 2. TENTA BUSCAR NA NUVEM (Enriquecimento)
-  if (!supabase || !cleanTenantId) return localCampaigns;
+  if (!supabase || !cleanTenantid) return localCampaigns;
 
   try {
     let query = supabase
       .from('campaigns')
       .select('*')
-      .eq('_tenantid', cleanTenantId);
+      .eq('tenantid', cleanTenantid);
     
     if (unitid) {
-      query = query.or(`_unitid.eq.${unitid},_unitid.is.null`);
+      query = query.or(`filial.eq.${unitid},filial.is.null`);
     }
 
     const { data: cloudData, error } = await query.order('start_date', { ascending: false });
@@ -2211,11 +2185,9 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
     // 3. MERGE INTELIGENTE (Prioridade para os dados mais recentes de IDs únicos)
     const cloudCampaigns = (cloudData || []).map((c: Record<string, unknown>) => ({
       ...c,
-      _unitid: (c.unit_id || c._unitid) as string,
-      _tenantid: (c.tenant_id || c._tenantid) as string,
-      unit_id: (c.unit_id || c._unitid) as string,
-      tenant_id: (c.tenant_id || c._tenantid) as string,
-      tenantid: (c.tenant_id || c._tenantid) as string
+      filial: (c.filial || c.unit_id || c._unitid) as string,
+      tenantid: c.tenantid as string,
+      unit_id: (c.filial || c.unit_id || c._unitid) as string
     })) as InventoryCampaign[];
 
     // Cria um mapa para evitar duplicatas, priorizando Cloud se houver conflito de ID
@@ -2240,24 +2212,23 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
   const isInternal = mode === 'INTERNAL';
 
-  const tenantVal = campaign._tenantid || campaign.tenant_id || campaign.tenantid || '';
-  const unitVal = campaign._unitid || campaign.unit_id || '';
+  const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
+  const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
 
   // 1. DADO LOCAL PRIMEIRO (Soberania SQL)
   const newCampaign = {
     ...campaign,
     id: campaign.id || generateUUID(),
-    tenant_id: tenantVal,
+    tenantid: tenantVal,
     unit_id: String(unitVal || '').trim(),
-    _tenantid: tenantVal,
-    _unitid: String(unitVal || '').trim(),
+    filial: String(unitVal || '').trim(),
     created_at: new Date().toISOString(),
     status: campaign.status || 'ACTIVE'
   } as InventoryCampaign;
 
   try {
     logger.info(">>> [Local-First] Persistindo campanha no SQLite antes da nuvem...");
-    await sqliteService.saveCampaign(newCampaign);
+    await sqliteService.saveCampaign(newCampaign as unknown as Record<string, unknown>);
     await sqliteService.persist(); 
   } catch (err) {
     logger.error(">>> [Local-First] Erro ao salvar localmente. Abortando.", err);
@@ -2272,8 +2243,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       name: newCampaign.name,
       description: newCampaign.description,
       status: newCampaign.status,
-      tenant_id: tenantVal,
-      unit_id: unitVal,
+      tenantid: tenantVal,
+      filial: unitVal,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
@@ -2312,25 +2283,26 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
     const row = await db.campaigns.get(campaignId);
     
     if (row) {
+      const rowExtras = row as unknown as Record<string, unknown>;
       const currentCampaign: InventoryCampaign = {
         id: row.id,
         name: row.name,
         status: row.status as CampaignStatus,
-        tenantId: row.tenantId,
+        tenantid: row.tenantid || '',
         created_at: row.created_at,
-        tenant_id: row.tenantId || row._tenantid || '',
-        unit_id: row._unitid || '',
-        _tenantid: row.tenantId || row._tenantid || '',
-        _unitid: row._unitid || ''
+        start_date: String(rowExtras.start_date || ''),
+        created_by: String(rowExtras.created_by || ''),
+        unit_id: String(rowExtras.filial || rowExtras._unitid || ''),
+        filial: String(rowExtras.filial || rowExtras._unitid || '')
       };
 
       const updated: InventoryCampaign = { 
         ...currentCampaign, 
         status, 
-        end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || null)
+        end_date: status === CampaignStatus.CLOSED ? new Date().toISOString() : (currentCampaign.end_date || undefined)
       };
       
-      await sqliteService.saveCampaign(updated);
+      await sqliteService.saveCampaign(updated as unknown as Record<string, unknown>);
       await sqliteService.persist();
       localFound = true;
     }
@@ -2403,10 +2375,10 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
       logger.info('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
       try {
         // 1. Localiza a campanha no SQLite
-        // Buscamos o tenantId preferencial do localStorage ou um fallback
-        const tenantId = (localStorage.getItem('app_last_tenant') || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').trim();
-        if (!tenantId || tenantId === 'undefined' || tenantId === 'null') {
-          logger.error('>>> [SQLite] TenantId ausente para o snapshot da campanha.');
+        // Buscamos o tenantid preferencial do localStorage ou um fallback
+        const tenantid = (localStorage.getItem('app_last_tenant') || readLocalTenantId() || readSessionTenantId() || '').trim();
+        if (!tenantid || tenantid === 'undefined' || tenantid === 'null') {
+          logger.error('>>> [SQLite] tenantid ausente para o snapshot da campanha.');
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('gbr_session_expired', {
               detail: { message: "Identificador de Contrato ausente para congelamento de laudo. Sessão encerrada." }
@@ -2414,7 +2386,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           }
           return false;
         }
-        const allCampaigns = await sqliteService.getCampaigns(tenantId);
+        const allCampaigns = await sqliteService.getCampaigns(tenantid);
         const currentCampaign = allCampaigns.find(c => c.id === campaignId) || null;
 
         if (!currentCampaign) {
@@ -2424,9 +2396,9 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
 
         // 2. Busca ativos vinculados da unidade
         const allAssets = await sqliteService.getAllAssets();
-        const unitId = currentCampaign._unitid || currentCampaign.unit_id;
-        const assets = allAssets.filter(a => {
-            const aUnit = (a._unitid || a.filial || '').trim().toUpperCase();
+        const unitId = String(currentCampaign.filial || currentCampaign._unitid || currentCampaign.unit_id || '');
+        const assets = allAssets.filter((a: Record<string, unknown>) => {
+            const aUnit = String(a.filial || a._unitid || '').trim().toUpperCase();
             const cUnit = (unitId || '').trim().toUpperCase();
             return cUnit === '' || aUnit === cUnit;
         });
@@ -2448,11 +2420,11 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         const snapshot: CampaignSnapshot = {
           id: `snap_${campaignId}_${Date.now()}`,
           campaign_id: campaignId,
-          assets_data: assets,
+          assets_data: assets as unknown as Asset[],
           metadata: stats,
           snapshot_date: new Date().toISOString(),
           closed_by: closedBy,
-          _tenantid: tenantId
+          tenantid: tenantid
         };
 
         await db.campaign_snapshots.put({
@@ -2462,7 +2434,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           metadata: JSON.stringify(snapshot.metadata),
           closed_at: snapshot.snapshot_date,
           closed_by: snapshot.closed_by || '',
-          _tenantid: snapshot._tenantid
+          tenantid: snapshot.tenantid
         });
 
         logger.info('>>> [SQLite] Snapshot criado com sucesso.');
@@ -2485,14 +2457,14 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
 
         if (!campaign) return false;
 
-        const tenantId = campaign.tenant_id || campaign._tenantid;
+        const tenantid = campaign.tenantid || '';
 
         // 2. Busca todos os ativos vinculados a esta unidade (Escopo da Campanha)
         const { data: assets, error: assetError } = await supabase
             .from('assets')
             .select('*')
-            .eq('_tenantid', tenantId)
-            .eq('_unitid', campaign.unit_id || campaign._unitid);
+            .eq('tenantid', tenantid)
+            .eq('filial', campaign.filial || campaign.unit_id || campaign._unitid);
 
         if (assetError) throw assetError;
 
@@ -2504,8 +2476,8 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         // 3. Calcula metadados/stats para o laudo consolidado
         const stats = {
             total: assets.length,
-            inventoried: assets.filter(a => a._conferido).length,
-            divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
+            inventoried: assets.filter((a: Record<string, unknown>) => a._conferido).length,
+            divergences: assets.filter((a: Record<string, unknown>) => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
             generated_at: new Date().toISOString(),
             cpc_compliance: 'CPC 27 / NBC TG 27'
         };
@@ -2520,7 +2492,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
                 metadata: stats as Record<string, unknown>,
                 closed_at: new Date().toISOString(),
                 closed_by: closedBy,
-                tenant_id: tenantId
+                tenantid: tenantid
             }]);
 
         if (snapshotError) throw snapshotError;
@@ -2569,7 +2541,7 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
           metadata: JSON.parse(row.metadata),
           snapshot_date: row.closed_at,
           closed_by: row.closed_by,
-          _tenantid: row._tenantid || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || ''
+          tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
         } as CampaignSnapshot;
       } catch (err) {
         logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
@@ -2605,20 +2577,20 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
     const { count: totalCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid);
+      .eq('tenantid', tenantid);
       
     // Ativos inventariados nesta campanha
     const { count: inventoriedCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid)
+      .eq('tenantid', tenantid)
       .eq('currentCampaignId', campaignId);
 
     // Divergências nesta campanha
     const { count: divergenceCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
-      .eq('_tenantid', tenantid)
+      .eq('tenantid', tenantid)
       .eq('currentCampaignId', campaignId)
       .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
 
@@ -2645,31 +2617,30 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
     // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
     try {
       const { sqliteService } = await import('./sqliteService');
-      await sqliteService.saveUnitConfigToSql(config);
+      await sqliteService.saveUnitConfigToSql(config as unknown as Record<string, unknown>);
       logger.info('>>> [Persistence] GPS persistido no SQLite Físico.');
     } catch (sqlErr) {
       logger.error('>>> [Persistence] Falha ao gravar GPS no SQLite:', sqlErr);
     }
 
-    const tenantIdRaw = (config._tenantid || config.tenant_id || config.tenantId || localStorage.getItem('tenantId') || sessionStorage.getItem('tenantId') || '').toString().trim();
-    const cleanTenantIdRaw = tenantIdRaw !== 'undefined' && tenantIdRaw !== 'null' ? tenantIdRaw : 'CICOPAL';
+    const tenantidRaw = (config.tenantid || readLocalTenantId() || readSessionTenantId() || '').toString().trim();
+    const cleanTenantidRaw = tenantidRaw !== 'undefined' && tenantidRaw !== 'null' ? tenantidRaw : 'CICOPAL';
     
-    const unitIdRaw = (config._unitid || config.unit_id || config.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').toString().trim();
+    const unitIdRaw = ((config as unknown as Record<string, unknown>).filial || config.unit_id || config._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').toString().trim();
     const cleanUnitIdRaw = unitIdRaw !== 'undefined' && unitIdRaw !== 'null' ? unitIdRaw : 'FEIRA_BOA_BA';
 
-    if (!cleanTenantIdRaw || !cleanUnitIdRaw) {
+    if (!cleanTenantidRaw || !cleanUnitIdRaw) {
       logger.warn(">>> [Session] Identificador de Contrato ou Filial ausente ao salvar configuração de filial. Fallback injetado.");
     }
     
-    const tenantId = cleanTenantIdRaw || 'CICOPAL';
+    const tenantid = cleanTenantidRaw || 'CICOPAL';
     const unitId = cleanUnitIdRaw || 'FEIRA_BOA_BA';
-    const unitKey = `${tenantId}_${unitId}`.replace(/\s+/g, '_');
+    const unitKey = `${tenantid}_${unitId}`.replace(/\s+/g, '_');
     
     const payload = {
-      _unitid: unitId,
-      _tenantid: tenantId,
+      filial: unitId,
+      tenantid: tenantid,
       unit_id: unitId, // Legado
-      tenant_id: tenantId, // Legado
       lat: Number(config.lat),
       lng: Number(config.lng),
       radius_meters: Number(config.radius_meters),
@@ -2689,7 +2660,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       await localDb.unitConfigs.put({
         ...payload,
         unit_id: unitId,
-        tenant_id: tenantId
+        tenantid: tenantid
       } as UnitConfig);
     } catch (dexieErr) {
       logger.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
@@ -2705,11 +2676,11 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Apenas modo SUPABASE)
   const syncToCloud = async () => {
       try {
-        // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantId e filial)
+        // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantid e filial)
         const { error } = await supabase
           .from('inventory_config')
           .upsert({
-            tenantid: tenantId,
+            tenantid: tenantid,
             filial: unitId,
             data: payload,
             updated_at: new Date().toISOString()
@@ -2723,7 +2694,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
                user_email: payload.updated_by,
                action: 'GPS_CONFIG_SYNC_FAIL',
                details: `Falha ao sincronizar configuração de unidade ${unitId}. Erro: ${error.message}`,
-               tenantid: tenantId
+               tenantid: tenantid
              });
           }
         } else {
@@ -2764,7 +2735,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       const dexieConfigs = await localDb.unitConfigs.toArray();
       if (dexieConfigs.length > 0) {
         dexieConfigs.forEach(c => {
-          const key = `${c.tenant_id}_${c.unit_id}`.replace(/\s+/g, '_');
+          const key = `${c.tenantid}_${c.unit_id}`.replace(/\s+/g, '_');
           localData[key] = c;
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(localData));
@@ -2775,11 +2746,11 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     try {
       const { sqliteService } = await import('./sqliteService');
       if (sqliteService.getIsInitialized()) {
-        const sqlConfigs = await sqliteService.getUnitConfigsFromSql(tenantid);
+        const sqlConfigs = await sqliteService.getUnitConfigsFromSql();
         if (sqlConfigs && sqlConfigs.length > 0) {
           sqlConfigs.forEach(c => {
             const key = `${tenantid}_${c.unit_id}`.replace(/\s+/g, '_');
-            configs[key] = c;
+            configs[key] = c as unknown as UnitConfig;
           });
           if (isInternal) {
              logger.info(`>>> [SQL] fetchUnitConfigs retornando ${Object.values(configs).length} configs do SQLite.`);
@@ -2795,8 +2766,8 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
-      if (config.tenant_id === tenantid || config._tenantid === tenantid) {
-        configs[config.unit_id] = config;
+      if (config.tenantid === tenantid || config.tenantid === tenantid) {
+        configs[config.filial || config.unit_id || ''] = config;
       }
     });
 
@@ -2816,26 +2787,30 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         .eq('tenantid', tenantid);
 
       if (data && !error) {
-        data.forEach(item => {
-          const _tenantid = item.tenantId || item._tenantid || (item.data && (item.data._tenantid || item.data.tenant_id)) || tenantid;
-          const _unitid = item.filial || item._unitid || (item.data && (item.data._unitid || item.data.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+        data.forEach((item: Record<string, unknown>) => {
+          const itemData = item.data as Record<string, unknown> | undefined;
+          const tenantidResolved = String(item.tenantid || (itemData && resolveTenantId(itemData)) || tenantid);
+          const filialUnit = String(item.filial || item._unitid || (itemData && (itemData.filial || itemData._unitid || itemData.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '');
           
-          configs[_unitid] = {
-            ...(item.data || {}),
-            _tenantid,
-            _unitid,
-            tenant_id: _tenantid,
-            unit_id: _unitid
-          };
+          configs[filialUnit] = {
+            ...(itemData || {}),
+            filial: filialUnit,
+            tenantid: tenantidResolved,
+            unit_id: filialUnit,
+            lat: Number((itemData && itemData.lat) ?? 0),
+            lng: Number((itemData && itemData.lng) ?? 0),
+            radius_meters: Number((itemData && itemData.radius_meters) ?? 0),
+            is_active: !itemData || itemData.is_active !== false
+          } as UnitConfig;
         });
         
         // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach(item => { 
-          const cloudTime = new Date(item.updated_at || 0).getTime();
-          const itemKey = item.filial || item.unit_key || `${item.tenantId || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`;
+        data.forEach((item: Record<string, unknown>) => { 
+          const cloudTime = new Date(String(item.updated_at || '') || 0).getTime();
+          const itemKey = String(item.filial || item.unit_key || `${item.tenantid || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`);
           const localItem = localData[itemKey];
-          const localTime = localItem ? new Date(localItem.updated_at || 0).getTime() : 0;
+          const localTime = localItem ? new Date(String(localItem.updated_at || '') || 0).getTime() : 0;
           
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {

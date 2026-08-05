@@ -135,7 +135,7 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
 /**
  * Salva apenas as configurações (metadata) para evitar processamento pesado de ativos.
  */
-export const saveConfigOnly = async (data: Omit<InventoryState, 'assets'>): Promise<void> => {
+export const saveConfigOnly = async (data: Partial<InventoryState>): Promise<void> => {
   try {
     const mode = data.databaseMode || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
@@ -197,7 +197,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     // Executa conversões explícitas e higienização regex de ruídos antes de gravar no hardware físico
     const dadosHigienizados = todosAtivos.map(row => ({
       ...row,
-      codigo_endereco: row.codigo_endereco ? String(row.codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : ''
+      codigo_endereco: (row as unknown as Record<string, unknown>).codigo_endereco ? String((row as unknown as Record<string, unknown>).codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : ''
     }));
     await FileSystemStorageService.salvarEmDiretorioLocal(dadosHigienizados);
     await backupDatabaseToPhysicalStorage(dadosHigienizados);
@@ -404,7 +404,7 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
       }
     }
 
-    // Normaliza os ativos de acordo com o contrato global unificado v2.6 (tenantId e filial)
+    // Normaliza os ativos de acordo com o contrato global unificado v2.6 (tenantid e filial)
     const normalizedAssets = finalAssets.map(a => normalizeAssetContract(a));
 
     // 1.2 Validação de Integridade (Checksum) - Apenas para base carregada do cache

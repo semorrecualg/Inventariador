@@ -54,7 +54,7 @@ export interface Asset {
   // Controle de Auditoria SRE e Sincronização Local-First (Underline / Metadados)
   _conferido?: boolean;
   _photoUrl?: string;
-  _tenantid?: string;
+  // @deprecated Legado (somente leitura): a coluna canônica é 'filial' (Índice 1).
   _unitid?: string;
   _is_deleted?: boolean | number;
   _is_synced?: boolean | number;
@@ -77,7 +77,7 @@ export interface Asset {
 }
 
 export interface InventoryAsset {
-  tenantId: string;       // Index 0
+  tenantid: string;       // Index 0
   filial: string;         // Index 1
   status: string;         // Index 2
   etiqueta: string;       // Index 3

@@ -14,7 +14,7 @@ export async function executeDatabaseStressTest(): Promise<{ totalTimeMs: number
   // Transação ACID Nativa isolada por chave composta (Diretriz 6)
   await db.transaction('rw', [db.local_assets], async () => {
     for (let i = 0; i < iterations; i++) {
-      await db.local_assets.where('[tenantId+filial]').equals(['TENANT-TEST', 'FILIAL-TEST']).limit(10).toArray();
+      await db.local_assets.where('[tenantid+filial]').equals(['TENANT-TEST', 'FILIAL-TEST']).limit(10).toArray();
     }
   });
 

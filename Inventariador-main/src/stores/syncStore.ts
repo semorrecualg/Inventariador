@@ -47,7 +47,7 @@ export interface SyncStoreState {
   reset: () => void;
 }
 
-const initialState: SyncStoreState = {
+const initialState: Omit<SyncStoreState, 'setSyncQueueLength' | 'setUnsyncedAssetsCount' | 'setIsSyncLocked' | 'setIsSyncing' | 'setLastSyncTime' | 'setLastLocalSave' | 'setSyncError' | 'setIsCloudUpdatePending' | 'setIsReconnecting' | 'setShowReconnectOverlay' | 'setRefreshVersion' | 'setPendingPhotosCount' | 'setLastQueryLog' | 'bumpRefreshVersion' | 'reset'> = {
   syncQueueLength: 0,
   unsyncedAssetsCount: 0,
   isSyncLocked: false,

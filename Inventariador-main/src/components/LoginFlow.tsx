@@ -27,13 +27,6 @@ interface LoginFlowProps {
 }
 
 export const LoginFlow: React.FC<LoginFlowProps> = ({
-  onLogin,
-  users,
-  databaseMode,
-  onOpenPrivacyCenter,
-  onUpdateScreen,
-  onShowModal,
-  onUpdateDatabaseMode,
   onDemoMode,
   onHandleSubmit,
   onBiometricLogin
@@ -78,8 +71,8 @@ export const LoginFlow: React.FC<LoginFlowProps> = ({
 
     try {
       await onHandleSubmit(email, password);
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao fazer login. Tente novamente.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro ao fazer login. Tente novamente.');
       console.error('[LoginFlow] Erro no login:', err);
     } finally {
       setIsLoading(false);
@@ -95,8 +88,8 @@ export const LoginFlow: React.FC<LoginFlowProps> = ({
       if (!success) {
         setError('Falha na autenticação biométrica. Tente com sua senha.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Erro na autenticação biométrica.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro na autenticação biométrica.');
       console.error('[LoginFlow] Erro biométrico:', err);
     } finally {
       setIsLoading(false);

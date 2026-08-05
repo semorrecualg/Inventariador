@@ -42,7 +42,7 @@ export class FileSystemStorageService {
       try {
         const resultado = await FilePicker.pickFiles({
           types: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv'],
-          multiple: false,
+          limit: 1,
           readData: true
         });
         if (resultado.files && resultado.files.length > 0) {

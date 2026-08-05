@@ -41,11 +41,11 @@ export const auditService = {
         user_email: userEmail,
         action: 'UPDATE',
         table_name: 'ativos',
-        record_id: updatedAsset.id || updatedAsset.primarykey,
+        record_id: String(updatedAsset.id || updatedAsset.primarykey),
         details,
         old_data: oldData,
         new_data: newData,
-        tenantId: updatedAsset.tenantId || updatedAsset._tenantid || 'CICOPAL'
+        tenantid: updatedAsset.tenantid || updatedAsset.tenantid || 'CICOPAL'
       });
 
       logger.info(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id || updatedAsset.primarykey}`);

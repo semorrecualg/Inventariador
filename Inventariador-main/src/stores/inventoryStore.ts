@@ -9,9 +9,10 @@ import {
   DatabaseMode,
   InventoryCampaign,
   UnitConfig,
-  SearchFilters,
   User,
 } from '../types';
+
+type StoreData<T> = Pick<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? never : K }[keyof T]>;
 
 export interface InventoryStoreState {
   /** Full inventory state (assets, companies, settings) */
@@ -125,7 +126,7 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
 const savedMode = localStorage.getItem('app_database_mode') as DatabaseMode | null;
 const initialMode = savedMode || DatabaseMode.INTERNAL;
 
-const initialState: InventoryStoreState = {
+const initialState: StoreData<InventoryStoreState> = {
   inventory: getInitialInventoryState(initialMode),
   selectedUnit: null,
   campaigns: [],

@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
+import { render } from '@testing-library/react';
 import Modal from '../components/Modal';
 
 describe('Modal Component', () => {
@@ -80,10 +82,13 @@ describe('Modal Component', () => {
     });
 
     it('defaults to info type', () => {
-      const element = React.createElement(Modal, {
-        isOpen: true, title: 'Default', onClose: vi.fn(),
-      });
-      expect(element.props.type).toBe('info');
+      // The default `type = 'info'` is applied at render time (destructured default),
+      // so it must be asserted on the rendered output, not on the element props.
+      const { container } = render(
+        <Modal isOpen title="Default" onClose={vi.fn()} />
+      );
+      // Modal.getIcon() default case renders the Info icon (text-blue-500)
+      expect(container.querySelector('.text-blue-500')).not.toBeNull();
     });
   });
 

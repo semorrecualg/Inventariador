@@ -19,10 +19,11 @@ export interface User {
   isAdmin?: boolean; // Deprecated: use is_admin
   isSuperAdmin?: boolean; // Super administrator flag
   mustChangePassword?: boolean;
-  tenantId: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
+  tenantid: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
   filial?: string;    // 2ª Coluna / Unidade Operacional - Oficial
-  _unitid?: string;   // Unidade Operacional Padrão - Fallback
-  unitid?: string;   // Deprecated: use _unitid
+  // @deprecated Legado (somente leitura): use 'filial'
+  _unitid?: string;
+  unitid?: string;   // @deprecated Legado: use filial
   units?: string[];  // Lista de Unidades Operacionais autorizadas
 }
 
@@ -43,7 +44,7 @@ export interface AuditLogEntry {
   old_data?: unknown;
   new_data?: unknown;
   details?: string;
-  tenantId?: string;
+  tenantid?: string;
   origin?: TransactionOrigin;
 }
 
@@ -87,7 +88,7 @@ export interface NCMClassifier {
   group_code: string; // Código do Grupo (4 dígitos)
   annual_depreciation_rate: number;
   useful_life_months: number;
-  tenantId: string;
+  tenantid: string;
 }
 
 export enum DepreciationMethod {
@@ -107,7 +108,7 @@ export interface AssetGroup {
   annual_depreciation_rate: number; // TAXA
   depreciation_method: DepreciationMethod; // TIPODEPREC
   useful_life_months: number;
-  tenantId: string;
+  tenantid: string;
 }
 
 export enum AccountType {
@@ -140,7 +141,7 @@ export interface ChartOfAccount {
   classification: AccountClassification; // CLASSIFICACAO
   referential_code?: string; // COD_REF (SPED)
   is_active: boolean; // STATUS
-  tenantId: string;
+  tenantid: string;
 }
 
 export interface AssetMovement {
@@ -153,7 +154,7 @@ export interface AssetMovement {
   value?: number;
   description?: string;
   user_email: string;
-  tenantId: string;
+  tenantid: string;
 }
 
 export interface DepreciationHistory {
@@ -164,7 +165,7 @@ export interface DepreciationHistory {
   depreciation_value: number;
   accumulated_depreciation: number;
   residual_value: number;
-  tenantId: string;
+  tenantid: string;
 }
 
 export interface ModalConfig {
@@ -185,7 +186,6 @@ export enum AppScreen {
   MAIN_MENU = 'MAIN_MENU',
   ASSET_DETAIL = 'ASSET_DETAIL',
   DASHBOARD = 'DASHBOARD',
-  SETTINGS = 'SETTINGS',
   INVENTORY = 'INVENTORY',
   LABELING = 'LABELING', // Nova tela independente
   CONSULTATION = 'CONSULTATION',
@@ -195,7 +195,6 @@ export enum AppScreen {
   CHANGE_PASSWORD = 'CHANGE_PASSWORD',
   FIELD_CONFIGURATOR = 'FIELD_CONFIGURATOR',
   QR_CODE_CONFIGURATOR = 'QR_CODE_CONFIGURATOR',
-  QR_CONFIGURATOR = 'QR_CONFIGURATOR',
   GLOBAL_PERFORMANCE = 'GLOBAL_PERFORMANCE',
   ACCOUNT_RECONCILIATION = 'ACCOUNT_RECONCILIATION',
   SIGNATURE = 'SIGNATURE',
@@ -291,7 +290,7 @@ export interface InventoryState {
 export interface SyncQueueItem {
   id: string; // UUID interno da fila
   assetId: string;
-  tenantId: string;
+  tenantid: string;
   photoBlob: Blob;
   timestamp: number;
   attempts: number;
@@ -313,9 +312,11 @@ export interface InventoryCampaign {
   start_date: string;
   end_date?: string;
   status: CampaignStatus;
-  tenantId: string;
-  _unitid?: string; // ID ou Nome da Unidade Operacional vinculada
-  unit_id?: string;  // Unificado
+  tenantid: string;
+  filial?: string; // Canônico (Índice 1 da planilha)
+  // @deprecated Legado (somente leitura): use 'filial'
+  _unitid?: string;
+  unit_id?: string;  // @deprecated Legado: use filial
   created_by: string;
   created_at: string;
   // Estatísticas calculadas
@@ -337,7 +338,7 @@ export interface CampaignSnapshot {
   assets_data: Asset[];
   metadata: Record<string, unknown>;
   closed_by: string;
-  tenantId: string;
+  tenantid: string;
 }
 
 export interface NavigationParams {
@@ -350,9 +351,11 @@ export interface NavigationParams {
 
 export interface UnitConfig {
   id?: string;
-  tenantId: string;
-  _unitid: string; // Nome da unidade (ex: "MATRIZ")
-  unit_id: string; // Deprecated: use _unitid
+  tenantid: string;
+  filial?: string; // Canônico (Índice 1 da planilha)
+  // @deprecated Legado (somente leitura): use 'filial'
+  _unitid?: string; // Nome da unidade (ex: "MATRIZ")
+  unit_id?: string; // @deprecated Legado: use filial
   lat: number;
   lng: number;
   radius_meters: number;
@@ -362,7 +365,7 @@ export interface UnitConfig {
 }
 
 export interface CargaExpertRow {
-  tenantId: string;         // Índice 0 (Tranca Invisível de Segurança)
+  tenantid: string;         // Índice 0 (Tranca Invisível de Segurança)
   filial: string;           // Índice 1 (Unidade Física Real - Antiga unit_key)
   status: string;           // Índice 2
   etiqueta: string;         // Índice 3

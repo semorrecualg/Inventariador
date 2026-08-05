@@ -18,12 +18,12 @@ export const stressTestService = {
         ETIQUETA: `ETQ_${i.toString().padStart(6, '0')}`,
         DESCRICAODOATIVO: `ITEM DE TESTE DE ESTRESSE - REGISTRO ${i}`,
         VLRAQUISIC: Math.random() * 10000,
-        _tenantid: 'STRESS_TEST_TENANT',
-        _unitid: 'STRESS_UNIT',
+        tenantid: 'STRESS_TEST_TENANT',
+        filial: 'STRESS_UNIT',
         TAG_INVENTARIO: TagInventario.PENDENTE,
         ESTADO_CONSERVACAO: ConservationState.BOM,
         _conferido: false
-      });
+      } as unknown as Asset);
       
       // Bulk add a cada 200 para não estourar memória
       if (assets.length >= 200) {
@@ -42,7 +42,7 @@ export const stressTestService = {
         user_email: 'stress_tester@gbr.com',
         action: 'STRESS_ACTION',
         details: `Log de teste de estresse número ${i}`,
-        _tenantid: 'STRESS_TEST_TENANT'
+        tenantid: 'STRESS_TEST_TENANT'
       });
 
       if (logs.length >= 500) {

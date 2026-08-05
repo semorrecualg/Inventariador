@@ -44,7 +44,7 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({ asset, batteryLeve
     }
     // Conversão Expert (Diretriz 6): Caixa alta limpa e Regex removendo ruídos de planilhas
     const sanitizedCode = String(inputCode).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-    await saveCollectedAssetAtomic({ ...asset, codigo_barra_coletado: sanitizedCode });
+    await saveCollectedAssetAtomic({ ...asset, codigo_barra_coletado: sanitizedCode } as unknown as Partial<DexieAsset> & { primarykey: string });
   };
 
   return (
@@ -61,6 +61,8 @@ interface InventoryScreenProps {
   userEmail?: string;
   userName?: string;
   currentCampaignId?: string | null;
+  inventorySearchValue?: string | null;
+  clearInventorySearchValue?: () => void;
 }
 
 interface BatteryStatus {
@@ -74,7 +76,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   onBack,
   userEmail = 'auditor@gbr.com.br',
   userName = 'Auditor SRE',
-  currentCampaignId = null
+  currentCampaignId = null,
+  inventorySearchValue,
+  clearInventorySearchValue
 }) => {
   // --- Estados do Componente ---
   const [unidades, setUnidades] = useState<string[]>([]);
@@ -85,6 +89,15 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
   // Filtros e busca
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Busca externa (ex.: retorno da Consulta com etiqueta) — sincroniza e limpa o valor
+  useEffect(() => {
+    if (inventorySearchValue) {
+      setSearchTerm(inventorySearchValue);
+      clearInventorySearchValue?.();
+    }
+  }, [inventorySearchValue, clearInventorySearchValue]);
+
   const [filterConferido, setFilterConferido] = useState<'todos' | 'conferido' | 'pendente'>('todos');
   const [filterContaEspecial, setFilterContaEspecial] = useState<boolean>(false);
 
@@ -286,7 +299,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       const isEliminacaoFiscal = ativoDetalhado.contacontabil === '131105001';
       
       // Definir metadados e status
-      const updatedItem: DexieAsset = {
+      const updatedItem: DexieAsset & Record<string, unknown> = {
         ...ativoDetalhado,
         status: novoStatusLocal || ativoDetalhado.status,
         _conferido: 1, // Marcar como conferido
@@ -501,7 +514,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
     setIsSaving(true);
     try {
-      const newSurplus: DexieAsset = {
+      const newSurplus = {
         primarykey: cleanBarcode,
         etiqueta: cleanBarcode,
         filial: unidadeSelecionada,
@@ -519,8 +532,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           status_anterior: 'NÃO CADASTRADO',
           novo_status: 'SOBRA_FISICA',
           obs: 'Cadastrado como Sobra Física (Surplus) de campo via Coletor SRE.'
-        }])
-      };
+        }]) ?? null
+      } as unknown as DexieAsset;
 
       await saveCollectedAssetAtomic(newSurplus);
       

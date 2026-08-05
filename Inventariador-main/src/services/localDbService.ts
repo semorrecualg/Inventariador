@@ -1,4 +1,4 @@
-import { db, DexieAsset, sqliteService } from './sqliteService';
+import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
@@ -13,12 +13,19 @@ const usersStore = localforage.createInstance({
   storeName: 'users'
 });
 
-export const getCurrentTenantId = (): string => {
+// Fallback IndexedDB para snapshots virtuais: localStorage tem quota (~5MB) e pode
+// estourar com cargas grandes (ex.: 12k+ ativos). IndexedDB não tem esse limite prático.
+const snapshotStore = localforage.createInstance({
+  name: 'InventoryApp_Snapshots',
+  storeName: 'virtual_backups'
+});
+
+export const getCurrentTenantid = (): string => {
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user._tenantid || user.tenantid || user.tenantId || 'DEMO_DEFAULT';
+      return user.tenantid || user.tenantid || user.tenantid || 'DEMO_DEFAULT';
     }
   } catch { /* ignore */ }
   return 'DEMO_DEFAULT';
@@ -40,7 +47,7 @@ const handleDemoAuditIncrement = () => {
 
 // Map React UI Asset models (with Booleans) to Database persistable models (with 0/1 Numbers)
 function toDexieAsset(asset: Asset): DexieAsset {
-  const obj: Record<string, unknown> = { ...asset } as unknown as Record<string, unknown>;
+  const obj: Record<string, unknown> = { ...asset } as unknown as unknown as Record<string, unknown>;
   const boolKeys = [
     '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
@@ -72,7 +79,7 @@ function toDexieAsset(asset: Asset): DexieAsset {
 
 // Map database row objects back to standard React types (with Booleans and parsed JSONs)
 function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
-  const asset: Record<string, unknown> = { ...row } as unknown as Record<string, unknown>;
+  const asset: Record<string, unknown> = { ...row } as unknown as unknown as Record<string, unknown>;
   const boolKeys = [
     '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
@@ -114,7 +121,7 @@ export const localDb = {
           record_id: dexieAsset.primarykey,
           details: 'Criação de ativo manual',
           new_data: asset,
-          tenantId: getCurrentTenantId()
+          tenantid: getCurrentTenantid()
         });
       }
     },
@@ -163,14 +170,14 @@ export const localDb = {
     },
 
     getMapData: async (campaignId: string): Promise<Asset[]> => {
-      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const tenant = getCurrentTenantid().trim().toUpperCase();
       const results = await db.assets
         .where('currentCampaignId')
         .equals(campaignId)
         .toArray();
 
       return results
-        .filter(a => a._is_deleted !== 1 && String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant)
+        .filter(a => a._is_deleted !== 1 && String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant)
         .map(row => toReactAsset(row));
     },
 
@@ -183,14 +190,12 @@ export const localDb = {
         for (let j = 0; j < chunk.length; j++) {
           const a = chunk[j];
           // Sanitização forçada obrigatória (SRE)
-          const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
+          const tenantid = String(a.tenantid || a.tenantid || '').trim().toUpperCase();
           const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
           const serial = String(a.serial || '').trim().toUpperCase();
           
-          a.tenantId = tenantId;
-          a._tenantid = tenantId;
+          a.tenantid = tenantid;
           a.filial = filial;
-          a._unitid = filial;
           a.serial = serial;
           
           mappedChunk.push(toDexieAsset(a));
@@ -216,7 +221,7 @@ export const localDb = {
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         const existing = await db.ativos.get(cleanId);
         if (existing) {
-          const mappedChanges: Record<string, unknown> = { ...changes } as unknown as Record<string, unknown>;
+          const mappedChanges: Record<string, unknown> = { ...changes } as unknown as unknown as Record<string, unknown>;
           // Format boolean values properly
           ['_conferido', '_is_deleted', '_is_synced', '_plaquetado', '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'].forEach(k => {
             if (k in mappedChanges) {
@@ -241,15 +246,15 @@ export const localDb = {
           record_id: cleanId,
           details: 'Atualização de ativo',
           new_data: changes,
-          tenantId: getCurrentTenantId()
+          tenantid: getCurrentTenantid()
         });
       }
     },
 
     count: async () => {
-      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const tenant = getCurrentTenantid().trim().toUpperCase();
       const all = await db.assets.toArray();
-      return all.filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant).length;
+      return all.filter(a => String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant).length;
     },
 
     clear: async () => {
@@ -259,20 +264,20 @@ export const localDb = {
     },
 
     toArray: async (): Promise<Asset[]> => {
-      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const tenant = getCurrentTenantid().trim().toUpperCase();
       const results = await db.ativos.toArray();
       return results
-        .filter(a => String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant)
+        .filter(a => String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant)
         .map(row => toReactAsset(row));
     },
 
     where: (field: string) => ({
       equals: (value: SqlValue | SqlValue[]) => ({
         first: async () => {
-          const tenant = getCurrentTenantId().trim().toUpperCase();
+          const tenant = getCurrentTenantid().trim().toUpperCase();
           if (Array.isArray(value)) {
-            // Using compound index: [tenantId+filial]
-            const results = await db.ativos.where('[tenantId+filial]').equals(value as string & string[]).toArray();
+            // Using compound index: [tenantid+filial]
+            const results = await db.ativos.where('[tenantid+filial]').equals(value as string & string[]).toArray();
             const firstMatch = results.find(a => a._is_deleted !== 1);
             return firstMatch ? toReactAsset(firstMatch) : null;
           }
@@ -281,17 +286,17 @@ export const localDb = {
           const fieldClean = field.replace('[', '').replace(']', '').replace('+', '');
           const results = await db.ativos.toArray();
           const match = results.find(a => {
-            const propVal = String((a as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
+            const propVal = String((a as unknown as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
             const targetVal = String(value).trim().toUpperCase();
-            const isTenantMatch = String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant;
+            const isTenantMatch = String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant;
             return propVal === targetVal && isTenantMatch;
           });
           return match ? toReactAsset(match) : null;
         },
         toArray: async () => {
-          const tenant = getCurrentTenantId().trim().toUpperCase();
+          const tenant = getCurrentTenantid().trim().toUpperCase();
           if (Array.isArray(value)) {
-            const results = await db.ativos.where('[tenantId+filial]').equals(value as string & string[]).toArray();
+            const results = await db.ativos.where('[tenantid+filial]').equals(value as string & string[]).toArray();
             return results.map(row => toReactAsset(row));
           }
 
@@ -299,9 +304,9 @@ export const localDb = {
           const results = await db.ativos.toArray();
           return results
             .filter(a => {
-              const propVal = String((a as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
+              const propVal = String((a as unknown as Record<string, unknown>)[fieldClean] || '').trim().toUpperCase();
               const targetVal = String(value).trim().toUpperCase();
-              const isTenantMatch = String(a.tenantId || a._tenantid || '').trim().toUpperCase() === tenant;
+              const isTenantMatch = String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant;
               return propVal === targetVal && isTenantMatch;
             })
             .map(row => toReactAsset(row));
@@ -310,11 +315,11 @@ export const localDb = {
     }),
 
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
-      const tenant = getCurrentTenantId().trim().toUpperCase();
+      const tenant = getCurrentTenantid().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
       const cleanSearch = searchTerm.toLowerCase().trim();
       
-      const query = db.addresses.where('[tenantId+filial]').equals([tenant, uIdUpper]);
+      const query = db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]);
       let addrList = await query.toArray();
 
       if (cleanSearch !== '') {
@@ -323,7 +328,7 @@ export const localDb = {
       
       // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente de ativos (ativos)
       if (addrList.length === 0) {
-        const assets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+        const assets = await db.ativos.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         assets.forEach(a => {
           const addrStr = String(a.endereco || '').trim();
@@ -331,7 +336,7 @@ export const localDb = {
             const key = addrStr.toUpperCase();
             if (!extractedAddrs.has(key)) {
               extractedAddrs.set(key, {
-                tenantId: tenant,
+                tenantid: tenant,
                 filial: uIdUpper,
                 codigo_endereco: addrStr,
                 setor: '',
@@ -345,7 +350,7 @@ export const localDb = {
       }
 
       // 4. Busca reativa das estatísticas de conferência em db.ativos
-      const listAssets = await db.ativos.where('[tenantId+filial]').equals([tenant, uIdUpper]).toArray();
+      const listAssets = await db.ativos.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
@@ -510,7 +515,7 @@ export const localDb = {
             record_id: log.registro_id,
             details: log.details,
             new_data: log.delta ? JSON.parse(log.delta) : undefined,
-            tenantId: getCurrentTenantId()
+            tenantid: getCurrentTenantid()
           }));
         }
       })
@@ -519,16 +524,17 @@ export const localDb = {
 
   unitConfigs: {
     put: async (config: UnitConfig) => {
+      const cfg = config as unknown as Record<string, unknown>;
       await db.unit_configs.put({
-        id: String(config.id || config.filial || ''),
-        filial: String(config.filial || ''),
-        nome: String(config.nome || config.filial || ''),
-        hasGps: config.hasGps ? 1 : 0,
-        requireNf: config.requireNf ? 1 : 0,
-        requireSeriado: config.requireSeriado ? 1 : 0,
-        allowNewAssets: config.allowNewAssets !== false ? 1 : 0,
-        allowWriteOffs: config.allowWriteOffs !== false ? 1 : 0,
-        requirePlaqueta: config.requirePlaqueta ? 1 : 0
+        id: String(cfg.id || cfg.filial || ''),
+        filial: String(cfg.filial || ''),
+        nome: String(cfg.nome || cfg.filial || ''),
+        hasGps: cfg.hasGps ? 1 : 0,
+        requireNf: cfg.requireNf ? 1 : 0,
+        requireSeriado: cfg.requireSeriado ? 1 : 0,
+        allowNewAssets: cfg.allowNewAssets !== false ? 1 : 0,
+        allowWriteOffs: cfg.allowWriteOffs !== false ? 1 : 0,
+        requirePlaqueta: cfg.requirePlaqueta ? 1 : 0
       });
     },
 
@@ -536,6 +542,12 @@ export const localDb = {
       const results = await db.unit_configs.toArray();
       return results.map(row => ({
         id: row.id,
+        tenantid: getCurrentTenantid(),
+        unit_id: row.filial,
+        lat: 0,
+        lng: 0,
+        radius_meters: 0,
+        is_active: true,
         filial: row.filial,
         nome: row.nome,
         hasGps: row.hasGps === 1,
@@ -544,7 +556,7 @@ export const localDb = {
         allowNewAssets: row.allowNewAssets === 1,
         allowWriteOffs: row.allowWriteOffs === 1,
         requirePlaqueta: row.requirePlaqueta === 1
-      }));
+      } as UnitConfig));
     },
 
     clear: async () => {
@@ -560,15 +572,15 @@ export const localDb = {
     clear: async () => {
       await db.campaigns.clear();
     },
-    toArray: async (tenantId?: string, unitId?: string): Promise<InventoryCampaign[]> => {
+    toArray: async (tenantid?: string, unitId?: string): Promise<InventoryCampaign[]> => {
       const results = await db.campaigns.toArray();
-      const normTenant = String(tenantId || '').trim().toUpperCase();
+      const normTenant = String(tenantid || '').trim().toUpperCase();
       const normUnit = String(unitId || '').trim().toUpperCase();
 
       return results
         .filter(c => {
-          const cTenant = String(c.tenantId || '').trim().toUpperCase();
-          const cUnit = String((c as Record<string, unknown>).unit_id || (c as Record<string, unknown>)._unitid || '').trim().toUpperCase();
+          const cTenant = String(c.tenantid || '').trim().toUpperCase();
+          const cUnit = String((c as unknown as Record<string, unknown>).unit_id || (c as unknown as Record<string, unknown>)._unitid || '').trim().toUpperCase();
           const tenantMatch = !normTenant || cTenant === normTenant;
           const unitMatch = !normUnit || cUnit === normUnit || cUnit === '';
           return tenantMatch && unitMatch;
@@ -576,14 +588,13 @@ export const localDb = {
         .map(row => ({
           id: row.id,
           name: row.name,
-          description: (row as Record<string, unknown>).description || '',
+          description: (row as unknown as Record<string, unknown>).description || '',
           status: (row.status || 'CREATED') as CampaignStatus,
-          start_date: (row as Record<string, unknown>).start_date || row.created_at || new Date().toISOString(),
-          end_date: (row as Record<string, unknown>).end_date || null,
-          _tenantid: row.tenantId,
-          _unitid: (row as Record<string, unknown>).unit_id || (row as Record<string, unknown>)._unitid || '',
-          tenant_id: row.tenantId,
-          unit_id: (row as Record<string, unknown>).unit_id || (row as Record<string, unknown>)._unitid || ''
+          start_date: (row as unknown as Record<string, unknown>).start_date || row.created_at || new Date().toISOString(),
+          end_date: (row as unknown as Record<string, unknown>).end_date || null,
+          tenantid: row.tenantid,
+          filial: String((row as unknown as Record<string, unknown>).filial || (row as unknown as Record<string, unknown>).unit_id || (row as unknown as Record<string, unknown>)._unitid || ''),
+          unit_id: (row as unknown as Record<string, unknown>).filial || (row as unknown as Record<string, unknown>).unit_id || (row as unknown as Record<string, unknown>)._unitid || ''
         } as unknown as InventoryCampaign));
     },
     put: async (campaign: Partial<InventoryCampaign>): Promise<void> => {
@@ -591,11 +602,11 @@ export const localDb = {
         id: String(campaign.id || ''),
         name: String(campaign.name || ''),
         status: String(campaign.status || 'CREATED'),
-        tenantId: String(campaign.tenant_id || campaign._tenantid || campaign.tenantId || ''),
+        tenantid: String(campaign.tenantid || ''),
         created_at: String(campaign.start_date || new Date().toISOString()),
         description: String(campaign.description || ''),
-        unit_id: String(campaign.unit_id || campaign._unitid || ''),
-        _unitid: String(campaign._unitid || campaign.unit_id || ''),
+        unit_id: String(campaign.filial || campaign.unit_id || campaign._unitid || ''),
+        filial: String(campaign.filial || campaign.unit_id || campaign._unitid || ''),
         start_date: String(campaign.start_date || new Date().toISOString()),
         end_date: campaign.end_date ? String(campaign.end_date) : null
       } as unknown as DexieCampaign);
@@ -615,14 +626,12 @@ export const localDb = {
         for (let j = 0; j < chunk.length; j++) {
           const a = chunk[j];
           // Sanitização forçada obrigatória (SRE)
-          const tenantId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
+          const tenantid = String(a.tenantid || a.tenantid || '').trim().toUpperCase();
           const filial = String(a.filial || a._unitid || '').trim().toUpperCase();
           const serial = String(a.serial || '').trim().toUpperCase();
           
-          a.tenantId = tenantId;
-          a._tenantid = tenantId;
+          a.tenantid = tenantid;
           a.filial = filial;
-          a._unitid = filial;
           a.serial = serial;
           
           mappedChunk.push(toDexieAsset(a));
@@ -661,7 +670,7 @@ export const localDb = {
         ...found,
         is_admin: found.is_admin === true || found.isAdmin === true,
         isAdmin: found.is_admin === true || found.isAdmin === true,
-        tenantId: found.tenantId || found._tenantid || 'CICOPAL'
+        tenantid: found.tenantid || found.tenantid || 'CICOPAL'
       } as unknown as User;
     },
 
@@ -674,12 +683,12 @@ export const localDb = {
     toArray: async (): Promise<User[]> => {
       const users: User[] = [];
       await usersStore.iterate((value: unknown) => {
-        const valueObj = value as Record<string, unknown>;
+        const valueObj = value as unknown as Record<string, unknown>;
         users.push({
           ...valueObj,
           is_admin: valueObj.is_admin === true || valueObj.isAdmin === true,
           isAdmin: valueObj.is_admin === true || valueObj.isAdmin === true,
-          tenantId: valueObj.tenantId || valueObj._tenantid || 'CICOPAL'
+          tenantid: valueObj.tenantid || valueObj.tenantid || 'CICOPAL'
         } as unknown as User);
       });
       return users;
@@ -895,11 +904,26 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
 export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (isIframe) {
+    // 1) Snapshot virtual: localStorage com fallback em IndexedDB (localforage).
+    //    São caminhos independentes — a falha de um não pode invalidar o outro.
+    let snapshotSaved = false;
     try {
       logger.info("[SRE-iFrame] Armazenando snapshot simulado localmente...");
       localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
-      
-      // Auto-download contingency physical JSON file
+      snapshotSaved = true;
+    } catch (e) {
+      logger.warn("[SRE-iFrame] localStorage indisponível/quota excedida; tentando fallback IndexedDB...", e);
+      try {
+        await snapshotStore.setItem('gbr_virtual_snapshot_backup', dataPayload);
+        snapshotSaved = true;
+      } catch (e2) {
+        logger.error("[SRE-iFrame] Fallback IndexedDB do snapshot também falhou", e2);
+      }
+    }
+
+    // 2) Auto-download contingency physical JSON file — best-effort. Em iframe
+    //    sandboxed o download é bloqueado pelo navegador (falha esperada e não-fatal).
+    try {
       const jsonStr = JSON.stringify(dataPayload, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -910,12 +934,11 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      return true;
     } catch (e) {
-      logger.error("[SRE-iFrame] Erro ao salvar snapshot no localStorage ou baixar arquivo", e);
-      return false;
+      logger.warn("[SRE-iFrame] Download do backup bloqueado pelo sandbox (esperado). Snapshot local preservado.", e);
     }
+
+    return snapshotSaved;
   }
 
   if (!userWorkspaceHandle) return false;
@@ -937,5 +960,24 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
     logger.error("[SRE CRÍTICO] Falha de I/O de escrita na pasta do Windows:", error);
     return false; 
   }
+}
+
+/**
+ * Lê o snapshot virtual persistido (localStorage → fallback IndexedDB).
+ * Usado pelo UnitSelector para reconstruir unidades quando o filtro de tenant
+ * não encontra ativos diretamente no banco local.
+ */
+export async function readVirtualSnapshot(): Promise<Record<string, unknown>[] | null> {
+  try {
+    const raw = localStorage.getItem('gbr_virtual_snapshot_backup');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+    }
+  } catch { /* ignore */ }
+  try {
+    const stored = await snapshotStore.getItem<unknown[]>('gbr_virtual_snapshot_backup');
+    return Array.isArray(stored) ? (stored as Record<string, unknown>[]) : null;
+  } catch { return null; }
 }
 

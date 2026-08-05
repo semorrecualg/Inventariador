@@ -41,8 +41,7 @@ interface AuditLogDB {
   old_data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   new_data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   details?: string;
-  _tenantid?: string;
-  tenant_id?: string;
+  tenantid?: string;
   origin?: string;
 }
 
@@ -103,17 +102,17 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     const loadLogs = async () => {
       setLoading(true);
       try {
-        const tenantId = user?._tenantid || user?.tenantId || user?.tenantid;
-        if (databaseMode.startsWith('SUPABASE') && tenantId) {
+        const tenantid = user?.tenantid || user?.tenantid || user?.tenantid;
+        if (databaseMode.startsWith('SUPABASE') && tenantid) {
           const data = logType === 'SYSTEM' 
-            ? await fetchAuditLogs(tenantId)
-            : await fetchAssetLogs(tenantId);
+            ? await fetchAuditLogs(tenantid)
+            : await fetchAssetLogs(tenantid);
           
           const normalizedData = (data as Record<string, any>[]).map(log => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
             ...log,
             record_id: String(log.record_id || log.asset_id || ''),
             table_name: (log.table_name || (logType === 'ASSET' ? 'assets' : '')) as string,
-            _tenantid: (log._tenantid || log.tenant_id || log.tenantid) as string
+            tenantid: (log.tenantid || log.tenantid || log.tenantid) as string
           }));
 
           setLogs(normalizedData as AuditLogDB[]);
@@ -189,7 +188,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         `"${log.table_name || ''}"`,
         `"${log.record_id || ''}"`,
         `"${(log.details || '').replace(/"/g, '""')}"`,
-        `"${log._tenantid || ''}"`
+        `"${log.tenantid || ''}"`
       ].join(','))
     ].join('\n');
 
@@ -522,7 +521,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                               <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">ID LOG: {log.id}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">TENANT: {log._tenantid || 'GLOBAL'}</span>
+                              <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">TENANT: {log.tenantid || 'GLOBAL'}</span>
                             </div>
                           </div>
                         </motion.div>

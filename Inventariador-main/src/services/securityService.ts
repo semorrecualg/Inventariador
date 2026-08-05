@@ -88,7 +88,7 @@ class EncryptionProvider {
       try {
         this.key = await crypto.subtle.importKey(
           'raw',
-          existingKeyMaterial.buffer || existingKeyMaterial,
+          (existingKeyMaterial.buffer as ArrayBuffer) || existingKeyMaterial,
           { name: 'AES-GCM', length: 256 },
           false, // Não exportável em runtime (segurança contra vazamento em memória)
           ['encrypt', 'decrypt']
@@ -302,6 +302,7 @@ export const resetSecurityPin = async (): Promise<void> => {
  * @deprecated Use verifySecurityPin(pin: string): Promise<boolean> instead
  */
 export const verifySecurityPinSync = (pin: string): boolean => {
+  void pin; // mantém assinatura legada; PIN não é verificado nesta função de compatibilidade
   console.warn('[SecurityService] verifySecurityPinSync is deprecated. Use await verifySecurityPin(pin) instead.');
   return true; // Comportamento permissivo para não quebrar chamadas legadas
 };

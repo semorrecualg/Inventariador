@@ -80,7 +80,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         <div className="flex items-center justify-between w-full h-12">
           {/* Back Button Alinhado à Esquerda */}
           <div className="flex-shrink-0 flex items-center">
-            <BackButton id="address-back-btn" onClick={handleBack} label="Voltar" subLabel="Unidades" />
+            <BackButton onClick={handleBack} label="Voltar" subLabel="Unidades" />
           </div>
           
           {/* Bloco de Texto Centralizado Verticalmente */}

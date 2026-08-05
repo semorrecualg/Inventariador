@@ -3,7 +3,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 
 export interface MasterDashboardStats {
-  tenantId: string;
+  tenantid: string;
   totalAtivos: number;
   conferidoAtivos: number;
   pendentesAtivos: number;
@@ -11,7 +11,7 @@ export interface MasterDashboardStats {
 }
 
 export interface AuditorProgress {
-  tenantId: string;
+  tenantid: string;
   filial: string;
   totalLocal: number;
   totalSincronizado: number;
@@ -54,25 +54,25 @@ function detectUserEmail(userEmail?: string): string {
 
 /**
  * Visão do Administrador Master:
- * Calcula o resumo da campanha filtrando estritamente por tenantId.
+ * Calcula o resumo da campanha filtrando estritamente por tenantid.
  * Se o operador for o e-mail admin configurado, ignora a barreira de inquilino (Master Omnisciente)
  * e injeta o token 'GBR_SUPER_ADMIN_CORINGA' agregando dados de todos os inquilinos.
  */
-export async function getMasterDashboardStats(tenantId: string, userEmail?: string): Promise<MasterDashboardStats> {
+export async function getMasterDashboardStats(tenantid: string, userEmail?: string): Promise<MasterDashboardStats> {
   const email = detectUserEmail(userEmail);
   const isSuperAdmin = isAdminEmail(email);
-  const targetTenant = isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId;
+  const targetTenant = isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantid;
 
   try {
     let assets: DexieAsset[] = await db.ativos.toArray();
     // Filtro básico de não-deletados
     assets = assets.filter(a => a._is_deleted !== 1);
 
-    // Se não for super admin, filtra estritamente por tenantId
+    // Se não for super admin, filtra estritamente por tenantid
     if (!isSuperAdmin) {
-      const tenantClean = String(tenantId).trim().toUpperCase();
+      const tenantClean = String(tenantid).trim().toUpperCase();
       assets = assets.filter(a => {
-        const tId = String(a.tenantId || a._tenantid || '').trim().toUpperCase();
+        const tId = String(a.tenantid || a.tenantid || '').trim().toUpperCase();
         return tId === tenantClean;
       });
     }
@@ -85,7 +85,7 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
     logger.info(`>>> [DashboardService SRE] getMasterDashboardStats executado. Tenant: ${targetTenant}, Total: ${totalAtivos}, Conferidos: ${conferidoAtivos}`);
 
     return {
-      tenantId: targetTenant,
+      tenantid: targetTenant,
       totalAtivos,
       conferidoAtivos,
       pendentesAtivos,
@@ -94,7 +94,7 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
   } catch (err) {
     logger.error(">>> [DashboardService SRE] Erro ao calcular getMasterDashboardStats:", err);
     return {
-      tenantId: targetTenant,
+      tenantid: targetTenant,
       totalAtivos: 0,
       conferidoAtivos: 0,
       pendentesAtivos: 0,
@@ -107,13 +107,13 @@ export async function getMasterDashboardStats(tenantId: string, userEmail?: stri
  * Visão do Auditor:
  * Lista em tempo real o progresso do inventário da sua filial designada,
  * comparando o total de registros locais com o total já sincronizado na nuvem (_is_synced === 1).
- * Otimização de Hardware: Utiliza o índice composto [tenantId+filial] para isolar no disco antes de computar na memória.
+ * Otimização de Hardware: Utiliza o índice composto [tenantid+filial] para isolar no disco antes de computar na memória.
  */
-export async function getAuditorProgress(tenantId: string, filial: string, userEmail?: string): Promise<AuditorProgress> {
+export async function getAuditorProgress(tenantid: string, filial: string, userEmail?: string): Promise<AuditorProgress> {
   const email = detectUserEmail(userEmail);
   const isSuperAdmin = isAdminEmail(email);
   
-  const tenantClean = String(tenantId).trim();
+  const tenantClean = String(tenantid).trim();
   const filialClean = String(filial).trim();
 
   try {
@@ -128,7 +128,7 @@ export async function getAuditorProgress(tenantId: string, filial: string, userE
       }
     } else {
       // Utilização do índice composto físico para isolar os registros diretamente no disco antes de iterar
-      assets = await db.ativos.where('[tenantId+filial]').equals([tenantClean, filialClean]).toArray();
+      assets = await db.ativos.where('[tenantid+filial]').equals([tenantClean, filialClean]).toArray();
     }
 
     // Filtro básico de não-deletados
@@ -142,7 +142,7 @@ export async function getAuditorProgress(tenantId: string, filial: string, userE
     logger.info(`>>> [DashboardService SRE] getAuditorProgress executado. Filial: ${filialClean}, Local: ${totalLocal}, Sincronizado: ${totalSincronizado}`);
 
     return {
-      tenantId: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId,
+      tenantid: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantid,
       filial: filialClean,
       totalLocal,
       totalSincronizado,
@@ -152,7 +152,7 @@ export async function getAuditorProgress(tenantId: string, filial: string, userE
   } catch (err) {
     logger.error(">>> [DashboardService SRE] Erro ao calcular getAuditorProgress:", err);
     return {
-      tenantId: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantId,
+      tenantid: isSuperAdmin ? 'GBR_SUPER_ADMIN_CORINGA' : tenantid,
       filial: filialClean,
       totalLocal: 0,
       totalSincronizado: 0,

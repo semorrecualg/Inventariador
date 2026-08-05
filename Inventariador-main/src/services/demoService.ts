@@ -18,12 +18,11 @@ export const demoService = {
       is_admin: false,
       isAdmin: false,
       mustChangePassword: false,
-      _tenantid: 'DEMO_DEFAULT',
-      _unitid: 'MATRIZ',
       tenantid: 'DEMO_DEFAULT',
+      filial: 'MATRIZ',
       unitid: 'MATRIZ',
       units: ['MATRIZ'],
-      tenants: ['DEMO_DEFAULT']
+
     };
   },
 
@@ -62,12 +61,11 @@ export const demoService = {
         role: 'ADMIN' as unknown as UserRole,
         is_admin: true,
         isAdmin: true,
-        _tenantid: 'DEMO_DEFAULT',
-        _unitid: 'MATRIZ',
         tenantid: 'DEMO_DEFAULT',
+        filial: 'MATRIZ',
         unitid: 'MATRIZ',
         units: ['MATRIZ'],
-        tenants: ['DEMO_DEFAULT']
+  
       };
       await localDb.users.add(backupAdminUser);
 
@@ -78,11 +76,8 @@ export const demoService = {
       const mappedAssets = seedAssets.map(asset => {
         return {
           ...asset,
-          tenantId: activeTenant,
-          _tenantid: activeTenant,
-          tenant_id: activeTenant,
-          filial: asset.filial || 'MATRIZ',
-          _unitid: asset.filial || 'MATRIZ'
+          tenantid: activeTenant,
+          filial: asset.filial || 'MATRIZ'
         };
       });
 

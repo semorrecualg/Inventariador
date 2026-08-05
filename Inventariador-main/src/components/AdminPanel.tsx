@@ -9,8 +9,7 @@ import {
   Activity,
   RefreshCw,
   Calendar,
-  Tag,
-  X
+  Tag
 } from 'lucide-react';
 
 export interface AdminPanelProps {

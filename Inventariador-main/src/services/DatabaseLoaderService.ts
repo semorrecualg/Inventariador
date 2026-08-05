@@ -39,7 +39,7 @@ export interface AtivoPlanilha {
   [key: string]: string | number | boolean | null | undefined;
 }
 
-function getRowValue(row: AtivoPlanilha, ...keys: string[]): string | number | boolean | null | undefined {
+function getRowValue(row: Record<string, unknown>, ...keys: string[]): string | number | boolean | null | undefined {
   if (!row) return undefined;
   const rowKeys = Object.keys(row);
   for (const requestedKey of keys) {
@@ -49,10 +49,91 @@ function getRowValue(row: AtivoPlanilha, ...keys: string[]): string | number | b
       return kClean === reqClean;
     });
     if (foundKey !== undefined) {
-      return row[foundKey];
+      return row[foundKey] as string | number | boolean | null | undefined;
     }
   }
   return undefined;
+}
+
+/**
+ * CONTRATO SRE (planilha): nomes e ordem das colunas obrigatórias definidos pelo operador.
+ * O tenantid (Índice 0) nunca recebe valor fixo/fallback — vem exclusivamente da planilha.
+ */
+const CONTRACT_HEADERS = [
+  'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 'serial',
+  'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 'registro',
+  'subreg', 'databaixa', 'contacontabil', 'primarykey', 'centrodecusto',
+  'vlraquisic', 'sn1_recno', 'sn3_recno'
+];
+
+const CONTRACT_HEADERS_TEXT = CONTRACT_HEADERS.join(';');
+
+function normalizeHeaderKey(value: unknown): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * CONTRATO SRE (planilha): valida o cabeçalho completo da planilha.
+ * Bloqueia a carga se a coluna 'tenantid' (Índice 0) estiver AUSENTE, fora do
+ * Índice 0 ou VAZIA em todas as linhas, ou se as 21 colunas obrigatórias não
+ * estiverem presentes EXATAMENTE na ordem do contrato.
+ */
+function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
+  if (!aoa || aoa.length === 0) {
+    throw new Error("A planilha fornecida está vazia ou corrompida.");
+  }
+
+  const header = (aoa[0] || []).map(normalizeHeaderKey);
+  const tenantIdx = header.findIndex(h => h === 'tenantid');
+
+  if (tenantIdx === -1) {
+    const msg =
+      "CARGA BLOQUEADA: a coluna 'tenantid' está AUSENTE na planilha. " +
+      "Contrato obrigatório (a primeira coluna deve ser 'tenantid'): " +
+      "tenantid;filial;status;etiqueta;qt;descricaodoativo;serial;dataaqusic;cnpj;nomefornecedor;notafiscal;endereco;registro;subreg;databaixa;contacontabil;primarykey;centrodecusto;vlraquisic;sn1_recno;sn3_recno";
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
+
+  if (tenantIdx !== 0) {
+    const msg =
+      `CARGA BLOQUEADA: a coluna 'tenantid' foi encontrada no Índice ${tenantIdx}, ` +
+      "mas o contrato exige que seja o Índice 0 (primeira coluna) da planilha.";
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
+
+  // 2) Ordem exata das 21 colunas obrigatórias (Índices 0..20) — contrato rígido
+  const orderMismatches: string[] = [];
+  for (let i = 0; i < CONTRACT_HEADERS.length; i++) {
+    const expected = CONTRACT_HEADERS[i];
+    const found = header[i] !== undefined && header[i] !== '' ? header[i] : '(ausente)';
+    if (header[i] !== expected) {
+      orderMismatches.push(`Índice ${i}: esperado '${expected}', encontrado '${found}'`);
+    }
+  }
+  if (orderMismatches.length > 0) {
+    const msg =
+      "CARGA BLOQUEADA: a ordem das colunas não segue o contrato. " +
+      orderMismatches.join(' | ') +
+      ` | Contrato obrigatório (ordem exata): ${CONTRACT_HEADERS_TEXT}`;
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
+
+  const hasTenantValue = aoa.slice(1).some(row => {
+    const v = row[0];
+    return v !== undefined && v !== null && String(v).trim() !== '';
+  });
+
+  if (!hasTenantValue) {
+    const msg =
+      "CARGA BLOQUEADA: a coluna 'tenantid' (Índice 0) está VAZIA em todas as linhas. " +
+      "Preencha o tenantid de cada ativo na planilha antes de carregar.";
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
 }
 
 export class DatabaseLoaderService {
@@ -79,6 +160,7 @@ export class DatabaseLoaderService {
       throw new Error("Planilha inválida ou vazia.");
     }
     const worksheet = workbook.Sheets[firstSheetName];
+    validateSpreadsheetContract(worksheet);
     return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) as unknown[];
   }
 
@@ -90,17 +172,17 @@ export class DatabaseLoaderService {
       
       const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
         const pk = row.primarykey ? String(row.primarykey).trim().toUpperCase() : `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-        const tenantId = row.tenantId ? String(row.tenantId).trim().toUpperCase() : 'GBR_DEFAULT';
+        // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
+        // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
+        const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
         const codEnd = row.codigo_endereco ? String(row.codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : '';
         const tagVal = row.tag || row.etiqueta || pk;
         
         return {
           id: pk,
           primarykey: pk,
-          tenantId: tenantId,
-          _tenantid: tenantId,
+          tenantid: tenantid,
           filial: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
-          _unitid: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
           status: row.status ? String(row.status).trim() : 'Pendente',
           etiqueta: String(tagVal),
           tag: String(tagVal),
@@ -211,6 +293,7 @@ export class DatabaseLoaderService {
     if (!rawRows || rawRows?.length === 0) {
       throw new Error("A planilha fornecida está vazia ou corrompida.");
     }
+    validateSpreadsheetContract(worksheet);
 
     let totalInseridos = 0;
     let batchIndex = 0;
@@ -245,16 +328,13 @@ export class DatabaseLoaderService {
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim().toUpperCase();
-          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim().toUpperCase();
+          const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           const itemDesc = String(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
           )?.trim();
           const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = String(
-            getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA'
-          )?.trim();
+          const contaContabil = String(getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA')?.trim();
           const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
 
           const serialVal = String(getRowValue(row, 'serial', 'serial_number') || '')?.trim().toUpperCase();
@@ -310,10 +390,8 @@ export class DatabaseLoaderService {
 
           const assetObj: DexieAsset = {
             id: finalId,
-            tenantId: finalTenantId,
-            _tenantid: finalTenantId,
+            tenantid: finalTenantid,
             filial: finalFilial,
-            _unitid: finalFilial,
             status: statusVal,
             etiqueta: tagSanitizada,
             tag: tagSanitizada,
@@ -469,11 +547,12 @@ export class DatabaseLoaderService {
     if (!rawExcelData || totalPlanilha === 0) {
       throw new Error("A planilha fornecida está vazia ou corrompida.");
     }
+    validateSpreadsheetContract(worksheet);
 
     // Captura o conteúdo real do campo 'filial' (Index 1) da planilha carregada
     let firstFilial = '';
     for (const row of rawExcelData) {
-      const filialVal = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || '')?.trim();
+      const filialVal = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || '')?.trim();
       if (filialVal && filialVal.toLowerCase() !== 'null' && filialVal.toLowerCase() !== 'undefined') {
         firstFilial = filialVal;
         break;
@@ -518,8 +597,8 @@ export class DatabaseLoaderService {
           const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, '_unitid', 'unitid', 'unit_id', 'filial', 'unidade', 'unit') || unitId)?.trim().toUpperCase();
-          const finalTenantId = String(getRowValue(row, '_tenantid', 'tenantid', 'tenant_id', 'empresa') || tenantid)?.trim().toUpperCase();
+          const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();
+          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           const itemDesc = String(getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`)?.trim();
           const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
@@ -573,10 +652,8 @@ export class DatabaseLoaderService {
 
           const assetObj: DexieAsset = {
             id: finalId,
-            tenantId: finalTenantId,
-            _tenantid: finalTenantId,
+            tenantid: finalTenantid,
             filial: finalFilial,
-            _unitid: finalFilial,
             status: statusVal,
             etiqueta: tagSanitizada,
             tag: tagSanitizada,

@@ -12,7 +12,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
@@ -229,12 +229,12 @@ const Inventory: React.FC<InventoryProps> = ({
   const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
   const cleanAndCapitalizeAsset = (rawAsset: Asset): Asset => {
-    const cleanTenantId = String(rawAsset.tenantId || user?.tenantId || 'CICOPAL').trim().toUpperCase();
+    const cleanTenantid = String(rawAsset.tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
     const cleanFilial = String(rawAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
     
-    if (!cleanTenantId || cleanTenantId === 'NULL' || cleanTenantId === 'UNDEFINED' || cleanTenantId === '') {
-      alert("Erro de Governança: tenantId inválido ou não autenticado.");
-      throw new Error("TenantId inválido ou não autenticado para gravação.");
+    if (!cleanTenantid || cleanTenantid === 'NULL' || cleanTenantid === 'UNDEFINED' || cleanTenantid === '') {
+      alert("Erro de Governança: tenantid inválido ou não autenticado.");
+      throw new Error("tenantid inválido ou não autenticado para gravação.");
     }
 
     if (!cleanFilial || cleanFilial === 'NULL' || cleanFilial === 'UNDEFINED' || cleanFilial === '') {
@@ -243,15 +243,15 @@ const Inventory: React.FC<InventoryProps> = ({
     }
 
     const trimmedAsset = { ...rawAsset } as unknown as Record<string, unknown>;
-    delete trimmedAsset._tenantid;
-    delete trimmedAsset.tenant_id;
+    delete trimmedAsset.tenantid;
+    delete trimmedAsset.tenantid;
     delete trimmedAsset.tenantid;
     delete trimmedAsset._unitid;
     delete trimmedAsset.unitid;
 
     return {
       ...trimmedAsset,
-      tenantId: cleanTenantId,
+      tenantid: cleanTenantid,
       filial: cleanFilial
     } as Asset;
   };
@@ -259,9 +259,9 @@ const Inventory: React.FC<InventoryProps> = ({
   // MECANISMO DE PERSISTÊNCIA ESPELHADA (DUPLO GRAVADOR)
   const handleUpdateAssetWithBackup = useCallback(async (cleanAsset: Asset) => {
     try {
-      const activeTenantId = String(cleanAsset.tenantId || user?.tenantId || 'CICOPAL').trim().toUpperCase();
+      const activeTenantid = String(cleanAsset.tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
       const activeFilial = String(cleanAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
-      const backupKey = `gbr_backup_${activeTenantId}_${activeFilial}`;
+      const backupKey = `gbr_backup_${activeTenantid}_${activeFilial}`;
       
       const rawBackup = localStorage.getItem(backupKey);
       let backupArray: Asset[] = [];
@@ -296,9 +296,9 @@ const Inventory: React.FC<InventoryProps> = ({
       if (hasRecoveredRef.current) return;
       hasRecoveredRef.current = true;
       
-      const activeTenantId = String(user?.tenantId || 'CICOPAL').trim().toUpperCase();
+      const activeTenantid = String(user?.tenantid || 'CICOPAL').trim().toUpperCase();
       const activeFilial = String(selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
-      const backupKey = `gbr_backup_${activeTenantId}_${activeFilial}`;
+      const backupKey = `gbr_backup_${activeTenantid}_${activeFilial}`;
       
       const rawBackup = localStorage.getItem(backupKey);
       if (!rawBackup) return;
@@ -609,7 +609,7 @@ const Inventory: React.FC<InventoryProps> = ({
       if (foundAsset) {
         // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
         // Ativo localizado: update atômico usando o serviço de banco local
-        const id = foundAsset.id || foundAsset.primarykey;
+        const id = String(foundAsset.id || foundAsset.primarykey);
         
         await localDb.assets.update(id, {
           _conferido: true,
@@ -625,7 +625,7 @@ const Inventory: React.FC<InventoryProps> = ({
           table_name: 'local_assets',
           record_id: String(id),
           details: `Ativo conferido via scanner: ${extractedEtiqueta}`,
-          tenantId: user?._tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || 'CICOPAL'
         });
 
         setIsHierarchyLoading(false);
@@ -667,7 +667,7 @@ const Inventory: React.FC<InventoryProps> = ({
         table_name: 'local_assets',
         record_id: extractedEtiqueta,
         details: `Ativo divergente isolado via scanner: ${extractedEtiqueta}`,
-        tenantId: user?._tenantid || 'CICOPAL'
+        tenantid: user?.tenantid || 'CICOPAL'
       });
 
       setIsHierarchyLoading(false);
@@ -697,7 +697,7 @@ const Inventory: React.FC<InventoryProps> = ({
           table_name: 'local_assets',
           record_id: term,
           details: `Exception in scan query: ${err instanceof Error ? err.message : String(err)}`,
-          tenantId: user?._tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || 'CICOPAL'
         });
       } catch (innerErr) {
         logger.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);
@@ -970,14 +970,10 @@ const Inventory: React.FC<InventoryProps> = ({
     
     // v24.50: Agora sempre abre o mapa interativo para que o auditor defina a âncora
     // Eliminada a tela vermelha de contingência.
-    if (onNavigate) {
-      onNavigate(AppScreen.UNIT_CONFIGURATOR, { initialUnit: selectedUnit });
+    if (window.pushScreen) {
+      window.pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: selectedUnit });
     } else {
-      logger.error('onNavigate não disponível no Inventory.tsx');
-      // Fallback para pushScreen global se App.tsx injetar
-      if (window.pushScreen) {
-        window.pushScreen(AppScreen.UNIT_CONFIGURATOR, { initialUnit: selectedUnit });
-      }
+      logger.error('pushScreen não disponível no Inventory.tsx');
     }
   };
 
@@ -1149,7 +1145,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
       await handleUpdateAssetWithBackup({ 
         ...asset, 
-        filial: selectedUnit || asset.filial || asset._unitid,
+        filial: selectedUnit || asset.filial || asset._unitid || '',
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
         _localMaster: selectedLocation || asset.ENDERECO
