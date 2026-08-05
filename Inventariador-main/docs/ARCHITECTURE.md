@@ -212,6 +212,20 @@ ausente/vazio. O `tenantid` vem **sempre da planilha** — nunca valor fixo em c
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 
+### 7.6 Schema Supabase (multi-tenant padronizado)
+As **10 tabelas** da nuvem usam a coluna canônica `tenantid` (minúsculo):
+`asset_logs`, `assets`, `audit_logs`, `campaign_snapshots`, `campaigns`,
+`inventory_campaign_snapshots`, `inventory_campaigns`, `inventory_config`,
+`unit_gps_data`, `user_permissions` — e **`filial`** substitui a legada `_unitid`
+(`assets`, `inventory_config`, `unit_gps_data`, `user_permissions`).
+Migrações aplicadas: `scripts/migrate-tenantid-supabase.sql` (rename das variantes
+legadas para `tenantid`) e `scripts/migrate-unitid-supabase.sql` (drop de `_unitid`).
+
+**Interceptor de colunas (`supabaseService.ts` → `mapColumnName`):** na borda do
+Supabase, chaves legadas são mapeadas automaticamente — `_unitid`/`unit_id`/`unitid`
+→ `filial` (em `assets`, `user_permissions`, `inventory_config`) e variantes de
+tenant → `tenantid`. É **read-compat intencional**: não remover nem "corrigir".
+
 ---
 
 ## 8. Mapa de telas — esteira operacional de campo
@@ -288,7 +302,9 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
    `src/`). Helper central `utils/tenantUtils.ts` (`resolveTenantId`, `readLocalTenantId`,
    `readSessionTenantId`) com leitura retroativa das chaves legadas (`tenantId`, `_tenantid`,
    `tenant_id`). Migrações SQL versionadas: `scripts/migrate-tenantid-supabase.sql` e
-   `scripts/migrate-unitid-supabase.sql`. → typecheck limpo + **119/119 testes verdes** (9 suítes).
+   `scripts/migrate-unitid-supabase.sql`. Interceptor `mapColumnName` no
+   `supabaseService` mapeia chaves legadas na borda do Supabase (read-compat
+   intencional — ver §7.6). → typecheck limpo + **119/119 testes verdes** (9 suítes).
 
 ---
 
