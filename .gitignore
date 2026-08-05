@@ -17,3 +17,8 @@ nul
 
 # Windows helper scripts
 create_junction.bat
+
+# Environment files — never commit local config/secrets
+.env
+.env.*
+!*.env.example
