@@ -16,8 +16,8 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Roteamento | React Router (`HashRouter`) — compatível com `file://` no Capacitor |
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
-| Nuvem (desligada) | Supabase (`@supabase/supabase-js`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (8 suítes / 103 testes) — ver §13 |
+| Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
+| Testes | Vitest (9 suítes / 119 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -108,13 +108,13 @@ Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
 ```
 1. MASTER DRIVE (bypass soberano)
    checkMasterDrive('Glaucio@1970','admin') → masterUser
-   ├─ sessionStorage: gbr_admin_scope=GLOBAL_SUPER_ADMIN, tenantId=GBR_SUPER_ADMIN_CORINGA
+   ├─ sessionStorage: gbr_admin_scope=GLOBAL_SUPER_ADMIN, tenantid=GBR_SUPER_ADMIN_CORINGA
    ├─ localStorage: gbr_kardek_history=[LOGIN, DATABASE_MANAGER]
    └─ onLogin(masterUser)  →  pula Dexie/SQLite/Supabase
 
 2. DEXIE LOCAL (offline)
    localAuthenticate(findByEmail=localDb.users.get, username, password)
-   ├─ role MASTER/ADMIN/is_admin → gbr_admin_scope=TENANT_MASTER (+ tenantId)
+   ├─ role MASTER/ADMIN/is_admin → gbr_admin_scope=TENANT_MASTER (+ tenantid)
    └─ senão → OPERATIONAL_AUDITOR
    ├─ sessionStorage: app_current_user
    └─ onLogin(user)
@@ -134,7 +134,7 @@ Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
 | Backup admin (legado) | `admin` | `123456` |
 
 **Escopos de sessão (`sessionStorage`):** `gbr_admin_scope` ∈ `GLOBAL_SUPER_ADMIN` |
-`TENANT_MASTER` | `OPERATIONAL_AUDITOR`; `tenantId`; `app_current_user`; `filial`.
+`TENANT_MASTER` | `OPERATIONAL_AUDITOR`; `tenantid`; `app_current_user`; `filial`.
 
 ---
 
@@ -145,7 +145,7 @@ Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
 | Condição | Rota | Tela |
 |---|---|---|
 | role DEMO | `/dashboard-demo` | DASHBOARD |
-| role MASTER sem tenantId | **erro de consistência** | — |
+| role MASTER sem tenantid | **erro de consistência** | — |
 | base vazia + admin | `/load-database` | **DATABASE_MANAGER** |
 | base vazia + auditor | `/auditor/aguardando-carga` | MODULE_SELECTION |
 | base cheia + admin | `/saas/painel-global` | **MODULE_SELECTION** |
@@ -169,10 +169,10 @@ Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedD
 **Tabelas (v3):**
 | Tabela | Chave/índices |
 |---|---|
-| `local_assets`, `ativos`, `assets` (DexieAsset) | `primarykey, filial, _is_synced, [tenantId+filial]` |
-| `addresses` | `++id, [tenantId+filial], codigo_endereco, setor, bloco, _is_synced` |
+| `local_assets`, `ativos`, `assets` (DexieAsset) | `primarykey, filial, _is_synced, [tenantid+filial]` |
+| `addresses` | `++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced` |
 | `audit_logs` | `id, updated_at` |
-| `campaigns` | `id, tenantId` |
+| `campaigns` | `id, tenantid` |
 | `SYSTEM_CONTEXT` | `key` |
 | `unit_configs` | `id, filial` |
 | `campaign_snapshots` | `id, campaign_id` |
@@ -184,13 +184,20 @@ Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedD
 → grava em **lotes** via `db.transaction('rw', [ativos, assets, local_assets, …])`
 (ACID, com progresso na UI — `DatabaseProgressBar`).
 
+**Contrato do loader (planilha):** o arquivo deve ter **exatamente 21 colunas**, com nomes
+E ordem fixas — `tenantid;filial;status;etiqueta;qt;descricaodoativo;serial;dataaqusic;cnpj;
+nomefornecedor;notafiscal;endereco;registro;subreg;databaixa;contacontabil;primarykey;
+centrodecusto;vlraquisic;sn1_recno;sn3_recno` — `tenantid` obrigatoriamente na **posição 0**.
+A carga é **bloqueada** se o cabeçalho divergir (nome ou posição) ou se `tenantid` estiver
+ausente/vazio. O `tenantid` vem **sempre da planilha** — nunca valor fixo em código.
+
 ### 7.3 Leitura/escrita operacional
 - `localDbService.ts` (`localDb`): `saveLocalAsset`, `bulkSave`, `bulkPut` em chunks,
   `updateAsset`, `getLocationsWithStats(unitId, search)`, `clear`.
 - `getLocationsWithStats` alimenta o `AddressSelector` (endereços indexados — sem table scan).
 - `Inventory.tsx` filtra ativos por endereço/unidade e renderiza virtualizado (Virtuoso).
 - Regras SRE do projeto: manipular dados **só via API Dexie** (proibido SQL raw); isolar por
-  tenant (`[tenantId+filial]`); gravação bloqueada com bateria < 5% (`checkHardwareSafety`).
+  tenant (`[tenantid+filial]`); gravação bloqueada com bateria < 5% (`checkHardwareSafety`).
 
 ### 7.4 Backups físicos / sobrevivência
 | Caminho | Mecanismo |
@@ -228,7 +235,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | `app_screen_params` | localStorage | Params da navegação |
 | `app_current_user` | sessionStorage | Usuário logado (JSON) |
 | `gbr_admin_scope` | sessionStorage | GLOBAL_SUPER_ADMIN / TENANT_MASTER / OPERATIONAL_AUDITOR |
-| `tenantId`, `filial` | sessionStorage | Contexto do tenant/unidade |
+| `tenantid`, `filial` | sessionStorage | Contexto do tenant/unidade (`tenantId` legado lido como fallback via `tenantUtils`) |
 | `current_selected_address` | sessionStorage | Endereço físico selecionado (anchor do inventário) |
 
 ---
@@ -238,13 +245,14 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | Variável | Uso | Obrigatória? |
 |---|---|---|
 | `GEMINI_API_KEY` | Insights AI (`geminiService`) — lida via `process.env` | não (desliga o recurso) |
-| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode (off) | não |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode (`SUPABASE_PLUS`) — schema multi-tenant padronizado | não |
 | `VITE_ADMIN_EMAIL` | Override do e-mail admin (default `semorr@gmail.com`) | não |
 | `APP_URL` / `SHARED_APP_URL` | `vite.config.ts` `define` | não |
 | `VITE_API_URL` | `vercel.json` (deploy) | não |
 
 `DatabaseMode`: `INTERNAL` · `INTERNAL_PLUS` · `SUPABASE` · `SUPABASE_PLUS`.
-Hoje o app roda **INTERNAL** (`isInternalMode=true` → sem rede).
+O app roda **INTERNAL** por padrão (`isInternalMode=true` → sem rede); `SUPABASE_PLUS`
+habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 
 ---
 
@@ -256,8 +264,10 @@ Hoje o app roda **INTERNAL** (`isInternalMode=true` → sem rede).
 3. **Navegação**: confira se a mudança passa por `pushScreen`/`setHistory` e se a URL
    (`screenToPath`) é sincronizada (efeito em `App.tsx`).
 4. **Dados**: use sempre a API Dexie (`localDb`/`sqliteService`) — sem SQL raw; respeite
-   isolamento por tenant; alterações de schema = nova `version(n)` no Dexie.
-5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (103 testes).
+   isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
+   alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
+   `scripts/migrate-*-supabase.sql`.
+5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (119 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
@@ -273,6 +283,12 @@ Hoje o app roda **INTERNAL** (`isInternalMode=true` → sem rede).
 3. **Testes** — devDeps adicionadas (`jsdom`, `@testing-library/react`, `@testing-library/dom`);
    corrigidos `Modal.test.tsx`, `ErrorBoundary.test.tsx`, `useBufferController.test.tsx`
    → **103/103 verdes**.
+4. **Schema multi-tenant padronizado** — coluna canônica **`tenantid`** (minúsculo) em todas
+   as tabelas e **`filial`** substituindo a legada `_unitid` (zero escritas de `_unitid` em
+   `src/`). Helper central `utils/tenantUtils.ts` (`resolveTenantId`, `readLocalTenantId`,
+   `readSessionTenantId`) com leitura retroativa das chaves legadas (`tenantId`, `_tenantid`,
+   `tenant_id`). Migrações SQL versionadas: `scripts/migrate-tenantid-supabase.sql` e
+   `scripts/migrate-unitid-supabase.sql`. → typecheck limpo + **119/119 testes verdes** (9 suítes).
 
 ---
 
@@ -280,7 +296,7 @@ Hoje o app roda **INTERNAL** (`isInternalMode=true` → sem rede).
 
 `npx vitest run` (script `npm test`). Suítes em `src/__tests__/`:
 `Login`, `localAuth`, `masterDrive` (+ integração), `ErrorBoundary`, `Modal`,
-`useBufferController`, `io_buffer` (8 arquivos / 103 testes).
+`useBufferController`, `io_buffer`, `tenantUtils` (9 arquivos / 119 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 
@@ -294,7 +310,8 @@ Hoje o app roda **INTERNAL** (`isInternalMode=true` → sem rede).
   `tsconfig.node.json` com `noEmit` em projeto referenciado (TS6310).
 - `public/logo.png` é placeholder 1×1 — gerar ícones PWA reais.
 - `sessionStorage.clear()` do MASTER DRIVE é agressivo (pode apagar flags de boot).
-- Modo Supabase desligado (`isInternalMode=true`) — decisão pendente de habilitar cloud.
+- Nuvem Supabase **ativa com schema padronizado** (`tenantid` + `filial`) — migrações em
+  `scripts/migrate-*-supabase.sql`; o default do app permanece INTERNAL (sem rede).
 - Fluxo "base vazia": admin cai no Gestor de Base — validar carga de `.db`/Excel.
 
 Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
@@ -303,8 +320,9 @@ Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
 
 **Arquitetura Híbrida aprovada:** Web/PWA mantém **Dexie/IndexedDB**, Android (Capacitor)
 passa a **SQLite nativo** (`@capacitor-community/sqlite`, deps já instalados) e o **Supabase**
-(Postgres) vira o sistema de registro com sync bidirecional — integração já 100% codificada
-em `supabaseService.ts`, desligada por `isInternalMode = true`.
+(Postgres) é o sistema de registro com sync bidirecional — integração em `supabaseService.ts`,
+**schema multi-tenant já padronizado** (`tenantid` + `filial`) com migrações versionadas em
+`scripts/` (ver §12 item 4).
 
 Plano completo em fases (0–5, com garantias anti-perda, riscos e critérios de aceite):
 **→ `docs/MIGRACAO_HIBRIDA.md`** · rastreamento operacional: **GitHub Issue** (nova, vinculada a esta).
