@@ -42,8 +42,10 @@ export interface ProvisionResult {
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 // GBR FORCE LOCAL DEVELOPMENT - SUPABASE DISABLED PER ORIENTATION
-// ATENÇÃO: manter `true` até a Fase 2 do MIGRACAO_HIBRIDA (sweep tenantid no código concluído).
-// Com o banco já migrado para `tenantid`, o sync atual ainda escreve `_tenantid` e quebraria.
+// Modo INTERNAL por padrão (sem rede). `SUPABASE_PLUS` habilita a nuvem com o schema
+// multi-tenant padronizado (`tenantid` + `filial`) — ver docs/ARCHITECTURE.md §10/§14.
+// Credenciais NUNCA hard-codadas no código-fonte: lidas de VITE_SUPABASE_URL /
+// VITE_SUPABASE_ANON_KEY (API Keys / env).
 export const isInternalMode = true;
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
