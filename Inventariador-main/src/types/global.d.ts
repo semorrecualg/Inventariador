@@ -8,6 +8,9 @@ declare module 'lucide-react/dist/esm/icons/*' {
 // Declaração global para isAdminEmail usado em supabaseService
 declare global {
   function isAdminEmail(email: string): boolean;
+  interface Window {
+    pushScreen?: (s: import('../types').AppScreen, params?: import('../types').NavigationParams) => void;
+  }
 }
 
 export {};

@@ -1,4 +1,3 @@
-import { lazy, ComponentType } from 'react';
 import { AppScreen } from '../types';
 
 /**

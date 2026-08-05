@@ -11,6 +11,7 @@ import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
 import pkg from '../../package.json';
 import { logger } from '../utils/logger';
+import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -105,7 +106,7 @@ const Login: React.FC<LoginProps> = ({
             user_email: localUser.email,
             action: 'LOGIN',
             details: 'Login efetuado via Biometria (Local)',
-            tenantId: localUser.tenantId
+            tenantid: localUser.tenantid
           });
 
           onLogin(localUser);
@@ -247,7 +248,7 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.clear();
 
         sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
-        sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
+        sessionStorage.setItem('tenantid', 'GBR_SUPER_ADMIN_CORINGA');
 
         // Usando DATABASE_MANAGER (AppScreen.LOAD_DATABASE nao existe no enum)
         localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
@@ -261,7 +262,7 @@ const Login: React.FC<LoginProps> = ({
       // 2. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
       // =======================================================
       const dexieAuthResult = await localAuthenticate(
-        (criteria) => localDb.users.get(criteria),
+        (criteria) => localDb.users.get(criteria) as unknown as Promise<Record<string, unknown> | null | undefined>,
         username,
         password,
       );
@@ -271,19 +272,19 @@ const Login: React.FC<LoginProps> = ({
 
         const localUser = dexieAuthResult.user as {
           role?: string;
-          tenantId?: string;
+          tenantid?: string;
           is_admin?: boolean;
           isAdmin?: boolean;
         };
 
         const userRole = (localUser.role || '').toString().toUpperCase();
         if (userRole === 'MASTER' || userRole === 'ADMIN' || localUser.is_admin || localUser.isAdmin) {
-          if (!localUser.tenantId) throw new Error('Perfil MASTER sem tenantId vinculado no Supabase.');
+          if (!localUser.tenantid) throw new Error('Perfil MASTER sem tenantid vinculado no Supabase.');
           sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
-          sessionStorage.setItem('tenantId', localUser.tenantId);
+          sessionStorage.setItem('tenantid', localUser.tenantid);
         } else {
           sessionStorage.setItem('gbr_admin_scope', 'OPERATIONAL_AUDITOR');
-          if (localUser.tenantId) sessionStorage.setItem('tenantId', localUser.tenantId);
+          if (localUser.tenantid) sessionStorage.setItem('tenantid', localUser.tenantid);
         }
 
         sessionStorage.setItem('app_current_user', JSON.stringify(dexieAuthResult.user));
@@ -331,7 +332,7 @@ const Login: React.FC<LoginProps> = ({
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
             if (isAdminEmail(loggedUser.email)) {
-              loggedUser.tenantId = 'DEMO_DEFAULT';
+              loggedUser.tenantid = 'DEMO_DEFAULT';
             }
           } else if (normalizedUsername === 'admin' && password === '123456') {
             loggedUser = {
@@ -342,7 +343,7 @@ const Login: React.FC<LoginProps> = ({
               is_admin: true,
               isAdmin: true,
               mustChangePassword: false,
-              tenantId: 'DEMO_DEFAULT',
+              tenantid: 'DEMO_DEFAULT',
               filial: ''
             };
           } else {
@@ -359,7 +360,7 @@ const Login: React.FC<LoginProps> = ({
                 is_admin: true,
                 isAdmin: true,
                 mustChangePassword: false,
-                tenantId: 'DEMO_DEFAULT',
+                tenantid: 'DEMO_DEFAULT',
                 filial: ''
               };
             }
@@ -372,7 +373,7 @@ const Login: React.FC<LoginProps> = ({
             user_email: loggedUser.email,
             action: 'LOGIN',
             details: `Login efetuado via Barreira Local Offline (SQLite Isolado)`,
-            tenantId: loggedUser.tenantId
+            tenantid: loggedUser.tenantid
           });
 
           onLogin(loggedUser);
@@ -494,7 +495,7 @@ const Login: React.FC<LoginProps> = ({
                 username: authData.user.email?.split('@')[0],
                 role: is_master ? 'ADMIN' : 'AUDITOR',
                 is_admin: is_master,
-                tenantId: is_master ? 'CICOPAL' : '',
+                tenantid: is_master ? 'CICOPAL' : '',
                 filial: is_master ? '' : ''
               } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             });
@@ -516,12 +517,12 @@ const Login: React.FC<LoginProps> = ({
           const is_master = (isAdminEmail(cloudUser.email));
           const is_admin = cloudUser.is_admin || cloudUser.isAdmin || cloudUser.role === 'ADMIN' || cloudUser.role === 'MASTER' || is_master;
 
-          let tenantId = normalizeValue(cloudUser.tenantId || cloudUser._tenantid || cloudUser.tenantid || '');
+          let tenantid = normalizeValue(cloudUser.tenantid || cloudUser.tenantid || cloudUser.tenantid || '');
           let unitId = normalizeValue(cloudUser.filial || cloudUser._unitid || cloudUser.unitid || '');
 
           if (is_master) {
-            const storedTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'CICOPAL';
-            tenantId = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+            const storedTenant = readSessionTenantId() || readLocalTenantId() || 'CICOPAL';
+            tenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
             unitId = 'TODAS';
           }
 
@@ -533,12 +534,12 @@ const Login: React.FC<LoginProps> = ({
             is_admin: is_admin,
             isAdmin: is_admin,
             mustChangePassword: false,
-            tenantId: tenantId,
+            tenantid: tenantid,
             filial: unitId
           };
 
-          if (!tenantId && !is_master) {
-            logger.warn('[Login] Bloqueando login pois tenantId está nulo ou vazio no perfil.');
+          if (!tenantid && !is_master) {
+            logger.warn('[Login] Bloqueando login pois tenantid está nulo ou vazio no perfil.');
             if (supabase) {
               await supabase.auth.signOut();
             }
@@ -554,7 +555,7 @@ const Login: React.FC<LoginProps> = ({
               email: loggedUser.email,
               role: loggedUser.role,
               is_admin: loggedUser.is_admin ? 1 : 0,
-              tenantId: loggedUser.tenantId,
+              tenantid: loggedUser.tenantid,
               filial: loggedUser.filial
             };
             logger.info('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
@@ -617,8 +618,8 @@ const Login: React.FC<LoginProps> = ({
         logAuditEvent({
           user_email: loggedUser.email,
           action: 'LOGIN',
-          details: `Login efetuado via ${databaseMode === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno (Isolado)'}`,
-          tenantId: loggedUser.tenantId
+          details: `Login efetuado via ${(databaseMode as DatabaseMode) === DatabaseMode.SUPABASE ? 'Nuvem' : 'Banco Interno (Isolado)'}`,
+          tenantid: loggedUser.tenantid
         });
 
         onLogin(loggedUser);

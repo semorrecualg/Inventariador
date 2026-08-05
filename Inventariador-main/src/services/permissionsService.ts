@@ -49,7 +49,7 @@ export const requestAllPermissions = async (): Promise<boolean> => {
     const allGranted = (
       cameraStatus.camera === 'granted' && 
       geoStatus.location === 'granted' &&
-      (fsStatus.publicStorage === 'granted' || fsStatus.external === 'granted')
+      (fsStatus.publicStorage === 'granted')
     );
 
     logger.info('>>> [Permissions] Conclusão do request nativo:', { allGranted });

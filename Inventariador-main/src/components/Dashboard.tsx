@@ -4,6 +4,7 @@ import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
+import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, 
@@ -154,10 +155,10 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
   // Se o array assets (memoria) estiver vazio, busca direto do db.ativos
   useEffect(() => {
     if (!assets || assets.length === 0) {
-      const tenantId = sessionStorage.getItem('tenantId') || 'DEMO_DEFAULT';
+      const tenantid = readSessionTenantId() || 'DEMO_DEFAULT';
       const filial = selectedUnit || sessionStorage.getItem('filial') || '';
       logger.info('[DASHBOARD_DEXIE] Assets em memoria vazio. Consultando db.ativos diretamente...');
-      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+      db.ativos.where('[tenantid+filial]').equals([tenantid, filial]).toArray()
         .then((rows) => {
           logger.info(`[DASHBOARD_DEXIE] ${rows.length} ativos carregados do IndexedDB.`);
           setDexieAssets(rows as unknown as Asset[]);
@@ -380,7 +381,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       const wsData = filtered.map(a => {
         const res: { [key: string]: string | number | boolean | null | undefined } = {
-          'TENANT': a._tenantid || user?.tenantId || user?.tenantid || '',
+          'TENANT': a.tenantid || user?.tenantid || user?.tenantid || '',
           'UNIDADE': a._unitid || user?.unitid || '',
         };
 
@@ -445,7 +446,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           <BackButton 
             onClick={onBack} 
             label="Dashboard" 
-            subLabel={selectedUnit || localStorage.getItem('filial') || sessionStorage.getItem('filial') || user?.unitid || user?.tenantId || user?.tenantid || 'Sem Unidade'} 
+            subLabel={selectedUnit || localStorage.getItem('filial') || sessionStorage.getItem('filial') || user?.unitid || user?.tenantid || user?.tenantid || 'Sem Unidade'} 
           />
           {currentCampaignId && (
             <div className="flex items-center space-x-1 bg-accent/10 px-2 py-1 rounded-lg border border-accent/20">

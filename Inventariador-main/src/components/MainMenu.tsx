@@ -92,6 +92,7 @@ interface MainMenuProps {
   syncQueueLength?: number;
   unsyncedAssetsCount?: number;
   deletedAssetsCount?: number;
+  impairmentAssetsCount?: number;
   excludedAccounts?: string[];
   onUpdateExcludedAccounts?: (accounts: string[]) => void;
   onResetGPS?: () => void;
@@ -229,12 +230,12 @@ const MainMenu: React.FC<MainMenuProps> = ({
   };
 
   // 1. EXTRAÇÃO DEFENSIVA SEM CRASH DE RUNTIME
-  const extractTenantId = (): string | null => {
-    const tid = user?.tenantId;
+  const extractTenantid = (): string | null => {
+    const tid = user?.tenantid;
     if (!tid) {
       showModal(
         "Erro de Segurança", 
-        "Contrato (tenantId) não identificado no perfil do usuário logado. Contate o Administrador do sistema.", 
+        "Contrato (tenantid) não identificado no perfil do usuário logado. Contate o Administrador do sistema.", 
         "error"
       );
       return null; // Interrompe sem disparar exceção fatal ('throw') que derruba a UI
@@ -246,11 +247,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const handleModuleNavigation = (targetScreen: AppScreen) => {
     try {
       if (selectedUnit) {
-        const validatedTenant = extractTenantId();
+        const validatedTenant = extractTenantid();
         if (!validatedTenant) return; // Bloqueio controlado e seguro
 
-        sessionStorage.setItem('tenantId', validatedTenant);
-        localStorage.setItem('tenantId', validatedTenant);
+        sessionStorage.setItem('tenantid', validatedTenant);
+        localStorage.setItem('tenantid', validatedTenant);
         sessionStorage.setItem('filial', selectedUnit);
         localStorage.setItem('filial', selectedUnit);
         onNavigate(targetScreen);
@@ -280,7 +281,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
       setIsCheckingIntegrity(true); // Bloqueia concorrência de cliques imediatamente
 
-      await sqliteService.mapLocalFolder();
 
       const randomSeed = Math.random().toString(36).substring(2, 10).toUpperCase();
       const count = await sqliteService.getAssetCount();
@@ -335,7 +335,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               if (onLogout) {
                 onLogout();
               } else {
-                onNavigate(AppScreen.LOAD_DATABASE);
+                onNavigate(AppScreen.DATABASE_MANAGER);
               }
             }}
             className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-500 active:scale-90 transition-all hover:bg-slate-100 mr-1"
@@ -903,7 +903,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <button 
                     onClick={() => {
                       if (Capacitor.isNativePlatform()) {
-                        sqliteService.downloadDatabase();
+                        logger.warn('>>> [MainMenu] downloadDatabase indisponível no Capacitor nativo (método removido).');
                       } else {
                         import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission());
                       }
@@ -1125,7 +1125,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 onClick={async () => { 
                   const proceed = window.confirm("ATENÇÃO: Esta ação fará um HARD RESET no cache do navegador (LocalStorage, IndexedDB e Sessões). Todos os arquivos vinculados serão esquecidos. Deseja continuar?");
                   if (proceed) {
-                    await sqliteService.purgeAllCache();
                     window.location.reload();
                   }
                 }} 

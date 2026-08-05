@@ -10,14 +10,14 @@ import { logger } from '../utils/logger';
 
 interface AssetMapProps {
   assets: Asset[];
-  tenantId?: string;
+  tenantid?: string;
   filial?: string;
   onBack: () => void;
   databaseMode: DatabaseMode;
   onSelectLocation?: (location: string) => void;
 }
 
-const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantId, filial }) => {
+const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantid, filial }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<maplibregl.Map | null>(null);
   
@@ -34,9 +34,9 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const [isDexieLoading, setIsDexieLoading] = useState(false);
   
   useEffect(() => {
-    if (assets.length === 0 && tenantId && filial) {
+    if (assets.length === 0 && tenantid && filial) {
       setIsDexieLoading(true);
-      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+      db.ativos.where('[tenantid+filial]').equals([tenantid, filial]).toArray()
         .then((result) => { setDexieAssets(result as unknown as Asset[]); })
         .catch(() => { /* fallback silencioso */ })
         .finally(() => setIsDexieLoading(false));
@@ -44,7 +44,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
       if (dexieAssets.length > 0) setDexieAssets([]);
       setIsDexieLoading(false);
     }
-  }, [assets, tenantId, filial]);
+  }, [assets, tenantid, filial]);
   
   const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
 
@@ -95,11 +95,76 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     }
   };
 
-  useEffect(() => {
-    if (mapReady) {
-      renderMapData();
+
+
+
+
+
+
+  const filteredAssets = useMemo(() => {
+    // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
+    let filtered = sourceAssets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    
+    // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
+    // Porém para cálculos de BI e grid aqui, ainda filtramos
+    filtered = filtered.filter(a => (a._id_andar || 0) === selectedFloor);
+    
+    if (selectedOrigin !== 'ALL') {
+      filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
     }
-  }, [mapReady, heatmapMode, geojsonAssets, geojsonArea, geojsonGrid]);
+    if (selectedLocation !== 'ALL') {
+      filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
+    }
+
+    return filtered;
+  }, [sourceAssets, selectedOrigin, selectedLocation, selectedFloor]);
+
+  const gridData = useMemo(() => {
+    if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
+
+    const validAssets = filteredAssets.filter(a => a.latitude && a.longitude);
+    if (validAssets.length === 0) return [];
+
+    // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
+    // 0.0002 graus é aproximadamente 20 metros
+    const cellSizeDegrees = 0.0002;
+    const bins: Record<string, { count: number, value: number, assets: Asset[], lat: number, lng: number }> = {};
+
+    validAssets.forEach(a => {
+      const latBin = Math.floor(a.latitude! / cellSizeDegrees) * cellSizeDegrees;
+      const lngBin = Math.floor(a.longitude! / cellSizeDegrees) * cellSizeDegrees;
+      const key = `${latBin.toFixed(6)}|${lngBin.toFixed(6)}`;
+
+      if (!bins[key]) {
+        bins[key] = { count: 0, value: 0, assets: [], lat: latBin, lng: lngBin };
+      }
+      
+      const bin = bins[key];
+      bin.count++;
+      bin.assets.push(a);
+      
+      const val = typeof a.VLRAQUISIC === 'string' 
+        ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
+        : (Number(a.VLRAQUISIC) || 0);
+      bin.value += (val || 0);
+    });
+
+    return Object.values(bins).map(bin => ({
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[
+          [bin.lng, bin.lat],
+          [bin.lng + cellSizeDegrees, bin.lat],
+          [bin.lng + cellSizeDegrees, bin.lat + cellSizeDegrees],
+          [bin.lng, bin.lat + cellSizeDegrees],
+          [bin.lng, bin.lat]
+        ]]
+      },
+      count: bin.count,
+      value: bin.value,
+      assets: bin.assets
+    }));
+  }, [filteredAssets, heatmapMode]);
 
   const geojsonAssets = useMemo(() => {
     // GBR v25: Delegação para GPU. Enviamos todos os ativos (leves) e deixamos o shader filtrar.
@@ -165,7 +230,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
       })
       .filter(f => f !== null);
 
-    return { type: 'FeatureCollection', features: features as maplibregl.GeoJSONFeature[] };
+    return { type: 'FeatureCollection', features: features as unknown as maplibregl.GeoJSONFeature[] };
   }, [filteredAssets, selectedFloor]);
 
   const geojsonGrid = useMemo(() => {
@@ -185,6 +250,14 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     };
   }, [gridData, heatmapMode]);
 
+
+
+  useEffect(() => {
+    if (mapReady) {
+      renderMapData();
+    }
+  }, [mapReady, heatmapMode, geojsonAssets, geojsonArea, geojsonGrid]);
+
   const renderMapData = () => {
     if (!mapInstance.current || !mapReady) return;
     const map = mapInstance.current;
@@ -192,21 +265,21 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     try {
       // 1. Gerenciar Fontes (Sources)
       if (map.getSource('assets-source')) {
-        (map.getSource('assets-source') as maplibregl.GeoJSONSource).setData(geojsonAssets as maplibregl.GeoJSONFeatureSelection);
+        (map.getSource('assets-source') as maplibregl.GeoJSONSource).setData(geojsonAssets as unknown as maplibregl.GeoJSONSourceSpecification['data']);
       } else {
-        map.addSource('assets-source', { type: 'geojson', data: geojsonAssets as maplibregl.GeoJSONFeatureSelection });
+        map.addSource('assets-source', { type: 'geojson', data: geojsonAssets as unknown as maplibregl.GeoJSONSourceSpecification['data'] });
       }
 
       if (map.getSource('area-source')) {
-        (map.getSource('area-source') as maplibregl.GeoJSONSource).setData(geojsonArea as maplibregl.GeoJSONFeatureSelection);
+        (map.getSource('area-source') as maplibregl.GeoJSONSource).setData(geojsonArea as unknown as maplibregl.GeoJSONSourceSpecification['data']);
       } else {
-        map.addSource('area-source', { type: 'geojson', data: geojsonArea as maplibregl.GeoJSONFeatureSelection });
+        map.addSource('area-source', { type: 'geojson', data: geojsonArea as unknown as maplibregl.GeoJSONSourceSpecification['data'] });
       }
 
       if (map.getSource('grid-source')) {
-        (map.getSource('grid-source') as maplibregl.GeoJSONSource).setData(geojsonGrid as maplibregl.GeoJSONFeatureSelection);
+        (map.getSource('grid-source') as maplibregl.GeoJSONSource).setData(geojsonGrid as unknown as maplibregl.GeoJSONSourceSpecification['data']);
       } else {
-        map.addSource('grid-source', { type: 'geojson', data: geojsonGrid as maplibregl.GeoJSONFeatureSelection });
+        map.addSource('grid-source', { type: 'geojson', data: geojsonGrid as unknown as maplibregl.GeoJSONSourceSpecification['data'] });
       }
 
       // 2. Gerenciar Camada de Perímetros (Retalhos de Auditoria - BASE)
@@ -237,7 +310,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
           ['==', ['get', 'id_andar'], selectedFloor],
           selectedOrigin !== 'ALL' ? ['==', ['get', 'origin'], selectedOrigin] : true,
           selectedLocation !== 'ALL' ? ['==', ['get', 'location'], selectedLocation] : true
-        ].filter(f => f !== true) as maplibregl.FilterSpecification;
+        ] as maplibregl.FilterSpecification;
 
         if (!map.getLayer('heatmap-layer')) {
           map.addLayer({
@@ -274,7 +347,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
         const gpuFilter: maplibregl.FilterSpecification = [
           'all',
           ['==', ['get', 'id_andar'], selectedFloor]
-        ].filter(f => f !== true) as maplibregl.FilterSpecification;
+        ] as maplibregl.FilterSpecification;
 
         if (!map.getLayer('grid-layer')) {
           const maxCount = gridData.length > 0 ? Math.max(1, ...gridData.map(c => c.count)) : 1;
@@ -349,23 +422,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     return Array.from(floors).sort((a, b) => b - a); // Ordem decrescente (topo para base)
   }, [sourceAssets]);
 
-  const filteredAssets = useMemo(() => {
-    // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
-    let filtered = sourceAssets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
-    
-    // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
-    // Porém para cálculos de BI e grid aqui, ainda filtramos
-    filtered = filtered.filter(a => (a._id_andar || 0) === selectedFloor);
-    
-    if (selectedOrigin !== 'ALL') {
-      filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
-    }
-    if (selectedLocation !== 'ALL') {
-      filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
-    }
 
-    return filtered;
-  }, [sourceAssets, selectedOrigin, selectedLocation, selectedFloor]);
 
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -382,52 +439,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     };
   }, []);
 
-  const gridData = useMemo(() => {
-    if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
 
-    const validAssets = filteredAssets.filter(a => a.latitude && a.longitude);
-    if (validAssets.length === 0) return [];
-
-    // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
-    // 0.0002 graus é aproximadamente 20 metros
-    const cellSizeDegrees = 0.0002;
-    const bins: Record<string, { count: number, value: number, assets: Asset[], lat: number, lng: number }> = {};
-
-    validAssets.forEach(a => {
-      const latBin = Math.floor(a.latitude! / cellSizeDegrees) * cellSizeDegrees;
-      const lngBin = Math.floor(a.longitude! / cellSizeDegrees) * cellSizeDegrees;
-      const key = `${latBin.toFixed(6)}|${lngBin.toFixed(6)}`;
-
-      if (!bins[key]) {
-        bins[key] = { count: 0, value: 0, assets: [], lat: latBin, lng: lngBin };
-      }
-      
-      const bin = bins[key];
-      bin.count++;
-      bin.assets.push(a);
-      
-      const val = typeof a.VLRAQUISIC === 'string' 
-        ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-        : (Number(a.VLRAQUISIC) || 0);
-      bin.value += (val || 0);
-    });
-
-    return Object.values(bins).map(bin => ({
-      geometry: {
-        type: 'Polygon',
-        coordinates: [[
-          [bin.lng, bin.lat],
-          [bin.lng + cellSizeDegrees, bin.lat],
-          [bin.lng + cellSizeDegrees, bin.lat + cellSizeDegrees],
-          [bin.lng, bin.lat + cellSizeDegrees],
-          [bin.lng, bin.lat]
-        ]]
-      },
-      count: bin.count,
-      value: bin.value,
-      assets: bin.assets
-    }));
-  }, [filteredAssets, heatmapMode]);
 
   const totalValue = useMemo(() => {
     return filteredAssets.reduce((acc, a) => {

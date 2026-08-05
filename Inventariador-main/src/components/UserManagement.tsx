@@ -80,7 +80,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [newTenantId, setNewTenantId] = useState(currentUser?._tenantid || currentUser?.tenantid || '');
+  const [newTenantid, setNewTenantid] = useState(currentUser?.tenantid || '');
   const [newUnits, setNewUnits] = useState<string[]>(
     (currentUser?._unitid || currentUser?.unitid) && (currentUser?._unitid || currentUser?.unitid)?.toUpperCase() !== 'DEFAULT' 
       ? [currentUser?._unitid || currentUser?.unitid || ''] 
@@ -92,27 +92,27 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
   React.useEffect(() => {
     if (currentUser) {
-      const currentTenant = currentUser._tenantid || currentUser.tenantid;
+      const currentTenant = currentUser.tenantid || currentUser.tenantid;
       const currentUnit = currentUser._unitid || currentUser.unitid;
       
-      if (currentTenant && !newTenantId) {
-        setNewTenantId(currentTenant);
+      if (currentTenant && !newTenantid) {
+        setNewTenantid(currentTenant);
       }
       if (currentUnit && currentUnit.toUpperCase() !== 'DEFAULT' && newUnits.length === 0) {
         setNewUnits([currentUnit]);
       }
     }
-  }, [currentUser, newTenantId, newUnits.length]);
+  }, [currentUser, newTenantid, newUnits.length]);
 
-  // Fallback: Se o tenantId estiver vazio, tenta inferir do unitsByTenant se houver apenas um
+  // Fallback: Se o tenantid estiver vazio, tenta inferir do unitsByTenant se houver apenas um
   React.useEffect(() => {
-    if (!newTenantId && unitsByTenant.size > 0) {
-      const tenants = Array.from(unitsByTenant.keys());
-      if (tenants.length === 1) {
-        setNewTenantId(tenants[0]);
+    if (!newTenantid && unitsByTenant.size > 0) {
+      const tenantKeys = Array.from(unitsByTenant.keys());
+      if (tenantKeys.length === 1) {
+        setNewTenantid(tenantKeys[0]);
       }
     }
-  }, [newTenantId, unitsByTenant]);
+  }, [newTenantid, unitsByTenant]);
 
   // States para Edição
   const [editUsername, setEditUsername] = useState('');
@@ -120,7 +120,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState<UserRole>(UserRole.AUDITOR);
-  const [editTenantId, setEditTenantId] = useState('');
+  const [editTenantid, setEditTenantid] = useState('');
   const [editUnits, setEditUnits] = useState<string[]>([]);
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
@@ -149,9 +149,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           password, 
           username, 
           newRole, 
-          newTenantId, 
-          newUnits, 
-          newName.trim(),
+          newTenantid, 
+                    newName.trim(),
           newUnits[0] || (currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' ? currentUser.unitid : ''),
           newUnits
         );
@@ -183,7 +182,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return arr.map(v => String(v)).filter(v => normalizeValue(v) !== '');
     };
 
-    const normTenantId = normalizeValue(newTenantId);
+    const normTenantid = normalizeValue(newTenantid);
     const normUnitId = normalizeValue(newUnits[0] || (currentUser?.unitid ? currentUser.unitid : ''));
     const normUnits = normalizeArray(newUnits.length > 0 ? newUnits : (currentUser?.unitid ? [currentUser.unitid] : []));
 
@@ -196,12 +195,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
       mustChangePassword: true,
-      _tenantid: normTenantId,
-      _unitid: normUnitId,
-      tenantid: normTenantId,
+      tenantid: normTenantid,
+      filial: normUnitId,
       unitid: normUnitId,
-      units: normUnits,
-      tenants: [normTenantId] // Compatibilidade
+      units: normUnits
     };
 
     setUsers(prev => {
@@ -231,8 +228,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditEmail(user.email);
     setEditPassword(''); // Senha vazia por padrão ao editar para não sobrescrever se não for alterada
     setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
-    setEditTenantId(user.tenantid || '');
-    const currentUnits = user.units || (Array.isArray(user.tenants) ? user.tenants : user.tenants ? [user.tenants] : (user.unitid ? [user.unitid] : []));
+    setEditTenantid(user.tenantid || '');
+    const currentUnits = user.units || (user.unitid ? [user.unitid] : []);
     setEditUnits(currentUnits);
     setIsEditModalOpen(true);
   };
@@ -262,9 +259,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
         editPassword, 
         editUsername, 
         editRole, 
-        editTenantId, 
-        editUnits, 
-        editName.trim(),
+        editTenantid, 
+                editName.trim(),
         editUnits[0] || (selectedUser.unitid && selectedUser.unitid.toUpperCase() !== 'DEFAULT' ? selectedUser.unitid : ''),
         editUnits
       );
@@ -318,7 +314,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     };
 
     const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || isAdminEmail(email);
-    const normTenantId = normalizeValue(editTenantId);
+    const normTenantid = normalizeValue(editTenantid);
     const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
     const normUnits = normalizeArray(editUnits);
 
@@ -331,10 +327,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       role: editRole, 
       is_admin, 
       isAdmin: is_admin, 
-      tenantid: normTenantId,
+      tenantid: normTenantid,
       unitid: normUnitId,
-      units: normUnits,
-      tenants: [normTenantId]
+      units: normUnits
     };
 
     setUsers(prev => {
@@ -427,7 +422,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             if (isAdminEmail(currentUser?.email) || currentUser?.role === UserRole.ADMIN) return true;
             // Master vê apenas usuários do seu tenant
             if (currentUser?.role === UserRole.MASTER) {
-              return u.tenantid === currentUser.tenantid || (u.tenants && u.tenants.includes(currentUser.tenantid || ''));
+              return u.tenantid === currentUser.tenantid;
             }
             // Outros papéis não devem ver nada (ou apenas a si mesmos)
             return u.email === currentUser?.email;
@@ -463,8 +458,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       <span className="text-[9px] font-bold text-accent uppercase tracking-widest">Unidades:</span>
                       {(u.units && u.units.length > 0 
                         ? u.units.filter(unit => unit.toUpperCase() !== 'DEFAULT') 
-                        : (Array.isArray(u.tenants) && u.tenants.length > 0)
-                          ? u.tenants 
+                        : (Array.isArray(u.tenantid) && u.tenantid.length > 0)
+                          ? u.tenantid 
                           : [u.unitid && u.unitid.toUpperCase() !== 'DEFAULT' ? u.unitid : 'GLOBAL']
                       ).filter(Boolean).map((t: string) => (
                         <span key={t} className="text-[9px] font-black text-ink uppercase tracking-widest bg-bg-main px-2 py-0.5 rounded-md border border-border">{t}</span>
@@ -519,7 +514,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   <input 
                     type="text" 
                     readOnly 
-                    value={editTenantId} 
+                    value={editTenantid} 
                     className="w-full px-6 py-4 bg-slate-50 rounded-3xl border border-border text-slate-500 font-bold text-sm outline-none cursor-not-allowed" 
                   />
                   <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
@@ -530,7 +525,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
                 <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {Array.from(unitsByTenant.get(editTenantId.toUpperCase()) || new Set<string>())
+                  {Array.from(unitsByTenant.get(editTenantid.toUpperCase()) || new Set<string>())
                     .map((unit: string) => {
                       const isSelected = editUnits.includes(unit);
                       return (
@@ -553,7 +548,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       );
                     })
                   }
-                  {(!unitsByTenant.get(editTenantId.toUpperCase()) || unitsByTenant.get(editTenantId.toUpperCase())?.size === 0) && (
+                  {(!unitsByTenant.get(editTenantid.toUpperCase()) || unitsByTenant.get(editTenantid.toUpperCase())?.size === 0) && (
                     <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada</p>
                   )}
                 </div>
@@ -726,8 +721,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   <input 
                     type="text" 
                     readOnly={!!currentUser?.tenantid && currentUser.tenantid !== ''} 
-                    value={newTenantId} 
-                    onChange={(e) => setNewTenantId(e.target.value.toUpperCase())}
+                    value={newTenantid} 
+                    onChange={(e) => setNewTenantid(e.target.value.toUpperCase())}
                     placeholder="EX: CICOPAL"
                     className={`w-full px-6 py-4 rounded-3xl border border-border font-bold text-sm outline-none transition-all ${(!currentUser?.tenantid) ? 'bg-bg-main focus:border-accent focus:bg-white' : 'bg-slate-50 text-slate-500 cursor-not-allowed'}`} 
                   />
@@ -743,9 +738,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
                 <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {newTenantId ? (
+                  {newTenantid ? (
                     <>
-                      {Array.from(unitsByTenant.get(newTenantId.toUpperCase()) || new Set<string>())
+                      {Array.from(unitsByTenant.get(newTenantid.toUpperCase()) || new Set<string>())
                         .map((unit: string) => {
                           const isSelected = newUnits.includes(unit);
                           return (
@@ -768,8 +763,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                           );
                         })
                       }
-                      {(!unitsByTenant.get(newTenantId.toUpperCase()) || unitsByTenant.get(newTenantId.toUpperCase())?.size === 0) && (
-                        <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada para {newTenantId}</p>
+                      {(!unitsByTenant.get(newTenantid.toUpperCase()) || unitsByTenant.get(newTenantid.toUpperCase())?.size === 0) && (
+                        <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada para {newTenantid}</p>
                       )}
                     </>
                   ) : (

@@ -4,7 +4,7 @@ import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
-import { formatDateBR, formatCurrency } from '../utils/formatUtils';
+import { formatDateBR, formatCurrency, parseAssetDate } from '../utils/formatUtils';
 import { 
   Search, 
   AlertCircle,
@@ -20,11 +20,10 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { db } from '../services/sqliteService';
 import pkg from '../../package.json';
-import { logger } from '../utils/logger';
 
 interface ConsultationProps {
   assets: Asset[];
-  tenantId?: string;
+  tenantid?: string;
   filial?: string;
   onBack: () => void;
   onSelectAsset: (asset: Asset) => void;
@@ -106,7 +105,7 @@ const NumericKeypad = ({
 
 const Consultation: React.FC<ConsultationProps> = ({ 
   assets, 
-  tenantId,
+  tenantid,
   filial,
   onBack, 
   onSelectAsset, 
@@ -126,9 +125,9 @@ const Consultation: React.FC<ConsultationProps> = ({
   const [isDexieLoading, setIsDexieLoading] = useState(false);
   
   useEffect(() => {
-    if (assets.length === 0 && tenantId && filial) {
+    if (assets.length === 0 && tenantid && filial) {
       setIsDexieLoading(true);
-      db.ativos.where('[tenantId+filial]').equals([tenantId, filial]).toArray()
+      db.ativos.where('[tenantid+filial]').equals([tenantid, filial]).toArray()
         .then((result) => { setDexieAssets(result as unknown as Asset[]); })
         .catch(() => { /* fallback silencioso */ })
         .finally(() => setIsDexieLoading(false));
@@ -136,7 +135,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       if (dexieAssets.length > 0) setDexieAssets([]);
       setIsDexieLoading(false);
     }
-  }, [assets, tenantId, filial]);
+  }, [assets, tenantid, filial]);
   
   const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -388,7 +387,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             components={{
               Footer: () => <div className="h-32" />
             }}
-            scrolledToTopChange={(isAtTop) => setShowScrollTop(!isAtTop)}
+            atTopStateChange={(isAtTop) => setShowScrollTop(!isAtTop)}
             itemContent={(index, asset) => (
               <div className="px-6 py-2">
                 <AssetListItem 

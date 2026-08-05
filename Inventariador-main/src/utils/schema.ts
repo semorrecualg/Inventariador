@@ -137,7 +137,7 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   const originalAsset = asset as Record<string, unknown>;
   
   // UNIFIED SIGNATURE ASSIGNMENTS:
-  const tenantId = (
+  const tenantid = (
     originalAsset.tenantId ||
     originalAsset._tenantid ||
     originalAsset.GRUPO_EMPRESARIAL ||
@@ -262,7 +262,7 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   const sn3_recno = asset.sn3_recno !== undefined ? Number(asset.sn3_recno) : (asset.Sn3_recno !== undefined ? Number(asset.Sn3_recno) : null);
 
   // Extend asset object with target property mappings (mutates)
-  asset.tenantId = tenantId;
+  asset.tenantid = tenantid;
   asset.filial = filial;
   asset.status = status;
   asset.etiqueta = etiqueta;
@@ -285,8 +285,7 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   asset.sn3_recno = sn3_recno;
 
   // Sync fallbacks for existing code
-  asset._unitid = filial;
-  asset.GRUPO_EMPRESARIAL = tenantId;
+  asset.GRUPO_EMPRESARIAL = tenantid;
   asset.STATUS = status;
   asset.ETIQUETA = etiqueta;
   asset.QT = qt;
@@ -310,7 +309,7 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   // Higienizar explicitamente propriedades legadas
   delete asset._tenantid;
   delete asset.tenant_id;
-  delete asset.tenantid;
+  delete asset.tenantId;
 
   return asset as Asset;
 }

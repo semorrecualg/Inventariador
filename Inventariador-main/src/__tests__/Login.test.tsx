@@ -178,8 +178,8 @@ describe('Login edge cases', () => {
   });
 
   it('handles empty users array', () => {
-    const findUser = (users: any[], email: string) => 
-      users.find((u: any) => u.email === email);
+    const findUser = (users: Array<{ email: string }>, email: string) => 
+      users.find((u) => u.email === email);
     expect(findUser([], 'test@test.com')).toBeUndefined();
   });
 });

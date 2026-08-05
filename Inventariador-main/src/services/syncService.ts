@@ -4,11 +4,12 @@ import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
+import { resolveTenantId } from '../utils/tenantUtils';
 
 export interface UserSessionData {
   id: string;
   email: string;
-  tenantId: string;
+  tenantid: string;
   role: string;
 }
 
@@ -21,6 +22,13 @@ export interface SyncResult {
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
+
+// Fronteira de leitura legada: registros persistidos por versões antigas podem
+// conter as chaves tenantId/_tenantid. Todo ponto de ESCRITA usa `tenantid`.
+const readLegacyRecordTenant = (r: unknown): string => {
+  const rec = r as Record<string, unknown>;
+  return String(rec.tenantId ?? rec._tenantid ?? rec.tenantid ?? '');
+};
 
 // Configura o store local
 const queueStore = localforage.createInstance({
@@ -99,16 +107,16 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
                 'CICOPAL';
 
     if (isStringInvalid(tId)) {
-      logger.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantId é inválido ou ausente.");
+      logger.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantid é inválido ou ausente.");
       return null;
     }
     
-    logger.info(">>> [Sync Guard] Identificador de contrato (tenantId) resolvido com sucesso:", tId);
+    logger.info(">>> [Sync Guard] Identificador de contrato (tenantid) resolvido com sucesso:", tId);
     
     return {
       id: String(parsed.id),
       email: String(parsed.email || ''),
-      tenantId: String(tId),
+      tenantid: String(tId),
       role: String(parsed.role || 'AUDITOR')
     };
   } catch (e: unknown) {
@@ -186,7 +194,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
     return { success: true, processedCount: 0 };
   }
   const user = getUserFromLocalStorage();
-  const rawTenant = user ? user.tenantId : null;
+  const rawTenant = user ? resolveTenantId(user) : null;
   const rawFilial = sessionStorage.getItem('filial');
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
@@ -262,7 +270,7 @@ export const photoSyncManager = {
       return { success: true, uploadCount: 0, failedCount: 0 };
     }
     const user = getUserFromLocalStorage();
-    const rawTenant = user ? user.tenantId : null;
+    const rawTenant = user ? resolveTenantId(user) : null;
     const rawFilial = sessionStorage.getItem('filial');
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
@@ -318,8 +326,8 @@ export const photoSyncManager = {
 
         try {
           const fileExt = 'jpg';
-          const tenantIdClean = String(rawTenant).trim();
-          const filePath = `${tenantIdClean}/${item.assetId}/${item.id}.${fileExt}`;
+          const tenantidClean = String(rawTenant).trim();
+          const filePath = `${tenantidClean}/${item.assetId}/${item.id}.${fileExt}`;
 
           const { error: uploadError } = await supabase.storage
             .from('asset-photos')
@@ -379,7 +387,7 @@ const _syncService = {
       return { success: true, processedCount: 0 };
     }
     const user = getUserFromLocalStorage();
-    const rawTenant = user ? user.tenantId : null;
+    const rawTenant = user ? resolveTenantId(user) : null;
     const rawFilial = sessionStorage.getItem('filial');
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
@@ -395,7 +403,7 @@ const _syncService = {
       return { success: false, processedCount: 0, error: "Dispositivo em modo Offline" };
     }
 
-    const tenantIdClean = String(rawTenant).trim();
+    const tenantidClean = String(rawTenant).trim();
     const filialClean = String(rawFilial).trim();
 
     try {
@@ -404,7 +412,7 @@ const _syncService = {
 
       // Filtro de Multi-Tenancy e Unidade com custo documentado para campos não indexados (apenas filial e _is_synced são indexados no store da v1)
       const records = (pendingRecords || []).filter(record => {
-        const isTenantMatch = String(record.tenantId || record._tenantid || '').trim().toUpperCase() === tenantIdClean.toUpperCase();
+        const isTenantMatch = readLegacyRecordTenant(record).trim().toUpperCase() === tenantidClean.toUpperCase();
         const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean.toUpperCase();
         return isTenantMatch && isFilialMatch;
       });
@@ -429,7 +437,7 @@ const _syncService = {
           continue;
         }
 
-        const contaValue = String(record.contacontabil || record.conta_contabil || '').trim();
+        const contaValue = String(record.contacontabil || (record as unknown as Record<string, unknown>).conta_contabil || '').trim();
         if (contaValue === '131105001') {
           // Marcar como sincronizado para pular a repetição na fila sem enviar ao Supabase (Regra Fiscal)
           syncedPrimaryKeys.push(String(pKey));
@@ -440,11 +448,9 @@ const _syncService = {
         try {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
-          // 2. VETO A PAYLOADS POLUÍDOS E TRANCA _tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas (21 índices contábeis)
+          // 2. VETO A PAYLOADS POLUÍDOS E TRANCA tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas (21 índices contábeis)
           const payload = {
-            _tenantid: tenantIdClean,
-            _unitid: filialClean,
-            tenantId: tenantIdClean,
+            tenantid: tenantidClean,
             filial: filialClean,
             status: record.status !== undefined && record.status !== null ? String(record.status).trim() : 'ATIVO',
             etiqueta: record.etiqueta !== undefined && record.etiqueta !== null ? String(record.etiqueta).trim() : '',
@@ -554,24 +560,24 @@ const _syncService = {
 
   backupContingencyLocal: async (): Promise<boolean> => {
     const user = getUserFromLocalStorage();
-    const rawTenant = user ? user.tenantId : null;
+    const rawTenant = user ? resolveTenantId(user) : null;
     const rawFilial = sessionStorage.getItem('filial');
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       return false;
     }
 
-    const tenantIdClean = String(rawTenant).trim();
+    const tenantidClean = String(rawTenant).trim();
     const filialClean = String(rawFilial).trim();
 
     try {
-      // Busca local_assets onde filial é igual a filialClean, e filtra por tenantId em memória (apenas filial é indexado)
+      // Busca local_assets onde filial é igual a filialClean, e filtra por tenantid em memória (apenas filial é indexado)
       const list = await db.local_assets.where('filial').equals(filialClean).toArray();
       const filtered = list.filter(item => 
-        String(item.tenantId || item._tenantid || '').trim().toUpperCase() === tenantIdClean.toUpperCase()
+        readLegacyRecordTenant(item).trim().toUpperCase() === tenantidClean.toUpperCase()
       );
       
-      const backupKey = `gbr_backup_${tenantIdClean.toUpperCase()}_${filialClean.toUpperCase()}`;
+      const backupKey = `gbr_backup_${tenantidClean.toUpperCase()}_${filialClean.toUpperCase()}`;
       localStorage.setItem(backupKey, JSON.stringify(filtered));
       return true;
     } catch (e) {
@@ -594,16 +600,16 @@ export const processDataSyncQueue = async (): Promise<SyncResult> => {
 export const getUnsyncedAssetsCount = async (): Promise<number> => {
    try {
      const user = getUserFromLocalStorage();
-     const rawTenant = user ? user.tenantId : null;
+     const rawTenant = user ? resolveTenantId(user) : null;
      const rawFilial = sessionStorage.getItem('filial');
      
      const unsynced = await db.local_assets.where('_is_synced').equals(0).toArray();
      
      if (user && !isStringInvalid(rawTenant) && !isStringInvalid(rawFilial)) {
-       const tenantIdClean = String(rawTenant).trim().toUpperCase();
+       const tenantidClean = String(rawTenant).trim().toUpperCase();
        const filialClean = String(rawFilial).trim().toUpperCase();
        const filtered = unsynced.filter(record => {
-         const isTenantMatch = String(record.tenantId || record._tenantid || '').trim().toUpperCase() === tenantIdClean;
+         const isTenantMatch = readLegacyRecordTenant(record).trim().toUpperCase() === tenantidClean;
          const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean;
          return isTenantMatch && isFilialMatch;
        });
@@ -626,12 +632,12 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
 /**
  * Adiciona uma foto à fila de sincronização offline
  */
-export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantId: string): Promise<string> => {
+export const addToSyncQueue = async (assetId: string, photoBlob: Blob, tenantid: string): Promise<string> => {
   const id = generateUUID();
   const item: SyncQueueItem = {
     id,
     assetId,
-    tenantId,
+    tenantid,
     photoBlob,
     timestamp: Date.now(),
     attempts: 0

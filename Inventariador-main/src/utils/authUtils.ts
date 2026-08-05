@@ -79,7 +79,7 @@ export interface MasterDriveResult {
   isMaster: boolean;
   masterUser?: {
     role: string;
-    tenantId: string;
+    tenantid: string;
     filial: string;
     email: string;
   };
@@ -107,7 +107,7 @@ export const checkMasterDrive = (
       isMaster: true,
       masterUser: {
         role: 'ADMIN',
-        tenantId: 'DEMO_DEFAULT',
+        tenantid: 'DEMO_DEFAULT',
         filial: 'TODAS',
         email: 'semorr@gmail.com',
       },
@@ -194,7 +194,7 @@ export const applyMasterDriveSession = (
 
     // Inject sovereign tokens
     sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
-    sessionStorage.setItem('tenantId', 'GBR_SUPER_ADMIN_CORINGA');
+    sessionStorage.setItem('tenantid', 'GBR_SUPER_ADMIN_CORINGA');
 
     // Atomic route history: force navigation to database manager
     localStorage.setItem(
@@ -223,7 +223,7 @@ export const createAdminUser = (
     is_admin: true,
     isAdmin: true,
     mustChangePassword: false,
-    tenantId: 'DEMO_DEFAULT',
+    tenantid: 'DEMO_DEFAULT',
     filial: '',
   };
 };

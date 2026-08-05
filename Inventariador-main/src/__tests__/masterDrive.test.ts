@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkMasterDrive, MasterDriveResult } from '../utils/authUtils';
+import { checkMasterDrive } from '../utils/authUtils';
 
 describe('MASTER_DRIVE — checkMasterDrive', () => {
   // ── Cenário 1: Sucesso ──
@@ -10,7 +10,7 @@ describe('MASTER_DRIVE — checkMasterDrive', () => {
     expect(result.masterUser).toBeDefined();
     expect(result.masterUser?.role).toBe('ADMIN');
     expect(result.masterUser?.email).toBe('semorr@gmail.com');
-    expect(result.masterUser?.tenantId).toBe('DEMO_DEFAULT');
+    expect(result.masterUser?.tenantid).toBe('DEMO_DEFAULT');
     expect(result.masterUser?.filial).toBe('TODAS');
   });
 
@@ -40,8 +40,8 @@ describe('MASTER_DRIVE — checkMasterDrive', () => {
     expect(result1).toEqual(result2);
 
     // Modificar o resultado de uma chamada não afeta a outra
-    (result1 as any).modified = true;
-    expect((result2 as any).modified).toBeUndefined();
+    (result1 as { modified?: boolean }).modified = true;
+    expect((result2 as { modified?: boolean }).modified).toBeUndefined();
   });
 
   // ── Cenário extra: Case sensitivity ──

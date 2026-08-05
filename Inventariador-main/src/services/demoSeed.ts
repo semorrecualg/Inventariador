@@ -53,9 +53,8 @@ export const getDemoSeedAssets = (): Asset[] => {
       NOMEFORNECEDOR: 'PROVEDORES E FABRICANTES DEMO BRASIL LTDA',
       NOTAFISCAL: `NF-${20000 + i}`,
       ENDERECO: loc,
-      tenantId: 'DEMO_DEFAULT',
+      tenantid: 'DEMO_DEFAULT',
       filial: 'MATRIZ',
-      _unitid: 'MATRIZ',
       _unidade: 'MATRIZ',
       _conferido: isChecked,
       _localMaster: loc,
@@ -82,14 +81,14 @@ export const getDemoSeedAssets = (): Asset[] => {
       Sn3_recno: 5000 + i,
       DE_PARA: '',
       AUDITOR_STATUS_CONFERENCIA: isChecked ? 'CONFERIDO_BOM' : 'PENDENTE',
-      _origemTransacao: 1,
+      _origemTransacao: '1',
       _parent_id: '',
       _is_synced: false,
       _altitude_metros: 750,
       _id_andar: 'TÉRREO',
       STATUS: 'ATIVO',
       DATABAIXA: ''
-    });
+    } as unknown as Asset);
   }
 
   return assets;

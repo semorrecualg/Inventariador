@@ -32,8 +32,8 @@ function getMinLevel(): LogLevel {
     }
   }
   // Verificar meta.env do Vite (build de produção)
-  if (typeof import.meta !== 'undefined' && (import.meta as Record<string, unknown>).env) {
-    const mode = (import.meta as Record<string, { PROD?: boolean; DEV?: boolean }>).env;
+  if (typeof import.meta !== 'undefined' && (import.meta as unknown as Record<string, unknown>).env) {
+    const mode = (import.meta as unknown as Record<string, { PROD?: boolean; DEV?: boolean }>).env;
     if (mode?.PROD) return 'warn';
   }
   // Por padrão, loga tudo (desenvolvimento)
@@ -52,28 +52,24 @@ function shouldLog(level: LogLevel): boolean {
  */
 function info(...args: unknown[]): void {
   if (shouldLog('info')) {
-    // eslint-disable-next-line no-console
     console.log(...args);
   }
 }
 
 function warn(...args: unknown[]): void {
   if (shouldLog('warn')) {
-    // eslint-disable-next-line no-console
     console.warn(...args);
   }
 }
 
 function error(...args: unknown[]): void {
   if (shouldLog('error')) {
-    // eslint-disable-next-line no-console
     console.error(...args);
   }
 }
 
 function debug(...args: unknown[]): void {
   if (shouldLog('debug')) {
-    // eslint-disable-next-line no-console
     console.debug(...args);
   }
 }

@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 test.describe('Dashboard', () => {
-  test.beforeEach(async ({ page, loginAsAdmin }) => {
+  test.beforeEach(async ({ loginAsAdmin }) => {
     // First log in to establish auth session
     await loginAsAdmin();
   });

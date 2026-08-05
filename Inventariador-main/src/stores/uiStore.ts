@@ -6,7 +6,6 @@ import {
   ModalConfig,
   NavigationParams,
   SearchFilters,
-  ScannerMode,
 } from '../types';
 
 export interface FileStatus {
@@ -23,6 +22,8 @@ export interface SqliteStatus {
   error: string | null;
   status: string;
 }
+
+type StoreData<T> = Pick<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? never : K }[keyof T]>;
 
 export interface UiStoreState {
   // Navigation
@@ -191,7 +192,7 @@ function getSavedModule(): AppModule | null {
 
 const savedDbMode = localStorage.getItem('app_database_mode') as DatabaseMode | null;
 
-const initialState: UiStoreState = {
+const initialState: StoreData<UiStoreState> = {
   screen: AppScreen.LOGIN,
   history: [AppScreen.LOGIN],
   screenParams: null,
@@ -231,7 +232,7 @@ const initialState: UiStoreState = {
   currentModule: getSavedModule(),
 };
 
-export const useUiStore = create<UiStoreState>((set, get) => ({
+export const useUiStore = create<UiStoreState>((set) => ({
   ...initialState,
 
   // Navigation

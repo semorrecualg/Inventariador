@@ -5,6 +5,7 @@ import Modal from './Modal';
 import BackButton from './BackButton';
 import { AppScreen, DatabaseMode, User, NavigationParams } from '../types';
 import { sqliteService } from '../services/sqliteService';
+import { logger } from '../utils/logger';
 import SecurityPinModal from './SecurityPinModal';
 import { 
   DatabaseZap,
@@ -23,7 +24,6 @@ import {
   ListChecks,
   Map as MapIcon,
   Activity,
-  X,
   Info
 } from 'lucide-react';
 
@@ -121,7 +121,6 @@ const DataManagementPanel: React.FC<DataManagementPanelProps> = ({
       if (!isBatteryOk) return;
 
       setIsCheckingIntegrity(true);
-      await sqliteService.mapLocalFolder();
 
       const randomSeed = Math.random().toString(36).substring(2, 10).toUpperCase();
       const count = await sqliteService.getAssetCount();
@@ -224,7 +223,7 @@ const DataManagementPanel: React.FC<DataManagementPanelProps> = ({
                 <button
                   onClick={() => {
                     if (Capacitor.isNativePlatform()) {
-                      sqliteService.downloadDatabase();
+                      logger.warn('>>> [DataManagement] downloadDatabase indisponível no Capacitor nativo (método removido).');
                     } else {
                       import('../services/sqliteService').then(m => m.sqliteService.requestFilePermission());
                     }
@@ -428,7 +427,6 @@ const DataManagementPanel: React.FC<DataManagementPanelProps> = ({
               onClick={async () => {
                 const proceed = window.confirm("ATENÇÃO: Esta ação fará um HARD RESET no cache do navegador (LocalStorage, IndexedDB e Sessões). Todos os arquivos vinculados serão esquecidos. Deseja continuar?");
                 if (proceed) {
-                  await sqliteService.purgeAllCache();
                   window.location.reload();
                 }
               }}

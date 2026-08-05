@@ -17,10 +17,12 @@ import {
 import BackButton from './BackButton';
 import { DatabaseMode, UnitConfig } from '../types';
 import * as turf from '@turf/turf';
-import { localDb } from '../services/localDbService';
+import { localDb, readVirtualSnapshot } from '../services/localDbService';
+import { resolveTenantId } from '../utils/tenantUtils';
 import { isAdminEmail } from '../utils/authUtils';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
+import type { DexieAsset } from '../services/sqliteService';
 
 interface UnitSelectorProps {
   units: Array<{ 
@@ -70,6 +72,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
   const [sqliteUnits, setSqliteUnits] = useState<SqliteUnitStats[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   // 1. Carrega as configurações de geocerca salvas no IndexedDB (SQLite configs extraídas)
   useEffect(() => {
@@ -93,56 +96,48 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   useEffect(() => {
     let active = true;
     const fetchSqliteUnits = async () => {
+      setStatsLoading(databaseMode === DatabaseMode.INTERNAL);
       try {
         if (databaseMode === DatabaseMode.INTERNAL) {
-          let tenantId: string | undefined;
+          let tenantid: string | undefined;
           try {
             const storedUser = sessionStorage.getItem('app_current_user');
             if (storedUser) {
-              const parsedUser = JSON.parse(storedUser) as { tenantId?: string; tenantid?: string };
-              tenantId = parsedUser.tenantId || parsedUser.tenantid || undefined;
+              const parsedUser = JSON.parse(storedUser) as { tenantid?: string };
+              tenantid = resolveTenantId(parsedUser) || undefined;
             }
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            logger.warn('[UnitSelector] Falha ao ler tenantId do sessionStorage:', errMsg);
+            logger.warn('[UnitSelector] Falha ao ler tenantid do sessionStorage:', errMsg);
           }
           
-          const currentTenantId = tenantId ? tenantId.trim().toUpperCase() : '';
+          const currentTenantid = tenantid? tenantid.trim().toUpperCase() : '';
           
-          // Fallback Seguro: Usa .filter() na fluent API do Dexie pois tenantId isolado não é um índice no schema atual v2.
-          // Isso garante a extração limpa para o currentTenantId e atende o requisito SRE.
+          // Fallback Seguro: Usa .filter() na fluent API do Dexie pois tenantid isolado não é um índice no schema atual v2.
+          // Isso garante a extração limpa para o currentTenantid e atende o requisito SRE.
           let allAssets = await db.local_assets
             .filter(item => {
-              const tId = String(item.tenantId || item._tenantid || '').trim().toUpperCase();
-              return !currentTenantId || tId === currentTenantId;
+              const tId = String(resolveTenantId(item) || '').trim().toUpperCase();
+              return !currentTenantid || tId === currentTenantid;
             })
             .toArray();
             
           const isIframe = typeof window !== 'undefined' && window.self !== window.top;
           if (allAssets.length === 0 && isIframe) {
-            const virtualData = localStorage.getItem('gbr_virtual_snapshot_backup');
-            if (virtualData) {
-              try {
-                const parsed = JSON.parse(virtualData);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  allAssets = parsed.map((row: unknown) => {
-                    const r = row as Record<string, unknown>;
-                    return {
-                      id: String(r.primarykey || r.id || ''),
-                      primarykey: String(r.primarykey || r.id || ''),
-                      tenantId: String(r.tenantId || 'GBR_DEFAULT'),
-                      _tenantid: String(r._tenantid || 'GBR_DEFAULT'),
-                      filial: String(r.filial || 'FILIAL_DEFAULT'),
-                      _unitid: String(r._unitid || 'FILIAL_DEFAULT'),
-                      status: String(r.status || 'Pendente'),
-                      _conferido: Number(r._conferido ?? 0),
-                      _is_deleted: Number(r._is_deleted ?? 0)
-                    };
-                  });
-                }
-              } catch (err) {
-                logger.warn("Error parsing virtual snapshot backup:", err);
-              }
+            const virtualData = await readVirtualSnapshot();
+            if (virtualData && virtualData.length > 0) {
+              allAssets = virtualData.map((row: unknown) => {
+                const r = row as Record<string, unknown>;
+                return {
+                  id: String(r.primarykey || r.id || ''),
+                  primarykey: String(r.primarykey || r.id || ''),
+                  tenantid: String(resolveTenantId(r) || 'GBR_DEFAULT'),
+                  filial: String(r.filial || r._unitid || 'FILIAL_DEFAULT'),
+                  status: String(r.status || 'Pendente'),
+                  _conferido: Number(r._conferido ?? 0),
+                  _is_deleted: Number(r._is_deleted ?? 0)
+                } as unknown as DexieAsset;
+              });
             }
           }
             
@@ -175,11 +170,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
           if (active) {
             setSqliteUnits(mapped);
+            setStatsLoading(false);
           }
+        } else if (active) {
+          setStatsLoading(false);
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error('>>> [UnitSelector] Erro ao carregar unidades com estatísticas do SQLite:', errMsg);
+        if (active) setStatsLoading(false);
       }
     };
 
@@ -435,11 +434,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           {/* Back Button Alinhado à Esquerda */}
           <div className="flex-shrink-0 flex items-center">
             <BackButton 
-              onClick={(e) => {
-                if (e) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
+              onClick={() => {
                 if (onForceToggleView) {
                   onForceToggleView();
                 } else {
@@ -639,6 +634,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                 </div>
               );
             })}
+          </div>
+        ) : statsLoading ? (
+          <div className="flex flex-col items-center justify-center h-full py-16">
+            <RefreshCw size={44} className="text-accent animate-spin mb-4" />
+            <p className="font-bold uppercase tracking-[0.2em] text-[9px] text-accent">
+              Carregando Unidades...
+            </p>
           </div>
         ) : isSyncing ? (
           <div className="flex flex-col items-center justify-center h-full py-16">

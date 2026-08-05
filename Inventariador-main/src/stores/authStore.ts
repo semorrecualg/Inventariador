@@ -30,8 +30,6 @@ export interface AuthState {
   reset: () => void;
 }
 
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'semorr@gmail.com';
-
 const initialState = {
   user: null as User | null,
   isSessionValid: false,
@@ -42,7 +40,7 @@ const initialState = {
   isProfileLocal: false,
 };
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   ...initialState,
 
   setUser: (user) => {

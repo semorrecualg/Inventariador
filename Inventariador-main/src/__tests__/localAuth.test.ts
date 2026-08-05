@@ -12,7 +12,7 @@ const makeUser = (overrides: Record<string, unknown> = {}) => ({
   role: 'AUDITOR',
   is_admin: false,
   isAdmin: false,
-  tenantId: 'TENANT_001',
+  tenantid: 'TENANT_001',
   filial: 'FILIAL_A',
   ...overrides,
 });

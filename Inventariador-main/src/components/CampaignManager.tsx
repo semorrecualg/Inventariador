@@ -33,7 +33,7 @@ interface CampaignManagerProps {
   campaigns?: InventoryCampaign[];
   onRefresh?: () => void;
   initialUnit?: string | null;
-  tenantId?: string | null;
+  tenantid?: string | null;
   unitId?: string | null;
   databaseMode?: string;
 }
@@ -47,7 +47,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   campaigns = [],
   onRefresh,
   initialUnit,
-  tenantId: propsTenantId
+  tenantid: propsTenantid
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -79,11 +79,11 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   // CORREÇÃO DA LEITURA LOCAL E RENDERIZAÇÃO CENTRAL:
   // Carrega as campanhas ativas diretamente da tabela local via Dexie/localDb nativo
-  // com a tranca de isolamento multidomínio (tenant_id / unit_id)
+  // com a tranca de isolamento multidomínio (tenantid / unit_id)
   const fetchLocalCampaignsOnScreen = async () => {
     setIsRefreshing(true);
     try {
-      const currentTenant = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || 'CICOPAL').trim();
+      const currentTenant = (propsTenantid || user?.tenantid || 'CICOPAL').trim();
       const currentFilial = (initialUnit || '').trim();
       
       logger.info(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
@@ -106,7 +106,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   React.useEffect(() => {
     fetchLocalCampaignsOnScreen();
-  }, [initialUnit, propsTenantId]);
+  }, [initialUnit, propsTenantid]);
 
   React.useEffect(() => {
     if (campaigns && !isRefreshing && !isSaving) {
@@ -161,10 +161,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
     
     const isAdmin = !!(isAdminUser(user));
-    let tenantId = (propsTenantId || user?._tenantid || user?.tenantId || user?.tenantid || '').trim();
-    if (!tenantId && isAdmin) tenantId = 'CICOPAL';
+    let tenantid = (propsTenantid || user?.tenantid || '').trim();
+    if (!tenantid && isAdmin) tenantid = 'CICOPAL';
 
-    if (!tenantId || tenantId === 'N/A') {
+    if (!tenantid || tenantid === 'N/A') {
       setErrorMessage('ERRO DE GOVERNANÇA: Tenant não identificado. Ação bloqueada.');
       setTimeout(() => setErrorMessage(null), 5000);
       return;
@@ -173,15 +173,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     setIsSaving(true);
     try {
       const finalUnit = newCampaignUnit.trim();
-      logger.info(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantId}, Unit: ${finalUnit || 'TODAS'}`);
+      logger.info(`>>> [Governance] Preparando criação de campanha. Tenant: ${tenantid}, Unit: ${finalUnit || 'TODAS'}`);
       
       const newCampaign: Partial<InventoryCampaign> = {
         name: newCampaignName.trim(),
         description: newCampaignDesc.trim(),
         status: CampaignStatus.CREATED,
-        _tenantid: tenantId,
-        _unitid: finalUnit,
-        tenant_id: tenantId,
+        tenantid: tenantid,
+        filial: finalUnit,
         unit_id: finalUnit,
         created_by: (user?.email || 'admin').toLowerCase(),
         start_date: new Date().toISOString()
@@ -326,13 +325,13 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    let tenantId = user?._tenantid || user?.tenantId || user?.tenantid;
+    let tenantid = user?.tenantid || user?.tenantid || user?.tenantid;
     const isAdmin = isAdminUser(user);
-    if (!tenantId && isAdmin) tenantId = 'CICOPAL';
+    if (!tenantid && isAdmin) tenantid = 'CICOPAL';
 
-    if (tenantId) {
+    if (tenantid) {
       setStatsLoading(true);
-      const campaignStats = await fetchCampaignStats(campaign.id, tenantId);
+      const campaignStats = await fetchCampaignStats(campaign.id, tenantid);
       setStats(campaignStats);
       setStatsLoading(false);
     }

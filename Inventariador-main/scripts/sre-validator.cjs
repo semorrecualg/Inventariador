@@ -14,7 +14,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const EXIT_PASS = 0;
@@ -45,14 +44,6 @@ const SQL_PATTERNS = [
   /\bDROP\s+(TABLE|INDEX|VIEW)\b/i,
   /\bALTER\s+TABLE\b/i,
   /\bDELETE\s+FROM\b/i,
-];
-
-// ── Arquivos que NÃO devem ter console.log em produção ─────────────────────
-const PRODUCTION_FILES_GLOB = [
-  'src/components/**/*.tsx',
-  'src/services/**/*.ts',
-  'src/hooks/**/*.ts',
-  'src/utils/**/*.ts',
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -160,7 +151,7 @@ function checkConsoleLog() {
     if (!fs.existsSync(fullDir)) continue;
 
     const files = [];
-  function walkDir(dir) {
+  const walkDir = (dir) => {
     let entries;
     try { entries = fs.readdirSync(dir); } catch { return; }
     for (const entry of entries) {
@@ -174,7 +165,7 @@ function checkConsoleLog() {
         }
       }
     }
-  }
+  };
   walkDir(fullDir);
 
     for (const filePath of files) {

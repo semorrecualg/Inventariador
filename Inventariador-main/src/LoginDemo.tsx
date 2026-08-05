@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LoginFlow } from './components/LoginFlow';
+import { DatabaseMode } from './types';
 
 export default function LoginDemo() {
   const [showFlow, setShowFlow] = useState(true);
@@ -19,17 +20,21 @@ export default function LoginDemo() {
 
   return (
     <LoginFlow
-      onLoginSuccess={(credentials) => {
+      onLogin={(credentials) => {
         console.log('Login bem-sucedido:', credentials);
         setShowFlow(false);
       }}
-      onCancelLogin={() => {
-        console.log('Login cancelado');
-      }}
+      users={[]}
+      databaseMode={DatabaseMode.INTERNAL}
+      onOpenPrivacyCenter={() => {}}
+      onUpdateScreen={() => {}}
+      onShowModal={() => {}}
       onDemoMode={() => {
         console.log('Modo demo ativado');
         setShowFlow(false);
       }}
+      onHandleSubmit={async () => {}}
+      onBiometricLogin={async () => false}
     />
   );
 }

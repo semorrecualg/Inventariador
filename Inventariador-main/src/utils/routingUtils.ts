@@ -7,7 +7,7 @@ export interface SupabaseUserProfile {
   userId: string;
   email: string;
   role: UserRole;
-  tenantId: string | null; 
+  tenantid: string | null; 
 }
 
 export async function processarRoteamentoPosLoginSaas(
@@ -25,8 +25,8 @@ export async function processarRoteamentoPosLoginSaas(
   }
 
   // 2. Validação de Segurança de Perfil Corporativo
-  if (String(user.role).toUpperCase() === 'MASTER' && !user.tenantId) {
-    logger.error("[GBR v2.6] Bloqueio de Segurança: MASTER sem tenantId.");
+  if (String(user.role).toUpperCase() === 'MASTER' && !user.tenantid) {
+    logger.error("[GBR v2.6] Bloqueio de Segurança: MASTER sem tenantid.");
     throw new Error("Erro de consistência: Perfil MASTER sem empresa vinculada.");
   }
 
@@ -54,8 +54,8 @@ export async function processarRoteamentoPosLoginSaas(
       navigate('/saas/painel-global');
     } else if (isMaster) {
       sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
-      if (user.tenantId) {
-        sessionStorage.setItem('gbr_active_tenant', user.tenantId);
+      if (user.tenantid) {
+        sessionStorage.setItem('gbr_active_tenant', user.tenantid);
       }
       navigate('/admin/painel-controle');
     } else {
