@@ -24,7 +24,7 @@ const ImpairmentTestModal: React.FC<ImpairmentTestModalProps> = ({ isOpen, onClo
 
   useEffect(() => {
     // Simulação de VCL atual (Valor de Aquisição - Depreciação Acumulada)
-    const v0 = Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0);
+    const v0 = Number(asset._valor_aquisicao || asset.vlraquisic || 0);
     const depr = Number(asset._depreciacao_acumulada || 0);
     setNetBookValue(v0 - depr);
   }, [asset]);
@@ -50,7 +50,7 @@ const ImpairmentTestModal: React.FC<ImpairmentTestModalProps> = ({ isOpen, onClo
           </div>
           <div className="mt-4 p-4 bg-white/5 rounded-2xl border border-white/10">
             <p className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-1">Ativo Selecionado</p>
-            <p className="text-sm font-black text-white">{asset.ETIQUETA} - {asset.DESCRICAODOATIVO}</p>
+            <p className="text-sm font-black text-white">{asset.etiqueta} - {asset.descricaodoativo}</p>
           </div>
         </div>
 

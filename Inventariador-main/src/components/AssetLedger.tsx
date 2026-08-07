@@ -54,8 +54,8 @@ const AssetLedger: React.FC<AssetLedgerProps> = ({ asset, onBack }) => {
               </div>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor de Aquisição</span>
             </div>
-            <div className="text-2xl font-black text-slate-900">{formatCurrency(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}</div>
-            <div className="mt-2 text-[10px] text-slate-500 font-bold uppercase">Data: {asset._data_aquisicao || asset.DATAAQUISIC || '-'}</div>
+            <div className="text-2xl font-black text-slate-900">{formatCurrency(Number(asset._valor_aquisicao || asset.vlraquisic || 0))}</div>
+            <div className="mt-2 text-[10px] text-slate-500 font-bold uppercase">Data: {asset._data_aquisicao || asset.dataaqusic || '-'}</div>
           </div>
 
           <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
@@ -91,15 +91,15 @@ const AssetLedger: React.FC<AssetLedgerProps> = ({ asset, onBack }) => {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Etiqueta</p>
-                <p className="text-sm font-black text-slate-800">{asset.ETIQUETA || '---'}</p>
+                <p className="text-sm font-black text-slate-800">{asset.etiqueta || '---'}</p>
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Registro</p>
-                <p className="text-sm font-black text-slate-800">{asset.REGISTRO || '---'}</p>
+                <p className="text-sm font-black text-slate-800">{asset.registro || '---'}</p>
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl col-span-2">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Descrição</p>
-                <p className="text-xs font-bold text-slate-700 uppercase">{asset.DESCRICAODOATIVO || '---'}</p>
+                <p className="text-xs font-bold text-slate-700 uppercase">{asset.descricaodoativo || '---'}</p>
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Conta Contábil</p>
@@ -111,7 +111,7 @@ const AssetLedger: React.FC<AssetLedgerProps> = ({ asset, onBack }) => {
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Centro de Custo</p>
-                <p className="text-sm font-black text-slate-800">{asset._centro_custo || asset.CENTRODECUSTO || '---'}</p>
+                <p className="text-sm font-black text-slate-800">{asset._centro_custo || asset.centrodecusto || '---'}</p>
               </div>
             </div>
           </div>
@@ -136,7 +136,7 @@ const AssetLedger: React.FC<AssetLedgerProps> = ({ asset, onBack }) => {
               </div>
               <div className="p-4 bg-white border border-slate-100 rounded-xl">
                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Início Depreciação</p>
-                <p className="text-sm font-black text-slate-800">{asset._data_inicio_depreciacao || asset._data_aquisicao || asset.DATAAQUISIC || '---'}</p>
+                <p className="text-sm font-black text-slate-800">{asset._data_inicio_depreciacao || asset._data_aquisicao || asset.dataaqusic || '---'}</p>
               </div>
             </div>
           </div>

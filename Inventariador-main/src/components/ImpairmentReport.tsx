@@ -38,8 +38,8 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
     if (!searchTerm) return impairmentAssets;
     const term = searchTerm.toLowerCase();
     return impairmentAssets.filter(a => 
-      String(a.ETIQUETA || '').toLowerCase().includes(term) ||
-      String(a.DESCRICAODOATIVO || '').toLowerCase().includes(term) ||
+      String(a.etiqueta || '').toLowerCase().includes(term) ||
+      String(a.descricaodoativo || '').toLowerCase().includes(term) ||
       String(a.conta_contabil || '').toLowerCase().includes(term)
     );
   }, [impairmentAssets, searchTerm]);
@@ -50,12 +50,12 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
 
   const exportToExcel = () => {
     const data = impairmentAssets.map(a => ({
-      'Etiqueta': a.ETIQUETA,
-      'Descrição': a.DESCRICAODOATIVO,
+      'Etiqueta': a.etiqueta,
+      'Descrição': a.descricaodoativo,
       'Conta Contábil': a.conta_contabil,
-      'Vlr Aquisição': a._valor_aquisicao || a.VLRAQUISIC,
+      'Vlr Aquisição': a._valor_aquisicao || a.vlraquisic,
       'Depr. Acumulada': a._depreciacao_acumulada || 0,
-      'Vlr Contábil': (Number(a._valor_aquisicao || 0) || Number(a.VLRAQUISIC || 0)) - Number(a._depreciacao_acumulada || 0),
+      'Vlr Contábil': (Number(a._valor_aquisicao || 0) || Number(a.vlraquisic || 0)) - Number(a._depreciacao_acumulada || 0),
       'Vlr Recuperável': a._valor_recuperavel || 0,
       'Perda Impairment': a._perda_impairment || 0,
       'Data Teste': a._data_impairment ? new Date(a._data_impairment).toLocaleDateString('pt-BR') : '---'
@@ -136,9 +136,9 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <span className="text-[10px] font-black text-ink uppercase tracking-tighter font-mono bg-bg-main px-2 py-1 rounded-md border border-border">
-                    {asset.ETIQUETA}
+                    {asset.etiqueta}
                   </span>
-                  <h3 className="text-[11px] font-bold text-ink uppercase mt-2 line-clamp-1">{asset.DESCRICAODOATIVO}</h3>
+                  <h3 className="text-[11px] font-bold text-ink uppercase mt-2 line-clamp-1">{asset.descricaodoativo}</h3>
                 </div>
                 {Number(asset._perda_impairment || 0) > 0 && (
                   <div className="bg-red-100 text-red-700 px-2 py-1 rounded-lg flex items-center space-x-1">
@@ -152,7 +152,7 @@ const ImpairmentReport: React.FC<ImpairmentReportProps> = ({ assets, onBack, onS
                 <div>
                   <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest mb-1">Vlr Contábil</p>
                   <p className="text-[10px] font-bold text-ink">
-                    {formatCurrency((Number(asset._valor_aquisicao || 0) || Number(asset.VLRAQUISIC || 0)) - Number(asset._depreciacao_acumulada || 0))}
+                    {formatCurrency((Number(asset._valor_aquisicao || 0) || Number(asset.vlraquisic || 0)) - Number(asset._depreciacao_acumulada || 0))}
                   </p>
                 </div>
                 <div>

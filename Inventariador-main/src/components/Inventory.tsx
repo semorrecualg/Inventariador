@@ -280,7 +280,7 @@ const Inventory: React.FC<InventoryProps> = ({
       backupArray.push(cleanAsset);
       
       localStorage.setItem(backupKey, JSON.stringify(backupArray));
-      logger.info(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.ETIQUETA}) espelhado com sucesso no localStorage.`);
+      logger.info(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.etiqueta}) espelhado com sucesso no localStorage.`);
     } catch (e) {
       logger.warn(">>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:", e);
     }
@@ -315,7 +315,7 @@ const Inventory: React.FC<InventoryProps> = ({
           const isAlreadyConferido = currentLocalObj && (currentLocalObj._conferido || String(currentLocalObj.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
           
           if (!isAlreadyConferido) {
-            logger.info(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.ETIQUETA})`);
+            logger.info(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.etiqueta})`);
             await onUpdateAsset(backedAsset);
             recoveredCount++;
           }
@@ -636,7 +636,7 @@ const Inventory: React.FC<InventoryProps> = ({
           _conferido: true,
           status: 'CONFERIDO',
           _is_synced: 0,
-          _localMaster: selectedLocationRef.current || foundAsset.ENDERECO || foundAsset.endereco
+          _localMaster: selectedLocationRef.current || foundAsset.endereco
         });
         await onUpdateAssetRef.current(cleanAsset);
 
@@ -651,8 +651,8 @@ const Inventory: React.FC<InventoryProps> = ({
           setCommittedSearch('');
           setDisplayValue('');
         } else {
-          const statusUpper = String(foundAsset.STATUS || foundAsset.status || '').toUpperCase();
-          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.DATABAIXA || foundAsset.databaixa);
+          const statusUpper = String(foundAsset.status || '').toUpperCase();
+          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.databaixa);
           setScannedAsset({ ...foundAsset, _conferido: true, status: 'CONFERIDO', _is_divergent_baixa: isGoldenRuleDivergent });
         }
         return;
@@ -736,16 +736,16 @@ const Inventory: React.FC<InventoryProps> = ({
     setShowGlobalSearchResolution(null);
     setGlobalSearchResults([]);
     setManualAsset({
-      ETIQUETA: etiqueta,
+      etiqueta: etiqueta,
       filial: selectedUnit || "",
-      STATUS: "ATIVO",
-      DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
+      status: "ATIVO",
+      dataaqusic: new Date().toLocaleDateString('pt-BR'),
       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
       TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-      QT: 1,
-      DESCRICAODOATIVO: '',
-      SERIAL: '',
-      ENDERECO: selectedLocation || ""
+      qt: 1,
+      descricaodoativo: '',
+      serial: '',
+      endereco: selectedLocation || ""
     });
     setIsManualEntryOpen(true);
   };
@@ -758,7 +758,7 @@ const Inventory: React.FC<InventoryProps> = ({
         filial: selectedUnit || asset.filial,
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.ENDERECO,
+        _localMaster: selectedLocation || asset.endereco,
         _dataLeitura: new Date().toISOString(),
         _origemTransacao: TransactionOrigin.INVENTORY
       };
@@ -843,9 +843,9 @@ const Inventory: React.FC<InventoryProps> = ({
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1">
                           <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest">{asset.filial || asset._unitid || 'SEM UNIDADE'}</p>
-                          <h4 className="text-[11px] font-bold text-slate-800 line-clamp-2 mt-0.5">{asset.DESCRICAODOATIVO}</h4>
+                          <h4 className="text-[11px] font-bold text-slate-800 line-clamp-2 mt-0.5">{asset.descricaodoativo}</h4>
                         </div>
-                        <span className="text-[9px] font-black text-slate-400 ml-2">#{String(asset.REGISTRO || '').slice(-4)}</span>
+                        <span className="text-[9px] font-black text-slate-400 ml-2">#{String(asset.registro || '').slice(-4)}</span>
                       </div>
                       
                       <div className="flex space-x-2 pt-1">
@@ -943,7 +943,7 @@ const Inventory: React.FC<InventoryProps> = ({
           
           setManualAsset(prev => ({
             ...prev,
-            ENDERECO: result.address
+            endereco: result.address
           }));
         } catch (err) {
           logger.error('Erro ao obter endereço:', err);
@@ -1005,8 +1005,8 @@ const Inventory: React.FC<InventoryProps> = ({
         const assetFilial = (a.filial || '').trim().toUpperCase();
         if (assetFilial !== activeFilial) continue;
 
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+        const statusUpper = String(a.status || '').toUpperCase();
+        const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
         const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
         
         if (isBaixado && !isConferido) continue;
@@ -1025,8 +1025,8 @@ const Inventory: React.FC<InventoryProps> = ({
           if (dateA !== dateB) return dateB - dateA;
         }
         
-        const etqA = String(a.ETIQUETA || '').padStart(10, '0');
-        const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+        const etqA = String(a.etiqueta || '').padStart(10, '0');
+        const etqB = String(b.etiqueta || '').padStart(10, '0');
         return activeFilter === 'checked' 
           ? etqB.localeCompare(etqA, undefined, { numeric: true })
           : etqA.localeCompare(etqB, undefined, { numeric: true });
@@ -1043,8 +1043,8 @@ const Inventory: React.FC<InventoryProps> = ({
         const assetFilial = (a.filial || '').trim().toUpperCase();
         if (assetFilial !== activeFilial) continue;
 
-        const etq = normalizeKeyFast(a.ETIQUETA || '');
-        const descText = String(a.DESCRICAODOATIVO || '').toUpperCase();
+        const etq = normalizeKeyFast(a.etiqueta || '');
+        const descText = String(a.descricaodoativo || '').toUpperCase();
 
         if (etq === term || etq.includes(term) || descText.includes(searchUpper)) {
             localMatches.push(a);
@@ -1058,8 +1058,8 @@ const Inventory: React.FC<InventoryProps> = ({
         if (dateA !== dateB) return dateB - dateA;
       }
 
-      const etqA = String(a.ETIQUETA || '').padStart(10, '0');
-      const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+      const etqA = String(a.etiqueta || '').padStart(10, '0');
+      const etqB = String(b.etiqueta || '').padStart(10, '0');
       return activeFilter === 'checked'
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
@@ -1071,10 +1071,10 @@ const Inventory: React.FC<InventoryProps> = ({
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length <= 1) return false;
     
-    const firstEtq = normalizeKey(pendingInSearch[0].ETIQUETA || "");
+    const firstEtq = normalizeKey(pendingInSearch[0].etiqueta || "");
     if (!firstEtq || firstEtq === "ETIQUETAR") return false;
     
-    return pendingInSearch.every(a => normalizeKey(a.ETIQUETA || "") === firstEtq);
+    return pendingInSearch.every(a => normalizeKey(a.etiqueta || "") === firstEtq);
   }, [committedSearch, filteredAssets, normalizeKey]);
 
   const handleConfirmSearchBatch = async () => {
@@ -1098,17 +1098,17 @@ const Inventory: React.FC<InventoryProps> = ({
     const asset = allAssets.find(a => String(a.id) === id);
     if (!asset) return;
     
-    const etq = normalizeKey(asset.ETIQUETA || "");
+    const etq = normalizeKey(asset.etiqueta || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
     
     if (isBatch && etq && etq !== "ETIQUETAR") {
       // Restrito à UNIDADE ATUAL e STATUS ATIVO
       const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
+        const sameEtq = normalizeKey(a.etiqueta || "") === etq;
         const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
-        const sUpper = String(a.STATUS || '').toUpperCase();
-        const isNotB = !sUpper.includes('BAIXA') && !a.DATABAIXA;
+        const sUpper = String(a.status || '').toUpperCase();
+        const isNotB = !sUpper.includes('BAIXA') && !a.databaixa;
         return sameEtq && sameComp && isNotB && !a._conferido;
       });
 
@@ -1123,14 +1123,14 @@ const Inventory: React.FC<InventoryProps> = ({
     await handleUpdateAssetWithBackup({
       ...asset,
       _conferido: true,
-      _localMaster: selectedLocation || asset.ENDERECO
+      _localMaster: selectedLocation || asset.endereco
     });
     setDisplayValue('');
   }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
     setShowNumericKeypad(false);
-    const etq = normalizeKey(asset.ETIQUETA || "");
+    const etq = normalizeKey(asset.etiqueta || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
@@ -1148,17 +1148,17 @@ const Inventory: React.FC<InventoryProps> = ({
         filial: selectedUnit || asset.filial || asset._unitid || '',
         _conferido: true,
         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.ENDERECO
+        _localMaster: selectedLocation || asset.endereco
       });
       return;
     }
 
     if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
       const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.ETIQUETA || "") === etq;
+        const sameEtq = normalizeKey(a.etiqueta || "") === etq;
         const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.DATABAIXA;
+        const statusUpper = String(a.status || '').toUpperCase();
+        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.databaixa;
         return sameEtq && sameComp && isNotBaixado && !a._conferido;
       });
 
@@ -1213,15 +1213,15 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleCreateNew = () => {
     setManualAsset({
-        ETIQUETA: committedSearch || "",
+        etiqueta: committedSearch || "",
         filial: selectedUnit || "",
-        STATUS: "ATIVO",
-        DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+        status: "ATIVO",
+        dataaqusic: new Date().toLocaleDateString('pt-BR'),
         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-        QT: 1,
-        DESCRICAODOATIVO: '',
-        SERIAL: ''
+        qt: 1,
+        descricaodoativo: '',
+        serial: ''
     });
     setIsManualEntryOpen(true);
   };
@@ -1373,12 +1373,12 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="p-8 space-y-4">
                       <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10">
                         <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                        <p className="text-xl font-black text-ink font-mono">{duplicateAsset.ETIQUETA}</p>
-                        <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.DESCRICAODOATIVO}</p>
+                        <p className="text-xl font-black text-ink font-mono">{duplicateAsset.etiqueta}</p>
+                        <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{duplicateAsset.descricaodoativo}</p>
                         <div className="mt-3 pt-3 border-t border-accent/10 flex items-center justify-between">
                           <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local do Registro:</span>
                           <span className={`text-[9px] font-black uppercase ${isSameLocation ? 'text-success' : 'text-warning'}`}>
-                            {duplicateAsset._localMaster || duplicateAsset.ENDERECO}
+                            {duplicateAsset._localMaster || duplicateAsset.endereco}
                           </span>
                         </div>
                       </div>
@@ -1434,7 +1434,7 @@ const Inventory: React.FC<InventoryProps> = ({
         <div className="p-8 space-y-4">
                 {/* Info de Local de Origem se for diferente */}
                 {(normalizeKey(scannedAsset.filial || scannedAsset._unitid || '') !== normalizeKey(selectedUnit || '') || 
-                  normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '') !== normalizeKey(selectedLocation || '')) && (
+                  normalizeKey(scannedAsset._localMaster || scannedAsset.endereco || '') !== normalizeKey(selectedLocation || '')) && (
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
                     <div className="flex items-center space-x-2 text-amber-700">
                       <MapPin size={14} />
@@ -1445,7 +1445,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         {scannedAsset.filial || 'Unidade não informada'}
                       </p>
                       <p className="text-[9px] text-slate-500 font-medium uppercase italic">
-                        {scannedAsset.ENDERECO || 'Endereço não informado'}
+                        {scannedAsset.endereco || 'Endereço não informado'}
                       </p>
                     </div>
                     <div className="pt-2 border-t border-amber-200">
@@ -1462,15 +1462,15 @@ const Inventory: React.FC<InventoryProps> = ({
 
                 <div className={`${scannedAsset._is_divergent_baixa ? 'bg-red-50 border-red-100' : 'bg-accent-soft border-accent/10'} p-4 rounded-2xl border transition-colors`}>
                   <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className={`text-xl font-black font-mono ${scannedAsset._is_divergent_baixa ? 'text-red-700' : 'text-ink'}`}>{scannedAsset.ETIQUETA}</p>
-                  <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                  <p className={`text-xl font-black font-mono ${scannedAsset._is_divergent_baixa ? 'text-red-700' : 'text-ink'}`}>{scannedAsset.etiqueta}</p>
+                  <p className="text-[10px] font-bold text-ink-muted mt-2 uppercase leading-tight line-clamp-2">{scannedAsset.descricaodoativo}</p>
                 </div>
 
                 {scannedAsset._is_divergent_baixa && (
                   <div className="p-3 bg-red-600 text-white rounded-xl flex items-center space-x-3 animate-pulse">
                     <AlertTriangle size={20} />
                     <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
-                      Atenção: Este item consta como ATIVO mas possui DATA DE BAIXA ({scannedAsset.DATABAIXA}). Proceda com cautela.
+                      Atenção: Este item consta como ATIVO mas possui DATA DE BAIXA ({scannedAsset.databaixa}). Proceda com cautela.
                     </p>
                   </div>
                 )}
@@ -1491,7 +1491,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       try {
                         const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                         const currentCompKey = normalizeKey(selectedUnit || '');
-                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.endereco || '');
                         const currentLocKey = normalizeKey(selectedLocation || '');
                         
                         let updatedAsset: Asset;
@@ -1502,21 +1502,21 @@ const Inventory: React.FC<InventoryProps> = ({
                             filial: selectedUnit || scannedAsset.filial,
                             _conferido: true,
                             TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
                           updatedAsset = {
                             ...scannedAsset,
                             _conferido: true,
                             TAG_INVENTARIO: TagInventario.ADOTADO,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         } else {
                           updatedAsset = {
                             ...scannedAsset,
                             _conferido: true,
                             TAG_INVENTARIO: TagInventario.CONFERIDO,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         }
 
@@ -1544,7 +1544,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       try {
                         const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                         const currentCompKey = normalizeKey(selectedUnit || '');
-                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.ENDERECO || '');
+                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.endereco || '');
                         const currentLocKey = normalizeKey(selectedLocation || '');
                         
                         let updatedAsset: Asset;
@@ -1555,7 +1555,7 @@ const Inventory: React.FC<InventoryProps> = ({
                             filial: selectedUnit || scannedAsset.filial,
                             _conferido: true,
                             TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
                           // Caso seja da mesma empresa mas outro endereço, adota como sobra física
@@ -1563,14 +1563,14 @@ const Inventory: React.FC<InventoryProps> = ({
                             ...scannedAsset,
                             _conferido: true,
                             TAG_INVENTARIO: TagInventario.ADOTADO,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         } else {
                           // Caso seja do mesmo endereço
                           updatedAsset = {
                             ...scannedAsset,
                             _conferido: true,
-                            _localMaster: selectedLocation || scannedAsset.ENDERECO
+                            _localMaster: selectedLocation || scannedAsset.endereco
                           };
                         }
                         
@@ -1618,15 +1618,15 @@ const Inventory: React.FC<InventoryProps> = ({
                   <button 
                     onClick={() => {
                       setManualAsset({
-                        ETIQUETA: scannedResult,
+                        etiqueta: scannedResult,
                         filial: selectedUnit || "",
-                        STATUS: "ATIVO",
-                        DATAAQUISIC: new Date().toLocaleDateString('pt-BR'),
+                        status: "ATIVO",
+                        dataaqusic: new Date().toLocaleDateString('pt-BR'),
                         AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
                         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-                        QT: 1,
-                        DESCRICAODOATIVO: '',
-                        SERIAL: ''
+                        qt: 1,
+                        descricaodoativo: '',
+                        serial: ''
                       });
                       setIsManualEntryOpen(true);
                       setScannedResult(null);
@@ -2077,16 +2077,16 @@ const Inventory: React.FC<InventoryProps> = ({
           onManualInput={() => {
             setIsScannerOpen(false);
             setManualAsset({
-              ETIQUETA: "",
+              etiqueta: "",
               filial: selectedUnit || "",
-              STATUS: "ATIVO",
-              DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+              status: "ATIVO",
+              dataaqusic: new Date().toLocaleDateString('pt-BR'),
               AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
               TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-              QT: 1,
-              DESCRICAODOATIVO: '',
-              SERIAL: '',
-              ENDERECO: selectedLocation || ""
+              qt: 1,
+              descricaodoativo: '',
+              serial: '',
+              endereco: selectedLocation || ""
             });
             setIsManualEntryOpen(true);
           }}
@@ -2205,10 +2205,10 @@ const Inventory: React.FC<InventoryProps> = ({
             </button>
             <div className="bg-slate-100 p-8 text-center border-b border-slate-200">
                <div className="bg-white p-6 rounded-3xl shadow-xl inline-block mb-4 border border-slate-200">
-                 <QRCodeSVG value={String(qrModalAsset.ETIQUETA || qrModalAsset.id || '')} size={180} />
+                 <QRCodeSVG value={String(qrModalAsset.etiqueta || qrModalAsset.id || '')} size={180} />
                </div>
-               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none mb-1">{qrModalAsset.ETIQUETA}</h3>
-               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qrModalAsset.DESCRICAODOATIVO}</p>
+               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none mb-1">{qrModalAsset.etiqueta}</h3>
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qrModalAsset.descricaodoativo}</p>
             </div>
             <div className="p-6 bg-white">
                <button 
@@ -2244,8 +2244,8 @@ const Inventory: React.FC<InventoryProps> = ({
               <div className="bg-accent-soft p-4 rounded-2xl border border-accent/10 space-y-3">
                 <div>
                   <p className="text-[8px] font-black text-ink-muted uppercase tracking-widest mb-1">Patrimônio</p>
-                  <p className="text-xl font-black text-ink font-mono">{scannedAsset.ETIQUETA}</p>
-                  <p className="text-[10px] font-bold text-ink-muted mt-1 uppercase leading-tight line-clamp-2">{scannedAsset.DESCRICAODOATIVO}</p>
+                  <p className="text-xl font-black text-ink font-mono">{scannedAsset.etiqueta}</p>
+                  <p className="text-[10px] font-bold text-ink-muted mt-1 uppercase leading-tight line-clamp-2">{scannedAsset.descricaodoativo}</p>
                 </div>
 
                 <div className="pt-3 border-t border-accent/10 space-y-2">
@@ -2253,7 +2253,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="flex flex-col">
                       <span className="text-[7px] font-black text-ink-muted uppercase tracking-widest">Local de Origem</span>
                       <span className="text-[9px] font-black text-amber-600 uppercase">
-                        {scannedAsset._localMaster || scannedAsset.ENDERECO || 'NÃO DEFINIDO'}
+                        {scannedAsset._localMaster || scannedAsset.endereco || 'NÃO DEFINIDO'}
                       </span>
                     </div>
                     <ChevronRight size={14} className="text-slate-300 mt-2" />
@@ -2295,13 +2295,13 @@ const Inventory: React.FC<InventoryProps> = ({
                         filial: selectedUnit || scannedAsset.filial,
                         _conferido: true,
                         TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                        _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        _localMaster: selectedLocation || scannedAsset.endereco
                       };
                     } else {
                       updatedAsset = {
                         ...scannedAsset,
                         _conferido: true,
-                        _localMaster: selectedLocation || scannedAsset.ENDERECO
+                        _localMaster: selectedLocation || scannedAsset.endereco
                       };
                     }
                     
@@ -2347,15 +2347,15 @@ const Inventory: React.FC<InventoryProps> = ({
                 <button 
                   onClick={() => {
                     setManualAsset({
-                      ETIQUETA: scannedResult,
+                      etiqueta: scannedResult,
                       filial: selectedUnit || "",
-                      STATUS: "ATIVO",
-                      DATAAQUSIC: new Date().toLocaleDateString('pt-BR'),
+                      status: "ATIVO",
+                      dataaqusic: new Date().toLocaleDateString('pt-BR'),
                       AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
                       TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-                      QT: 1,
-                      DESCRICAODOATIVO: '',
-                      SERIAL: ''
+                      qt: 1,
+                      descricaodoativo: '',
+                      serial: ''
                     });
                     setIsManualEntryOpen(true);
                     setScannedResult(null);
@@ -2403,13 +2403,13 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="relative">
                       <input 
                         type="text" 
-                        value={manualAsset.ETIQUETA || ''} 
+                        value={manualAsset.etiqueta || ''} 
                         onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-black font-mono text-lg outline-none focus:border-accent"
                       />
                       <button 
-                        onClick={() => handleVoiceTyping('ETIQUETA')}
-                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'ETIQUETA' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                        onClick={() => handleVoiceTyping('etiqueta')}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'etiqueta' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
                       >
                         <Mic size={18} />
                       </button>
@@ -2420,14 +2420,14 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="relative">
                       <textarea 
                         rows={3}
-                        value={manualAsset.DESCRICAODOATIVO || ''} 
+                        value={manualAsset.descricaodoativo || ''} 
                         onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent uppercase"
                         placeholder="DESCREVA O BEM..."
                       />
                       <button 
-                        onClick={() => handleVoiceTyping('DESCRICAODOATIVO')}
-                        className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${isListening === 'DESCRICAODOATIVO' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                        onClick={() => handleVoiceTyping('descricaodoativo')}
+                        className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${isListening === 'descricaodoativo' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
                       >
                         <Mic size={18} />
                       </button>
@@ -2439,13 +2439,13 @@ const Inventory: React.FC<InventoryProps> = ({
                       <div className="relative">
                         <input 
                           type="text" 
-                          value={manualAsset.SERIAL || ''} 
+                          value={manualAsset.serial || ''} 
                           onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
                           className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent"
                         />
                         <button 
-                          onClick={() => handleVoiceTyping('SERIAL')}
-                          className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'SERIAL' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
+                          onClick={() => handleVoiceTyping('serial')}
+                          className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isListening === 'serial' ? 'bg-danger text-white animate-pulse' : 'bg-white text-accent shadow-sm'}`}
                         >
                           <Mic size={18} />
                         </button>
@@ -2455,7 +2455,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Quantidade</label>
                       <input 
                         type="number" 
-                        value={manualAsset.QT || 1} 
+                        value={manualAsset.qt || 1} 
                         onChange={(e) => setManualAsset({...manualAsset, QT: e.target.value})}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent"
                       />
@@ -2469,7 +2469,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Local:</span>
                       <div className="flex items-center space-x-2">
-                        <span className="text-[9px] font-black text-accent uppercase">{manualAsset.ENDERECO}</span>
+                        <span className="text-[9px] font-black text-accent uppercase">{manualAsset.endereco}</span>
                         <button 
                           onClick={handleReverseGeocoding}
                           disabled={isGeocoding}

@@ -51,16 +51,16 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
   extraAction,
   onShowQr
 }) => {
-  const statusUpper = String(asset.STATUS || '').toUpperCase();
+  const statusUpper = String(asset.status || '').toUpperCase();
   
   const isBaixado = useMemo(() => {
-    return statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
-  }, [statusUpper, asset.DATABAIXA]);
+    return statusUpper.includes('BAIXA') || !!asset.databaixa;
+  }, [statusUpper, asset.databaixa]);
 
   const visualStatus = useMemo(() => {
     return determineAssetTag(
       asset, 
-      selectedLocation || asset._localMaster || asset.ENDERECO || "", 
+      selectedLocation || asset._localMaster || asset.endereco || "", 
       selectedUnit || asset._unitid || null
     );
   }, [asset, selectedLocation, selectedUnit]);
@@ -70,10 +70,10 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
 
   const fullDescription = [
-    asset.QT || '1',
-    asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
-    asset.SERIAL ? `S/N: ${asset.SERIAL}` : 'S/N',
-    asset.DATAAQUISIC ? formatMonthYearBR(asset.DATAAQUISIC) : '',
+    asset.qt || '1',
+    asset.descricaodoativo || 'SEM DESCRIÇÃO',
+    asset.serial ? `S/N: ${asset.serial}` : 'S/N',
+    asset.dataaqusic ? formatMonthYearBR(asset.dataaqusic) : '',
   ].filter(Boolean).join('; ');
 
   const handleConfirm = (e: React.MouseEvent) => {
@@ -114,7 +114,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
           </div>
           
           <h3 className="text-xl font-extrabold text-[#1E293B] font-mono tracking-tight mb-1 truncate">
-            {formatEtiqueta(asset.ETIQUETA)}
+            {formatEtiqueta(asset.etiqueta)}
           </h3>
           
           <p className="text-sm font-medium text-[#475569] leading-snug line-clamp-2 mb-2">
@@ -135,7 +135,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 <div className="flex-1 min-w-0">
                   <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-0.5">Origem (Base)</p>
                   <p className="text-[10px] font-black text-slate-700 uppercase leading-tight truncate">
-                    {asset.ENDERECO || 'NÃO INFORMADO'}
+                    {asset.endereco || 'NÃO INFORMADO'}
                   </p>
                 </div>
               </div>
@@ -176,9 +176,9 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 Pendente Nuvem
               </span>
             )}
-            {asset.REGISTRO && (
+            {asset.registro && (
               <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-tight">
-                REG: {asset.REGISTRO}
+                REG: {asset.registro}
               </span>
             )}
             {asset._dataLeitura && !isAdopted && (

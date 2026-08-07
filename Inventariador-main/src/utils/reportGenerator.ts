@@ -42,9 +42,9 @@ export const generateInventoryBook = async (assets: Asset[], unitName: string): 
   doc.text('Resumo dos Ativos', 20, 20);
 
   const tableData = assets.map(a => [
-    a.ETIQUETA || 'S/E',
-    a.DESCRICAODOATIVO || 'S/D',
-    a.ENDERECO || 'S/L',
+    a.etiqueta || 'S/E',
+    a.descricaodoativo || 'S/D',
+    a.endereco || 'S/L',
     a._conferido ? 'CONFERIDO' : 'PENDENTE',
     a.TAG_INVENTARIO || '---'
   ]);
@@ -87,9 +87,9 @@ export const generateKardexFichas = async (assets: Asset[], unitName: string): P
 
     doc.setTextColor(20, 20, 20);
     doc.setFontSize(12);
-    doc.text(`ETIQUETA: ${asset.ETIQUETA || 'NÃO INFORMADA'}`, 15, 55);
-    doc.text(`DESCRIÇÃO: ${asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}`, 15, 65);
-    doc.text(`LOCAL: ${asset.ENDERECO || 'NÃO LOCALIZADO'}`, 15, 75);
+    doc.text(`ETIQUETA: ${asset.etiqueta || 'NÃO INFORMADA'}`, 15, 55);
+    doc.text(`DESCRIÇÃO: ${asset.descricaodoativo || 'SEM DESCRIÇÃO'}`, 15, 65);
+    doc.text(`LOCAL: ${asset.endereco || 'NÃO LOCALIZADO'}`, 15, 75);
     doc.text(`ESTADO: ${asset.ESTADO_CONSERVACAO || 'NÃO INFORMADO'}`, 15, 85);
 
     // Foto do Ativo

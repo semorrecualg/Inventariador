@@ -15,9 +15,9 @@ export const stressTestService = {
     for (let i = 0; i < assetCount; i++) {
       assets.push({
         id: `STRESS_${i}`,
-        ETIQUETA: `ETQ_${i.toString().padStart(6, '0')}`,
-        DESCRICAODOATIVO: `ITEM DE TESTE DE ESTRESSE - REGISTRO ${i}`,
-        VLRAQUISIC: Math.random() * 10000,
+        etiqueta: `ETQ_${i.toString().padStart(6, '0')}`,
+        descricaodoativo: `ITEM DE TESTE DE ESTRESSE - REGISTRO ${i}`,
+        vlraquisic: Math.random() * 10000,
         tenantid: 'STRESS_TEST_TENANT',
         filial: 'STRESS_UNIT',
         TAG_INVENTARIO: TagInventario.PENDENTE,

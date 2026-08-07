@@ -33,6 +33,7 @@ import AssetGroupsTable from './AssetGroupsTable';
 import ChartOfAccountsTable from './ChartOfAccountsTable';
 import NCMClassifierTable from './NCMClassifierTable';
 import AssetLedger from './AssetLedger';
+import { InventoryCard } from './InventoryCard';
 import BaseModal from './BaseModal';
 import UnitConfigurator from './UnitConfigurator';
 import ImpairmentTestModal from './ImpairmentTestModal';
@@ -77,7 +78,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     let writeOffCount = 0;
 
     assets.forEach(asset => {
-      const v0 = Number(asset._valor_aquisicao) || Number(asset.VLRAQUISIC) || 0;
+      const v0 = Number(asset._valor_aquisicao || asset.vlraquisic) || 0;
       totalValue += v0;
       
       const depr = calculateDepreciation(asset);
@@ -407,7 +408,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         setNewAssetForm(prev => ({
           ...prev,
           _ncm_code: ncmCode,
-          DESCRICAODOATIVO: prev.DESCRICAODOATIVO || classifier.description,
+          descricaodoativo: prev.descricaodoativo || classifier.description,
           _taxa_depreciacao_anual: classifier.annual_depreciation_rate,
           _vida_util_meses: classifier.useful_life_months,
           _conta_contabil: group?.asset_account || prev._conta_contabil,
@@ -419,7 +420,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
   };
 
   const handleSaveNewAsset = async () => {
-    if (!newAssetForm.ETIQUETA || !newAssetForm.DESCRICAODOATIVO || !newAssetForm._valor_aquisicao) {
+    if (!newAssetForm.etiqueta || !newAssetForm.descricaodoativo || !newAssetForm._valor_aquisicao) {
       alert('Preencha os campos obrigatórios (Etiqueta, Descrição e Valor)');
       return;
     }
@@ -482,7 +483,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
         record_id: String(editingAsset?.id || assetToSave.id),
         old_data: editingAsset,
         new_data: assetToSave,
-        details: `${editingAsset ? 'Atualização' : 'Criação'} manual de ativo imobilizado: ${assetToSave.ETIQUETA}`,
+        details: `${editingAsset ? 'Atualização' : 'Criação'} manual de ativo imobilizado: ${assetToSave.etiqueta}`,
         tenantid: tenantid
       });
 
@@ -589,14 +590,14 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
           ...selectedAsset,
           id: crypto.randomUUID(),
           _parent_id: selectedAsset.id,
-          ETIQUETA: `${selectedAsset.ETIQUETA}.${i + 1}`,
+          etiqueta: `.`,
           _isNew: true,
           _history: [
             {
               timestamp,
               user: username,
               action: 'CRIAÇÃO POR UNITARIZAÇÃO',
-              details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${selectedAsset.ETIQUETA}.`
+              details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${selectedAsset.etiqueta}.`
             }
           ]
         };
@@ -780,6 +781,27 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Inventário em Destaque</h3>
+          {assets.length > 0 ? (
+            <div className="space-y-3">
+              {assets.slice(0, 3).map(asset => (
+                <div key={asset.id} className="rounded-xl overflow-hidden border border-slate-100">
+                  <InventoryCard
+                    asset={asset}
+                    batteryLevel={1}
+                    isPlugged
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-40 text-slate-400 italic">
+              Nenhum ativo carregado na tabela de trabalho.
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Últimas Movimentações</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-center h-40 text-slate-400 italic">
@@ -860,13 +882,13 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {impairmentAssets.length > 0 ? impairmentAssets.map(asset => {
-                    const v0 = Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0);
+                    const v0 = Number(asset._valor_aquisicao || asset.vlraquisic || 0);
                     const depr = Number(asset._depreciacao_acumulada || 0);
                     const vcl = v0 - depr;
                     return (
                       <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.ETIQUETA}</td>
-                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.DESCRICAODOATIVO}</td>
+                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.etiqueta}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.descricaodoativo}</td>
                         <td className="px-6 py-4 text-xs font-bold text-slate-900 text-right">{formatCurrency(vcl)}</td>
                         <td className="px-6 py-4 text-xs font-bold text-blue-600 text-right">{formatCurrency(Number(asset._valor_recuperavel || 0))}</td>
                         <td className="px-6 py-4 text-xs font-black text-rose-600 text-right">{formatCurrency(Number(asset._perda_impairment || 0))}</td>
@@ -905,9 +927,9 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                     const childrenCount = assets.filter(a => a._parent_id === asset.id).length;
                     return (
                       <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.ETIQUETA}</td>
-                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.DESCRICAODOATIVO}</td>
-                        <td className="px-6 py-4 text-xs font-bold text-slate-900 text-right">{formatCurrency(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}</td>
+                        <td className="px-6 py-4 text-xs font-black text-slate-900">{asset.etiqueta}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase truncate max-w-xs">{asset.descricaodoativo}</td>
+                        <td className="px-6 py-4 text-xs font-bold text-slate-900 text-right">{formatCurrency(Number(asset._valor_aquisicao || asset.vlraquisic || 0))}</td>
                         <td className="px-6 py-4 text-xs font-black text-emerald-600 text-center">{childrenCount}</td>
                         <td className="px-6 py-4 text-center">
                           <span className="px-2 py-1 bg-slate-100 text-slate-500 text-[9px] font-black rounded-lg uppercase">Unitarizado</span>
@@ -994,18 +1016,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                         className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
                       >
                         <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
-                          <div className="font-medium text-slate-800">{asset.ETIQUETA || 'S/E'}</div>
-                          <div className="text-xs text-slate-500 truncate max-w-[200px]">{asset.DESCRICAODOATIVO}</div>
+                          <div className="font-medium text-slate-800">{asset.etiqueta || 'S/E'}</div>
+                          <div className="text-xs text-slate-500 truncate max-w-[200px]">{asset.descricaodoativo}</div>
                         </td>
                         <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
                           <div className="text-sm text-slate-700">{asset.filial || asset._unidade_operacional || '-'}</div>
-                          <div className="text-xs text-slate-400">{asset._centro_custo || asset.CENTRODECUSTO || '-'}</div>
+                          <div className="text-xs text-slate-400">{asset._centro_custo || asset.centrodecusto || '-'}</div>
                         </td>
                         <td className="px-6 py-4" onClick={() => setSelectedAsset(asset)}>
-                          <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.DATAAQUISIC || '-'}</div>
+                          <div className="text-sm text-slate-700">{asset._data_aquisicao || asset.dataaqusic || '-'}</div>
                         </td>
                         <td className="px-6 py-4 text-sm font-medium text-slate-800" onClick={() => setSelectedAsset(asset)}>
-                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.vlraquisic || 0))}
                         </td>
                         <td className="px-6 py-4 text-sm text-rose-600" onClick={() => setSelectedAsset(asset)}>
                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(depr.accumulatedDepreciation)}
@@ -1401,10 +1423,10 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
                           <tbody className="divide-y divide-slate-50">
                             {assets.slice(0, 10).map((asset) => (
                               <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="px-6 py-4 text-xs font-bold text-slate-900">{asset.ETIQUETA}</td>
-                                <td className="px-6 py-4 text-xs text-slate-600 uppercase">{asset.DESCRICAODOATIVO}</td>
+                                <td className="px-6 py-4 text-xs font-bold text-slate-900">{asset.etiqueta}</td>
+                                <td className="px-6 py-4 text-xs text-slate-600 uppercase">{asset.descricaodoativo}</td>
                                 <td className="px-6 py-4 text-xs font-bold text-slate-900">
-                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao) || Number(asset.VLRAQUISIC) || 0)}
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.vlraquisic) || 0)}
                                 </td>
                                 <td className="px-6 py-4">
                                   <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest ${
@@ -1477,7 +1499,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
               <label className="text-xs font-bold text-slate-500 uppercase">Etiqueta / Patrimônio *</label>
               <input 
                 type="text"
-                value={newAssetForm.ETIQUETA || ''}
+                value={newAssetForm.etiqueta || ''}
                 onChange={(e) => setNewAssetForm({...newAssetForm, ETIQUETA: e.target.value})}
                 className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="Ex: 001234"
@@ -1508,7 +1530,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
             <label className="text-xs font-bold text-slate-500 uppercase">Descrição do Ativo *</label>
             <input 
               type="text"
-              value={newAssetForm.DESCRICAODOATIVO || ''}
+              value={newAssetForm.descricaodoativo || ''}
               onChange={(e) => setNewAssetForm({...newAssetForm, DESCRICAODOATIVO: e.target.value})}
               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               placeholder="Ex: NOTEBOOK DELL LATITUDE 3420"

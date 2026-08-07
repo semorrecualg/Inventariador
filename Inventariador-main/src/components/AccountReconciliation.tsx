@@ -82,32 +82,32 @@ interface AssetCardProps {
 
 const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }: AssetCardProps) => {
   const isConferido = !!asset._conferido;
-  const isSixDigit = isSixDigitNumeric(asset.ETIQUETA);
-  const isLabeling = String(asset.ETIQUETA || '').toUpperCase().trim() === 'ETIQUETAR';
+  const isSixDigit = isSixDigitNumeric(asset.etiqueta);
+  const isLabeling = String(asset.etiqueta || '').toUpperCase().trim() === 'ETIQUETAR';
   const isLocked = isSixDigit || isLabeling;
   const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
   
-  const statusUpper = String(asset.STATUS || '').toUpperCase();
-  const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+  const statusUpper = String(asset.status || '').toUpperCase();
+  const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
 
   const visualStatus = useMemo(() => {
     if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
 
     if (!asset._conferido) {
-      const needsLabel = normalize(asset.ETIQUETA || '') === 'ETIQUETAR';
+      const needsLabel = normalize(asset.etiqueta || '') === 'ETIQUETAR';
       if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
       return TagInventario.PENDENTE;
     }
 
     const wasFaltaEtiquetar = normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
-    if (wasFaltaEtiquetar && normalize(asset.ETIQUETA || '') !== 'ETIQUETAR') {
+    if (wasFaltaEtiquetar && normalize(asset.etiqueta || '') !== 'ETIQUETAR') {
       return TagInventario.ETIQUETADO;
     }
 
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
     if (asset.TAG_INVENTARIO === TagInventario.RE_ADOTADO) return TagInventario.RE_ADOTADO;
 
-    const currentEtq = normalize(asset.ETIQUETA || "");
+    const currentEtq = normalize(asset.etiqueta || "");
     const masterEtq = normalize(asset._plaquetaMaster || "");
     if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
       return TagInventario.DIVERGENCIA;
@@ -150,18 +150,18 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
   }, [visualStatus, isBaixado, isConferido]);
 
   const isValueZeroForAsset = useMemo(() => {
-    const val = asset.VLRAQUISIC || asset.vlraquisic;
+    const val = asset.vlraquisic;
     if (val === undefined || val === null) return true;
     const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[R$\s]/gi, ''));
     return isNaN(num) || num <= 0;
-  }, [asset.VLRAQUISIC, asset.vlraquisic]);
+  }, [asset.vlraquisic]);
 
   const fullDescription = [
-    asset.QT || '1',
-    asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO',
-    asset.SERIAL || 'S/N',
-    formatMonthYearBR(asset.DATAAQUISIC),
-    asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'
+    asset.qt || '1',
+    asset.descricaodoativo || 'SEM DESCRIÇÃO',
+    asset.serial || 'S/N',
+    formatMonthYearBR(asset.dataaqusic),
+    asset.nomefornecedor || 'FORNECEDOR N/I'
   ].join('; ');
 
   return (
@@ -189,7 +189,7 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
         <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-[7px] font-bold uppercase flex items-center space-x-1 shadow-sm z-10 ${isLocked ? 'bg-slate-400 text-white' : colors.badge}`}>
           {isLocked ? <AlertTriangle size={10} strokeWidth={3} /> : (colors.icon && <colors.icon size={10} strokeWidth={3} />)}
           <span className="tracking-widest">
-            {isLocked ? `BLOQUEADO | ${isSixDigit ? 'REGRA DE OURO' : 'ETIQUETAGEM'}` : `${asset.REGISTRO || '---'} | ${visualStatus}`}
+            {isLocked ? `BLOQUEADO | ${isSixDigit ? 'REGRA DE OURO' : 'ETIQUETAGEM'}` : `${asset.registro || '---'} | ${visualStatus}`}
           </span>
         </div>
         
@@ -198,7 +198,7 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
             <div className="flex items-center space-x-2">
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
               <span className={`text-lg font-bold font-mono tracking-tight ${isLocked ? 'text-slate-500' : colors.text}`}>
-                {formatEtiqueta(asset.ETIQUETA)}
+                {formatEtiqueta(asset.etiqueta)}
               </span>
             </div>
             {isLocked ? (
@@ -233,7 +233,7 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
           <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 mt-1">
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">C. Custo:</span>
             <span className="text-[10px] font-bold text-slate-700 uppercase truncate tracking-tight">
-              {asset.CENTRODECUSTO || '---'}
+              {asset.centrodecusto || '---'}
             </span>
           </div>
 
@@ -332,8 +332,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   const accountStats = useMemo(() => {
     const stats: Record<string, { total: number; checked: number; totalValue: number; itemsWithZeroValue: number }> = {};
     assets.forEach(asset => {
-      const statusUpper = String(asset.STATUS || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+      const statusUpper = String(asset.status || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
       
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
       if (isBaixado && !asset._conferido) return;
@@ -348,7 +348,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       }
 
       // Validador de Balanço Patrimonial: Identifica valor zero ou corrompido
-      const val = asset.VLRAQUISIC || asset.vlraquisic;
+      const val = asset.vlraquisic;
       const num = val !== undefined && val !== null 
         ? (typeof val === 'number' ? val : parseFloat(String(val).replace(/[R$\s]/gi, ''))) 
         : 0;
@@ -372,8 +372,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
   const filteredAssets = useMemo(() => {
     if (!selectedAccount) return [];
     return assets.filter(asset => {
-      const statusUpper = String(asset.STATUS || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+      const statusUpper = String(asset.status || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
 
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
       if (isBaixado && !asset._conferido) return false;
@@ -382,11 +382,11 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       const matchesAccount = account === selectedAccount;
       
       const matchesSearch = assetSearchTerm === '' || 
-        (asset.DESCRICAODOATIVO || '').toUpperCase().includes(assetSearchTerm.toUpperCase()) ||
-        (asset.REGISTRO || '').toString().includes(assetSearchTerm) ||
-        (asset.ETIQUETA || '').toString().includes(assetSearchTerm) ||
-        (asset.Sn1_recno || '').toString().includes(assetSearchTerm) ||
-        (asset.Sn3_recno || '').toString().includes(assetSearchTerm);
+        (asset.descricaodoativo || '').toUpperCase().includes(assetSearchTerm.toUpperCase()) ||
+        (asset.registro || '').toString().includes(assetSearchTerm) ||
+        (asset.etiqueta || '').toString().includes(assetSearchTerm) ||
+        (asset.sn1_recno || '').toString().includes(assetSearchTerm) ||
+        (asset.sn3_recno || '').toString().includes(assetSearchTerm);
 
       if (!matchesAccount || !matchesSearch) return false;
 
@@ -398,14 +398,14 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
         if (dateA !== dateB) return dateB - dateA;
       }
-      const etqA = String(a.ETIQUETA || '').padStart(10, '0');
-      const etqB = String(b.ETIQUETA || '').padStart(10, '0');
+      const etqA = String(a.etiqueta || '').padStart(10, '0');
+      const etqB = String(b.etiqueta || '').padStart(10, '0');
       return etqB.localeCompare(etqA, undefined, { numeric: true });
     });
   }, [assets, selectedAccount, assetSearchTerm, activeFilter]);
 
   const handleToggleReconcile = useCallback((asset: Asset) => {
-    const etq = String(asset.ETIQUETA || '').toUpperCase().trim();
+    const etq = String(asset.etiqueta || '').toUpperCase().trim();
     if (isSixDigitNumeric(etq) || etq === 'ETIQUETAR') return;
     
     onUpdateAsset({
@@ -500,7 +500,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                   onClick={() => {
                     const allSelectableIds = filteredAssets
                       .filter(a => {
-                        const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+                        const etq = String(a.etiqueta || '').toUpperCase().trim();
                         const isSixDigit = /^\d{6}$/.test(etq);
                         const isLabeling = etq === 'ETIQUETAR';
                         return !(isSixDigit || isLabeling);
@@ -522,7 +522,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
                 >
                   {filteredAssets.length > 0 && filteredAssets
                     .filter(a => {
-                      const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+                      const etq = String(a.etiqueta || '').toUpperCase().trim();
                       const isSixDigit = /^\d{6}$/.test(etq);
                       const isLabeling = etq === 'ETIQUETAR';
                       return !(isSixDigit || isLabeling);

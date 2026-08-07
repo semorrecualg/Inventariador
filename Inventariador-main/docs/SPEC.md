@@ -29,11 +29,11 @@ Capacitor e sincronização em nuvem (Supabase) pronta porém desligada por padr
 | Estilo | Tailwind CSS v4 + Motion + Lucide | `@tailwindcss/vite` |
 | Roteamento | React Router `HashRouter` | Compatível com `file://` no Capacitor |
 | Estado | State local em `App.tsx` (máquina de telas) + Zustand (`stores/`) | `uiStore`, `authStore`, `inventoryStore`, `syncStore` |
-| Persistência local | **Dexie.js / IndexedDB** — banco `InventoryLocalStore` | Schema v3 (9 tabelas) |
+| Persistência local | **Dexie.js / IndexedDB** — banco `InventoryLocalStore` | Schema v4 (9 tabelas — baseline em `docs/SCHEMA_BASELINE.md`) |
 | Nuvem (desligada) | Supabase (`@supabase/supabase-js`) + Gemini (`@google/genai`) | `isInternalMode = true` |
 | Mobile | Capacitor 6 (Android) | APK via GitHub Actions |
 | Banco nativo Android (fase 3) | `@capacitor-community/sqlite` + `jeep-sqlite` + `sql.js` | Instalados, ainda não usados |
-| Testes | Vitest (9 suítes / 119 testes) + Playwright (E2E) | `npm test`, `npm run test:e2e` |
+| Testes | Vitest (13 arquivos / 144 testes) + Playwright (E2E) | `npm test`, `npm run test:e2e` |
 | Qualidade | ESLint + TypeScript + Husky | `npm run lint` |
 
 **Dependências principais:** react, react-dom, dexie, @supabase/supabase-js, @google/genai,
@@ -98,7 +98,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 
 ---
 
-## 4. Modelo de dados (Dexie/IndexedDB — schema v3)
+## 4. Modelo de dados (Dexie/IndexedDB — schema v4, baseline congelado em `docs/SCHEMA_BASELINE.md`)
 
 | Tabela | Chave / índices | Observação |
 |---|---|---|
@@ -185,7 +185,7 @@ Duas fontes de verdade que devem andar juntas:
 | `npm install --legacy-peer-deps` | Instalar dependências (obrigatório o flag) |
 | `npm run dev` | Dev server Vite (porta 3000) |
 | `npm run build` | Build de produção (`dist/`) |
-| `npm test` | Vitest (119 testes) |
+| `npm test` | Vitest (144 testes) |
 | `npm run test:e2e` | Playwright E2E |
 | `npm run lint` | ESLint |
 | `npx tsc -b --noEmit` | Typecheck |
@@ -194,10 +194,11 @@ Duas fontes de verdade que devem andar juntas:
 
 ## 8. Testes e validação
 
-- **Vitest:** 119 testes / 9 suítes em `src/__tests__/` (Login, localAuth, masterDrive,
-  ErrorBoundary, Modal, useBufferController, io_buffer etc.) — verdes.
-- **Typecheck:** dívida pré-existente de ~114+ erros fora de `src/` em limpeza por fases
-  (não bloqueia o app em runtime).
+- **Vitest:** 144 testes / 13 arquivos em `src/__tests__/` (Login, localAuth, masterDrive,
+  ErrorBoundary, Modal, useBufferController, io_buffer, schemaBaseline, securityExport etc.) — verdes.
+- **Typecheck:** limpo ✅ (zero erros em todo o projeto) — `tsconfig.json` único com
+  `skipLibCheck: true`, sem projetos referenciados (TS6310 não se aplica) e declarações
+  ambient para workbox/vite-plugin-pwa. Pendência 1 da issue #6 (Fase 0) concluída.
 - **E2E:** Playwright configurado (`playwright.config.ts`), depende de browsers instalados.
 
 ---
@@ -211,7 +212,7 @@ anti-perda: export+checksum, migrador idempotente com dry-run, dual-write, rollb
 
 | Fase | Escopo | Status |
 |---|---|---|
-| 0 | Baseline estável (typecheck limpo, schema congelado, export seguro) | **Em andamento** (typecheck em limpeza por fases) |
+| 0 | Baseline estável (typecheck limpo, schema congelado, export seguro) | **Em andamento** (typecheck ✅ concluído; falta snapshot do schema + export/restore) |
 | 1 | Camada de repositórios (`src/repositories/`) | Planejada |
 | 2 | Supabase ativo (schema + RLS por `tenantid` + sync bidirecional + auth) | SQL de migração executado no Supabase (RLS/colunas `tenantid`) |
 | 3 | SQLite nativo no Android (migrador IndexedDB→SQLite, dual-write, cutover) | Planejada |

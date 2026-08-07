@@ -191,12 +191,12 @@ export const normalizeString = (s: string): string => {
 };
 
 export const determineAssetTag = (asset: Asset, targetLocation: string, selectedUnit: string | null): TagInventario => {
-  const statusUpper = String(asset.STATUS || '').toUpperCase();
-  const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+  const statusUpper = String(asset.status || '').toUpperCase();
+  const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
   const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   
   // REGRA DE OURO: Divergência Crítica (Ativo mas com Baixa)
-  const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.DATABAIXA;
+  const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.databaixa;
   if (isGoldenRuleDivergent) return TagInventario.DIVERGENCIA;
 
   // 1. ETIQUETAGEM (Workflow Soberano v24)
@@ -221,7 +221,7 @@ export const determineAssetTag = (asset: Asset, targetLocation: string, selected
   if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
   // 5. DIVERGÊNCIA (Plaqueta física != lógíca)
-  const currentEtq = normalizeString(asset.ETIQUETA || "");
+  const currentEtq = normalizeString(asset.etiqueta || "");
   if (masterEtq !== "" && currentEtq !== masterEtq) {
     return TagInventario.DIVERGENCIA;
   }
@@ -231,7 +231,7 @@ export const determineAssetTag = (asset: Asset, targetLocation: string, selected
 
   // 6. CONFERIDO vs ADOTADO vs RE-ADOTADO
   const targetLocKey = normalizeString(targetLocation);
-  const originalLocKey = normalizeString(asset.ENDERECO || ""); 
+  const originalLocKey = normalizeString(asset.endereco || ""); 
   const currentAuditLocKey = asset._localMaster ? normalizeString(asset._localMaster) : "";
   
   // 3) RE-ADOTADO: Já conferido anteriormente em um local e agora encontrado em outro local

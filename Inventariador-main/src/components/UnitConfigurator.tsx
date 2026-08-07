@@ -1,17 +1,22 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Save, 
-  AlertCircle, 
-  CheckCircle2, 
+import {
+  Save,
+  AlertCircle,
+  CheckCircle2,
   Loader2,
   Layers,
   ArrowLeft,
   WifiOff,
   Unlock,
-  Search
+  Search,
+  Plus,
+  Minus,
+  Navigation,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Geolocation } from '@capacitor/geolocation';
 import * as turf from '@turf/turf';
 import { UnitConfig, User, AppScreen } from '../types';
@@ -25,18 +30,139 @@ interface UnitConfiguratorProps {
   onUpdateConfigs?: (configs: UnitConfig[]) => void;
   onNavigate?: (screen: AppScreen) => void;
   initialUnit?: string | null;
+  /** Bypass offline: chamado quando o auditor aplica coordenadas padrão e a campanha de contingência é aberta. */
+  onBypassApplied?: (config: UnitConfig) => void;
 }
 
-const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack, onUpdateConfigs, initialUnit }) => {
+// ============================================================================
+// ÂNCORA GPS — CENTRO PADRÃO / FALLBACK CANÔNICO
+// Brasília - DF: [longitude: -47.8825, latitude: -15.7942], zoom inicial 4 (nacional)
+// ============================================================================
+const BRASILIA_DEFAULT = { lat: -15.7942, lng: -47.8825 } as const;
+const DEFAULT_ZOOM = 4;
+const UNIT_ZOOM = 12;
+
+/**
+ * safeLngLat — higienizador estrito de coordenadas (Guarda Defensiva).
+ * Aceita [lng, lat] ou { lng/longitude/lngLat, lat/latitude/lngLat } e SEMPRE
+ * devolve um par [lng, lat] finito — ou o centro canônico Brasília-DF.
+ * Intercepta o crash "Cannot read properties of undefined (reading 'lng')".
+ */
+const BRASILIA_CENTER: [number, number] = [BRASILIA_DEFAULT.lng, BRASILIA_DEFAULT.lat];
+
+const safeLngLat = (coords: unknown): [number, number] => {
+  const DEFAULT_CENTER: [number, number] = BRASILIA_CENTER;
+  if (!coords) return DEFAULT_CENTER;
+
+  // Se for Array [lng, lat]
+  if (Array.isArray(coords) && coords.length >= 2) {
+    const lng = Number(coords[0]);
+    const lat = Number(coords[1]);
+    return isNaN(lng) || isNaN(lat) ? DEFAULT_CENTER : [lng, lat];
+  }
+
+  // Se for Objeto { lng, lat } ou { longitude, latitude } ou variantes normais
+  const c = coords as { lng?: unknown; longitude?: unknown; lat?: unknown; latitude?: unknown; lngLat?: { lng?: unknown; lat?: unknown } };
+  const lng = Number(c.lng ?? c.longitude ?? c.lngLat?.lng);
+  const lat = Number(c.lat ?? c.latitude ?? c.lngLat?.lat);
+
+  if (isNaN(lng) || isNaN(lat)) return DEFAULT_CENTER;
+  return [lng, lat];
+};
+
+/** Variante { lat, lng } finitos — para o estado currentConfig e persistência. */
+const safeLatLngPair = (coords: unknown): { lat: number; lng: number } => {
+  const [lng, lat] = safeLngLat(coords);
+  return { lat, lng };
+};
+
+/**
+ * Estilo LOCAL 100% offline (inline JSON): sem tiles, sem glyphs, sem sprites,
+ * sem nenhuma requisição de rede. Previne a tela preta do MapLibre no Capacitor.
+ * Duas camadas de fundo (street/satellite) + grade de coordenadas local.
+ */
+function buildOfflineStyle(): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      'graticule-source': {
+        type: 'geojson',
+        data: buildGraticuleGeoJSON() as unknown as maplibregl.GeoJSONSourceSpecification['data']
+      }
+    },
+    layers: [
+      {
+        id: 'bg-street',
+        type: 'background',
+        paint: { 'background-color': '#e8ecf2' }
+      },
+      {
+        id: 'bg-satellite',
+        type: 'background',
+        paint: { 'background-color': '#040b1a' }
+      },
+      {
+        id: 'graticule-layer',
+        type: 'line',
+        source: 'graticule-source',
+        paint: {
+          'line-color': 'rgba(71, 85, 105, 0.28)',
+          'line-width': 0.75
+        }
+      },
+      {
+        id: 'graticule-satellite-layer',
+        type: 'line',
+        source: 'graticule-source',
+        paint: {
+          'line-color': 'rgba(59, 130, 246, 0.22)',
+          'line-width': 0.75
+        }
+      }
+    ]
+  };
+}
+
+/** Grade de coordenadas gerada localmente (2° de passo sobre o Brasil) — zero rede. */
+function buildGraticuleGeoJSON() {
+  const latMin = -34, latMax = 6, lngMin = -74, lngMax = -34, step = 2;
+  const features: unknown[] = [];
+  for (let lat = latMin; lat <= latMax; lat += step) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [[lngMin, lat], [lngMax, lat]] }
+    });
+  }
+  for (let lng = lngMin; lng <= lngMax; lng += step) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [[lng, latMin], [lng, latMax]] }
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
+  user,
+  units,
+  onBack,
+  onUpdateConfigs,
+  onNavigate,
+  initialUnit,
+  onBypassApplied
+}) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  
-  const [isIframeFallback] = useState(true);
+  const mapInstance = useRef<maplibregl.Map | null>(null);
+  const markerRef = useRef<maplibregl.Marker | null>(null);
+
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
-    lat: -15.793889, // Brasília default
-    lng: -47.882778,
+    lat: BRASILIA_DEFAULT.lat,
+    lng: BRASILIA_DEFAULT.lng,
     radius_meters: 500,
     is_active: true
   });
@@ -50,9 +176,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     return (saved === 'satellite' || saved === 'street') ? saved : 'street';
   });
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([-15.793889, -47.882778]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showAdminBypassToast, setShowAdminBypassToast] = useState(false);
+  const [bypassCampaignId, setBypassCampaignId] = useState<string | null>(null);
 
   // Solução para Stale Closure bugs (Captura os estados mais recentes nos listeners assíncronos do mapa)
   const selectedUnitRef = useRef<string | null>(null);
@@ -75,20 +201,180 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         return;
       }
       setCurrentConfig(prev => ({ ...prev, lat, lng }));
-      
+
       // Gravação preventiva de rascunho na sessão
       sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
       sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
     };
   }, []);
 
+  // ==========================================================================
+  // MOTOR MAPLIBRE OFFLINE-FIRST
+  // ==========================================================================
+  const flyTo = (lat: number, lng: number, zoom = UNIT_ZOOM) => {
+    const map = mapInstance.current;
+    if (!map) return;
+    // Guarda Defensiva: nunca alimenta o motor com coordenadas indefinidas/NaN
+    const [safeLng, safeLat] = safeLngLat({ lat, lng });
+    map.flyTo({ center: [safeLng, safeLat], zoom, essential: true, duration: 900 });
+  };
+
+  const initMap = () => {
+    if (!mapRef.current || mapInstance.current) return;
+    try {
+      const style = buildOfflineStyle();
+
+      const map = new maplibregl.Map({
+        container: mapRef.current,
+        style,
+        center: [BRASILIA_DEFAULT.lng, BRASILIA_DEFAULT.lat], // [lng, lat] Brasília DF
+        zoom: DEFAULT_ZOOM, // nível nacional
+        attributionControl: false,
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchZoomRotate: true,
+        fadeDuration: 0
+      });
+
+      map.on('load', () => {
+        try {
+          // Grade de coordenadas (camada local de referência)
+          if (!map.getSource('graticule-source')) {
+            map.addSource('graticule-source', {
+              type: 'geojson',
+              data: buildGraticuleGeoJSON() as unknown as maplibregl.GeoJSONSourceSpecification['data']
+            });
+          }
+          // Círculo de geocerca (âncora) — preenchimento + contorno
+          if (!map.getSource('geofence-source')) {
+            map.addSource('geofence-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+            map.addLayer({
+              id: 'geofence-fill',
+              type: 'fill',
+              source: 'geofence-source',
+              paint: {
+                'fill-color': '#3b82f6',
+                'fill-opacity': 0.18,
+                'fill-outline-color': '#3b82f6'
+              }
+            });
+            map.addLayer({
+              id: 'geofence-line',
+              type: 'line',
+              source: 'geofence-source',
+              paint: {
+                'line-color': '#3b82f6',
+                'line-width': 2,
+                'line-dasharray': [3, 2]
+              }
+            });
+          }
+
+          mapInstance.current = map;
+          setMapReady(true);
+          setMapFailed(false);
+          logger.info('>>> [MAP] MapLibre GL iniciado em modo OFFLINE (estilo inline, zero requisições de rede).');
+
+          // Ponto de partida: unidade com coordenadas válidas → voa para a âncora; senão mantém Brasília/zoom nacional
+          const cfg = currentConfigRef.current;
+          if (cfg.lat !== undefined && cfg.lng !== undefined && !isNaN(Number(cfg.lat)) && !isNaN(Number(cfg.lng))) {
+            const { lat: safeLat, lng: safeLng } = safeLatLngPair(cfg);
+            flyTo(safeLat, safeLng, UNIT_ZOOM);
+          }
+        } catch (err) {
+          logger.error('>>> [MAP] Falha ao montar camadas locais do MapLibre:', err);
+          mapInstance.current = map;
+          setMapReady(true);
+        }
+      });
+
+      map.on('error', (evt) => {
+        // Erros de estilo/rede são ignorados: o estilo é 100% local.
+        logger.warn('>>> [MAP] Evento de erro não-fatal do MapLibre:', evt?.error?.message);
+      });
+    } catch (err) {
+      logger.error('>>> [MAP] Falha catastrófica ao inicializar MapLibre GL. Acionando fallback Canvas 2D (CPU):', err);
+      setMapFailed(true);
+    }
+  };
+
   useEffect(() => {
-    logger.info('>>> [MAP] SRE CPU-Bound 2D Motor gráfico ativo por padrão (Garantia de 0% GPU / Mobile-First).');
+    initMap();
+    return () => {
+      if (mapInstance.current) {
+        try { mapInstance.current.remove(); } catch { /* ignore */ }
+        mapInstance.current = null;
+      }
+      markerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Veto SRE: Inicializações de MapLibre GL JS removidas para conformidade rigorosa com processamento puro CPU 2D.
+  // Sincroniza marcador + círculo de geocerca com a configuração atual
+  useEffect(() => {
+    if (!mapReady || !mapInstance.current) return;
+    const map = mapInstance.current;
+    const lat = currentConfig.lat;
+    const lng = currentConfig.lng;
+    if (lat === undefined || lng === undefined || isNaN(Number(lat)) || isNaN(Number(lng))) return;
 
-  // Canvas drawing for 2D Fallback
+    // Guarda Defensiva: coordenadas finitas garantidas antes de tocar Marker/geocerca
+    const [safeLng, safeLat] = safeLngLat({ lat: Number(lat), lng: Number(lng) });
+
+    if (!markerRef.current) {
+      markerRef.current = new maplibregl.Marker({ color: '#ef4444' }).addTo(map);
+    }
+    markerRef.current.setLngLat([safeLng, safeLat]);
+
+    const radiusKm = (currentConfig.radius_meters || 500) / 1000;
+    const circle = turf.circle([safeLng, safeLat], radiusKm, {
+      units: 'kilometers',
+      steps: 64
+    }) as unknown as maplibregl.GeoJSONSourceSpecification['data'];
+
+    if (map.getSource('geofence-source')) {
+      (map.getSource('geofence-source') as maplibregl.GeoJSONSource).setData(circle);
+    }
+  }, [mapReady, currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
+
+  // Alternância de camada (street/satellite) reativa via APIs programáticas do mapa
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map || !mapReady) return;
+    const satellite = mapType === 'satellite';
+    try {
+      map.setLayoutProperty('bg-street', 'visibility', satellite ? 'none' : 'visible');
+      map.setLayoutProperty('bg-satellite', 'visibility', satellite ? 'visible' : 'none');
+      map.setLayoutProperty('graticule-layer', 'visibility', satellite ? 'none' : 'visible');
+      map.setLayoutProperty('graticule-satellite-layer', 'visibility', satellite ? 'visible' : 'none');
+    } catch { /* camadas ainda não criadas */ }
+  }, [mapType, mapReady]);
+
+  // Controles nativos reativos (React onClick → API programática do mapa)
+  const handleZoomIn = () => {
+    if (mapInstance.current) mapInstance.current.zoomIn();
+  };
+  const handleZoomOut = () => {
+    if (mapInstance.current) mapInstance.current.zoomOut();
+  };
+
+  const handleUseMyPosition = async () => {
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+      if (!pos || !pos.coords) throw new Error('Sem coordenadas');
+      // Guarda Defensiva: valores do hardware sanitizados (null/undefined/NaN → Brasília)
+      const { lat, lng } = safeLatLngPair(pos.coords);
+      setCurrentConfig(prev => ({ ...prev, lat, lng }));
+      flyTo(lat, lng, 16);
+      setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE DO DISPOSITIVO!', type: 'success' });
+      mapClickRef.current(lat, lng);
+    } catch (err) {
+      logger.warn('>>> [GPS] Falha ao ler posição real:', err);
+      setMessage({ text: 'GPS INDISPONÍVEL. USE A BUSCA OU O BYPASS OFFLINE.', type: 'error' });
+    }
+  };
+
+  // Canvas drawing for 2D Fallback (apenas se o MapLibre falhar — último recurso)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentConfig.lat || !currentConfig.lng) return;
     const canvas = canvasRef.current;
@@ -110,13 +396,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
     const newLat = currentConfig.lat + deltaLat;
     const newLng = currentConfig.lng + deltaLng;
+    const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: newLat, lng: newLng });
 
-    setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
-    setMapCenter([newLat, newLng]);
+    setCurrentConfig(prev => ({ ...prev, lat: safeLat, lng: safeLng }));
   };
 
   useEffect(() => {
-    if (!isIframeFallback || !canvasRef.current) return;
+    if (!mapFailed || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -161,7 +447,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       // Draw coordinate indicators
       ctx.fillStyle = '#475569';
       ctx.font = '10px monospace';
-      ctx.fillText(`CPU FALLBACK SECURE MODE (IFRAME ACTIVE)`, 20, 30);
+      ctx.fillText(`FALLBACK CPU 2D (MAPLIBRE INDISPONÍVEL)`, 20, 30);
       ctx.fillText(`CENTER LAT: ${currentConfig.lat?.toFixed(6) || 'N/A'}`, 20, 50);
       ctx.fillText(`CENTER LNG: ${currentConfig.lng?.toFixed(6) || 'N/A'}`, 20, 70);
 
@@ -225,7 +511,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [isIframeFallback, currentConfig.lat, currentConfig.lng, currentConfig.radius_meters, selectedUnit, mapType]);
+  }, [mapFailed, currentConfig.lat, currentConfig.lng, currentConfig.radius_meters, selectedUnit, mapType]);
 
   useEffect(() => {
     sessionStorage.setItem('unit_config_map_type', mapType);
@@ -263,14 +549,17 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
   const loadConfigs = async () => {
     setLoading(true);
     const data = await fetchUnitConfigs(user.tenantid);
-    setConfigs(data);
+    // Guarda Defensiva: registros do banco local com coordenadas nulas/NaN são
+    // higienizados para o canônico (Brasília) em vez de propagar undefined ao mapa
+    const sanitized = (data || []).map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
+    setConfigs(sanitized);
     setLoading(false);
   };
 
   const handleSelectUnit = (unit: string) => {
     if (!unit) return;
     setSelectedUnit(unit);
-    
+
     // Recuperar rascunhos preventivos do sessionStorage
     const sessionLat = sessionStorage.getItem(`kardek_temp_gps_lat_${unit}`);
     const sessionLng = sessionStorage.getItem(`kardek_temp_gps_lng_${unit}`);
@@ -282,27 +571,34 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     });
 
     if (sessionLat && sessionLng) {
-      setCurrentConfig({
+      // Guarda Defensiva: rascunhos de sessão podem conter 'null'/'NaN' — sanitiza antes de tocar o mapa
+      const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(sessionLat), lng: Number(sessionLng) });
+      const cfg = {
         tenantid: user.tenantid,
         unit_id: unit,
-        lat: Number(sessionLat),
-        lng: Number(sessionLng),
+        lat: safeLat,
+        lng: safeLng,
         radius_meters: sessionRadius ? Number(sessionRadius) : (existing?.radius_meters || 500),
         is_active: true
-      });
-      setMapCenter([Number(sessionLat), Number(sessionLng)]);
+      };
+      setCurrentConfig(cfg);
+      flyTo(cfg.lat, cfg.lng, UNIT_ZOOM);
     } else if (existing) {
-      setCurrentConfig(existing);
-      setMapCenter([existing.lat, existing.lng]);
+      // Guarda Defensiva: registro do IndexedDB/SQLite pode estar parcialmente corrompido
+      const { lat: safeLat, lng: safeLng } = safeLatLngPair(existing);
+      const safeExisting = { ...existing, lat: safeLat, lng: safeLng };
+      setCurrentConfig(safeExisting);
+      flyTo(safeExisting.lat, safeExisting.lng, UNIT_ZOOM);
     } else {
       setCurrentConfig({
         tenantid: user.tenantid,
         unit_id: unit,
-        lat: mapCenter[0],
-        lng: mapCenter[1],
+        lat: BRASILIA_DEFAULT.lat,
+        lng: BRASILIA_DEFAULT.lng,
         radius_meters: 500,
         is_active: true
       });
+      flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
     }
     setMessage(null);
   };
@@ -328,29 +624,30 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       // 🚀 PRIMEIRO PASSO: Soberania Local-First. Busca de endereços/localidades na tabela local assets_counting / ativos
       logger.info(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
       const { sqliteService } = await import('../services/sqliteService');
-      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantid || user?.tenantid || 'CICOPAL');
-      
+      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantid || 'CICOPAL');
+
       const exactMatch = localAddresses.find(
-        addr => (addr.endereco && addr.endereco.toUpperCase().includes(searchQuery.toUpperCase())) || 
+        addr => (addr.endereco && addr.endereco.toUpperCase().includes(searchQuery.toUpperCase())) ||
                 (addr.filial && addr.filial.toUpperCase().includes(searchQuery.toUpperCase()))
       );
 
       if (exactMatch && exactMatch.lat !== undefined && exactMatch.lng !== undefined && !isNaN(exactMatch.lat) && !isNaN(exactMatch.lng)) {
         logger.info(`>>> [Local-First Search] Sucesso local! Encontrado ponto físico persistido no Lote 0: Lat ${exactMatch.lat}, Lng ${exactMatch.lng}`);
-        const newLat = exactMatch.lat;
-        const newLng = exactMatch.lng;
-        
-        setMapCenter([newLat, newLng]);
+        // Guarda Defensiva: coordenadas da busca local sanitizadas antes do flyTo/gravação
+        const { lat: newLat, lng: newLng } = safeLatLngPair(exactMatch);
+
         if (selectedUnit) {
-          setCurrentConfig(prev => ({ 
-            ...prev, 
-            lat: newLat, 
-            lng: newLng 
+          setCurrentConfig(prev => ({
+            ...prev,
+            lat: newLat,
+            lng: newLng
           }));
         }
-        setMessage({ 
-          text: `COORDENADAS LOCAIS ENCONTRADAS (LOTE 0): ${exactMatch.filial} - ${exactMatch.endereco}`, 
-          type: 'success' 
+        // CORREÇÃO BUSCAR: deslocamento físico explícito da câmera via flyTo
+        flyTo(newLat, newLng, UNIT_ZOOM);
+        setMessage({
+          text: `COORDENADAS LOCAIS ENCONTRADAS (LOTE 0): ${exactMatch.filial} - ${exactMatch.endereco}`,
+          type: 'success'
         });
         setSearching(false);
         return;
@@ -378,39 +675,38 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
 
       if (data && data.length > 0) {
         const { lat, lon } = data[0];
-        const newLat = parseFloat(lat);
-        const newLng = parseFloat(lon);
-        
-        setMapCenter([newLat, newLng]);
+        // Guarda Defensiva: resposta da nuvem pode vir sem campos ou com NaN
+        const { lat: newLat, lng: newLng } = safeLatLngPair({ lat: parseFloat(lat), lng: parseFloat(lon) });
+
         if (selectedUnit) {
           setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
         }
+        // CORREÇÃO BUSCAR: deslocamento físico explícito da câmera via flyTo
+        flyTo(newLat, newLng, UNIT_ZOOM);
         setMessage({ text: `CENTRALIZADO EM: ${searchQuery}`, type: 'success' });
       } else {
         // Fallback contingência Brasília, DF
-        const defaultLat = -15.793889;
-        const defaultLng = -47.882778;
-        setMapCenter([defaultLat, defaultLng]);
+        const defaultLat = BRASILIA_DEFAULT.lat;
+        const defaultLng = BRASILIA_DEFAULT.lng;
         if (selectedUnit) {
           setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
         }
+        flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
         setMessage({ text: `CONVERTIDO PARA BRASÍLIA, DF (REGISTRO LOCAL ENCONTRADO SEM GPS / LOCALIZAÇÃO DESCONHECIDA)`, type: 'success' });
       }
     } catch (err: unknown) {
       logger.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
-      const defaultLat = -15.793889;
-      const defaultLng = -47.882778;
-      setMapCenter([defaultLat, defaultLng]);
+      const defaultLat = BRASILIA_DEFAULT.lat;
+      const defaultLng = BRASILIA_DEFAULT.lng;
       if (selectedUnit) {
         setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
       }
+      flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
       setMessage({ text: `MÉTODO DE CONTINGÊNCIA ATIVADO: BRASÍLIA, DF`, type: 'success' });
     } finally {
       setSearching(false);
     }
   };
-
-
 
   const handleSave = async () => {
     const l_lat = currentConfig.lat;
@@ -479,9 +775,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
             setShowAdminBypassToast(true);
             setTimeout(() => setShowAdminBypassToast(false), 5000);
           } else {
-            setMessage({ 
-              text: `BLOQUEADO: Sua distância física (${Math.round(distanceM)}m) excede o raio de geocerca (${l_radius}m).`, 
-              type: 'error' 
+            setMessage({
+              text: `BLOQUEADO: Sua distância física (${Math.round(distanceM)}m) excede o raio de geocerca (${l_radius}m).`,
+              type: 'error'
             });
             setSaving(false);
             return;
@@ -492,12 +788,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       }
     }
 
+    // Guarda Defensiva: coordenadas canônicas finitas antes da persistência (SQLite + Dexie)
+    const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(l_lat), lng: Number(l_lng) });
+
     const configData: UnitConfig = {
       tenantid: user?.tenantid || 'CICOPAL',
       filial: selectedUnit,
       unit_id: selectedUnit,
-      lat: Number(l_lat),
-      lng: Number(l_lng),
+      lat: safeLat,
+      lng: safeLng,
       radius_meters: Number(l_radius),
       is_active: true,
       updated_by: user?.email || 'auditor',
@@ -505,14 +804,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     };
 
     try {
-      // Gravação síncrona/bloqueante no SQLite local
+      // Gravação síncrona/bloqueante no SQLite local (+ espelho Dexie/IndexedDB e localStorage)
       const ok = await saveUnitConfig(configData);
-      
+
       if (ok === true || (typeof ok === 'string' && ok.includes('sucesso'))) {
         setJustSaved(true);
         setTimeout(() => setJustSaved(false), 3000);
         setMessage({ text: 'COORDENADAS GRAVADAS E ANCORADAS NO DISPOSITIVO!', type: 'success' });
-        
+
         // PERSISTÊNCIA PREVENTIVA COMPULSÓRIA NO SESSIONSTORAGE E LOCALSTORAGE DO OPERADOR
         sessionStorage.setItem(`unit_gps_config_${selectedUnit}`, JSON.stringify(configData));
         sessionStorage.setItem('last_configured_gps_unit', selectedUnit);
@@ -549,32 +848,124 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
     }
   };
 
+  // ==========================================================================
+  // BYPASS DE SEGURANÇA TEMPORÁRIO (Diretiva 5)
+  // Se o usuário clicar no botão e o mapa falhar ou se ele salvar, o app grava
+  // uma coordenada fictícia padrão (Brasília canônica) no IndexedDB (Dexie) e
+  // define a flag de Campanha aberta para o auditor avançar na esteira operacional.
+  // ==========================================================================
+  const handleOfflineBypass = async () => {
+    const unit = selectedUnitRef.current || selectedUnit;
+    if (!unit) {
+      setMessage({ text: 'SELECIONE UMA UNIDADE ANTES DE APLICAR O BYPASS.', type: 'error' });
+      return;
+    }
+
+    // Guarda Defensiva: estrutura canônica explícita exigida pelo safeLngLat
+    const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
+
+    const bypassConfig: UnitConfig = {
+      tenantid: user?.tenantid || 'CICOPAL',
+      filial: unit,
+      unit_id: unit,
+      lat: safeLat,
+      lng: safeLng,
+      radius_meters: currentConfig.radius_meters || 500,
+      is_active: true,
+      updated_by: user?.email || 'auditor',
+      updated_at: new Date().toISOString()
+    };
+    // Registro defensivo para leitores subsequentes: { lat, lng } + array [lng, lat]
+    const bypassRecord = { ...bypassConfig, coordenadas: [safeLng, safeLat] as [number, number] };
+
+    setSaving(true);
+    setMessage({ text: 'BYPASS OFFLINE: COORDENADAS PADRÃO (BRASÍLIA, DF) SENDO GRAVADAS...', type: 'success' });
+    setCurrentConfig(prev => ({ ...prev, lat: bypassConfig.lat, lng: bypassConfig.lng, unit_id: unit }));
+    flyTo(bypassConfig.lat, bypassConfig.lng, UNIT_ZOOM);
+
+    try {
+      // 1) Persistência canônica: SQLite físico + espelho Dexie (IndexedDB) + localStorage
+      const ok = await saveUnitConfig(bypassConfig);
+      const saved = ok === true || (typeof ok === 'string' && ok.includes('sucesso'));
+      logger.info(`>>> [GPS Bypass] Persistência da coordenada padrão ${saved ? 'confirmada' : 'com aviso'}: ${String(ok)}`);
+
+      // 2) Flags preventivas de âncora e campanha aberta (esteira operacional liberada)
+      localStorage.setItem(`kardek_gps_ancora_${unit}`, JSON.stringify(bypassRecord));
+      sessionStorage.setItem(`unit_gps_config_${unit}`, JSON.stringify(bypassRecord));
+      sessionStorage.setItem('last_configured_gps_unit', unit);
+      // Estrutura canônica explícita para as telas subsequentes relerem sem quebrar
+      sessionStorage.setItem(`gps_lat_${unit}`, String(safeLat));
+      sessionStorage.setItem(`gps_lng_${unit}`, String(safeLng));
+      const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
+      setBypassCampaignId(campaignFlag);
+      sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
+      localStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
+      sessionStorage.setItem('campaign_bypass_open', 'true');
+      localStorage.setItem('campaign_bypass_open', 'true');
+      sessionStorage.setItem('kardek_campaign_open', campaignFlag);
+
+      // 3) Estado local sincronizado
+      setConfigs(prev => {
+        const list = [...prev];
+        const i = list.findIndex(c => c.unit_id === unit);
+        if (i >= 0) list[i] = { ...list[i], ...bypassConfig };
+        else list.push(bypassConfig);
+        return list;
+      });
+      if (typeof onUpdateConfigs === 'function') {
+        onUpdateConfigs(configs);
+      }
+
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 3000);
+      setMessage({ text: 'BYPASS ATIVADO: ÂNCORA PADRÃO GRAVADA E CAMPANHA DE CONTINGÊNCIA ABERTA!', type: 'success' });
+
+      // 4) Avança na esteira operacional (App abre a flag de campanha e navega)
+      if (typeof onBypassApplied === 'function') {
+        onBypassApplied(bypassConfig);
+      }
+    } catch (err: unknown) {
+      const se = err as Error;
+      logger.error('>>> [GPS Bypass] Falha na persistência do bypass:', err);
+      // Mesmo com erro, o flag de campanha é aberto para não travar o auditor (simulação local)
+      const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
+      sessionStorage.setItem('campaign_bypass_open', 'true');
+      sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
+      setMessage({ text: `BYPASS PARCIAL: ${se.message || 'falha de persistência'} — CAMPANHA ABERTA PARA SIMULAÇÃO LOCAL.`, type: 'success' });
+      if (typeof onBypassApplied === 'function') {
+        onBypassApplied(bypassConfig);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="relative w-full h-[100dvh] bg-slate-900 overflow-hidden font-sans">
       {/* Background Map Container (Camada Base) */}
       <div className="absolute top-0 left-0 w-screen h-screen z-1">
-        {isIframeFallback ? (
+        {!mapFailed ? (
+          <div
+            ref={mapRef}
+            id="gbr-unit-map"
+            className="w-full h-full"
+          />
+        ) : (
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
             className="w-full h-full cursor-crosshair"
           />
-        ) : (
-          <div 
-            ref={mapRef} 
-            id="gbr-unit-map" 
-            className="w-full h-full"
-          />
         )}
-        {/* Camada de Interação (Caso o mapa native fique por baixo) */}
-        {!isIframeFallback && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm p-12 text-center">
+        {/* Overlay de carregamento do motor MapLibre */}
+        {!mapFailed && !mapReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm p-12 text-center">
             <div className="w-20 h-20 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border border-slate-800 mb-6 animate-pulse">
               <Loader2 className="text-blue-500 animate-spin" size={32} />
             </div>
-            <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Motor Nativo</h2>
+            <h2 className="text-white text-xs font-black uppercase tracking-[0.2em] mb-3">Motor Nativo Offline</h2>
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed max-w-[240px]">
-              Inicializando MapLibre GL JS GPU acceleration...
+              Inicializando MapLibre GL (estilo local, zero rede)...
             </p>
           </div>
         )}
@@ -583,7 +974,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       {/* Banner de Orientação Offline */}
       <AnimatePresence>
         {isOffline && (
-          <motion.div 
+          <motion.div
             initial={{ y: -50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -50, opacity: 0 }}
@@ -594,7 +985,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 <WifiOff size={16} className="text-white" />
               </div>
               <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
-                Ambiente Offline: O mapa visual está indisponível, mas o GPS Nativo continua operacional. Use o botão &quot;Minha Posição&quot; para fixar o ponto com precisão.
+                Ambiente Offline: o mapa roda em modo simulado local (estilo embutido). Use "Minha Posição", a busca ou o bypass para fixar a âncora.
               </p>
             </div>
           </motion.div>
@@ -605,7 +996,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       <div className="absolute top-4 left-0 right-0 z-20 px-4 pointer-events-none">
         <div className="max-w-xl mx-auto flex items-center justify-between bg-[#0F172A]/95 backdrop-blur-md border border-slate-800 p-3 rounded-2xl shadow-2xl pointer-events-auto">
           {/* Botão voltar ← */}
-          <button 
+          <button
             onClick={() => {
               if (typeof onBack === 'function') {
                 onBack();
@@ -632,6 +1023,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
                 <span className="text-[7px] font-black text-emerald-400 uppercase tracking-widest leading-none">Bypass Admin</span>
               </div>
             )}
+            {bypassCampaignId && (
+              <div className="inline-flex items-center space-x-1 mt-0.5 bg-blue-500/10 border border-blue-500/30 px-1.5 py-0.5 rounded-md ml-1">
+                <span className="w-1 h-1 rounded-full bg-blue-400 animate-pulse" />
+                <span className="text-[7px] font-black text-blue-400 uppercase tracking-widest leading-none">Campanha Aberta</span>
+              </div>
+            )}
           </div>
 
           {/* Direita: Selo discreto GBR v2.6 */}
@@ -644,28 +1041,28 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       {/* Elegant Address Search Bar (Ultra-Slim) */}
       <div className="absolute top-[76px] left-0 right-0 z-20 px-4 pointer-events-none">
         <div className="max-w-xl mx-auto pointer-events-auto">
-          <form 
+          <form
             onSubmit={handleSearchLocation}
             className="flex items-center bg-[#0F172A]/90 backdrop-blur-md border border-slate-800 rounded-xl shadow-xl overflow-hidden h-9 px-3"
           >
             <Search size={14} className="text-slate-400 mr-2 shrink-0" />
-            <input 
-              type="text" 
-              placeholder="BUSCAR CIDADE OU ENDEREÇO..." 
+            <input
+              type="text"
+              placeholder="BUSCAR CIDADE OU ENDEREÇO..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
               className="flex-1 bg-transparent text-[10px] font-bold uppercase tracking-wider text-white focus:outline-none placeholder:text-slate-500 animate-none"
             />
             {searchQuery && (
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setSearchQuery('')}
                 className="text-slate-400 hover:text-white text-xs px-1"
               >
                 ✕
               </button>
             )}
-            <button 
+            <button
               type="submit"
               disabled={searching}
               className="ml-3 h-6 px-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all"
@@ -676,17 +1073,50 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
         </div>
       </div>
 
-      {/* Floating Action Buttons (Alinhados verticalmente, flutuando verticalmente logo acima do painel) */}
+      {/* Floating Action Buttons (Zoom + / - , Camada, Minha Posição, Raio) */}
       <div className="absolute bottom-[calc(18dvh+16px)] right-4 z-20 flex flex-col space-y-3 items-center pointer-events-none">
-        <button 
+        {/* Alternância de camada (street/satellite) — reativa via API do mapa */}
+        <button
           onClick={() => setMapType(mapType === 'street' ? 'satellite' : 'street')}
           className={`w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border pointer-events-auto ${
-            mapType === 'satellite' 
-              ? 'bg-blue-600 text-white border-blue-400' 
+            mapType === 'satellite'
+              ? 'bg-blue-600 text-white border-blue-400'
               : 'bg-[#0F172A]/95 text-slate-200 border-slate-800'
           }`}
         >
           <Layers size={18} />
+        </button>
+
+        {/* Zoom + / - (controles nativos reativos via onClick → map.zoomIn/zoomOut) */}
+        <div className="flex flex-col items-center bg-[#0F172A]/95 backdrop-blur-md border border-slate-800 rounded-2xl p-1.5 shadow-2xl pointer-events-auto space-y-1">
+          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest leading-none text-center block pt-0.5 px-0.5">
+            Zoom
+          </span>
+          <button
+            onClick={handleZoomIn}
+            disabled={mapFailed}
+            className="w-8 h-8 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all text-xs font-black shrink-0 animate-none"
+            title="Aproximar (+)"
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            disabled={mapFailed}
+            className="w-8 h-8 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 border border-slate-700 rounded-xl flex items-center justify-center text-white active:scale-95 transition-all text-xs font-black shrink-0 animate-none"
+            title="Afastar (−)"
+          >
+            <Minus size={14} />
+          </button>
+        </div>
+
+        {/* Minha Posição (hardware GPS) */}
+        <button
+          onClick={handleUseMyPosition}
+          className="w-12 h-12 rounded-2xl shadow-2xl flex flex-col items-center justify-center transition-all active:scale-90 border pointer-events-auto bg-[#0F172A]/95 text-blue-400 border-slate-800 hover:bg-blue-600 hover:text-white"
+          title="Fixar pela posição real do dispositivo"
+        >
+          <Navigation size={18} />
         </button>
 
         {/* Geofence Radius +/- controls */}
@@ -694,7 +1124,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest leading-none text-center block pt-0.5 px-0.5">
             Raio
           </span>
-          <button 
+          <button
             onClick={() => {
               setCurrentConfig(prev => {
                 const current = prev.radius_meters || 500;
@@ -715,7 +1145,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
               m
             </span>
           </div>
-          <button 
+          <button
             onClick={() => {
               setCurrentConfig(prev => {
                 const current = prev.radius_meters || 500;
@@ -734,16 +1164,16 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       {/* Alert Messages Overlay floating above bottom panel */}
       <AnimatePresence>
         {message && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             className="absolute bottom-[calc(18dvh+16px)] left-4 right-20 z-20 max-w-sm pointer-events-auto"
           >
-            <div 
+            <div
               className={`p-3 rounded-xl flex items-center space-x-3 border shadow-2xl backdrop-blur-md ${
-                message.type === 'success' 
-                  ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-400' 
+                message.type === 'success'
+                  ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-400'
                   : 'bg-rose-950/90 border-rose-500/40 text-rose-400'
               }`}
             >
@@ -758,7 +1188,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       </AnimatePresence>
 
       {/* Bottom Panel - ULTRA-SLIM & INDUSTRIAL (v2.6 Radical Re-design) */}
-      <div 
+      <div
         className="absolute bottom-0 left-0 right-0 z-10 bg-[#0F172A] border-t border-slate-800 shadow-[0_-15px_50px_rgba(0,0,0,0.4)] flex flex-col text-white h-[18dvh] min-h-[140px] p-4 pb-5 justify-between no-scrollbar rounded-t-[2rem]"
       >
         {/* Linha 1 (Labels menores): Latitude e Longitude atuais lidas pelo dispositivo */}
@@ -777,19 +1207,28 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
           </div>
         </div>
 
-        {/* Linha 2 (Ação Principal): Botão central largo com alto contraste e feedback visivo síncrono */}
-        <div className="pt-1">
-          <button 
+        {/* Linha 2 (Ações): Botão principal de âncora + Bypass offline */}
+        <div className="grid grid-cols-[1.6fr_1fr] gap-2 pt-1">
+          <button
             onClick={handleSave}
             disabled={saving || currentConfig.lat === undefined || currentConfig.lat === null}
             className={`w-full py-3.5 text-white rounded-xl font-black uppercase text-[9px] tracking-[0.2em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center space-x-2 pointer-events-auto ${
-              justSaved 
-                ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 shadow-emerald-500/20' 
+              justSaved
+                ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 shadow-emerald-500/20'
                 : 'bg-blue-600 hover:bg-blue-500 border-blue-400 shadow-blue-500/10'
             } border`}
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            <span>{justSaved ? 'POSIÇÃO FIXADA PELO HARDWARE!' : 'FIXAR ÂNCORA DE GPS DA UNIDADE'}</span>
+            <span>{justSaved ? 'POSIÇÃO FIXADA!' : 'FIXAR ÂNCORA GPS'}</span>
+          </button>
+          <button
+            onClick={handleOfflineBypass}
+            disabled={saving}
+            className="w-full py-3.5 text-white rounded-xl font-black uppercase text-[8px] tracking-[0.15em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center space-x-2 pointer-events-auto bg-slate-800 hover:bg-slate-700 border border-slate-600"
+            title="Aplica coordenadas padrão (Brasília, DF), grava no dispositivo e abre a campanha de contingência"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+            <span>Bypass Offline</span>
           </button>
         </div>
       </div>
@@ -797,7 +1236,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({ user, units, onBack
       {/* Toast Flutuante de Bypass Admin do Turf.js */}
       <AnimatePresence>
         {showAdminBypassToast && (
-          <motion.div 
+          <motion.div
             initial={{ y: -60, opacity: 0, scale: 0.9 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: -60, opacity: 0, scale: 0.9 }}

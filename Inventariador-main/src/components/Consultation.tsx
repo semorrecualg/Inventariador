@@ -4,6 +4,7 @@ import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
+import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, parseAssetDate } from '../utils/formatUtils';
 import { 
   Search, 
@@ -153,15 +154,13 @@ const Consultation: React.FC<ConsultationProps> = ({
     const lines: string[] = [];
     
     // Filtra os campos selecionados que existem no ativo e os ordena conforme a regra oficial
-    const activeFields = QR_FIELD_ORDER.filter(field => 
-      qrCodeFields.includes(field) && 
-      selectedAssetForQr[field as keyof Asset] !== undefined && 
-      selectedAssetForQr[field as keyof Asset] !== null && 
-      selectedAssetForQr[field as keyof Asset] !== ''
-    );
+    const activeFields = QR_FIELD_ORDER.filter(field => {
+      const v = (selectedAssetForQr as unknown as Record<string, unknown>)[canonicalKey(field)];
+      return qrCodeFields.includes(field) && v !== undefined && v !== null && v !== '';
+    });
 
     activeFields.forEach(field => {
-      let value = String(selectedAssetForQr[field as keyof Asset]);
+      let value = String((selectedAssetForQr as unknown as Record<string, unknown>)[canonicalKey(field)] ?? '');
       
       if (field === 'DATAAQUISIC' || field === 'DATABAIXA') value = formatDateBR(value);
       if (field === 'VLRAQUISIC') value = formatCurrency(value);
@@ -184,7 +183,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     sourceAssets.forEach(asset => {
       const conta = asset.conta_contabil;
       if (conta) contabilidade.add(String(conta).trim());
-      if (asset.CENTRODECUSTO) custos.add(String(asset.CENTRODECUSTO).trim());
+      if (asset.centrodecusto) custos.add(String(asset.centrodecusto).trim());
     });
     
     return {
@@ -215,7 +214,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       if (!textMatch) return false;
 
       // Date range filter
-      const assetDate = parseAssetDate(asset.DATAAQUISIC);
+      const assetDate = parseAssetDate(asset.dataaqusic);
       if (!assetDate) {
         // If asset has no date but user is filtering by date, it's a mismatch
         return !committedFilters.DATAAQUISIC_START && !committedFilters.DATAAQUISIC_END;
@@ -238,7 +237,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       if (!a._is_divergent_baixa && b._is_divergent_baixa) return 1;
       
       // Prioridade 2: Ordem Numérica de Etiqueta
-      return String(a.ETIQUETA || '').localeCompare(String(b.ETIQUETA || ''), undefined, { numeric: true });
+      return String(a.etiqueta || '').localeCompare(String(b.etiqueta || ''), undefined, { numeric: true });
     });
   }, [sourceAssets, committedFilters]);
 
@@ -468,7 +467,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             </div>
             <div className="text-center w-full">
               <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
-              <p className="bg-accent text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl shadow-accent/20">{selectedAssetForQr.ETIQUETA}</p>
+              <p className="bg-accent text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl shadow-accent/20">{selectedAssetForQr.etiqueta}</p>
             </div>
             <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-accent-soft text-accent rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
           </div>

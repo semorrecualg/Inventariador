@@ -33,7 +33,7 @@ export const auditService = {
     if (!hasChanges) return { hasChanges: false };
 
     try {
-      const details = `Edição do ativo Etiqueta: ${updatedAsset.ETIQUETA || 'Sem Plaqueta'}`;
+      const details = `Edição do ativo Etiqueta: ${updatedAsset.etiqueta || 'Sem Plaqueta'}`;
       
       await localDb.auditLogs.add({
         timestamp: new Date().toISOString(),

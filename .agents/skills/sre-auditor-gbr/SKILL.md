@@ -73,6 +73,17 @@ Antes de gerar qualquer código, refatoração ou resposta:
   `_unitid`/`tenantId`/`tenant_id` **PROIBIDAS**; leitura retroativa apenas via
   `utils/tenantUtils.ts` (fallback legado). Loader exige contrato rígido de 21 colunas
   com `tenantid` na posição 0 (bloqueio se ausente/vazio).
+- **Fase C — higienização canônica (obrigatória)**: valores/chaves de `assets` seguem o
+  contrato de `docs/PLANO_FASE_C_HIGIENIZACAO.md` — Classe K = `UPPER+TRIM+[^A-Z0-9-]`
+  (desvios SRE: `filial` preserva espaços internos; identidade/PK `etiqueta/tag/primarykey`
+  só TRIM na C1); Classe T = TRIM+colapso preservando **caixa** (`status`/`descricaodoativo`/
+  `nomefornecedor`). Usar SEMPRE `src/utils/normalize.ts` — `normalizeFieldValue` na
+  escrita/carga (M1 já aplicado nos 3 caminhos do `DatabaseLoaderService`) e `pickCanonical`
+  na leitura durante a transição (remover só na C5). `public.assets` = **no-op** (26/26
+  canônicas — nenhuma DDL); `staging` fora de escopo (Fase D).
+- **Gate de subfase Fase C**: `npx tsc -b --noEmit` zero erros + `npx vitest run` **16
+  arquivos / 165 testes verdes** antes de declarar entrega (baseline Dexie v4 congelado em
+  `docs/SCHEMA_BASELINE.md`/`schemaBaseline.test.ts`; migração `version(5)` é C4).
 - **Proibido** early-return web que aborte carga física
 - Salvaguarda de hardware: travar gravação se bateria < 5% sem alimentação externa
 - Ação Purgar: `.clear()` assíncrono e transacional nas coleções críticas, mantendo banco aberto sem deslogar
@@ -132,5 +143,9 @@ Status: Aguardando próxima instrução de SRE.
 | `src/components/UnitSelector.tsx` | Soberania da Filial |
 | `src/components/AddressSelector.tsx` | Busca reativa com Debounce |
 | `src/components/InventoryCard.tsx` | Auditoria física |
-| `src/services/DatabaseLoaderService.ts` | Carga atômica IndexedDB |
+| `src/services/DatabaseLoaderService.ts` | Carga atômica IndexedDB (M1 — `normalizeFieldValue` nos 3 caminhos) |
+| `src/utils/normalize.ts` | Regras canônicas por classe (K/T/filial) + `pickCanonical`/`canonicalKey`/`NORMALIZE_ON_UPGRADE` |
+| `src/constants/schema.ts` | `CANONICAL_KEY_MAP` (variantes UPPER→canônico) + dicionário de importação |
+| `docs/PLANO_FASE_C_HIGIENIZACAO.md` | Contrato da Fase C (C1/C2 entregues; C3–C5 pendentes) |
+| `docs/SCHEMA_BASELINE.md` | Baseline Dexie v4 congelado (9 tabelas + 21 colunas) |
 | `SYSTEM_INSTRUCTIONS.md` | Diretrizes locais (sobrepõe suposições genéricas) |

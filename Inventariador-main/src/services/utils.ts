@@ -1,4 +1,3 @@
-
 /**
  * Helper para serialização segura de objetos complexos/circulares
  * Evita erros de "Converting circular structure to JSON"
@@ -30,7 +29,12 @@ export const safeStringify = (obj: unknown, indent = 0): string => {
         }
         cache.add(value);
         
-        if (value instanceof HTMLElement || value instanceof SVGElement) {
+        // Guarda de ambiente: HTMLElement/SVGElement não existem fora do DOM
+        // (ex.: testes Vitest em Node). Sem o typeof-guard, um ReferenceError
+        // derrubaria o try inteiro e degradaria TODO checksum para uma constante.
+        const isHtmlElement = typeof HTMLElement !== 'undefined' && value instanceof HTMLElement;
+        const isSvgElement = typeof SVGElement !== 'undefined' && value instanceof SVGElement;
+        if (isHtmlElement || isSvgElement) {
           return `[DOM Element: ${value.tagName}]`;
         }
         if (value.constructor && value.constructor.name === 'FiberNode') {

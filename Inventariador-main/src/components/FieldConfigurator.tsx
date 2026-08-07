@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Asset } from '../types';
+import { canonicalKey } from '../utils/normalize';
 import { 
   SlidersHorizontal, 
   Lock, 
@@ -44,8 +45,10 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
   const availableFields = useMemo(() => {
     if (assets.length === 0) return Object.keys(fieldLabels);
     const keys = new Set(Object.keys(assets[0]).filter(k => !k.startsWith('_') && k !== 'id' && k !== 'TAG_INVENTARIO' && k !== 'TAG_DUPLICIDADE'));
-    const mapped = Object.keys(fieldLabels).filter(k => keys.has(k));
-    const unmapped = Array.from(keys).filter(k => !fieldLabels[k]);
+    // M2 Fase C: assets canônicos têm chaves minúsculas; o mapa de labels usa o
+    // contrato UPPER (editableFields). canonicalKey() reconcilia as duas grafias.
+    const mapped = Object.keys(fieldLabels).filter(k => keys.has(canonicalKey(k)));
+    const unmapped = Array.from(keys).filter(k => !fieldLabels[canonicalKey(k)] && !fieldLabels[k]);
     return [...mapped, ...unmapped];
   }, [assets]);
 

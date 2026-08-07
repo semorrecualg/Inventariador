@@ -29,17 +29,17 @@ const SoftDeleteReport: React.FC<SoftDeleteReportProps> = ({
   const filteredAssets = useMemo(() => {
     return deletedAssets.filter(a => {
       const matchesSearch = 
-        String(a.ETIQUETA || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(a.DESCRICAODOATIVO || '').toLowerCase().includes(searchTerm.toLowerCase());
+        String(a.etiqueta || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(a.descricaodoativo || '').toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesUnit = filterUnit === 'ALL' || a.UNIDADE === filterUnit;
+      const matchesUnit = filterUnit === 'ALL' || (a.filial) === filterUnit;
       
       return matchesSearch && matchesUnit;
     });
   }, [deletedAssets, searchTerm, filterUnit]);
 
   const uniqueUnits = useMemo(() => {
-    const units = new Set(deletedAssets.map(a => a.UNIDADE).filter(Boolean));
+    const units = new Set(deletedAssets.map(a => a.filial).filter(Boolean));
     return Array.from(units) as string[];
   }, [deletedAssets]);
 
@@ -136,10 +136,10 @@ const SoftDeleteReport: React.FC<SoftDeleteReportProps> = ({
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-bold text-accent uppercase tracking-widest mb-0.5">
-                      {asset.ETIQUETA || 'SEM ETIQUETA'}
+                      {asset.etiqueta || 'SEM ETIQUETA'}
                     </span>
                     <h4 className="text-xs font-bold text-ink uppercase leading-tight line-clamp-2">
-                      {asset.DESCRICAODOATIVO}
+                      {asset.descricaodoativo}
                     </h4>
                   </div>
                   <div className="bg-red-50 px-2 py-1 rounded-lg border border-red-100">
@@ -150,7 +150,7 @@ const SoftDeleteReport: React.FC<SoftDeleteReportProps> = ({
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-1">Unidade</span>
-                    <span className="text-[10px] font-bold text-ink uppercase">{asset.UNIDADE}</span>
+                    <span className="text-[10px] font-bold text-ink uppercase">{asset.filial}</span>
                   </div>
                   <div>
                     <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest block mb-1">Valor de Custo</span>

@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (9 suítes / 119 testes) — ver §13 |
+| Testes | Vitest (13 arquivos / 144 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -161,12 +161,13 @@ Guarda: `DATABASE_MANAGER` só para `isSuperAdmin` ou `semorr@gmail.com`.
 
 ### 7.1 O "SQLite" local é Dexie/IndexedDB
 Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedDB**:
-- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→3).
+- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→4 — **baseline
+  congelado em `docs/SCHEMA_BASELINE.md`**, Fase 0 do plano de migração).
 - `sqliteService = new Proxy({}, …)` — inicialização lazy.
 - `getStorageSource()` → `'IndexedDB://InventoryLocalStore'` (no Capacitor nativo há
   caminho físico; em Web `persist()` é no-op).
 
-**Tabelas (v3):**
+**Tabelas (v4 canônica — snapshot congelado em `docs/SCHEMA_BASELINE.md`):**
 | Tabela | Chave/índices |
 |---|---|
 | `local_assets`, `ativos`, `assets` (DexieAsset) | `primarykey, filial, _is_synced, [tenantid+filial]` |
@@ -281,7 +282,7 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (119 testes).
+5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (144 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
@@ -304,7 +305,7 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
    `tenant_id`). Migrações SQL versionadas: `scripts/migrate-tenantid-supabase.sql` e
    `scripts/migrate-unitid-supabase.sql`. Interceptor `mapColumnName` no
    `supabaseService` mapeia chaves legadas na borda do Supabase (read-compat
-   intencional — ver §7.6). → typecheck limpo + **119/119 testes verdes** (9 suítes).
+   intencional — ver §7.6). → typecheck limpo + **144/144 testes verdes** (13 arquivos).
 5. **Mapa de navegação consolidado (docs/FLOW_GRAPH.md)** — os **32 nós** do grafo de
    negócio mapeados para `AppScreen`; removidas 2 telas órfãs (`SETTINGS`, `QR_CONFIGURATOR`)
    que colidiam com rotas vivas (`/sync`, `/qr-config`). Decisões de transição registradas:
@@ -318,7 +319,8 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 
 `npx vitest run` (script `npm test`). Suítes em `src/__tests__/`:
 `Login`, `localAuth`, `masterDrive` (+ integração), `ErrorBoundary`, `Modal`,
-`useBufferController`, `io_buffer`, `tenantUtils`, `navigationMap` (10 arquivos / 124 testes).
+`useBufferController`, `io_buffer`, `tenantUtils`, `navigationMap`, `virtualSnapshot`,
+`schemaBaseline`, `securityExport` (13 arquivos / 144 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 
@@ -326,10 +328,12 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 
 ## 14. Pendências conhecidas
 
-- **Typecheck sujo (pré-existente, não bloqueia o app):** `workbox-core`
-  (`ExtendableEvent`), `rollup` (`parseAst` com `moduleResolution: Node`),
-  `@tailwindcss/vite`, `vite-plugin-pwa` (`@vite-pwa/assets-generator/*`),
-  `tsconfig.node.json` com `noEmit` em projeto referenciado (TS6310).
+- **Typecheck limpo ✅ (Fase 0, pendência 1 da issue #6 — concluída 2026-08-06):** a dívida
+  pré-existente (`workbox-core` `ExtendableEvent`, `rollup` `parseAst`,
+  `@tailwindcss/vite`, `vite-plugin-pwa`/`@vite-pwa/assets-generator`, TS6310 de projeto
+  referenciado) não reproduz mais — `tsconfig.json` único com `skipLibCheck: true` e sem
+  `references`, mais declarações ambient `src/types/workbox.d.ts` +
+  `src/types/pwa-assets-generator.d.ts`. Verificado: `tsc -b --force` e `tsc --noEmit -p` → zero erros.
 - `public/logo.png` é placeholder 1×1 — gerar ícones PWA reais.
 - `sessionStorage.clear()` do MASTER DRIVE é agressivo (pode apagar flags de boot).
 - Nuvem Supabase **ativa com schema padronizado** (`tenantid` + `filial`) — migrações em
@@ -358,6 +362,7 @@ Plano completo em fases (0–5, com garantias anti-perda, riscos e critérios de
 - `SKILL.md` — skill de release (changelog/versão/GitHub release).
 - `CHANGELOG.md` — histórico de versões (v2.6.0: MASTER DRIVE, boot estável, offline-first).
 - `TROUBLESHOOTING.md` — problemas conhecidos e instalação (`--legacy-peer-deps`).
+- `docs/SCHEMA_BASELINE.md` — **snapshot congelado do schema local** (Fase 0, v4 `tenantid` canônico), garantido por `src/__tests__/schemaBaseline.test.ts`.
 - `docs/MIGRACAO_HIBRIDA.md` — **plano aprovado de migração híbrida de dados** (Dexie + SQLite
   nativo Android + Supabase), fases 0–5 com garantias anti-perda.
 - `docs/FLOW_GRAPH.md` — **mapa canônico de navegação** (GRAPH TD) com status por nó e
