@@ -358,19 +358,45 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     if (mapInstance.current) mapInstance.current.zoomOut();
   };
 
+  /**
+   * "MINHA POSIÇÃO" — Hardware Hook defensivo (Capacitor Geolocation).
+   *
+   * LOGÍSTICA DE TESTE MOBILE: a validação REAL do hardware de GPS depende do
+   * build nativo e das diretivas de permissões ativas no emulador Android ou
+   * dispositivo físico (ACCESS_FINE_LOCATION + permissão em runtime):
+   *   npm run build && npx cap sync android && npx cap open android
+   *
+   * No preview Desktop/iframe, o domínio pode bloquear a chamada por Permissions
+   * Policy ("[Violation] Permissions policy violation: Geolocation access has
+   * been blocked") ou o Capacitor pode lançar exceção silenciosa. O catch abaixo
+   * intercepta o erro e aplica o fallback canônico de Brasília suavemente, sem
+   * quebrar a esteira reativa do MapLibre nem ativar o ErrorBoundary.
+   */
   const handleUseMyPosition = async () => {
     try {
+      // Tenta invocar a API de geolocalização do Capacitor (pode lançar em Desktop por política)
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
-      if (!pos || !pos.coords) throw new Error('Sem coordenadas');
-      // Guarda Defensiva: valores do hardware sanitizados (null/undefined/NaN → Brasília)
-      const { lat, lng } = safeLatLngPair(pos.coords);
+      if (!pos || !pos.coords) throw new Error('Estrutura de coordenadas ausente');
+
+      // Validação estrita: o hardware pode retornar objeto incompleto/null em ambientes sem GPS
+      const rawLat = Number(pos.coords.latitude);
+      const rawLng = Number(pos.coords.longitude);
+      if (isNaN(rawLat) || isNaN(rawLng)) throw new Error('Coordenadas inválidas retornadas pelo hardware');
+
+      // Guarda Defensiva final (belt-and-suspenders) — sanitiza antes de tocar o motor
+      const { lat, lng } = safeLatLngPair({ lat: rawLat, lng: rawLng });
       setCurrentConfig(prev => ({ ...prev, lat, lng }));
       flyTo(lat, lng, 16);
       setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE DO DISPOSITIVO!', type: 'success' });
       mapClickRef.current(lat, lng);
     } catch (err) {
-      logger.warn('>>> [GPS] Falha ao ler posição real:', err);
-      setMessage({ text: 'GPS INDISPONÍVEL. USE A BUSCA OU O BYPASS OFFLINE.', type: 'error' });
+      // Fallback suave: permissão negada/política no Desktop → câmera para Brasília-DF (zoom nacional)
+      logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Aplicando centro canônico (Brasília-DF):', err);
+      const { lat: fbLat, lng: fbLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
+      setCurrentConfig(prev => ({ ...prev, lat: fbLat, lng: fbLng }));
+      flyTo(fbLat, fbLng, DEFAULT_ZOOM);
+      setMessage({ text: 'MODO DESKTOP/POLÍTICA: ÂNCORA CANÔNICA (BRASÍLIA, DF) APLICADA.', type: 'success' });
+      mapClickRef.current(fbLat, fbLng);
     }
   };
 
