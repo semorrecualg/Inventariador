@@ -41,12 +41,13 @@ export interface ProvisionResult {
 // As credenciais são lidas do ambiente (API Keys). Se ausentes, caem para placeholders inofensivos.
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-// GBR FORCE LOCAL DEVELOPMENT - SUPABASE DISABLED PER ORIENTATION
-// Modo INTERNAL por padrão (sem rede). `SUPABASE_PLUS` habilita a nuvem com o schema
+// SUPABASE_PLUS ativa automaticamente quando as credenciais estão presentes
+// (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY via API Keys). Sem chaves → INTERNAL
+// (offline-first preservado). `SUPABASE_PLUS` habilita a nuvem com o schema
 // multi-tenant padronizado (`tenantid` + `filial`) — ver docs/ARCHITECTURE.md §10/§14.
 // Credenciais NUNCA hard-codadas no código-fonte: lidas de VITE_SUPABASE_URL /
 // VITE_SUPABASE_ANON_KEY (API Keys / env).
-export const isInternalMode = true;
+export const isInternalMode = !(rawSupabaseUrl && rawSupabaseAnonKey);
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';
 const supabaseAnonKey = rawSupabaseAnonKey || 'placeholder-anon-key';

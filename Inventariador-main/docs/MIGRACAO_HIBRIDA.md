@@ -42,7 +42,7 @@ uma **única camada de repositórios** por trás das telas:
 
 | Item | Situação |
 |---|---|
-| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema v3) |
+| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema **v4** — baseline congelado em `docs/SCHEMA_BASELINE.md`) |
 | `sqliteService.getStorageSource()` | Retorna `'DEXIE_INDEXEDDB'` (hardcoded) |
 | `sql.js`, `jeep-sqlite`, `@capacitor-community/sqlite` | **Instalados + assets wasm configurados, mas NÃO usados em código** (grep em `src` = zero) |
 | Checagens `'PHYSICAL'`/`'CACHE'` no App.tsx | Código morto (nunca casam) |
@@ -56,13 +56,30 @@ uma **única camada de repositórios** por trás das telas:
 ## 3. Fases
 
 ### Fase 0 — Baseline estável (pré-requisito de tudo)
-- [ ] **Corrigir typecheck** (pendência 1 da issue #6): workbox, rollup, @tailwindcss/vite,
-      vite-plugin-pwa, tsconfig TS6310 — baseline limpo antes de mover 292 pontos.
-- [ ] Congelar o **schema atual** (snapshot das 9 tabelas Dexie + `schema.ts`).
-- [ ] **Export de segurança** completo: JSON (`persistenceService`/`backupService`) + `.dat`
-      físico + contagem por tabela (checksum) — armazenado fora do app.
-- [ ] Testar **backup → restore** de ponta a ponta (critério de aceite da Fase 0).
-- **Critério de aceite:** `tsc` limpo em `src/`; 103 testes verdes; restore validado.
+- [x] **Corrigir typecheck** (pendência 1 da issue #6) ✅ 2026-08-06 — a dívida
+      (workbox/rollup/@tailwindcss/vite/vite-plugin-pwa/TS6310) não reproduz mais: o
+      `tsconfig.json` foi consolidado em config único com `skipLibCheck: true` e sem
+      `references` (TS6310 estruturalmente impossível), e existem declarações ambient
+      `src/types/workbox.d.ts` + `src/types/pwa-assets-generator.d.ts`. Verificado com
+      `tsc -b --force` e `tsc --noEmit -p` → **zero erros**. Baseline limpo para mover os 292 pontos.
+- [x] Congelar o **schema atual** (snapshot das 9 tabelas Dexie + `schema.ts`) ✅ 2026-08-06
+      — `docs/SCHEMA_BASELINE.md` (v4 canônica `tenantid`) + contrato `src/__tests__/schemaBaseline.test.ts`.
+- [x] **Export de segurança** completo: JSON + `.dat` físico + contagem por tabela
+      (checksum SHA-256) ✅ 2026-08-06 — `src/services/securityExportService.ts`
+      (`buildSecurityExport`/`restoreSecurityExport`/`serializeSecurityExport`, com
+      persistência `.dat` Capacitor e download `.json`/`.dat` no Web).
+- [x] Testar **backup → restore** de ponta a ponta ✅ 2026-08-06
+      — `src/__tests__/securityExport.test.ts` (6 testes, `fake-indexeddb`): round-trip
+      de checksum, contagem/checksum por tabela, anti-downgrade, tolerância a tabelas
+      ausentes e isolamento de tabelas fora do manifesto.
+- [x] **Análise DBA da redundância `ativos`/`assets`/`local_assets`** ✅ 2026-08-06
+      (decisão confirmada) — as 3 tabelas são espelhos idênticos (`DexieAsset`, PK
+      `primarykey`, índices iguais) com **triple-write** no loader; **papéis aprovados:**
+      **`assets` = canônica/operacional** (sync → Supabase `assets`),
+      **`local_assets` = baseline imutável** (comparação), **`ativos` = legado → sai na
+      Fase 1** (`version(5)` idempotente com dry-run). Registro:
+      `docs/ANALISE_TABELAS_ATIVOS_ASSETS.md`.
+- **Critério de aceite:** `tsc` limpo em `src/`; 144 testes verdes (13 arquivos); restore validado.
 - **Risco:** baixo. **Rollback:** n/a (não altera runtime).
 
 ### Fase 1 — Camada de Repositórios (abstração)
@@ -70,7 +87,7 @@ uma **única camada de repositórios** por trás das telas:
       `UnitRepository`, `ContextRepository` — interface única por domínio.
 - [ ] Implementar 1º backend = **Dexie** (delega para `localDb`/`db` atuais, comportamento idêntico).
 - [ ] Migrar os **292 touchpoints** para os repositórios (telas/serviços não tocam mais em `db.*` direto).
-- [ ] Testes de repositório (mock do backend) + 103 testes existentes verdes.
+- [ ] Testes de repositório (mock do backend) + 144 testes existentes verdes.
 - **Critério de aceite:** nenhuma mudança de comportamento; testes verdes; rollback = reverter imports.
 - **Risco:** médio (refactor amplo). **Rollback:** trivial (commit anterior).
 
@@ -129,8 +146,15 @@ uma **única camada de repositórios** por trás das telas:
 
 ## 5. Sequenciamento vs. correções do app
 
-- **Primeiro:** pendência 1 da issue #6 (typecheck limpo) — Fase 0.
+- **Primeiro:** pendência 1 da issue #6 (typecheck limpo) — Fase 0. ✅ concluída (2026-08-06).
 - **Depois:** demais correções pequenas da issue #6 (independentes da migração).
+- **Registrada ✅ 2026-08-06:** correção `InventoryCard` ↔ `Inventory` no módulo ATIVO
+  IMOBILIZADO — `InventoryCard.tsx` vai para o módulo `ASSET_CONTROL_HOME`
+  (`/asset-control`) como card de entrada; a tela `INVENTORY` (`/inventory`) passa a
+  renderizar `Inventory.tsx` (motor da listagem). Todas as conexões de leitura/escrita
+  do componente corrigido devem apontar para a **tabela de trabalho `assets`**
+  (canônica — decisão aprovada). Execução no repositório real (`src/` não está neste
+  workspace); registro: `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md`.
 - **Em paralelo/sequencial:** Fase 1 (repositórios) pode coexistir com correções de UI,
   pois não muda comportamento.
 - **Não misturar:** Fases 2–3 (Supabase/SQLite) entram com o baseline estável, testes verdes
@@ -143,7 +167,7 @@ uma **única camada de repositórios** por trás das telas:
 | Risco | Mitigação |
 |---|---|
 | Perda de dados na migração | Export+checksum, dry-run, idempotência, restore testado |
-| Regressão nos 292 touchpoints | Camada de repositórios com testes + 103 testes baseline |
+| Regressão nos 292 touchpoints | Camada de repositórios com testes + 144 testes baseline |
 | Conflitos de sync | `_lastUpdated`/`_version` + reconciliação de fila offline |
 | Segurança/RLS no Supabase | RLS por `tenant_id`, service role só no backend |
 | SQLite nativo instável no APK | Dual-write + flag + rollback `.dat` |
@@ -159,5 +183,10 @@ uma **única camada de repositórios** por trás das telas:
 - `src/services/DatabaseLoaderService.ts` — carga de planilhas em lotes
 - `src/services/persistenceService.ts`, `backupService.ts`, `FileSystemStorageService.ts` — backup/restore
 - `src/constants/schema.ts` — dicionário de colunas (mapeamento de importação)
+- `docs/ANALISE_TABELAS_ATIVOS_ASSETS.md` — análise DBA da redundância das tabelas-espelho
+  (canônica `assets`, baseline `local_assets`, `ativos` legado) — pendência pós-export
+- `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md` — correção `InventoryCard` ↔ `Inventory`
+  (card no módulo ATIVO IMOBILIZADO; `Inventory.tsx` no fluxo de inventário; conexões
+  com a tabela de trabalho `assets`) — pendência de UI registrada 2026-08-06
 - `vite.config.ts` — assets wasm já copiados (sql.js); `optimizeDeps.exclude` já pronto
 - `src/types.ts` — `DatabaseMode`, `AppScreen`, `User`

@@ -5,6 +5,7 @@ import { db, DexieAsset } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
+import { normalizeFieldValue } from '../utils/normalize';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -175,7 +176,10 @@ export class DatabaseLoaderService {
         // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-        const codEnd = row.codigo_endereco ? String(row.codigo_endereco).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') : '';
+        // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
+        // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
+        // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
+        const codEnd = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
         const tagVal = row.tag || row.etiqueta || pk;
         
         return {
@@ -183,22 +187,22 @@ export class DatabaseLoaderService {
           primarykey: pk,
           tenantid: tenantid,
           filial: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
-          status: row.status ? String(row.status).trim() : 'Pendente',
+          status: normalizeFieldValue('status', getRowValue(row, 'status')) ?? 'Pendente',
           etiqueta: String(tagVal),
           tag: String(tagVal),
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
-          descricaodoativo: String(row.descricaodoativo || row.descricao || row.item || `Ativo N-${pk}`),
-          serial: row.serial ? String(row.serial).trim().toUpperCase() : null,
+          descricaodoativo: normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${pk}`,
+          serial: normalizeFieldValue('serial', row.serial),
           dataaqusic: row.dataaqusic ? String(row.dataaqusic) : null,
-          cnpj: row.cnpj ? String(row.cnpj) : null,
-          nomefornecedor: row.nomefornecedor ? String(row.nomefornecedor) : null,
-          notafiscal: row.notafiscal ? String(row.notafiscal) : null,
+          cnpj: normalizeFieldValue('cnpj', row.cnpj),
+          nomefornecedor: normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor')),
+          notafiscal: normalizeFieldValue('notafiscal', row.notafiscal),
           endereco: codEnd || null,
-          registro: row.registro ? String(row.registro) : null,
-          subreg: row.subreg ? String(row.subreg) : null,
+          registro: normalizeFieldValue('registro', row.registro),
+          subreg: normalizeFieldValue('subreg', row.subreg),
           databaixa: row.databaixa ? String(row.databaixa) : null,
-          contacontabil: row.contacontabil ? String(row.contacontabil) : null,
-          centrodecusto: row.centrodecusto ? String(row.centrodecusto) : null,
+          contacontabil: normalizeFieldValue('contacontabil', row.contacontabil),
+          centrodecusto: normalizeFieldValue('centrodecusto', row.centrodecusto),
           vlraquisic: isNaN(Number(row.vlraquisic)) ? 0 : Number(row.vlraquisic),
           sn1_recno: isNaN(Number(row.sn1_recno)) ? null : Number(row.sn1_recno),
           sn3_recno: isNaN(Number(row.sn3_recno)) ? null : Number(row.sn3_recno),
@@ -329,26 +333,25 @@ export class DatabaseLoaderService {
 
           const finalId = tagSanitizada;
           const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          const itemDesc = String(
-            getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`
-          )?.trim();
-          const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
+          const itemDesc = normalizeFieldValue(
+            'descricaodoativo',
+            getRowValue(row, 'descricaodoativo', 'descricao', 'item')
+          ) ?? `Ativo N-${finalId}`;
+          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = String(getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA')?.trim();
-          const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
+          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
+          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
 
-          const serialVal = String(getRowValue(row, 'serial', 'serial_number') || '')?.trim().toUpperCase();
+          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
-          const cnpjVal = String(getRowValue(row, 'cnpj') || '')?.trim();
-          const fornecedorVal = String(getRowValue(row, 'nomefornecedor', 'fornecedor') || '')?.trim();
-          const nfVal = String(getRowValue(row, 'notafiscal') || '')?.trim();
-          const finalEndereco = String(
-            getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição') || ''
-          )?.trim();
-          const subregVal = String(getRowValue(row, 'subreg') || '')?.trim();
+          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
+          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
+          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
           const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
           const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
-          const centrodecustoVal = String(getRowValue(row, 'centrodecusto', 'centro_custo') || '')?.trim();
+          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
           const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
@@ -599,22 +602,22 @@ export class DatabaseLoaderService {
           const finalId = tagSanitizada;
           const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          const itemDesc = String(getRowValue(row, 'descricaodoativo', 'descricao', 'item') || `Ativo N-${finalId}`)?.trim();
-          const finalRegistro = String(getRowValue(row, 'registro') || `REG-${tagSanitizada}`)?.trim();
+          const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
+          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = String(getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA')?.trim();
-          const statusVal = String(getRowValue(row, 'status') || 'Pendente')?.trim();
+          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
+          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
 
-          const serialVal = String(getRowValue(row, 'serial', 'serial_number') || '')?.trim().toUpperCase();
+          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
-          const cnpjVal = String(getRowValue(row, 'cnpj') || '')?.trim();
-          const fornecedorVal = String(getRowValue(row, 'nomefornecedor', 'fornecedor') || '')?.trim();
-          const nfVal = String(getRowValue(row, 'notafiscal') || '')?.trim();
-          const finalEndereco = String(getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição') || '')?.trim();
-          const subregVal = String(getRowValue(row, 'subreg') || '')?.trim();
+          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
+          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
+          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
           const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
           const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
-          const centrodecustoVal = String(getRowValue(row, 'centrodecusto', 'centro_custo') || '')?.trim();
+          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
 
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');

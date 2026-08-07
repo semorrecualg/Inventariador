@@ -22,6 +22,45 @@ export const DB_ASSET_COLUMNS = [
   'contacontabil', 'primarykey', 'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno'
 ];
 
+/**
+ * CANONICAL_KEY_MAP — Fase C (§3.1): resolve as variantes UPPER/mixed (dupla
+ * grafia D1) para a chave canônica minúscula do contrato. NÃO substitui
+ * DB_ASSET_COLUMNS/SCHEMA_PRIORITY (dicionário de importação do Excel —
+ * permanece intacto); cobre apenas chaves de runtime/payload. Consumido por
+ * `canonicalKey()` em src/utils/normalize.ts.
+ */
+export const CANONICAL_KEY_MAP: Record<string, string> = {
+  FILIAL: 'filial',
+  UNIDADE: 'filial',
+  EMPRESA: 'filial',
+  ETIQUETA: 'etiqueta',
+  PLAQUETA: 'tag',
+  TAG: 'tag',
+  TAG_INVENTARIO: 'tag',
+  STATUS: 'status',
+  QT: 'qt',
+  DESCRICAODOATIVO: 'descricaodoativo',
+  SERIAL: 'serial',
+  DATAAQUISIC: 'dataaqusic',
+  DATAAQUSIC: 'dataaqusic', // typo histórico do cabeçalho Excel (staging) — sinônimo
+  DATABAIXA: 'databaixa',
+  CNPJ: 'cnpj',
+  NOMEFORNECEDOR: 'nomefornecedor',
+  NOTAFISCAL: 'notafiscal',
+  ENDERECO: 'endereco',
+  ENDEREÇO: 'endereco', // variante acentuada do cabeçalho
+  REGISTRO: 'registro',
+  SUBREG: 'subreg',
+  CONTACONTABIL: 'contacontabil',
+  CONTA_CONTABIL: 'contacontabil',
+  PRIMARYKEY: 'primarykey',
+  CENTRODECUSTO: 'centrodecusto',
+  CENTRO_DE_CUSTO: 'centrodecusto',
+  VLRAQUISIC: 'vlraquisic',
+  SN1_RECNO: 'sn1_recno',
+  SN3_RECNO: 'sn3_recno'
+};
+
 export const SCHEMA_PRIORITY = {
   UNIT: [
     'FILIAL',

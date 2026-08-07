@@ -441,9 +441,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans w-full">
-        {/* Module 1: INVENTÁRIO */}
+        {/* Module 1: INVENTÁRIO → Seleção de Endereço (AddressSelector) antes do motor */}
         <button
-          onClick={() => handleModuleNavigation(AppScreen.INVENTORY)}
+          onClick={() => handleModuleNavigation(AppScreen.ADDRESS_SELECTION)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn"
         >
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">

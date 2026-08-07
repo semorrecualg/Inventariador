@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, DexieAsset } from '../services/sqliteService';
+import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { showRecoveryToast } from '../services/NavigationGuardService';
 import { 
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 
 interface InventoryCardProps {
-  asset: Partial<DexieAsset>;
+  asset: Partial<DexieAsset> | Partial<Asset>;
   batteryLevel: number;
   isPlugged: boolean;
 }
@@ -36,6 +37,11 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({ asset, batteryLeve
     }
   };
 
+  // Fallbacks de campos: aceita tanto o shape DexieAsset (legado) quanto o shape Asset (módulo ATIVO IMOBILIZADO)
+  const tagAtual = asset.tag_atual || asset.etiqueta || asset.tag || 'SEM TAG';
+  const descricaoAtual = asset.descricao || asset.descricaodoativo || 'SEM DESCRIÇÃO';
+  const statusAuditoria = asset.status_auditoria || asset.status || '';
+
   /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
   const handleAuditSubmit = async (inputCode: string) => {
     if (isHardwareLocked) {
@@ -44,13 +50,13 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({ asset, batteryLeve
     }
     // Conversão Expert (Diretriz 6): Caixa alta limpa e Regex removendo ruídos de planilhas
     const sanitizedCode = String(inputCode).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-    await saveCollectedAssetAtomic({ ...asset, codigo_barra_coletado: sanitizedCode } as unknown as Partial<DexieAsset> & { primarykey: string });
+    await saveCollectedAssetAtomic({ ...(asset as Partial<DexieAsset>), codigo_barra_coletado: sanitizedCode } as unknown as Partial<DexieAsset> & { primarykey: string });
   };
 
   return (
-    <div className="inventory-card-container" style={{ borderLeft: `6px solid ${getStatusColor(asset.status_auditoria)}`, padding: '16px', background: '#0a192f', borderRadius: '4px', opacity: isHardwareLocked ? 0.4 : 1 }}>
-      <span style={{ fontSize: '11px', color: '#64ffda', fontFamily: 'monospace' }}>TAG: {asset.tag_atual}</span>
-      <h4 style={{ color: '#ffffff', margin: '4px 0' }}>{String(asset.descricao).toUpperCase()}</h4>
+    <div className="inventory-card-container" style={{ borderLeft: `6px solid ${getStatusColor(statusAuditoria)}`, padding: '16px', background: '#0a192f', borderRadius: '4px', opacity: isHardwareLocked ? 0.4 : 1 }}>
+      <span style={{ fontSize: '11px', color: '#64ffda', fontFamily: 'monospace' }}>TAG: {tagAtual}</span>
+      <h4 style={{ color: '#ffffff', margin: '4px 0' }}>{String(descricaoAtual).toUpperCase()}</h4>
       {isHardwareLocked && <p style={{ color: '#ff1744', fontSize: '10px', fontWeight: 'bold' }}>SISTEMA BLOQUEADO PARA PRESERVAR O DISPOSITIVO</p>}
     </div>
   );

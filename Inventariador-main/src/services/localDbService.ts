@@ -326,11 +326,15 @@ export const localDb = {
         addrList = addrList.filter(a => String(a.codigo_endereco || '').toLowerCase().startsWith(cleanSearch));
       }
       
-      // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente de ativos (ativos)
+      // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente da tabela de trabalho
+      //    (assets canônica — decisão DBA 2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
-        const assets = await db.ativos.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        let workAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        if (workAssets.length === 0) {
+          workAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        }
         const extractedAddrs = new Map<string, typeof addrList[0]>();
-        assets.forEach(a => {
+        workAssets.forEach(a => {
           const addrStr = String(a.endereco || '').trim();
           if (addrStr && (cleanSearch === '' || addrStr.toUpperCase().startsWith(cleanSearch))) {
             const key = addrStr.toUpperCase();
@@ -349,8 +353,11 @@ export const localDb = {
         addrList = Array.from(extractedAddrs.values());
       }
 
-      // 4. Busca reativa das estatísticas de conferência em db.ativos
-      const listAssets = await db.ativos.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
+      let listAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      if (listAssets.length === 0) {
+        listAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      }
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
@@ -901,25 +908,41 @@ export async function selectAndVerifyWorkspaceFolder(): Promise<{ pathName: stri
   }
 }
 
+/**
+ * Persiste o snapshot virtual (espelho JSON dos ativos) de forma resiliente:
+ * tenta localStorage primeiro (leitura rápida) e, se a quota (~5MB) estourar
+ * com cargas grandes (ex.: 12k+ ativos), cai para IndexedDB via localforage,
+ * que não tem limite prático.
+ * Retorna true se conseguiu persistir em ao menos um dos backends.
+ */
+export async function saveVirtualSnapshot(dataPayload: any[]): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  try {
+    logger.info("[SRE-iFrame] Armazenando snapshot simulado localmente...");
+    localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
+    return true;
+  } catch (e) {
+    logger.warn("[SRE-iFrame] localStorage indisponível/quota excedida; tentando fallback IndexedDB...", e);
+    // Remove o snapshot antigo/parcial do localStorage: se ele permanecesse, a leitura
+    // priorizaria o espelho obsoleto em vez do novo gravado em IndexedDB (duplicidade).
+    try {
+      localStorage.removeItem('gbr_virtual_snapshot_backup');
+    } catch { /* best-effort: remoção pode falhar em sandbox restrito */ }
+    try {
+      await snapshotStore.setItem('gbr_virtual_snapshot_backup', dataPayload);
+      return true;
+    } catch (e2) {
+      logger.error("[SRE-iFrame] Fallback IndexedDB do snapshot também falhou", e2);
+      return false;
+    }
+  }
+}
+
 export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (isIframe) {
     // 1) Snapshot virtual: localStorage com fallback em IndexedDB (localforage).
     //    São caminhos independentes — a falha de um não pode invalidar o outro.
-    let snapshotSaved = false;
-    try {
-      logger.info("[SRE-iFrame] Armazenando snapshot simulado localmente...");
-      localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(dataPayload));
-      snapshotSaved = true;
-    } catch (e) {
-      logger.warn("[SRE-iFrame] localStorage indisponível/quota excedida; tentando fallback IndexedDB...", e);
-      try {
-        await snapshotStore.setItem('gbr_virtual_snapshot_backup', dataPayload);
-        snapshotSaved = true;
-      } catch (e2) {
-        logger.error("[SRE-iFrame] Fallback IndexedDB do snapshot também falhou", e2);
-      }
-    }
+    const snapshotSaved = await saveVirtualSnapshot(dataPayload);
 
     // 2) Auto-download contingency physical JSON file — best-effort. Em iframe
     //    sandboxed o download é bloqueado pelo navegador (falha esperada e não-fatal).
@@ -971,8 +994,19 @@ export async function readVirtualSnapshot(): Promise<Record<string, unknown>[] |
   try {
     const raw = localStorage.getItem('gbr_virtual_snapshot_backup');
     if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // Snapshot corrompido/parcial detectado (JSON inválido).
+        parsed = null;
+      }
+      if (Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>[];
+      }
+      // Chave órfã (JSON válido porém não-array, ou corrompido): remove para não
+      // mascarar o espelho válido do IndexedDB nem duplicar dados entre backends.
+      try { localStorage.removeItem('gbr_virtual_snapshot_backup'); } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
   try {

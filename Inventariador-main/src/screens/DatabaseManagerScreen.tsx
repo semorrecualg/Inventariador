@@ -3,7 +3,7 @@ import { db } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
-import { saveSnapshotToWorkspace } from '../services/localDbService';
+import { saveSnapshotToWorkspace, saveVirtualSnapshot } from '../services/localDbService';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -90,7 +90,15 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
         localStorage.setItem('gbr_physical_link_active', 'true');
-        localStorage.setItem('gbr_virtual_snapshot_backup', JSON.stringify(parsed));
+
+        // Snapshot virtual espelhado de forma resiliente: localStorage primeiro,
+        // IndexedDB (localforage) como fallback quando a quota de ~5MB estoura.
+        // O banco físico (Dexie) já foi restaurado — a falha do espelho não pode
+        // invalidar a reconexão.
+        const snapshotMirrored = await saveVirtualSnapshot(parsed);
+        if (!snapshotMirrored) {
+          addLog("[SRE_BACKUP] Ressalva: espelho do snapshot virtual falhou (quota excedida). Banco físico restaurado com sucesso.");
+        }
 
         setProgress(100);
         setIsUploading(false);

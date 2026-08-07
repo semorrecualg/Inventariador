@@ -26,7 +26,7 @@ const DatabaseManagerScreen = React.lazy(() => import('./screens/DatabaseManager
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
 import ImpairmentReport from './components/ImpairmentReport';
-import { InventoryScreen } from './components/InventoryCard';
+import Inventory from './components/Inventory';
 import Labeling from './components/Labeling'; 
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
@@ -805,12 +805,22 @@ const App: React.FC = () => {
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [duplicateModalMessage, setDuplicateModalMessage] = useState("");
 
-  const [manualLocations] = useState<string[]>(() => {
+  const [manualLocations, setManualLocations] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('app_manual_locations');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+
+  const handleAddNewLocation = useCallback((newLocation: string) => {
+    const normalized = String(newLocation || '').trim().toUpperCase();
+    if (!normalized) return;
+    setManualLocations(prev => {
+      const next = prev.includes(normalized) ? prev : [...prev, normalized];
+      try { localStorage.setItem('app_manual_locations', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const userRef = useRef<User | null>(user);
   const isSyncRunningRef = useRef<boolean>(false);
@@ -3425,7 +3435,7 @@ const App: React.FC = () => {
   }, [inventory]);
 
 
-  const { allLocations, uniqueCentrosDeCusto } = useMemo(() => {
+  const { allLocations, uniqueCentrosDeCusto, locationsWithStats } = useMemo(() => {
     const stats: Record<string, { total: number; checked: number; displayName: string }> = {};
     const locationsSet = new Set<string>(manualLocations);
     const centrosDeCustoSet = new Set<string>();
@@ -6149,13 +6159,38 @@ const App: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <InventoryScreen 
+                <Inventory 
+                  assets={filteredAssetsByUnit}
+                  allAssets={inventory.assets}
                   onBack={popScreen} 
-                  userEmail={user?.email}
-                  userName={user?.name}
-                  currentCampaignId={inventory.currentCampaignId}
+                  onUpdateAsset={updateAsset}
+                  onBulkUpdateAssets={bulkUpdateAssets}
+                  onSelectAsset={handleSelectAsset}
+                  selectedLocation={inventoryLocation}
+                  setSelectedLocation={setInventoryLocation}
+                  isInventorying={isInventorying}
+                  setIsInventorying={setIsInventorying}
+                  selectedUnit={selectedUnit}
+                  onAddNewLocation={handleAddNewLocation}
+                  locationsWithStats={locationsWithStats}
+                  scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
+                  searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL}
+                  onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))}
+                  onUpdateScannerMode={handleUpdateScannerMode}
+                  autoConfirmOnScan={inventory.autoConfirmOnScan || false}
+                  scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
+                  onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }}
+                  onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
                   inventorySearchValue={inventorySearchValue}
                   clearInventorySearchValue={() => setInventorySearchValue(null)}
+                  immersiveMode={inventory.immersiveMode || false}
+                  onToggleFullscreen={toggleFullscreen}
+                  batterySaver={inventory.batterySaver || false}
+                  databaseMode={databaseMode}
+                  onSyncFromCloud={syncFromCloud}
+                  user={user}
+                  currentCampaignId={inventory.currentCampaignId}
+                  unitConfig={currentUnitConfig}
                 />
               )}
             </GPSComplianceGuard>
@@ -6239,7 +6274,7 @@ const App: React.FC = () => {
           {screen === AppScreen.IMPAIRMENT_REPORT && (
             <ImpairmentReport 
               assets={inventory.assets}
-              onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])}
+              onBack={() => setHistory([AppScreen.MAIN_MENU])}
               onSelectAsset={(asset) => {
                 setSelectedAssets([asset]);
                 pushScreen(AppScreen.ASSET_DETAIL);
@@ -6316,8 +6351,9 @@ const App: React.FC = () => {
                 setInventoryLocation(null);
                 sessionStorage.removeItem('app_just_finished_load');
 
-                // Passo 4: Menu de Opções da Filial (DASHBOARD) - Obrigatório para todos os perfis (GBR v2.6.0)
-                pushScreen(AppScreen.DASHBOARD);
+                // Passo 4: Menu Principal da Filial (MAIN_MENU) - Hub operacional do auditor (2026-08-06)
+                // Fluxo: LOGIN → MODULE_SELECTION → UNIT_SELECTION → MAIN_MENU (DASHBOARD fora do fluxo principal)
+                pushScreen(AppScreen.MAIN_MENU);
               }} 
               onBack={async () => { 
                 setCurrentModule(null);
@@ -6428,7 +6464,7 @@ const App: React.FC = () => {
           {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} databaseMode={databaseMode} />}
+          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} />}
           {screen === AppScreen.CAMPAIGN_MANAGEMENT && (
             <CampaignManager 
               user={user} 
@@ -6477,7 +6513,7 @@ const App: React.FC = () => {
               databaseMode={databaseMode}
             />
           )}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU, AppScreen.DASHBOARD])} />}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU])} />}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 

@@ -12,6 +12,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { sqliteService } from '../services/sqliteService';
+import { readVirtualSnapshot } from '../services/localDbService';
 import { Capacitor } from '@capacitor/core';
 import { logger } from '../utils/logger';
 
@@ -40,15 +41,10 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
         let count = await sqliteService.getAssetCount();
         const isIframe = typeof window !== 'undefined' && window.self !== window.top;
         if (count === 0 && isIframe) {
-          const virtualData = localStorage.getItem('gbr_virtual_snapshot_backup');
-          if (virtualData) {
-            try {
-              const parsed = JSON.parse(virtualData);
-              if (Array.isArray(parsed)) count = parsed.length;
-            } catch (err) {
-              logger.warn("Error parsing virtualData:", err);
-            }
-          }
+          // Lê o snapshot virtual com fallback (localStorage → IndexedDB) para
+          // cobrir cargas grandes cujo espelho foi persistido em IndexedDB.
+          const virtualData = await readVirtualSnapshot();
+          if (Array.isArray(virtualData)) count = virtualData.length;
         }
         if (active) {
           const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';

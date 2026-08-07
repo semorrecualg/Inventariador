@@ -33,6 +33,7 @@ import AssetGroupsTable from './AssetGroupsTable';
 import ChartOfAccountsTable from './ChartOfAccountsTable';
 import NCMClassifierTable from './NCMClassifierTable';
 import AssetLedger from './AssetLedger';
+import { InventoryCard } from './InventoryCard';
 import BaseModal from './BaseModal';
 import UnitConfigurator from './UnitConfigurator';
 import ImpairmentTestModal from './ImpairmentTestModal';
@@ -779,6 +780,27 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Inventário em Destaque</h3>
+          {assets.length > 0 ? (
+            <div className="space-y-3">
+              {assets.slice(0, 3).map(asset => (
+                <div key={asset.id} className="rounded-xl overflow-hidden border border-slate-100">
+                  <InventoryCard
+                    asset={asset}
+                    batteryLevel={1}
+                    isPlugged
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-40 text-slate-400 italic">
+              Nenhum ativo carregado na tabela de trabalho.
+            </div>
+          )}
+        </div>
+
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Últimas Movimentações</h3>
           <div className="space-y-4">
