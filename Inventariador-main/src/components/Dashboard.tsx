@@ -244,16 +244,16 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
         });
       }
 
-      const statusUpper = String(a.STATUS || a.SITUACAO || '').toUpperCase();
+      const statusUpper = String(a.status || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
       const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
-      const etq = String(a.ETIQUETA || '').toUpperCase().trim();
+      const etq = String(a.etiqueta || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
       const unit = a.filial || a._unitid || 'SEM UNIDADE';
 
       // Financials
-      const valorAquisicao = typeof a._valor_aquisicao === 'number' ? a._valor_aquisicao : parseFloat(String(a.VLRAQUISIC || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+      const valorAquisicao = typeof a._valor_aquisicao === 'number' ? a._valor_aquisicao : parseFloat(String(a.vlraquisic || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
       const depreciacao = typeof a._depreciacao_acumulada === 'number' ? a._depreciacao_acumulada : 0;
       const residual = typeof a._valor_residual === 'number' ? a._valor_residual : (valorAquisicao - depreciacao);
 
@@ -355,8 +355,8 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           allHistory.push({
             ...h,
             assetId: a.id,
-            assetTag: a.ETIQUETA,
-            assetDesc: a.DESCRICAODOATIVO
+            assetTag: a.etiqueta,
+            assetDesc: a.descricaodoativo
           });
         });
       }
@@ -417,9 +417,9 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
           });
         }
 
-        res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
-        res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
-        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.ENDERECO === (a._localMaster || a.ENDERECO) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+        res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
+        res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
+        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.endereco === (a._localMaster || a.endereco) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
         res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
         res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
         res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';

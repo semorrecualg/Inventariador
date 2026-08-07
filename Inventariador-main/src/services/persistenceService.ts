@@ -150,7 +150,7 @@ export const saveConfigOnly = async (data: Partial<InventoryState>): Promise<voi
 export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   try {
     await localDb.assets.put(asset);
-    logger.info(`>>> [Persistence] Ativo ${asset.ETIQUETA} salvo incrementalmente.`);
+    logger.info(`>>> [Persistence] Ativo ${asset.etiqueta} salvo incrementalmente.`);
   } catch (error) {
     logger.error('Erro no salvamento incremental:', error);
     // Re-throw to allow the caller to handle the "Healthy Pessimism" logic

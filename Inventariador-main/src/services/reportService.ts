@@ -12,12 +12,12 @@ export class ReportService {
       
       const worksheet = XLSX.utils.json_to_sheet(assets.map(a => ({
         'ESTADO': a.C_STATUS_AUDIT === 'pending' ? 'PENDENTE' : 'CONFERIDO',
-        'PATRIMONIO': a.ETIQUETA || a.REGISTRO,
-        'DESCRICAO': a.DESCRICAODOATIVO,
-        'CENTRO_CUSTO': a.CENTRODECUSTO,
+        'PATRIMONIO': a.etiqueta || a.registro,
+        'DESCRICAO': a.descricaodoativo,
+        'CENTRO_CUSTO': a.centrodecusto,
         'CONTA': a.conta_contabil,
         'UNIDADE': a.filial || a._unitid,
-        'ENDERECO': a.ENDERECO,
+        'ENDERECO': a.endereco,
         'DATA_AUDITORIA': new Date().toLocaleDateString('pt-BR')
       })));
 
@@ -37,7 +37,7 @@ export class ReportService {
    */
   exportToCSV(assets: Asset[]) {
     const headers = ["ETIQUETA", "DESCRICAO", "STATUS"];
-    const rows = assets.map(a => `${a.ETIQUETA},"${a.DESCRICAODOATIVO}",${a.C_STATUS_AUDIT}`);
+    const rows = assets.map(a => `${a.etiqueta},"${a.descricaodoativo}",${a.C_STATUS_AUDIT}`);
     const csvContent = [headers.join(","), ...rows].join("\n");
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

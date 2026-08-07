@@ -22,12 +22,12 @@ export const assetRepository = {
     const upperTerm = rawTerm.toUpperCase();
     
     // Tenta busca exata primeiro
-    let asset = await localDb.assets.where('ETIQUETA').equals(upperTerm).first();
+    let asset = await localDb.assets.where('etiqueta').equals(upperTerm).first();
     
     // Se não encontrou e for numérico curto, tenta com padding de 6 zeros
     if (!asset && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
       const padded = rawTerm.padStart(6, '0');
-      asset = await localDb.assets.where('ETIQUETA').equals(padded).first();
+      asset = await localDb.assets.where('etiqueta').equals(padded).first();
     }
     
     return asset || undefined;
@@ -43,7 +43,7 @@ export const assetRepository = {
     
     // Tenta busca exata na unidade
     let asset = await localDb.assets
-      .where('[ETIQUETA+filial]')
+      .where('[etiqueta+filial]')
       .equals([upperTerm, upperUnit])
       .first();
     
@@ -51,7 +51,7 @@ export const assetRepository = {
     if (!asset && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
       const padded = rawTerm.padStart(6, '0');
       asset = await localDb.assets
-        .where('[ETIQUETA+filial]')
+        .where('[etiqueta+filial]')
         .equals([padded, upperUnit])
         .first();
     }
@@ -59,7 +59,7 @@ export const assetRepository = {
     // Fallback para _unitid se filial falhar (compatibilidade legado)
     if (!asset) {
        asset = await localDb.assets
-         .where('[ETIQUETA+_unitid]')
+         .where('[etiqueta+_unitid]')
          .equals([upperTerm, upperUnit])
          .first();
     }
@@ -74,11 +74,11 @@ export const assetRepository = {
     const rawTerm = etiqueta.trim();
     const upperTerm = rawTerm.toUpperCase();
     
-    const assets = await localDb.assets.where('ETIQUETA').equals(upperTerm).toArray();
+    const assets = await localDb.assets.where('etiqueta').equals(upperTerm).toArray();
     
     if (assets.length === 0 && /^\d+$/.test(rawTerm) && rawTerm.length < 6) {
       const padded = rawTerm.padStart(6, '0');
-      return await localDb.assets.where('ETIQUETA').equals(padded).toArray();
+      return await localDb.assets.where('etiqueta').equals(padded).toArray();
     }
     
     return assets;
@@ -117,7 +117,7 @@ export const assetRepository = {
       ...item,
       id: item.id || crypto.randomUUID(),
       _conferido: !!item._conferido,
-      _localMaster: item._localMaster || item.ENDERECO || ''
+      _localMaster: item._localMaster || item.endereco || ''
     }));
     await localDb.assets.bulkPut(assets);
   },

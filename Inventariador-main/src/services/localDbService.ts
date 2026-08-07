@@ -276,10 +276,25 @@ export const localDb = {
         first: async () => {
           const tenant = getCurrentTenantid().trim().toUpperCase();
           if (Array.isArray(value)) {
-            // Using compound index: [tenantid+filial]
-            const results = await db.ativos.where('[tenantid+filial]').equals(value as string & string[]).toArray();
-            const firstMatch = results.find(a => a._is_deleted !== 1);
-            return firstMatch ? toReactAsset(firstMatch) : null;
+            // Busca composta em MEMÓRIA (achado SRE corrigido): o índice
+            // [etiqueta+filial] não existe no schema Dexie (só [tenantid+filial]);
+            // consultar [tenantid+filial] com [etiqueta, unidade] jamais casava
+            // (findByEtiquetaInUnit inoperante). O wrapper já é in-memory no ramo
+            // escalar — mesma estratégia aqui: parse dos campos do índice
+            // composto + escopo de tenant.
+            const parts = field.replace('[', '').replace(']', '').split('+').map(p => p.trim());
+            const rows = await db.ativos.toArray();
+            const match = rows.find(a => {
+              const isTenantMatch = String(a.tenantid || '').trim().toUpperCase() === tenant;
+              if (!isTenantMatch) return false;
+              for (let i = 0; i < parts.length; i++) {
+                const propVal = String((a as unknown as Record<string, unknown>)[parts[i]] || '').trim().toUpperCase();
+                const targetVal = String(value[i] ?? '').trim().toUpperCase();
+                if (propVal !== targetVal) return false;
+              }
+              return a._is_deleted !== 1;
+            });
+            return match ? toReactAsset(match) : null;
           }
 
           // Simple field queries
@@ -296,8 +311,21 @@ export const localDb = {
         toArray: async () => {
           const tenant = getCurrentTenantid().trim().toUpperCase();
           if (Array.isArray(value)) {
-            const results = await db.ativos.where('[tenantid+filial]').equals(value as string & string[]).toArray();
-            return results.map(row => toReactAsset(row));
+            // Busca composta em memória (mesma correção do ramo first — ver acima).
+            const parts = field.replace('[', '').replace(']', '').split('+').map(p => p.trim());
+            const rows = await db.ativos.toArray();
+            return rows
+              .filter(a => {
+                const isTenantMatch = String(a.tenantid || '').trim().toUpperCase() === tenant;
+                if (!isTenantMatch) return false;
+                for (let i = 0; i < parts.length; i++) {
+                  const propVal = String((a as unknown as Record<string, unknown>)[parts[i]] || '').trim().toUpperCase();
+                  const targetVal = String(value[i] ?? '').trim().toUpperCase();
+                  if (propVal !== targetVal) return false;
+                }
+                return true;
+              })
+              .map(row => toReactAsset(row));
           }
 
           const fieldClean = field.replace('[', '').replace(']', '').replace('+', '');

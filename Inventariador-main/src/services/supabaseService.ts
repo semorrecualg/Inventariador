@@ -887,7 +887,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         delete cleanAsset._photoUrl;
       }
       
-      const assetGrupo = (cleanAsset.tenantid || cleanAsset.tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
+      const assetGrupo = (cleanAsset.tenantid || cleanAsset.GRUPO_EMPRESARIAL || '').trim().toUpperCase();
       let finalTenantid = '';
       if (tenantid) {
         if (Array.isArray(tenantid)) {
@@ -900,7 +900,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         finalTenantid = assetGrupo || (readLocalTenantId() || readSessionTenantId() || '').trim();
       }
 
-      const finalFilial = (cleanAsset.filial || cleanAsset.FILIAL || cleanAsset._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || 'GERAL').trim().toUpperCase();
+      const finalFilial = (cleanAsset.filial || cleanAsset._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || 'GERAL').trim().toUpperCase();
 
       if (!finalTenantid || finalTenantid === 'undefined' || finalTenantid === 'null') {
         logger.warn(">>> [Session] Falha crítica de isolamento em syncAssetsToCloud: Contrato ausente.");
@@ -912,47 +912,47 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         throw new Error("Sessão Expirada: Contrato ausente para sincronização.");
       }
 
-      const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : (cleanAsset.PRIMARYKEY !== undefined && cleanAsset.PRIMARYKEY !== null ? cleanAsset.PRIMARYKEY : '')).trim() || String(cleanAsset.id || '');
+      const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : '').trim() || String(cleanAsset.id || '');
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
       return {
         id: assetPrimaryKey,
         tenantid: finalTenantid,
         filial: finalFilial,
-        status: (cleanAsset.status || cleanAsset.STATUS || 'PENDENTE').trim().toUpperCase(),
-        etiqueta: (cleanAsset.etiqueta || cleanAsset.ETIQUETA || '').trim(),
+        status: (cleanAsset.status || 'PENDENTE').trim().toUpperCase(),
+        etiqueta: (cleanAsset.etiqueta || '').trim(),
         qt: (() => {
-          const rawQt = cleanAsset.qt !== undefined ? cleanAsset.qt : (cleanAsset.QT !== undefined ? cleanAsset.QT : 1);
+          const rawQt = cleanAsset.qt !== undefined ? cleanAsset.qt : 1;
           const parsed = Number(rawQt);
           return isNaN(parsed) ? 1 : parsed;
         })(),
-        descricaodoativo: (cleanAsset.descricaodoativo || cleanAsset.DESCRICAODOATIVO || '').trim(),
-        serial: (cleanAsset.serial || cleanAsset.SERIAL || '').trim(),
-        dataaqusic: (cleanAsset.dataaqusic || cleanAsset.DATAAQUISIC || '').trim(),
-        cnpj: (cleanAsset.cnpj || cleanAsset.CNPJ || '').trim(),
-        nomefornecedor: (cleanAsset.nomefornecedor || cleanAsset.NOMEFORNECEDOR || '').trim(),
-        notafiscal: (cleanAsset.notafiscal || cleanAsset.NOTAFISCAL || '').trim(),
-        endereco: (cleanAsset.endereco || cleanAsset.ENDERECO || '').trim(),
-        registro: (cleanAsset.registro || cleanAsset.REGISTRO || '').trim(),
-        subreg: (cleanAsset.subreg || cleanAsset.SUBREG || '').trim(),
-        databaixa: (cleanAsset.databaixa || cleanAsset.DATABAIXA || '').trim(),
+        descricaodoativo: (cleanAsset.descricaodoativo || '').trim(),
+        serial: (cleanAsset.serial || '').trim(),
+        dataaqusic: (cleanAsset.dataaqusic || '').trim(),
+        cnpj: (cleanAsset.cnpj || '').trim(),
+        nomefornecedor: (cleanAsset.nomefornecedor || '').trim(),
+        notafiscal: (cleanAsset.notafiscal || '').trim(),
+        endereco: (cleanAsset.endereco || '').trim(),
+        registro: (cleanAsset.registro || '').trim(),
+        subreg: (cleanAsset.subreg || '').trim(),
+        databaixa: (cleanAsset.databaixa || '').trim(),
         contacontabil: (cleanAsset.contacontabil || cleanAsset.conta_contabil || '').trim(),
         primarykey: assetPrimaryKey,
-        centrodecusto: (cleanAsset.centrodecusto || cleanAsset.CENTRODECUSTO || '').trim(),
+        centrodecusto: (cleanAsset.centrodecusto || '').trim(),
         vlraquisic: (() => {
-          const rawVal = cleanAsset.vlraquisic !== undefined ? cleanAsset.vlraquisic : (cleanAsset.VLRAQUISIC !== undefined ? cleanAsset.VLRAQUISIC : 0);
+          const rawVal = cleanAsset.vlraquisic !== undefined ? cleanAsset.vlraquisic : 0;
           const parsed = Number(rawVal);
           return isNaN(parsed) ? 0 : parsed;
         })(),
         sn1_recno: (() => {
-          const val = cleanAsset.sn1_recno !== undefined ? cleanAsset.sn1_recno : cleanAsset.Sn1_recno;
-          if (val === undefined || val === null || val === '') return null;
+          const val = cleanAsset.sn1_recno;
+          if (val === undefined || val === null) return null;
           const num = Number(val);
           return isNaN(num) ? null : num;
         })(),
         sn3_recno: (() => {
-          const val = cleanAsset.sn3_recno !== undefined ? cleanAsset.sn3_recno : cleanAsset.Sn3_recno;
-          if (val === undefined || val === null || val === '') return null;
+          const val = cleanAsset.sn3_recno;
+          if (val === undefined || val === null) return null;
           const num = Number(val);
           return isNaN(num) ? null : num;
         })()
@@ -1438,7 +1438,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
     let query = supabase
       .from('assets')
       .select('*')
-      .eq('ETIQUETA', tag.toUpperCase().trim());
+      .eq('etiqueta', tag.toUpperCase().trim());
     
     // Tenta filtrar por _is_deleted se a coluna existir (soft delete)
     // Se falhar, o Supabase retornará erro 42703 (undefined_column)
@@ -1456,7 +1456,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
         let retryQuery = supabase
           .from('assets')
           .select('*')
-          .eq('ETIQUETA', tag.toUpperCase().trim());
+          .eq('etiqueta', tag.toUpperCase().trim());
         
         if (tenantid) {
           retryQuery = retryQuery.eq('tenantid', tenantid);
@@ -2055,7 +2055,7 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
     .from('assets')
     .select('*')
     .eq('tenantid', tenantid)
-    .in('ETIQUETA', variations)
+    .in('etiqueta', variations)
     .maybeSingle();
 
   if (error) {
@@ -2411,7 +2411,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
         // 3. Stats
         const stats = {
           total: assets.length,
-          inventoried: assets.filter(a => a._conferido || a.STATUS === 'CONFERIDO').length,
+          inventoried: assets.filter(a => a._conferido || a.status === 'CONFERIDO').length,
           divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
           generated_at: new Date().toISOString(),
           cpc_compliance: 'CPC 27 / NBC TG 27 (MODO LOCAL)'
@@ -2580,20 +2580,26 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid);
       
-    // Ativos inventariados nesta campanha
+    // Ativos inventariados — contrato public.assets: `currentCampaignId` é
+    // runtime LOCAL (coluna inexistente no public → PGRST204; não sincronizada).
+    // O marcador sincronizado de conferência é `status = 'CONFERIDO'` (espelha o
+    // snapshot local: a._conferido || a.status === 'CONFERIDO').
     const { count: inventoriedCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid)
-      .eq('currentCampaignId', campaignId);
+      .eq('status', 'CONFERIDO');
 
-    // Divergências nesta campanha
+    // Divergências — contrato public.assets: `TAG_INVENTARIO` é runtime LOCAL
+    // (coluna inexistente no public → PGRST204; não sincronizada). A divergência
+    // canônica do app (determineTag / regra de ouro) é derivável das colunas
+    // sincronizadas: status ≠ *BAIXA* E databaixa presente (isGoldenRuleDivergent).
     const { count: divergenceCount } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid)
-      .eq('currentCampaignId', campaignId)
-      .eq('TAG_INVENTARIO', 'DIVERGÊNCIA');
+      .not('status', 'ilike', '%BAIXA%')
+      .not('databaixa', 'is', null);
 
     return {
       total: totalCount || 0,

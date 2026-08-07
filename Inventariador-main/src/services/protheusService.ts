@@ -19,14 +19,14 @@ export interface ProtheusUpdateResponse {
 export const normalizeToProtheus = (asset: Asset) => {
   return {
     N1_FILIAL: asset.filial || asset._unitid || '',
-    N1_CBASE: asset.ETIQUETA || '',
+    N1_CBASE: asset.etiqueta || '',
     N1_ITEM: '0001', // Padrão Protheus para item único
-    N1_STATUS: asset.STATUS === 'ATIVO' ? '1' : '0', // Exemplo de mapeamento de status
-    N1_LOCAL: asset.ENDERECO || '',
+    N1_STATUS: asset.status === 'ATIVO' ? '1' : '0', // Exemplo de mapeamento de status
+    N1_LOCAL: asset.endereco || '',
     N3_CUSTBEM: asset.conta_contabil || '',
-    N3_CCUSTO: asset.CENTRODECUSTO || '',
-    SN1_RECNO: asset.Sn1_recno,
-    SN3_RECNO: asset.Sn3_recno
+    N3_CCUSTO: asset.centrodecusto || '',
+    SN1_RECNO: asset.sn1_recno,
+    SN3_RECNO: asset.sn3_recno
   };
 };
 
@@ -36,16 +36,16 @@ export const normalizeToProtheus = (asset: Asset) => {
 export const validateForProtheus = (asset: Asset): { valid: boolean; errors: string[] } => {
   const errors: string[] = [];
   
-  if (!asset.Sn1_recno) {
+  if (!asset.sn1_recno) {
     errors.push('Identificador Protheus (Sn1_recno) não encontrado.');
   }
   
-  if (!asset.Sn3_recno) {
+  if (!asset.sn3_recno) {
     errors.push('Identificador Protheus (Sn3_recno) não encontrado.');
   }
   
   if (!asset.filial && !asset._unitid) errors.push('Filial (filial) é obrigatória.');
-  if (!asset.ETIQUETA) errors.push('Código Base (ETIQUETA) é obrigatório.');
+  if (!asset.etiqueta) errors.push('Código Base (ETIQUETA) é obrigatório.');
   
   return {
     valid: errors.length === 0,
@@ -83,7 +83,7 @@ export const updateAssetInProtheus = async (
         resolve({
           success: true,
           message: 'Ativo atualizado com sucesso no Protheus (SIGAATF).',
-          recno: asset.Sn1_recno
+          recno: asset.sn1_recno ?? undefined
         });
       } else {
         resolve({

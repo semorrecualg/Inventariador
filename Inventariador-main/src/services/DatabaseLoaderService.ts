@@ -5,7 +5,7 @@ import { db, DexieAsset } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
-import { normalizeFieldValue } from '../utils/normalize';
+import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -193,19 +193,19 @@ export class DatabaseLoaderService {
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
           descricaodoativo: normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${pk}`,
           serial: normalizeFieldValue('serial', row.serial),
-          dataaqusic: row.dataaqusic ? String(row.dataaqusic) : null,
+          dataaqusic: normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic')),
           cnpj: normalizeFieldValue('cnpj', row.cnpj),
           nomefornecedor: normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor')),
           notafiscal: normalizeFieldValue('notafiscal', row.notafiscal),
           endereco: codEnd || null,
           registro: normalizeFieldValue('registro', row.registro),
           subreg: normalizeFieldValue('subreg', row.subreg),
-          databaixa: row.databaixa ? String(row.databaixa) : null,
+          databaixa: normalizeDateISO(getRowValue(row, 'databaixa')),
           contacontabil: normalizeFieldValue('contacontabil', row.contacontabil),
           centrodecusto: normalizeFieldValue('centrodecusto', row.centrodecusto),
           vlraquisic: isNaN(Number(row.vlraquisic)) ? 0 : Number(row.vlraquisic),
-          sn1_recno: isNaN(Number(row.sn1_recno)) ? null : Number(row.sn1_recno),
-          sn3_recno: isNaN(Number(row.sn3_recno)) ? null : Number(row.sn3_recno),
+          sn1_recno: normalizeNumeric(row.sn1_recno),
+          sn3_recno: normalizeNumeric(row.sn3_recno),
           _is_synced: 0,
           _is_deleted: 0,
           _conferido: 0,
@@ -343,19 +343,19 @@ export class DatabaseLoaderService {
           const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
 
           const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
-          const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
+          const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
           const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
           const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
           const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
           const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
           const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
-          const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
+          const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
           const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
           const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
-          const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
-          const sn3RecnoVal = (sn3RecnoRaw !== undefined && sn3RecnoRaw !== null && !isNaN(Number(sn3RecnoRaw))) ? Number(sn3RecnoRaw) : null;
+          const sn1RecnoVal = normalizeNumeric(sn1RecnoRaw);
+          const sn3RecnoVal = normalizeNumeric(sn3RecnoRaw);
 
           // HIGIENIZAÇÃO CONTÁBIL EXIGIDA PELO LAUDO SRE: Higienização de Valor de Aquisição
           let vlrAquisicSanitizado = 0;
@@ -609,20 +609,20 @@ export class DatabaseLoaderService {
           const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
 
           const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
-          const dataaqVal = String(getRowValue(row, 'dataaqusic', 'dataaquisic') || '')?.trim();
+          const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
           const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
           const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
           const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
           const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
           const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
-          const databaixaVal = String(getRowValue(row, 'databaixa') || '')?.trim();
+          const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
           const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
           const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
 
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
-          const sn1RecnoVal = (sn1RecnoRaw !== undefined && sn1RecnoRaw !== null && !isNaN(Number(sn1RecnoRaw))) ? Number(sn1RecnoRaw) : null;
-          const sn3RecnoVal = (sn3RecnoRaw !== undefined && sn3RecnoRaw !== null && !isNaN(Number(sn3RecnoRaw))) ? Number(sn3RecnoRaw) : null;
+          const sn1RecnoVal = normalizeNumeric(sn1RecnoRaw);
+          const sn3RecnoVal = normalizeNumeric(sn3RecnoRaw);
 
           // Higienização de Valor de Aquisição
           let vlrAquisicSanitizado = 0;

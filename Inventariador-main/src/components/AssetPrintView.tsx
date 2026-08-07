@@ -129,10 +129,10 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                     </span>
                     <div>
                         <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 leading-tight">
-                        {asset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO CADASTRAL'}
+                        {asset.descricaodoativo || 'ITEM SEM DESCRIÇÃO CADASTRAL'}
                         </h2>
                         <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                            {asset.conta_contabil || 'SEM CONTA'} | {asset.CENTRODECUSTO || 'SEM CC'}
+                            {asset.conta_contabil || 'SEM CONTA'} | {asset.centrodecusto || 'SEM CC'}
                         </p>
                     </div>
                   </div>
@@ -141,11 +141,11 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                   <div className="grid grid-cols-3 gap-6 bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Tag / Etiqueta</p>
-                      <p className="text-sm font-black text-slate-900">{asset.ETIQUETA || 'N/A'}</p>
+                      <p className="text-sm font-black text-slate-900">{asset.etiqueta || 'N/A'}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Num. Série</p>
-                      <p className="text-sm font-bold text-slate-900">{asset.SERIAL || '-'}</p>
+                      <p className="text-sm font-bold text-slate-900">{asset.serial || '-'}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Status Auditoria</p>
@@ -159,12 +159,12 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Valor Aquisição</p>
                       <p className="text-[10px] font-bold text-slate-900">
-                          {asset.VLRAQUISIC ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset.VLRAQUISIC)) : 'R$ 0,00'}
+                          {asset.vlraquisic ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset.vlraquisic)) : 'R$ 0,00'}
                       </p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Data Aquisição</p>
-                      <p className="text-[10px] font-bold text-slate-900">{asset.DATAAQUISIC || 'N/A'}</p>
+                      <p className="text-[10px] font-bold text-slate-900">{asset.dataaqusic || 'N/A'}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Conservação</p>
@@ -180,7 +180,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                             &quot;{asset.AUDITOR_STATUS_CONFERENCIA || 'Conferência física realizada sem ressalvas.'}&quot;
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 uppercase mt-2">
-                            GeoRef: {asset.latitude ? `${asset.latitude}, ${asset.longitude}` : 'Coordenadas não registradas'} | {asset.ENDERECO || 'Localidade indefinida'}
+                            GeoRef: {asset.latitude ? `${asset.latitude}, ${asset.longitude}` : 'Coordenadas não registradas'} | {asset.endereco || 'Localidade indefinida'}
                         </p>
                     </div>
                   </div>

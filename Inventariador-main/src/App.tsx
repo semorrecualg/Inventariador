@@ -9,6 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
+import { normalizeFlag, pickCanonical } from './utils/normalize';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -716,15 +717,15 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem('app_consultation_filters');
       return saved ? JSON.parse(saved) : {
-        ETIQUETA: '',
-        DESCRICAODOATIVO: '',
-        SERIAL: '',
-        CNPJ: '',
-        NOMEFORNECEDOR: '',
-        NOTAFISCAL: '',
-        ENDERECO: '',
+        etiqueta: '',
+        descricaodoativo: '',
+        serial: '',
+        cnpj: '',
+        nomefornecedor: '',
+        notafiscal: '',
+        endereco: '',
         conta_contabil: '',
-        CENTRODECUSTO: '',
+        centrodecusto: '',
         DATAAQUISIC_START: '',
         DATAAQUISIC_END: '',
         Sn1_recno: '',
@@ -732,15 +733,15 @@ const App: React.FC = () => {
       };
     } catch {
       return {
-        ETIQUETA: '',
-        DESCRICAODOATIVO: '',
-        SERIAL: '',
-        CNPJ: '',
-        NOMEFORNECEDOR: '',
-        NOTAFISCAL: '',
-        ENDERECO: '',
+        etiqueta: '',
+        descricaodoativo: '',
+        serial: '',
+        cnpj: '',
+        nomefornecedor: '',
+        notafiscal: '',
+        endereco: '',
         conta_contabil: '',
-        CENTRODECUSTO: '',
+        centrodecusto: '',
         DATAAQUISIC_START: '',
         DATAAQUISIC_END: '',
         Sn1_recno: '',
@@ -955,7 +956,7 @@ const App: React.FC = () => {
           if (loaded.companies.length === 0 && loaded.assets.length > 0) {
              logger.info(">>> [DBA] Extraindo unidades de " + loaded.assets.length + " ativos...");
              loaded.companies = [...new Set(loaded.assets.map(a => {
-               return (a.filial || a.UNIDADE || a._unidade || a._unitid || '').toString().trim().toUpperCase();
+               return (a.filial || a._unidade || a._unitid || '').toString().trim().toUpperCase();
              }))].filter(Boolean);
           }
           
@@ -1766,8 +1767,8 @@ const App: React.FC = () => {
       if (assetFilial === selKey || 
           assetUnitId === selKey || 
           assetTenant === selKey) {
-        const statusUpper = String(a.STATUS || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+        const statusUpper = String(a.status || '').toUpperCase();
+        const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
         // Registro Ativo: Não pode estar baixado
         if (!isBaixado) {
           filtered.push(a);
@@ -1802,7 +1803,7 @@ const App: React.FC = () => {
         const unitCode = normalizedUnit.match(/^\d+/)?.[0];
 
         const allAtivos = await db.ativos.toArray();
-        let filtered = allAtivos.filter(a => a._is_deleted === 0);
+        let filtered = allAtivos.filter(a => !normalizeFlag(a._is_deleted));
 
         filtered = filtered.filter(a => {
           const filialUpper = String(a.filial || '').toUpperCase().trim();
@@ -1883,14 +1884,14 @@ const App: React.FC = () => {
         const allAssets = await db.local_assets.toArray();
         
         const results = allAssets.filter(item => {
-          if (Number(item._is_deleted) === 1) return false;
+          if (normalizeFlag(item._is_deleted)) return false;
           
           if (inventory.currentCampaignId && item.currentCampaignId !== inventory.currentCampaignId) {
             return false;
           }
           
           if (currentAddr && currentAddr.trim() !== '') {
-            const addrVal = String((item as unknown as Record<string, unknown>).ENDERECO || item.endereco || '').trim().toUpperCase();
+            const addrVal = String((item as unknown as Record<string, unknown>).endereco || item.endereco || '').trim().toUpperCase();
             if (currentAddr === 'GERAL - NÃO ESPECIFICADO') {
               if (addrVal !== '' && addrVal !== 'GERAL - NÃO ESPECIFICADO') {
                 return false;
@@ -2277,9 +2278,9 @@ const App: React.FC = () => {
     if (inventory.assets.length > 0 && inventory.unitConfigs && inventory.unitConfigs.length > 0) {
       let hasRepaired = false;
       const repairedAssets = inventory.assets.map(a => {
-        const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+        const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
         if (isConferido && (!a.latitude || !a.longitude)) {
-          const unitId = a.UNIDADE || a._unidade;
+          const unitId = a.filial || a._unidade;
           const config = inventory.unitConfigs?.find(c => c.unit_id === unitId);
           if (config && config.lat && config.lng) {
             hasRepaired = true;
@@ -2503,7 +2504,7 @@ const App: React.FC = () => {
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
 
                   if (isConflict) {
-                    logger.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.ETIQUETA}.`);
+                    logger.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.etiqueta}.`);
                     logAuditEvent({
                       user_email: user?.email || 'system',
                       action: 'SYNC_CONFLICT',
@@ -2884,7 +2885,7 @@ const App: React.FC = () => {
           let hasChanges = false;
 
           const updatedAssets = saved.assets.map(a => {
-            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+            const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
             if (isConferido) {
               let needsUpdate = false;
               if (!a._dataLeitura) {
@@ -2954,7 +2955,7 @@ const App: React.FC = () => {
               const yesterdayStr = '2026-03-15T12:00:00Z';
               
               parsed.assets = parsed.assets.map((a: Asset) => {
-                const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+                const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
                 if (isConferido) {
                   let needsUpdate = false;
                   if (!a._dataLeitura) {
@@ -3147,7 +3148,7 @@ const App: React.FC = () => {
     if (dataParam && !publicAsset) {
       try {
         const decoded = JSON.parse(decodeURIComponent(escape(atob(dataParam))));
-        if (decoded && decoded.ETIQUETA) {
+        if (decoded && pickCanonical(decoded as Record<string, unknown>, 'etiqueta')) {
           setPublicAsset(decoded as Asset);
         }
       } catch (e) {
@@ -3155,7 +3156,7 @@ const App: React.FC = () => {
       }
     } else if (etqParam && !publicAsset) {
       // 1. Tenta encontrar no inventário local primeiro (mais rápido)
-      const foundLocal = inventory.assets.find(a => normalizeKey(a.ETIQUETA || "") === normalizeKey(etqParam));
+      const foundLocal = inventory.assets.find(a => normalizeKey(a.etiqueta || "") === normalizeKey(etqParam));
       if (foundLocal) {
         setPublicAsset(foundLocal);
       } else {
@@ -3446,8 +3447,8 @@ const App: React.FC = () => {
       const a = inventory.assets[i];
       
       // Centro de Custo
-      if (a.CENTRODECUSTO) {
-        centrosDeCustoSet.add(String(a.CENTRODECUSTO).trim().toUpperCase());
+      if (a.centrodecusto) {
+        centrosDeCustoSet.add(String(a.centrodecusto).trim().toUpperCase());
       }
 
       const assetFilial = normalizeKey(a.filial || '');
@@ -3463,14 +3464,14 @@ const App: React.FC = () => {
       }
 
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const effectiveLoc = a._localMaster || a.ENDERECO || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
+      const effectiveLoc = a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
       
       if (locDisplay) locationsSet.add(locDisplay);
 
-      const statusUpper = String(a.STATUS || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXA') || !!a.DATABAIXA;
+      const statusUpper = String(a.status || '').toUpperCase();
+      const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
       
       if (isBaixado && !isConferido) continue;
 
@@ -3493,12 +3494,12 @@ const App: React.FC = () => {
 
   // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
   const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
-    const statusUpper = String(asset.STATUS || '').toUpperCase();
-    const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
-    const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+    const statusUpper = String(asset.status || '').toUpperCase();
+    const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
+    const isConferido = normalizeFlag(asset._conferido) || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
     
     // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA ou Status de Baixa
-    const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.DATABAIXA;
+    const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.databaixa;
     asset._is_divergent_baixa = isGoldenRuleDivergent;
     
     // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
@@ -3526,7 +3527,7 @@ const App: React.FC = () => {
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
 
     // 5. DIVERGÊNCIA: Etiqueta física difere do registro lógico
-    const currentEtq = normalizeKey(asset.ETIQUETA || "");
+    const currentEtq = normalizeKey(asset.etiqueta || "");
     const masterEtq = normalizeKey(asset._plaquetaMaster || "");
     if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
       return TagInventario.DIVERGENCIA;
@@ -3538,7 +3539,7 @@ const App: React.FC = () => {
     }
 
     const targetLocKey = normalizeKey(targetLocation);
-    const originalLocKey = normalizeKey(asset.ENDERECO || ""); 
+    const originalLocKey = normalizeKey(asset.endereco || ""); 
     const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
 
     // 1) CONFERIDO: Localizado exatamente no ENDERECO original
@@ -4217,10 +4218,10 @@ const App: React.FC = () => {
 
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     const targetLoc = isReconciliationWorkflow
-      ? (updatedAsset.ENDERECO || "")
+      ? (updatedAsset.endereco || "")
       : (inventoryLocation 
           ? inventoryLocation.toUpperCase().trim() 
-          : (updatedAsset.ENDERECO || "").toString().toUpperCase().trim());
+          : (updatedAsset.endereco || "").toString().toUpperCase().trim());
     
     const updates = { ...updatedAsset } as Asset;
     // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
@@ -4259,10 +4260,10 @@ const App: React.FC = () => {
 
     if (existingAsset) {
       const wasLabelingCandidate = 
-        String(existingAsset.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+        String(existingAsset.etiqueta || '').toUpperCase().includes('ETIQUETAR') || 
         String(existingAsset._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
         existingAsset.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-        existingAsset._plaquetado === true;
+        normalizeFlag(existingAsset._plaquetado);
 
       Object.keys(updates).forEach(key => {
         if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO') return;
@@ -4385,19 +4386,19 @@ const App: React.FC = () => {
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
-    const newEtiqueta = String(updatedAsset.ETIQUETA || '').trim().toUpperCase();
+    const newEtiqueta = String(updatedAsset.etiqueta || '').trim().toUpperCase();
     if (newEtiqueta && newEtiqueta !== 'ETIQUETAR') {
       const existing = inventory.assets.find(a => String(a.id) === String(updatedAsset.id));
-      const oldEtiqueta = String(existing?.ETIQUETA || '').trim().toUpperCase();
+      const oldEtiqueta = String(existing?.etiqueta || '').trim().toUpperCase();
 
       if (newEtiqueta !== oldEtiqueta) {
         const duplicate = inventory.assets.find(a => 
           String(a.id) !== String(updatedAsset.id) && 
-          String(a.ETIQUETA || '').trim().toUpperCase() === newEtiqueta
+          String(a.etiqueta || '').trim().toUpperCase() === newEtiqueta
         );
         if (duplicate) {
           setPendingAssetUpdate(updatedAsset);
-          setDuplicateModalMessage(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.DESCRICAODOATIVO}"\n\nDeseja continuar mesmo assim?`);
+          setDuplicateModalMessage(`ALERTA DE DUPLICIDADE!\n\nA etiqueta "${newEtiqueta}" já está em uso pelo item:\n"${duplicate.descricaodoativo}"\n\nDeseja continuar mesmo assim?`);
           setIsDuplicateModalOpen(true);
           return;
         }
@@ -4571,8 +4572,8 @@ const App: React.FC = () => {
         _parent_id: parentAsset.id,
         _isNew: true,
         _conferido: false,
-        ETIQUETA: 'ETIQUETAR',
-        QT: 1,
+        etiqueta: 'ETIQUETAR',
+        qt: 1,
         _plaquetaMaster: 'ETIQUETAR',
         _dataLeitura: undefined,
         _auditor: undefined,
@@ -4582,7 +4583,7 @@ const App: React.FC = () => {
             timestamp,
             user: auditor,
             action: 'CRIAÇÃO POR UNITARIZAÇÃO',
-            details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${parentAsset.ETIQUETA}. ${percentages ? `Percentual: ${percentages[i]}%` : ''}`
+            details: `Unidade ${i + 1} de ${numberOfUnits} gerada a partir do ativo ${parentAsset.etiqueta}. ${percentages ? `Percentual: ${percentages[i]}%` : ''}`
           }
         ]
       };
@@ -4596,13 +4597,13 @@ const App: React.FC = () => {
       });
 
       // Rateia VLRAQUISIC (se for numérico ou string conversível)
-      const vlrAquisicTotal = typeof parentAsset.VLRAQUISIC === 'number' 
-        ? parentAsset.VLRAQUISIC 
-        : parseFloat(String(parentAsset.VLRAQUISIC || '0').replace(',', '.'));
+      const vlrAquisicTotal = typeof parentAsset.vlraquisic === 'number' 
+        ? parentAsset.vlraquisic 
+        : parseFloat(String(parentAsset.vlraquisic || '0').replace(',', '.'));
       
       if (!isNaN(vlrAquisicTotal) && vlrAquisicTotal > 0) {
         const splitVlr = calculateSplit(vlrAquisicTotal, numberOfUnits, i, percentages);
-        child.VLRAQUISIC = typeof parentAsset.VLRAQUISIC === 'number' ? splitVlr : splitVlr.toFixed(2);
+        child.vlraquisic = typeof parentAsset.vlraquisic === 'number' ? splitVlr : Number(splitVlr.toFixed(2));
       }
 
       newAssets.push(child);
@@ -4737,7 +4738,7 @@ const App: React.FC = () => {
           table_name: 'assets',
           record_id: assetId,
           old_data: assetToDelete,
-          details: `Exclusão lógica do ativo: ${assetToDelete.ETIQUETA} - ${assetToDelete.DESCRICAODOATIVO}`,
+          details: `Exclusão lógica do ativo: ${assetToDelete.etiqueta} - ${assetToDelete.descricaodoativo}`,
           tenantid: user?.tenantid || 'CICOPAL'
         });
       }
@@ -4832,20 +4833,20 @@ const App: React.FC = () => {
         
         // REGRA DE OURO: Respeita o local do inventário se houver
         const targetLoc = isReconciliationWorkflow
-          ? (a.ENDERECO || "")
+          ? (a.endereco || "")
           : (inventoryLocation 
               ? inventoryLocation.toUpperCase().trim() 
-              : (updates.ENDERECO || "").toString().toUpperCase().trim());
+              : (updates.endereco || "").toString().toUpperCase().trim());
 
         updates._conferido = true;
         updates._dataLeitura = new Date().toISOString();
         updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
         
         const wasLabelingCandidate = 
-          String(a.ETIQUETA || '').toUpperCase().includes('ETIQUETAR') || 
+          String(a.etiqueta || '').toUpperCase().includes('ETIQUETAR') || 
           String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
           a.TAG_INVENTARIO === TagInventario.FALTA_ETIQUETAR ||
-          a._plaquetado === true;
+          normalizeFlag(a._plaquetado);
 
         if (wasLabelingCandidate) {
           updates._plaquetado = true;
@@ -4867,10 +4868,10 @@ const App: React.FC = () => {
           });
         }
         
-        if (!isReconciliationWorkflow && normalizeKey(String(a.ENDERECO || '')) !== normalizeKey(String(targetLoc || ''))) {
-          alteredFields.add('ENDERECO');
-          if (originalValues['ENDERECO'] === undefined) {
-            originalValues['ENDERECO'] = a.ENDERECO;
+        if (!isReconciliationWorkflow && normalizeKey(String(a.endereco || '')) !== normalizeKey(String(targetLoc || ''))) {
+          alteredFields.add('endereco');
+          if (originalValues['endereco'] === undefined) {
+            originalValues['endereco'] = a.endereco;
           }
         }
         updates._localMaster = targetLoc;
@@ -4940,9 +4941,9 @@ const App: React.FC = () => {
     const currentScreen = history[history.length - 1];
     setIsReadOnlyDetail(currentScreen === AppScreen.CONSULTATION);
 
-    const etq = normalizeKey(asset.ETIQUETA || "");
+    const etq = normalizeKey(asset.etiqueta || "");
     if (etq && etq !== "ETIQUETAR") {
-      const related = inventory.assets.filter(a => normalizeKey(a.ETIQUETA || "") === etq);
+      const related = inventory.assets.filter(a => normalizeKey(a.etiqueta || "") === etq);
       if (related.length > 1) {
         setSelectedAssets(related);
       } else {
@@ -4995,9 +4996,9 @@ const App: React.FC = () => {
         });
       }
 
-      res['AUDITOR_LOCAL_ORIGINAL'] = a.ENDERECO;
-      res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.ENDERECO;
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.ENDERECO)) === normalizeKey(String(a._localMaster || a.ENDERECO)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+      res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
+      res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
+      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       return res;
@@ -5363,7 +5364,7 @@ const App: React.FC = () => {
         companyStatsMap.set(company, stats);
       }
       
-      const status = String(a.STATUS || '').toUpperCase();
+      const status = String(a.status || '').toUpperCase();
       // REGRA v25.01: Consideramos como ativo qualquer item que não esteja baixado ou que seja 'PENDENTE' (padrão de carga)
       const isActiveStatus = status === '' || status === 'PENDENTE' || status.includes('ATIVO') || status.includes('USO') || status.includes('NOVO') || status.includes('CONFERIDO');
       
@@ -5533,7 +5534,7 @@ const App: React.FC = () => {
       const emergencyUnits = new Set<string>();
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
-        const company = (a.filial || a.UNIDADE || a._unitid || '').toString().trim().toUpperCase();
+        const company = (a.filial || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0' && company !== 'CICOPAL' && normalizeKey(company) !== 'CICOPAL') {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
@@ -6060,8 +6061,8 @@ const App: React.FC = () => {
             pendingPhotosCount={pendingPhotosCount}
             syncQueueLength={syncQueueLength}
             unsyncedAssetsCount={unsyncedAssetsCount}
-            deletedAssetsCount={inventory.assets.filter(a => a._is_deleted).length}
-            impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !a._is_deleted).length}
+            deletedAssetsCount={inventory.assets.filter(a => normalizeFlag(a._is_deleted)).length}
+            impairmentAssetsCount={inventory.assets.filter(a => Number(a._perda_impairment || 0) > 0 && !normalizeFlag(a._is_deleted)).length}
             excludedAccounts={inventory.excludedAccounts}
             onUpdateExcludedAccounts={(accounts) => { localStorage.setItem('app_excluded_accounts', safeStringify(accounts)); updateConfig({ excludedAccounts: accounts }); }}
             protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}

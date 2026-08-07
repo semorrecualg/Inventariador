@@ -284,27 +284,10 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   asset.sn1_recno = sn1_recno;
   asset.sn3_recno = sn3_recno;
 
-  // Sync fallbacks for existing code
-  asset.GRUPO_EMPRESARIAL = tenantid;
-  asset.STATUS = status;
-  asset.ETIQUETA = etiqueta;
-  asset.QT = qt;
-  asset.DESCRICAODOATIVO = descricaodoativo;
-  asset.SERIAL = serial;
-  asset.DATAAQUISIC = dataaqusic;
-  asset.CNPJ = cnpj;
-  asset.NOMEFORNECEDOR = nomefornecedor;
-  asset.NOTAFISCAL = notafiscal;
-  asset.ENDERECO = endereco;
-  asset.REGISTRO = registro;
-  asset.SUBREG = subreg;
-  asset.DATABAIXA = databaixa;
+  // C5 — fallbacks UPPER de escrita removidos (dados locais canônicos desde a
+  // migração C4 version(5); o contrato passa a ser 1:1 com o canônico).
+  // `conta_contabil` mantido: alias de leitura do sync (supabaseService).
   asset.conta_contabil = contacontabil;
-  asset.PRIMARYKEY = primarykey;
-  asset.CENTRODECUSTO = centrodecusto;
-  asset.VLRAQUISIC = vlraquisic;
-  asset.Sn1_recno = sn1_recno;
-  asset.Sn3_recno = sn3_recno;
 
   // Higienizar explicitamente propriedades legadas
   delete asset._tenantid;

@@ -7,6 +7,7 @@ import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
+import { canonicalKey } from '../utils/normalize';
 
 import { 
   Edit2, 
@@ -108,7 +109,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       setIsDexieLoading(true);
       localDb.ativos.toArray()
         .then((allAssets) => {
-          const matched = allAssets.filter((a) => (a.tenantid === tenantid || String(a.tenantid) === tenantid) && (a.id === initialAssetId || a.ETIQUETA === initialAssetId));
+          const matched = allAssets.filter((a) => (a.tenantid === tenantid || String(a.tenantid) === tenantid) && (a.id === initialAssetId || a.etiqueta === initialAssetId));
           setDexieAssets(matched as unknown as Asset[]);
         })
         .catch(() => { /* silencioso */ })
@@ -242,7 +243,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         // Único resultado: Aplicar direto (Preenchimento Automático)
         const result = uniqueMatches[0];
         const updates = { ...workingAsset };
-        updates[ocrTargetField] = result;
+        updates[canonicalKey(ocrTargetField)] = result;
         setWorkingAsset(updates);
         if (editingField === ocrTargetField) setEditValue(result);
         setOcrTargetField(null);
@@ -252,7 +253,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       } else {
         // Nenhum padrão: Usar o texto bruto limpo
         const updates = { ...workingAsset };
-        updates[ocrTargetField] = cleanedText.substring(0, 50);
+        updates[canonicalKey(ocrTargetField)] = cleanedText.substring(0, 50);
         setWorkingAsset(updates);
         if (editingField === ocrTargetField) setEditValue(cleanedText.substring(0, 50));
         setOcrTargetField(null);
@@ -268,7 +269,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const selectOCRResult = (val: string) => {
     if (!ocrTargetField) return;
     const updates = { ...workingAsset };
-    updates[ocrTargetField] = val;
+    updates[canonicalKey(ocrTargetField)] = val;
     setWorkingAsset(updates);
     if (editingField === ocrTargetField) setEditValue(val);
     setOcrResults([]);
@@ -295,7 +296,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           const result = await reverseGeocode(latitude, longitude);
           
           const updates = { ...workingAsset };
-          updates[field] = result.address;
+          updates[canonicalKey(field)] = result.address;
           setWorkingAsset(updates);
           
           if (editingField === field) {
@@ -322,7 +323,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
   const calculateDynamicLocation = async () => {
     try {
-      const filialName = (workingAsset.filial || workingAsset.FILIAL || '').toUpperCase().trim();
+      const filialName = (workingAsset.filial || '').toUpperCase().trim();
       if (!filialName) return;
       const configs = await localDb.unitConfigs.toArray();
       const config = configs.find(c => {
@@ -411,15 +412,13 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     const lines: string[] = [];
     
     // Filtra os campos selecionados que existem no ativo e os ordena conforme a regra
-    const activeFields = QR_FIELD_ORDER.filter(field => 
-      qrCodeFields.includes(field) && 
-      workingAsset[field] !== undefined && 
-      workingAsset[field] !== null && 
-      workingAsset[field] !== ''
-    );
+        const activeFields = QR_FIELD_ORDER.filter(field => {
+      const v = workingAsset[canonicalKey(field)];
+      return qrCodeFields.includes(field) && v !== undefined && v !== null && v !== '';
+    });
 
     activeFields.forEach(field => {
-      let value = String(workingAsset[field]);
+      let value = String(workingAsset[canonicalKey(field)] ?? '');
       
       // Formatações básicas
       if (field === 'DATAAQUISIC' || field === 'DATABAIXA') value = formatDateBR(value);
@@ -515,7 +514,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     if (editingField) {
       const updates: Asset = { ...workingAsset };
       const newValue = (val || editValue).toUpperCase().trim();
-      updates[editingField] = newValue;
+      updates[canonicalKey(editingField)] = newValue;
       setWorkingAsset(updates);
       setEditingField(null);
     }
@@ -527,7 +526,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     // Se o usuário está editando um campo e clicou direto em SALVAR, aplicamos o valor atual
     if (editingField) {
       const newValue = editValue.toUpperCase().trim();
-      finalAsset[editingField] = newValue;
+      finalAsset[canonicalKey(editingField)] = newValue;
     }
 
     // Validação de foto obrigatória
@@ -664,13 +663,13 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   };
 
   const visualStatus = useMemo(() => {
-    return determineAssetTag(workingAsset, workingAsset._localMaster || workingAsset.ENDERECO || "", tenantid);
+    return determineAssetTag(workingAsset, workingAsset._localMaster || workingAsset.endereco || "", tenantid);
   }, [workingAsset, tenantid]);
 
   const isBaixado = useMemo(() => {
-    const statusUpper = String(workingAsset.STATUS || '').toUpperCase();
-    return statusUpper.includes('BAIXA') || !!workingAsset.DATABAIXA;
-  }, [workingAsset.STATUS, workingAsset.DATABAIXA]);
+    const statusUpper = String(workingAsset.status || '').toUpperCase();
+    return statusUpper.includes('BAIXA') || !!workingAsset.databaixa;
+  }, [workingAsset.status, workingAsset.databaixa]);
 
   const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
@@ -682,7 +681,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const calculateImpairment = () => {
     // Fidedignidade: Garantir que o valor contábil seja calculado corretamente (CPC 27 / CPC 01)
     const vlrAquisicao = Number(workingAsset._valor_aquisicao || 0) || 
-                         parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'));
+                         parseFloat(String(workingAsset.vlraquisic || '0').replace(',', '.'));
     const vlrDepreciacao = Number(workingAsset._depreciacao_acumulada || 0);
     const valorContabil = vlrAquisicao - vlrDepreciacao;
     
@@ -782,7 +781,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           </div>
 
           <h2 className="text-xl font-bold uppercase tracking-tight leading-tight mb-6 text-white line-clamp-2">
-            {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.ETIQUETA}` : (workingAsset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO')}
+            {isBatch ? `LOTE PATRIMONIAL: ${workingAsset.etiqueta}` : (workingAsset.descricaodoativo || 'ITEM SEM DESCRIÇÃO')}
           </h2>
 
           {!isBatch && (
@@ -833,7 +832,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner">
               <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">PLAQUETA</p>
-              <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.ETIQUETA || 'S/ ETQ'}</p>
+              <p className="text-2xl font-bold font-mono tracking-tighter text-white">{workingAsset.etiqueta || 'S/ ETQ'}</p>
             </div>
             <div className="bg-black/20 border border-white/10 p-3 rounded-xl backdrop-blur-xl shadow-inner flex flex-col justify-center">
               <p className="text-[8px] font-bold text-white/50 uppercase tracking-[0.2em] mb-2">SITUAÇÃO / TAG</p>
@@ -846,7 +845,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           </div>
 
-          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.ENDERECO) && (
+          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.endereco) && (
             <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
               <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
                 <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>
@@ -855,7 +854,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <div className="space-y-3">
                 <div className="flex flex-col">
                   <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest">Local de Origem (Base)</span>
-                  <span className="text-xs font-bold text-white uppercase mt-0.5">{workingAsset.ENDERECO || 'NÃO INFORMADO'}</span>
+                  <span className="text-xs font-bold text-white uppercase mt-0.5">{workingAsset.endereco || 'NÃO INFORMADO'}</span>
                 </div>
                 <div className="flex flex-col">
                   <div className="flex items-center space-x-1.5">
@@ -879,7 +878,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           <div className="flex-1">
             <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Divergência Crítica (Regra de Ouro)</h4>
             <p className="text-[9px] font-bold text-white/80 uppercase tracking-tight leading-tight mt-0.5">
-              Este item está marcado como <strong className="text-white underline">ATIVO</strong> na base, porém possui <strong className="text-white underline">DATA DE BAIXA</strong> preenchida ({workingAsset.DATABAIXA}).
+              Este item está marcado como <strong className="text-white underline">ATIVO</strong> na base, porém possui <strong className="text-white underline">DATA DE BAIXA</strong> preenchida ({workingAsset.databaixa}).
             </p>
           </div>
         </div>
@@ -910,7 +909,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       <div className="flex-1 min-w-0">
                         <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Local de Origem (Base)</p>
                         <p className="text-xs font-black text-slate-700 uppercase leading-snug break-words">
-                          {workingAsset.ENDERECO || 'LOCAL NÃO INFORMADO NA BASE'}
+                          {workingAsset.endereco || 'LOCAL NÃO INFORMADO NA BASE'}
                         </p>
                       </div>
                     </div>
@@ -932,7 +931,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                         <div className="flex-1 min-w-0">
                           <p className="text-[8px] font-bold text-blue-500 uppercase tracking-widest mb-0.5">Novo Local (Inventariado)</p>
                           <p className="text-xs font-black text-blue-900 uppercase leading-snug break-words">
-                            {workingAsset._localMaster || workingAsset.ENDERECO}
+                            {workingAsset._localMaster || workingAsset.endereco}
                           </p>
                         </div>
                       </div>
@@ -946,7 +945,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                     <AlertTriangle className="text-red-500 shrink-0" size={20} />
                     <div>
                       <p className="text-[9px] font-black text-red-600 uppercase tracking-widest">Divergência Crítica</p>
-                      <p className="text-[11px] font-bold text-red-900 leading-tight">ATIVO com DATA DE BAIXA ({workingAsset.DATABAIXA})</p>
+                      <p className="text-[11px] font-bold text-red-900 leading-tight">ATIVO com DATA DE BAIXA ({workingAsset.databaixa})</p>
                     </div>
                   </div>
                 )}
@@ -1014,8 +1013,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                 {assets.map((a, idx) => (
                   <div key={a.id} className="bg-bg-main border border-border p-3 rounded-lg flex items-center justify-between shadow-sm">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-ink truncate uppercase tracking-tight">{a.DESCRICAODOATIVO}</p>
-                      <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.1em] mt-0.5">REG: {a.REGISTRO} | SUB: {a.SUBREG}</p>
+                      <p className="text-[10px] font-bold text-ink truncate uppercase tracking-tight">{a.descricaodoativo}</p>
+                      <p className="text-[7px] font-bold text-ink-muted uppercase tracking-[0.1em] mt-0.5">REG: {a.registro} | SUB: {a.subreg}</p>
                     </div>
                     <span className="text-[9px] font-bold text-ink-muted/30 font-mono ml-2">#{String(idx + 1).padStart(2, '0')}</span>
                   </div>
@@ -1035,7 +1034,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                   const isDateField = key === 'DATAAQUISIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
                   const isCurrency = key === 'VLRAQUISIC' || key.startsWith('_valor') || key.includes('perda');
-                  const rawVal = workingAsset[key];
+                  const rawVal = workingAsset[canonicalKey(key)];
+                  const origVal = workingAsset._valoresOriginais?.[canonicalKey(key)] ?? workingAsset._valoresOriginais?.[key];
                   let displayVal = String(rawVal || '---');
                   if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
                   if (isDateTime) displayVal = formatReadingTime(rawVal as string);
@@ -1060,9 +1060,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       
                       {editingField === key ? (
                         <div className="mt-2 flex flex-col space-y-2">
-                          {workingAsset._valoresOriginais?.[key] !== undefined && (
+                          {origVal !== undefined && (
                             <p className="text-[8px] text-danger font-bold uppercase tracking-wider px-1">
-                              ORIGINAL (DE): {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
+                              ORIGINAL (DE): {isDateField ? formatDateBR(origVal as string) : isCurrency ? formatCurrency(origVal as string) : String(origVal || '---')}
                             </p>
                           )}
                           <div className="flex items-center space-x-2">
@@ -1106,17 +1106,17 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                                 PARA: {workingAsset._localMaster || '---'}
                               </p>
                               <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
-                                DE: {workingAsset.ENDERECO || '---'}
+                                DE: {workingAsset.endereco || '---'}
                               </p>
                             </>
                           ) : (
                             <>
                               <p className={`text-xs font-bold uppercase leading-tight font-mono tracking-tight ${rawVal ? 'text-ink' : 'text-ink-muted/30'}`}>
-                                {workingAsset._valoresOriginais?.[key] !== undefined ? `PARA: ${displayVal}` : displayVal}
+                                {origVal !== undefined ? `PARA: ${displayVal}` : displayVal}
                               </p>
-                              {workingAsset._valoresOriginais?.[key] !== undefined && (
+                              {origVal !== undefined && (
                                <p className="text-[8px] text-danger font-bold uppercase mt-1 tracking-wider">
-                                  DE: {isDateField ? formatDateBR(workingAsset._valoresOriginais[key] as string) : isCurrency ? formatCurrency(workingAsset._valoresOriginais[key] as string) : String(workingAsset._valoresOriginais[key] || '---')}
+                                  DE: {isDateField ? formatDateBR(origVal as string) : isCurrency ? formatCurrency(origVal as string) : String(origVal || '---')}
                                 </p>
                               )}
                             </>
@@ -1290,7 +1290,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
             <div className="text-center w-full">
               <p className="text-[10px] font-bold text-ink-muted uppercase tracking-[0.3em] mb-3">NÚMERO DO ATIVO</p>
-              <p className="bg-ink text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.ETIQUETA}</p>
+              <p className="bg-ink text-white w-full py-5 rounded-2xl text-3xl font-bold uppercase tracking-tighter font-mono shadow-xl">{workingAsset.etiqueta}</p>
             </div>
             <button onClick={() => setIsQrModalOpen(false)} className="mt-10 w-full py-5 bg-bg-main text-ink rounded-2xl font-bold uppercase text-[11px] tracking-[0.2em] active:scale-95 transition-all">Fechar</button>
           </div>
@@ -1332,7 +1332,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
                 <span>Valor Contábil Líquido:</span>
                 <span>{formatCurrency(
-                  (Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - 
+                  (Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.vlraquisic || '0').replace(',', '.'))) - 
                   Number(workingAsset._depreciacao_acumulada || 0)
                 )}</span>
               </div>
@@ -1343,12 +1343,12 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
               <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between items-center">
                 <span className="text-[10px] font-bold text-slate-700 uppercase">Perda Estimada:</span>
                 <span className={`text-sm font-black ${
-                  ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) > 
+                  ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.vlraquisic || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) > 
                   Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso))
                   ? 'text-red-600' : 'text-emerald-600'
                 }`}>
                   {formatCurrency(Math.max(0, 
-                    ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.VLRAQUISIC || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) - 
+                    ((Number(workingAsset._valor_aquisicao || 0) || parseFloat(String(workingAsset.vlraquisic || '0').replace(',', '.'))) - Number(workingAsset._depreciacao_acumulada || 0)) - 
                     Math.max(Number(impairmentData.valorJusto), Number(impairmentData.valorEmUso))
                   ))}
                 </span>

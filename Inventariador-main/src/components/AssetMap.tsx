@@ -113,7 +113,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
       filtered = filtered.filter(a => a._origemTransacao === selectedOrigin);
     }
     if (selectedLocation !== 'ALL') {
-      filtered = filtered.filter(a => (a._localMaster || a.ENDERECO) === selectedLocation);
+      filtered = filtered.filter(a => (a._localMaster || a.endereco) === selectedLocation);
     }
 
     return filtered;
@@ -143,9 +143,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
       bin.count++;
       bin.assets.push(a);
       
-      const val = typeof a.VLRAQUISIC === 'string' 
-        ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-        : (Number(a.VLRAQUISIC) || 0);
+      const rawVlr = (a as unknown as Record<string, unknown>).vlraquisic;
+      const val = typeof rawVlr === 'string' 
+        ? parseFloat((rawVlr as string).replace(/[^\d,.-]/g, '').replace(',', '.')) 
+        : (Number(rawVlr) || 0);
       bin.value += (val || 0);
     });
 
@@ -171,7 +172,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     const features = sourceAssets
       .filter(a => a.latitude && a.longitude)
       .map(a => {
-        const val = Number(a.VLRAQUISIC) || 0;
+        const val = Number(a.vlraquisic) || 0;
         const lat = a.latitude!;
         const lng = a.longitude!;
         return {
@@ -181,13 +182,13 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
             coordinates: [lng, lat]
           },
           properties: {
-            id: a.id || a.ETIQUETA,
-            label: a.ETIQUETA,
+            id: a.id || a.etiqueta,
+            label: a.etiqueta,
             value: val,
             intensity: val > 0 ? Math.log10(val) : 1,
             id_andar: a._id_andar || 0,
             origin: a._origemTransacao || 'ALL',
-            location: a._localMaster || a.ENDERECO || 'SEM LOCAL'
+            location: a._localMaster || a.endereco || 'SEM LOCAL'
           }
         };
       });
@@ -200,10 +201,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     // Agrupamento Otimizado via Reduce (GBR v25 Pipeline)
     const groups = filteredAssets.reduce((acc, a) => {
       if (!a.latitude || !a.longitude) return acc;
-      const loc = a._localMaster || a.ENDERECO || 'SEM LOCAL';
+      const loc = a._localMaster || a.endereco || 'SEM LOCAL';
       if (!acc[loc]) acc[loc] = { points: [], totalValue: 0 };
       acc[loc].points.push([a.longitude!, a.latitude!]);
-      acc[loc].totalValue += (Number(a.VLRAQUISIC) || 0);
+      acc[loc].totalValue += (Number(a.vlraquisic) || 0);
       return acc;
     }, {} as Record<string, { points: [number, number][], totalValue: number }>);
 
@@ -395,7 +396,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     const locs = new Set<string>();      sourceAssets.forEach(a => {
       // REGRA: Apenas localidades que possuem itens INVENTARIADOS
       if (a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM') {
-        const loc = a._localMaster || a.ENDERECO;
+        const loc = a._localMaster || a.endereco;
         if (loc) locs.add(loc);
       }
     });
@@ -443,9 +444,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
 
   const totalValue = useMemo(() => {
     return filteredAssets.reduce((acc, a) => {
-      const val = typeof a.VLRAQUISIC === 'string' 
-        ? parseFloat(a.VLRAQUISIC.replace(/[^\d,.-]/g, '').replace(',', '.')) 
-        : (Number(a.VLRAQUISIC) || 0);
+      const rawVlr = (a as unknown as Record<string, unknown>).vlraquisic;
+      const val = typeof rawVlr === 'string' 
+        ? parseFloat((rawVlr as string).replace(/[^\d,.-]/g, '').replace(',', '.')) 
+        : (Number(rawVlr) || 0);
       return acc + (val || 0);
     }, 0);
   }, [filteredAssets]);

@@ -18,10 +18,10 @@ export interface DepreciationResult {
  * Calcula a depreciação de um ativo com base no método linear (pro-rata temporis).
  */
 export const calculateDepreciation = (asset: Asset, referenceDate: Date = new Date()): DepreciationResult => {
-  const v0 = Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0);
+  const v0 = Number(asset._valor_aquisicao || asset.vlraquisic || 0);
   const vr = Number(asset._valor_residual || 0);
   const n = Number(asset._vida_util_meses || 60); // Default 5 anos
-  const startDateStr = asset._data_inicio_depreciacao || asset._data_aquisicao || asset.DATAAQUISIC;
+  const startDateStr = asset._data_inicio_depreciacao || asset._data_aquisicao || String(asset.dataaqusic ?? '');
 
   if (!startDateStr || v0 <= 0) {
     return {
@@ -71,9 +71,9 @@ export const calculateDepreciation = (asset: Asset, referenceDate: Date = new Da
  */
 export const generateDepreciationSchedule = (asset: Asset) => {
   const schedule = [];
-  const v0 = Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0);
+  const v0 = Number(asset._valor_aquisicao || asset.vlraquisic || 0);
   const n = Number(asset._vida_util_meses || 60);
-  const startDateStr = asset._data_inicio_depreciacao || asset._data_aquisicao || asset.DATAAQUISIC;
+  const startDateStr = asset._data_inicio_depreciacao || asset._data_aquisicao || String(asset.dataaqusic ?? '');
 
   if (!startDateStr) return [];
 

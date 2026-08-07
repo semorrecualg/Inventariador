@@ -1,8 +1,9 @@
 # GBR KARDEK – Inventariador · Baseline de Schema (Fase 0)
 
-> **Status:** CONGELADO ✅ · **Data:** 2026-08-06
-> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **4**
-> **Fase:** 0 do plano `docs/MIGRACAO_HIBRIDA.md` (baseline estável antes de mover os 292 touchpoints).
+> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4)
+> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **5**
+> **Fase:** 0 do plano `docs/MIGRACAO_HIBRIDA.md` (baseline estável) + Fase C4
+> (`docs/PLANO_FASE_C_HIGIENIZACAO.md` §6 — v5 = v4 **sem mudança estrutural**, apenas etapa de dados).
 >
 > Este documento é o **snapshot canônico e congelado** do schema local (9 tabelas Dexie +
 > `src/constants/schema.ts`). A conformidade é garantida por contrato automatizado:
@@ -19,14 +20,15 @@
 | **v2** | Adiciona `campaign_snapshots`; índice composto `[tenantId+filial]` nas 3 tabelas de ativos |
 | **v3** | Adiciona `addresses` (`++id` auto-incremento) com índices `codigo_endereco`, `setor`, `bloco` |
 | **v4** | **Canônico `tenantid`** (minúsculo) — migração **idempotente** via `upgrade(tx)`: copia `tenantId`/`_tenantid`/`tenant_id` → `tenantid` e remove as legadas nas tabelas `local_assets`, `ativos`, `assets`, `campaigns`, `addresses`; índices compostos passam a `[tenantid+filial]` |
+| **v5** | **Fase C4** — MESMAS assinaturas do v4 (sem mudança estrutural). Etapa de DADOS no `upgrade(tx)`: reescreve chaves UPPER → canônico minúsculo e normaliza valores por classe (K/T/N/D/F) nas 3 tabelas de ativos + reconcile **aditivo** de `addresses` (nunca apaga linhas). Idempotente (`modify` retorna `false` quando nada muda — 2ª execução → 0 escritas); PK (`primarykey`/`id`) imutável; chaves de runtime (`TAG_INVENTARIO`, `DE_PARA`, …) preservadas; pulável via `NORMALIZE_ON_UPGRADE=false` (rollback instantâneo). Módulo: `src/services/migrationV5.ts` |
 
 **Regra de evolução:** alterar o schema local = **nova `version(n)`** no
 `InventoryDexieDatabase` (`src/services/sqliteService.ts`) com `upgrade` idempotente,
-atualização **deste** documento e do teste de contrato. Proibido editar `version(4)`.
+atualização **deste** documento e do teste de contrato. Proibido editar `version(4)`/`version(5)` retroativo.
 
 ---
 
-## 2. Tabelas — snapshot canônico v4 (9 tabelas)
+## 2. Tabelas — snapshot canônico v5 (9 tabelas; v5 = v4 sem mudança estrutural)
 
 | Tabela | Chave primária | Índices | Tipo (fonte) |
 |---|---|---|---|
@@ -42,7 +44,7 @@ atualização **deste** documento e do teste de contrato. Proibido editar `versi
 
 Fonte das definições: `src/services/sqliteService.ts` (interfaces exportadas, linhas 7–110;
 classe `InventoryDexieDatabase`, linhas 112–183). Declaração das tabelas no Dexie:
-`version(4).stores({ ... })`.
+`version(5).stores({ ... })` (idêntico ao v4 — ver §1).
 
 ---
 
@@ -112,14 +114,14 @@ Indexação composta `[tenantid+filial]` → queries sub-12ms no `AddressSelecto
 ## 5. Garantias do congelamento
 
 1. **Contrato automatizado:** `src/__tests__/schemaBaseline.test.ts` (node) asserta
-   `db.verno === 4`, o conjunto exato das 9 tabelas, a assinatura de chave/índices de cada
+   `db.verno === 5`, o conjunto exato das 9 tabelas, a assinatura de chave/índices de cada
    tabela e a presença dos 21 canônicos em `DB_ASSET_COLUMNS`. Drift → teste vermelho.
 2. **Fingerprint de drift:** a assinatura canônica congelada das 9 tabelas é:
    `local_assets: primarykey,[tenantid+filial],filial,_is_synced` · `ativos: idem` ·
    `assets: idem` · `audit_logs: id,updated_at` · `campaigns: id,tenantid` ·
    `SYSTEM_CONTEXT: key` · `unit_configs: id,filial` ·
    `campaign_snapshots: id,campaign_id` · `addresses: ++id,[tenantid+filial],codigo_endereco,setor,bloco,_is_synced`.
-3. **Proibição:** editar `version(4)` retroativo; escrever colunas legadas (`_unitid`,
+3. **Proibição:** editar `version(4)`/`version(5)` retroativo; escrever colunas legadas (`_unitid`,
    `tenantId`, `tenant_id`, `_tenantid`); SQL raw (proibido pelo contrato SRE — só API Dexie).
 
 ---

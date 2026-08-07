@@ -16,35 +16,35 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
 
   const downloadTemplate = () => {
     const headers = [
-      'GRUPO_EMPRESARIAL', 'FILIAL', 'STATUS', 'ETIQUETA', 'QT', 
-      'DESCRICAO', 'SERIAL', 'DATA_AQ', 'CNPJ', 'FORNECEDOR', 'NF', 
-      'ENDERECO', 'REGISTRO', 'SUBREG', 'DATA_BAIXA', 'CONTA', 'PK', 
-      'CUSTO', 'VALOR', 'SN1_RECNO', 'SN3_RECNO'
+      'tenantid', 'filial', 'status', 'etiqueta', 'qt', 
+      'descricaodoativo', 'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 
+      'endereco', 'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey', 
+      'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno'
     ];
     
     const exampleData = [
       {
-        GRUPO_EMPRESARIAL: 'EXEMPLO_SA',
-        FILIAL: 'MATRIZ',
-        STATUS: 'ATIVO',
-        ETIQUETA: 'PAT-0001',
-        QT: 1,
-        DESCRICAO: 'NOTEBOOK DELL LATITUDE',
-        SERIAL: 'ABC123XYZ',
-        DATA_AQ: '2023-01-15',
-        CNPJ: '00.000.000/0001-00',
-        FORNECEDOR: 'DELL BRASIL',
-        NF: '12345',
-        ENDERECO: 'SALA 101 - TI',
-        REGISTRO: 'REG-001',
-        SUBREG: '00',
-        DATA_BAIXA: '',
-        CONTA: '1.02.01.01.01',
-        PK: 'ERP-001',
-        CUSTO: '10101',
-        VALOR: 5500.00,
-        SN1_RECNO: 1,
-        SN3_RECNO: 1
+        tenantid: 'EXEMPLO_SA',
+        filial: 'MATRIZ',
+        status: 'ATIVO',
+        etiqueta: 'PAT-0001',
+        qt: 1,
+        descricaodoativo: 'NOTEBOOK DELL LATITUDE',
+        serial: 'ABC123XYZ',
+        dataaqusic: '2023-01-15',
+        cnpj: '00.000.000/0001-00',
+        nomefornecedor: 'DELL BRASIL',
+        notafiscal: '12345',
+        endereco: 'SALA 101 - TI',
+        registro: 'REG-001',
+        subreg: '00',
+        databaixa: '',
+        contacontabil: '1.02.01.01.01',
+        primarykey: 'ERP-001',
+        centrodecusto: '10101',
+        vlraquisic: 5500.00,
+        sn1_recno: 1,
+        sn3_recno: 1
       }
     ];
 
@@ -180,7 +180,7 @@ const TrustOnboarding: React.FC<TrustOnboardingProps> = ({ onAccept, onOpenPriva
             <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
               <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ordem das Colunas (A-R)</h4>
               <p className="text-[9px] text-slate-700 leading-tight font-mono">
-                GRUPO_EMPRESARIAL; FILIAL; STATUS; ETIQUETA; QT; DESCRICAO; SERIAL; DATA_AQ; CNPJ; FORNECEDOR; NF; ENDERECO; REGISTRO; SUBREG; DATA_BAIXA; CONTA; PK; CUSTO; VALOR; SN1_RECNO; SN3_RECNO
+                tenantid; filial; status; etiqueta; qt; descricaodoativo; serial; dataaqusic; cnpj; nomefornecedor; notafiscal; endereco; registro; subreg; databaixa; contacontabil; primarykey; centrodecusto; vlraquisic; sn1_recno; sn3_recno
               </p>
             </div>
             <button 

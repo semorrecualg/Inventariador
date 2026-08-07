@@ -55,9 +55,9 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
 
     // Table
     const tableData = assets.map(a => [
-      a.ETIQUETA || 'S/E',
-      a.DESCRICAODOATIVO || 'S/D',
-      a.ENDERECO || 'S/L',
+      a.etiqueta || 'S/E',
+      a.descricaodoativo || 'S/D',
+      a.endereco || 'S/L',
       a._conferido ? 'SIM' : 'NÃO',
       a.TAG_INVENTARIO || '---'
     ]);

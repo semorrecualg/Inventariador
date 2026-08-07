@@ -14,8 +14,11 @@
  *   `unit_configs` por match com espaço; o expurgo quebraria o vínculo).
  * - N/D/F: coerções da C3 — aqui apenas TRIM, sem case/expurgo.
  *
- * Transição tolerante: `pickCanonical` mantém a leitura híbrida (canônico
- * minúsculo vence; UPPER é fallback) DURANTE a Fase C; removido na C5.
+ * Leitura tolerante: `pickCanonical` (canônico minúsculo vence; UPPER é
+ * fallback). Após a C5, o uso fica restrito a payloads NÃO migrados:
+ *  - `migrationV5.ts` — lê registros legados UPPER durante o upgrade version(5);
+ *  - `App.tsx` (QR público `decoded`) — etiquetas físicas antigas não migram.
+ * Leituras de dados locais são diretas (canônicas desde a C4).
  */
 import { CANONICAL_KEY_MAP } from '../constants/schema';
 
@@ -104,8 +107,46 @@ export function normalizeFieldValue(field: string, raw: unknown): string | null 
   } else if (CLASS_T_FIELDS.has(field) || CLASS_K_IDENTITY_FIELDS.has(field)) {
     out = normalizeClassT(raw) ?? '';
   } else {
-    // N/D/F: coerções numéricas/de data/flags são da C3 — aqui apenas TRIM.
+    // Outros campos: apenas TRIM (coerções N/D/F usam os helpers dedicados da C3).
     out = String(raw).trim();
   }
   return out === '' ? null : out;
+}
+
+// --- Classe N — coerção numérica segura (C3) ---------------------------------
+// `Number(x)` válido e finito → número; caso contrário → `null` (nunca `NaN` no banco).
+export function normalizeNumeric(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// --- Classe D — data canônica ISO `YYYY-MM-DD` (C3) --------------------------
+// Aceita `dd/mm/yyyy`, `dd-mm-yyyy` (ano 2 ou 4 dígitos) e ISO; valida o round-trip
+// (ex.: 31/02 → inválido) e **preserva o valor original** quando não-parseável
+// (contrato risco zero — nunca corrompe texto).
+export function normalizeDateISO(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+  if (m) {
+    const year = m[3].length === 2 ? `20${m[3]}` : m[3];
+    const iso = `${year}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    const check = new Date(`${iso}T00:00:00Z`);
+    if (!Number.isNaN(check.getTime()) && check.toISOString().slice(0, 10) === iso) return iso;
+  }
+  return s;
+}
+
+// --- Classe F — flag booleana (C3) --------------------------------------------
+// Escritas legadas são mistas: loader grava `0|1`; App.tsx grava `true|false`;
+// o sync pode trazer strings. `normalizeFlag` unifica a leitura (zero lógica case).
+export function normalizeFlag(v: unknown): boolean {
+  if (v === true || v === 1) return true;
+  if (v === false || v === 0 || v === null || v === undefined || v === '') return false;
+  const n = Number(v);
+  if (!Number.isNaN(n)) return n === 1;
+  return String(v).trim().toLowerCase() === 'true';
 }

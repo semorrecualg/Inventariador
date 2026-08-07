@@ -42,7 +42,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
     const groups: Record<string, Asset[]> = {};
     
     missingAssets.forEach(asset => {
-      const loc = asset.ENDERECO || 'SEM LOCALIZAÇÃO';
+      const loc = asset.endereco || 'SEM LOCALIZAÇÃO';
       if (!groups[loc]) groups[loc] = [];
       groups[loc].push(asset);
     });
@@ -57,15 +57,15 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
     let list = missingAssets;
     
     if (selectedLocation) {
-      list = list.filter(a => (a.ENDERECO || 'SEM LOCALIZAÇÃO') === selectedLocation);
+      list = list.filter(a => (a.endereco || 'SEM LOCALIZAÇÃO') === selectedLocation);
     }
 
     if (committedSearch) {
       const lower = committedSearch.toLowerCase();
       list = list.filter(a => 
-        String(a.ETIQUETA || '').toLowerCase().includes(lower) ||
-        String(a.DESCRICAODOATIVO || '').toLowerCase().includes(lower) ||
-        String(a.SERIAL || '').toLowerCase().includes(lower)
+        String(a.etiqueta || '').toLowerCase().includes(lower) ||
+        String(a.descricaodoativo || '').toLowerCase().includes(lower) ||
+        String(a.serial || '').toLowerCase().includes(lower)
       );
     }
 
@@ -76,13 +76,13 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
     if (missingAssets.length === 0) return;
 
     const wsData = missingAssets.map(a => ({
-      'ETIQUETA': a.ETIQUETA,
-      'DESCRIÇÃO': a.DESCRICAODOATIVO,
-      'LOCALIZAÇÃO': a.ENDERECO,
-      'CENTRO DE CUSTO': a.CENTRODECUSTO,
+      'ETIQUETA': a.etiqueta,
+      'DESCRIÇÃO': a.descricaodoativo,
+      'LOCALIZAÇÃO': a.endereco,
+      'CENTRO DE CUSTO': a.centrodecusto,
       'CONTA CONTÁBIL': a.conta_contabil,
-      'VALOR AQUISIÇÃO': a.VLRAQUISIC,
-      'STATUS ATUAL': a.STATUS
+      'VALOR AQUISIÇÃO': a.vlraquisic,
+      'STATUS ATUAL': a.status
     }));
 
     const ws = XLSX.utils.json_to_sheet(wsData);
@@ -185,27 +185,27 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
                   <div className="flex-1 min-w-0 pr-4">
                     <div className="flex items-center space-x-2 mb-1">
                       <span className="text-[10px] font-black text-accent uppercase tracking-widest">
-                        {asset.ETIQUETA || 'S/ ETIQUETA'}
+                        {asset.etiqueta || 'S/ ETIQUETA'}
                       </span>
                       <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest px-2 py-0.5 bg-bg-main rounded-full border border-border">
-                        {asset.STATUS || 'ATIVO'}
+                        {asset.status || 'ATIVO'}
                       </span>
                     </div>
                     <h4 className="text-sm font-bold text-ink uppercase tracking-tight line-clamp-2 mb-2 group-hover:text-accent transition-colors">
-                      {asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO'}
+                      {asset.descricaodoativo || 'SEM DESCRIÇÃO'}
                     </h4>
                     
                     <div className="flex flex-wrap gap-y-2 gap-x-4">
                       <div className="flex items-center space-x-1.5">
                         <MapPin size={10} className="text-ink-muted" />
                         <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest truncate max-w-[150px]">
-                          {asset.ENDERECO || 'SEM LOCAL'}
+                          {asset.endereco || 'SEM LOCAL'}
                         </span>
                       </div>
                       <div className="flex items-center space-x-1.5">
                         <Filter size={10} className="text-ink-muted" />
                         <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">
-                          CC: {asset.CENTRODECUSTO || '---'}
+                          CC: {asset.centrodecusto || '---'}
                         </span>
                       </div>
                     </div>
@@ -216,7 +216,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
                       <ArrowRight size={16} />
                     </div>
                     <span className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">
-                      {asset.VLRAQUISIC ? `R$ ${asset.VLRAQUISIC}` : ''}
+                      {asset.vlraquisic ? `R$ ${asset.vlraquisic}` : ''}
                     </span>
                   </div>
                 </div>

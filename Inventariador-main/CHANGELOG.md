@@ -5,6 +5,28 @@ All notable changes to the GBR KARDEK Inventariador project will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fase C — Padronização canônica de chaves/valores (UPPER → minúsculo)
+
+Higienização completa do ecossistema para o canônico minúsculo (`endereco`, `etiqueta`, …),
+eliminando a dupla grafia estrutural (D1) e a normalização assimétrica (D2) — sem DDL no
+Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
+
+- **C1–C3:** helpers de normalização por classe (K/T/N/D/F) + `CANONICAL_KEY_MAP` + loader M1
+  (3 caminhos) + coerções N/D/F (`normalizeNumeric`/`normalizeDateISO`/`normalizeFlag`).
+- **M2:** varredura de ~700 chaves UPPER → canônico em ~40 arquivos (serviços, componentes, sync).
+- **C4:** migração Dexie `version(5)` idempotente (`src/services/migrationV5.ts`) — reescreve
+  chaves UPPER e normaliza valores com dry-run, flag `NORMALIZE_ON_UPGRADE` e reconcile
+  aditivo de `addresses`; sync Supabase alinhado (`mapColumnName` verificado).
+- **C5:** remoção da tolerância híbrida (leituras diretas canônicas), do bloco de fallback
+  UPPER de escrita (`utils/schema.ts`) e varredura final (`pickCanonical` restrito a payloads
+  não migrados: migração v5 e QR público).
+- **Fixes SRE:** `findByEtiquetaInUnit` (ramo composto do `where()` agora filtra em memória)
+  e `.eq('TAG_INVENTARIO')` realinhado ao contrato do `public` (`fetchCampaignStats`).
+- **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
+  atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
+
 ## [2.6.0] — 2026-07-24
 
 ### Summary

@@ -5,7 +5,10 @@ import {
   normalizeClassK,
   normalizeClassT,
   normalizeUpperTrim,
-  canonicalKey
+  canonicalKey,
+  normalizeNumeric,
+  normalizeDateISO,
+  normalizeFlag
 } from '../utils/normalize';
 import { CANONICAL_KEY_MAP } from '../constants/schema';
 
@@ -85,5 +88,67 @@ describe('canonicalKey — resolução de variantes para o canônico minúsculo'
     for (const [variant, target] of Object.entries(CANONICAL_KEY_MAP)) {
       expect(target, `alvo não-canônico para ${variant}`).toBe(target.toLowerCase());
     }
+  });
+});
+
+describe('normalizeNumeric — Classe N (coerção numérica segura, nunca NaN)', () => {
+  it('converte números e strings numéricas', () => {
+    expect(normalizeNumeric(1500)).toBe(1500);
+    expect(normalizeNumeric('12')).toBe(12);
+    expect(normalizeNumeric('1500,50'.replace(',', '.'))).toBe(1500.5);
+    expect(normalizeNumeric(0)).toBe(0);
+  });
+
+  it('retorna null para inválidos/null/undefined/vazio (nunca NaN)', () => {
+    expect(normalizeNumeric('abc')).toBeNull();
+    expect(normalizeNumeric(NaN)).toBeNull();
+    expect(normalizeNumeric(Infinity)).toBeNull();
+    expect(normalizeNumeric(null)).toBeNull();
+    expect(normalizeNumeric(undefined)).toBeNull();
+    expect(normalizeNumeric('')).toBeNull();
+  });
+});
+
+describe('normalizeDateISO — Classe D (canônico YYYY-MM-DD)', () => {
+  it('converte dd/mm/yyyy e dd-mm-yyyy para ISO', () => {
+    expect(normalizeDateISO('01/01/2023')).toBe('2023-01-01');
+    expect(normalizeDateISO('31/12/2024')).toBe('2024-12-31');
+    expect(normalizeDateISO('1/2/2023')).toBe('2023-02-01');
+    expect(normalizeDateISO('01-01-2023')).toBe('2023-01-01');
+    expect(normalizeDateISO('01/01/23')).toBe('2023-01-01');
+  });
+
+  it('mantém ISO já canônica (trunca hora se existir)', () => {
+    expect(normalizeDateISO('2023-01-01')).toBe('2023-01-01');
+    expect(normalizeDateISO('2023-01-01T10:00:00Z')).toBe('2023-01-01');
+  });
+
+  it('rejeita datas inválidas no round-trip e preserva o original', () => {
+    expect(normalizeDateISO('31/02/2023')).toBe('31/02/2023'); // fevereiro não tem 31
+    expect(normalizeDateISO('texto-livre')).toBe('texto-livre'); // não-parseável preservado
+  });
+
+  it('trata null/undefined/vazio', () => {
+    expect(normalizeDateISO(null)).toBeNull();
+    expect(normalizeDateISO(undefined)).toBeNull();
+    expect(normalizeDateISO('   ')).toBeNull();
+  });
+});
+
+describe('normalizeFlag — Classe F (unifica 0|1, true|false e strings)', () => {
+  it('reconhece formas verdadeiras', () => {
+    expect(normalizeFlag(1)).toBe(true);
+    expect(normalizeFlag(true)).toBe(true);
+    expect(normalizeFlag('1')).toBe(true);
+    expect(normalizeFlag('true')).toBe(true);
+  });
+
+  it('reconhece formas falsas', () => {
+    expect(normalizeFlag(0)).toBe(false);
+    expect(normalizeFlag(false)).toBe(false);
+    expect(normalizeFlag('0')).toBe(false);
+    expect(normalizeFlag('false')).toBe(false);
+    expect(normalizeFlag(null)).toBe(false);
+    expect(normalizeFlag(undefined)).toBe(false);
   });
 });

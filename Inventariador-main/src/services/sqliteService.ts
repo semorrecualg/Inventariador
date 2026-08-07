@@ -2,6 +2,8 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
+import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
+import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
 export interface DexieAsset {
@@ -179,8 +181,39 @@ class InventoryDexieDatabase extends Dexie {
         })
       ));
     });
+    // v5 — Fase C4 (docs/PLANO_FASE_C_HIGIENIZACAO.md §6): MESMAS assinaturas do
+    // v4 (sem mudança estrutural — garantia de zero perda). A etapa de dados
+    // normaliza chaves UPPER → canônico e valores por classe (K/T/N/D/F) nas 3
+    // tabelas de ativos + reconcile aditivo de `addresses`. Idempotente
+    // (`modify` só grava o que muda — 2ª execução → 0 alterações). Pula os dados
+    // quando `NORMALIZE_ON_UPGRADE === false` (flag de rollback — decisão §9.2).
+    this.version(5).stores({
+      local_assets: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      ativos: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      assets: 'primarykey, filial, _is_synced, [tenantid+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced'
+    }).upgrade(tx => {
+      if (!NORMALIZE_ON_UPGRADE) {
+        logger.warn('[MigrationV5] NORMALIZE_ON_UPGRADE=false — migração version(5) sem etapa de dados (rollback instantâneo).');
+        return Promise.resolve();
+      }
+      return runV5Upgrade(tx);
+    });
   }
 }
+
+/**
+ * Relatório de dry-run da migração `version(5)` — somente leitura: aplica a
+ * normalização em memória sobre o banco real e reporta contagens/checksum sem
+ * gravar nada (docs/PLANO_FASE_C_HIGIENIZACAO.md §6.1).
+ */
+export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
+  runMigrationV5DryRunOn(db as unknown as V5Source);
 
 export const db = new InventoryDexieDatabase();
 

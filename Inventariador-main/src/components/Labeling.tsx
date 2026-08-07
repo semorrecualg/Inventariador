@@ -73,7 +73,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     const source = dbAssets.length > 0 ? dbAssets : initialAssets;
     
     return source.filter(a => 
-      String(a.ETIQUETA || '').toUpperCase() === 'ETIQUETAR'
+      String(a.etiqueta || '').toUpperCase() === 'ETIQUETAR'
     );
   }, [dbAssets, initialAssets]);
 
@@ -85,17 +85,17 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     if (advDesc) {
        const term = normalize(advDesc);
        base = base.filter(a => 
-         normalize(a.DESCRICAODOATIVO || '').includes(term) || 
-         normalize(a.SERIAL || '').includes(term) ||
-         normalize(a.ETIQUETA || '').includes(term) ||
-         normalize(a.NOTAFISCAL || '').includes(term) ||
-         normalize(a.REGISTRO || '').includes(term)
+         normalize(a.descricaodoativo || '').includes(term) || 
+         normalize(a.serial || '').includes(term) ||
+         normalize(a.etiqueta || '').includes(term) ||
+         normalize(a.notafiscal || '').includes(term) ||
+         normalize(a.registro || '').includes(term)
        );
     }
 
     // GBR v25: Ordenação Absoluta por CENTRODECUSTO ASC (Query UI fallback)
     return base.sort((a, b) => 
-      String(a.CENTRODECUSTO || '').localeCompare(String(b.CENTRODECUSTO || ''), undefined, { numeric: true })
+      String(a.centrodecusto || '').localeCompare(String(b.centrodecusto || ''), undefined, { numeric: true })
     );
   }, [assetsToLabel, activeTab, advDesc]);
 
@@ -188,14 +188,14 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
             }}
             itemContent={(index, asset) => {
               const isSelected = selectedIds.has(String(asset.id));
-              const fullDescription = [asset.QT || '1', asset.DESCRICAODOATIVO || 'SEM DESCRIÇÃO', asset.SERIAL || 'S/N', formatMonthYearBR(asset.DATAAQUISIC), asset.NOMEFORNECEDOR || 'FORNECEDOR N/I'].join('; ');
+              const fullDescription = [asset.qt || '1', asset.descricaodoativo || 'SEM DESCRIÇÃO', asset.serial || 'S/N', formatMonthYearBR(asset.dataaqusic), asset.nomefornecedor || 'FORNECEDOR N/I'].join('; ');
 
               const isConferido = !!asset._conferido;
               const tagDisplay = asset.TAG_INVENTARIO || (isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR);
               const colors = getColors(tagDisplay);
 
-              const statusUpper = String(asset.STATUS || '').toUpperCase();
-              const isBaixado = statusUpper.includes('BAIXA') || !!asset.DATABAIXA;
+              const statusUpper = String(asset.status || '').toUpperCase();
+              const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
 
               return (
                 <div className="px-6 py-2">
@@ -208,13 +208,13 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
                       {isBatchMode ? (
                         isSelected ? <CheckSquare size={12} /> : <Square size={12} className="text-white/50" />
                       ) : null}
-                      <span className="tracking-widest">{asset.REGISTRO || '---'} / {asset.SUBREG || '---'} | {isBaixado ? 'BAIXADO | ' : ''}{tagDisplay}</span>
+                      <span className="tracking-widest">{asset.registro || '---'} / {asset.subreg || '---'} | {isBaixado ? 'BAIXADO | ' : ''}{tagDisplay}</span>
                     </div>
                     
                     <div className="pt-8 flex flex-col space-y-3">
                       <div className="flex items-center space-x-2">
                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
-                        <span className="text-xl font-bold font-mono tracking-tighter text-slate-900">{formatEtiqueta(asset.ETIQUETA)}</span>
+                        <span className="text-xl font-bold font-mono tracking-tighter text-slate-900">{formatEtiqueta(asset.etiqueta)}</span>
                         {asset._photoUrl && (
                           <div className="bg-amber-100 p-1 rounded-lg animate-pulse">
                             <Camera size={12} className="text-amber-600" />

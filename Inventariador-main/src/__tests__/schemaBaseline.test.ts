@@ -1,14 +1,17 @@
 // src/__tests__/schemaBaseline.test.ts
 // CONTRATO DE CONGELAMENTO DO SCHEMA LOCAL (Fase 0 — docs/MIGRACAO_HIBRIDA.md).
 //
-// Trava o baseline canônico `InventoryLocalStore` v4:
-//  - `db.verno === 4`
+// Trava o baseline canônico `InventoryLocalStore` v5:
+//  - `db.verno === 5`
 //  - conjunto exato das 9 tabelas Dexie
 //  - assinatura de chave primária + índices de cada tabela (order-insensitive)
 //  - os 21 canônicos do contrato de carga presentes em DB_ASSET_COLUMNS
 //
-// Referência congelada: docs/SCHEMA_BASELINE.md. Qualquer evolução do schema exige
-// nova version(n) no InventoryDexieDatabase, atualização do doc E deste contrato.
+// v5 (Fase C4) = MESMAS assinaturas do v4 — sem mudança estrutural; apenas a
+// etapa de DADOS (normalização de chaves/valores + reconcile aditivo de
+// addresses) no upgrade. Referência congelada: docs/SCHEMA_BASELINE.md.
+// Qualquer evolução do schema exige nova version(n) no InventoryDexieDatabase,
+// atualização do doc E deste contrato.
 import { describe, it, expect } from 'vitest';
 import type { Table } from 'dexie';
 import { db } from '../services/sqliteService';
@@ -40,7 +43,8 @@ function normalize(sig: string): string {
     .join(', ');
 }
 
-// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v4 canônico `tenantid`.
+// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v5 canônico `tenantid`
+// (v5 = v4 sem mudança estrutural; docs/PLANO_FASE_C_HIGIENIZACAO.md §6).
 const BASELINE: Record<string, string> = {
   local_assets: 'primarykey, [tenantid+filial], filial, _is_synced',
   ativos: 'primarykey, [tenantid+filial], filial, _is_synced',
@@ -63,9 +67,9 @@ const LOADER_CONTRACT_21 = [
 ];
 
 describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () => {
-  it('banco canônico `InventoryLocalStore` na versão de schema v4', () => {
+  it('banco canônico `InventoryLocalStore` na versão de schema v5', () => {
     expect(db.name).toBe('InventoryLocalStore');
-    expect(db.verno).toBe(4);
+    expect(db.verno).toBe(5);
   });
 
   it('conjunto exato de 9 tabelas (sem tabelas órfãs nem faltantes)', () => {

@@ -51,8 +51,8 @@ const AssetUnitizeModal: React.FC<AssetUnitizeModalProps> = ({ isOpen, onClose, 
           </div>
           <div className="mt-4 p-4 bg-white/10 rounded-2xl border border-white/10">
             <p className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest mb-1">Ativo Pai</p>
-            <p className="text-sm font-black text-white">{asset.ETIQUETA} - {asset.DESCRICAODOATIVO}</p>
-            <p className="text-[10px] font-bold text-emerald-200 mt-1">Valor Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.VLRAQUISIC || 0))}</p>
+            <p className="text-sm font-black text-white">{asset.etiqueta} - {asset.descricaodoativo}</p>
+            <p className="text-[10px] font-bold text-emerald-200 mt-1">Valor Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(asset._valor_aquisicao || asset.vlraquisic || 0))}</p>
           </div>
         </div>
 

@@ -29,10 +29,10 @@ const formatDateBR = (val: string | number | null | undefined): string => {
 };
 
 const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUnit }) => {
-  const isBaixado = String(asset.STATUS || '').toUpperCase().includes('BAIXA') || !!asset.DATABAIXA;
+  const isBaixado = String(asset.status || '').toUpperCase().includes('BAIXA') || !!asset.databaixa;
   
   // Regra de Ouro: Determina a Tag e os Metadados (Cores/Legendas)
-  const tag = determineAssetTag(asset, asset._localMaster || asset.ENDERECO || "", selectedUnit || asset._unitid || asset.filial || null);
+  const tag = determineAssetTag(asset, asset._localMaster || asset.endereco || "", selectedUnit || asset._unitid || asset.filial || null);
   const meta = getTagMetadata(tag);
   const TagIcon = meta.icon;
 
@@ -62,7 +62,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
             <span className={`text-[10px] font-black uppercase tracking-widest ${meta.color.text}`}>{meta.label}</span>
           </div>
           <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight leading-tight mb-2">
-            {asset.DESCRICAODOATIVO || 'ITEM SEM DESCRIÇÃO'}
+            {asset.descricaodoativo || 'ITEM SEM DESCRIÇÃO'}
           </h2>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
             {asset.filial || asset._unitid || 'UNIDADE NÃO INFORMADA'}
@@ -85,7 +85,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
         <div className="px-8 py-2 grid grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 shadow-inner group transition-all hover:bg-white hover:shadow-md">
             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-2 group-hover:text-accent">PLAQUETA</p>
-            <p className="text-2xl font-black font-mono text-slate-900 tracking-tighter">{asset.ETIQUETA || '---'}</p>
+            <p className="text-2xl font-black font-mono text-slate-900 tracking-tighter">{asset.etiqueta || '---'}</p>
           </div>
           <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 shadow-inner group transition-all hover:bg-white hover:shadow-md">
             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-2 group-hover:text-accent">ESTADO</p>
@@ -103,26 +103,26 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
           <div className="mx-8 mt-2 mb-4 bg-red-600 rounded-2xl p-4 flex items-center space-x-3 shadow-lg animate-pulse">
             <AlertTriangle className="text-white shrink-0" size={24} />
             <p className="text-[9px] font-black text-white uppercase leading-tight tracking-wider">
-              DIVERGÊNCIA CRÍTICA: Item ATIVO com DATA DE BAIXA ({asset.DATABAIXA}).
+              DIVERGÊNCIA CRÍTICA: Item ATIVO com DATA DE BAIXA ({asset.databaixa}).
             </p>
           </div>
         )}
 
         {/* DETAILS LIST */}
         <div className="px-8 py-4 space-y-6">
-          {asset.ENDERECO && (
+          {asset.endereco && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shrink-0 border border-slate-100">
                 <MapPin size={18} />
               </div>
               <div>
                 <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Local de Origem (Base)</p>
-                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{asset.ENDERECO}</p>
+                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{asset.endereco}</p>
               </div>
             </div>
           )}
 
-          {asset._localMaster && asset._localMaster !== asset.ENDERECO && (
+          {asset._localMaster && asset._localMaster !== asset.endereco && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-400 shrink-0 border border-indigo-100">
                 <MapPin size={18} />
@@ -134,19 +134,19 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
             </div>
           )}
 
-          {asset.CENTRODECUSTO && (
+          {asset.centrodecusto && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shrink-0 border border-slate-100">
                 <Tag size={18} />
               </div>
               <div>
                 <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">CENTRO DE CUSTO</p>
-                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{asset.CENTRODECUSTO}</p>
+                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{asset.centrodecusto}</p>
               </div>
             </div>
           )}
 
-          {(asset.SERIAL || asset.REGISTRO) && (
+          {(asset.serial || asset.registro) && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shrink-0 border border-slate-100">
                 <Hash size={18} />
@@ -154,20 +154,20 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
               <div>
                 <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">SERIAL / REGISTRO</p>
                 <p className="text-xs font-black text-slate-800 uppercase leading-tight">
-                  {asset.SERIAL || '---'} {asset.REGISTRO ? `| REG: ${asset.REGISTRO}` : ''}
+                  {asset.serial || '---'} {asset.registro ? `| REG: ${asset.registro}` : ''}
                 </p>
               </div>
             </div>
           )}
 
-          {asset.DATAAQUISIC && (
+          {asset.dataaqusic && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shrink-0 border border-slate-100">
                 <Calendar size={18} />
               </div>
               <div>
                 <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">DATA AQUISIÇÃO</p>
-                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{formatDateBR(asset.DATAAQUISIC)}</p>
+                <p className="text-xs font-black text-slate-800 uppercase leading-tight">{formatDateBR(asset.dataaqusic)}</p>
               </div>
             </div>
           )}
