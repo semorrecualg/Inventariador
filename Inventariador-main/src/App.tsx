@@ -6397,6 +6397,17 @@ const App: React.FC = () => {
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
               initialUnit={selectedUnit}
+              onBypassApplied={(cfg) => {
+                // Bypass de seguranca (Fase Ancora GPS): grava coordenada padrao e abre a
+                // flag de Campanha para liberar a esteira operacional (ADDRESS_SELECTION > INVENTORY).
+                const unitKey = cfg?.unit_id || selectedUnit || ("UNIDADE");
+                const bypassCampaignId = `BYPASS_${unitKey}_${Date.now()}`;
+                setInventory(prev => ({ ...prev, currentCampaignId: bypassCampaignId }));
+                sessionStorage.setItem("kardek_campaign_open", bypassCampaignId);
+                sessionStorage.setItem(`kardek_campaign_open_${unitKey}`, bypassCampaignId);
+                logger.info(`>>> [GPS Bypass] Campanha de contingencia aberta para ${unitKey}: ${bypassCampaignId}`);
+                pushScreen(AppScreen.ADDRESS_SELECTION);
+              }}
             />
           )}{screen === AppScreen.ASSET_MAP && (
             <AssetMap 
