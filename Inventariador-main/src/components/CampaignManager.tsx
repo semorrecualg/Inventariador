@@ -61,7 +61,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     if (initialUnit && !newCampaignUnit) {
       setNewCampaignUnit(initialUnit);
     }
-  }, [initialUnit]);
+  }, [initialUnit, newCampaignUnit]);
 
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
@@ -80,7 +80,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   // CORREÇÃO DA LEITURA LOCAL E RENDERIZAÇÃO CENTRAL:
   // Carrega as campanhas ativas diretamente da tabela local via Dexie/localDb nativo
   // com a tranca de isolamento multidomínio (tenantid / unit_id)
-  const fetchLocalCampaignsOnScreen = async () => {
+  const fetchLocalCampaignsOnScreen = React.useCallback(async () => {
     setIsRefreshing(true);
     try {
       const currentTenant = (propsTenantid || user?.tenantid || 'CICOPAL').trim();
@@ -102,11 +102,11 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, [initialUnit, propsTenantid, campaigns, user?.tenantid]);
 
   React.useEffect(() => {
     fetchLocalCampaignsOnScreen();
-  }, [initialUnit, propsTenantid]);
+  }, [initialUnit, propsTenantid, fetchLocalCampaignsOnScreen]);
 
   React.useEffect(() => {
     if (campaigns && !isRefreshing && !isSaving) {

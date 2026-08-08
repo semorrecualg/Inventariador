@@ -228,7 +228,7 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [globalSearchResults, dbLocations]);
   const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
-  const cleanAndCapitalizeAsset = (rawAsset: Asset): Asset => {
+  const cleanAndCapitalizeAsset = useCallback((rawAsset: Asset): Asset => {
     const cleanTenantid = String(rawAsset.tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
     const cleanFilial = String(rawAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
     
@@ -254,7 +254,7 @@ const Inventory: React.FC<InventoryProps> = ({
       tenantid: cleanTenantid,
       filial: cleanFilial
     } as Asset;
-  };
+  }, [user, selectedUnit]);
 
   // MECANISMO DE PERSISTÊNCIA ESPELHADA (DUPLO GRAVADOR)
   const handleUpdateAssetWithBackup = useCallback(async (cleanAsset: Asset) => {
@@ -711,7 +711,7 @@ const Inventory: React.FC<InventoryProps> = ({
     } finally {
       setIsPersistingScan(false);
     }
-  }, [normalizeKey, isCoolingDown, isThermalBlocked, isScannerPaused, isPersistingScan, torch, user]);
+  }, [isCoolingDown, isThermalBlocked, isScannerPaused, isPersistingScan, torch, user, cleanAndCapitalizeAsset, resetActivity]);
 
   const handlePerformGlobalSearch = async () => {
     if (!showGlobalSearchResolution) return;
@@ -1075,7 +1075,7 @@ const Inventory: React.FC<InventoryProps> = ({
     if (!firstEtq || firstEtq === "ETIQUETAR") return false;
     
     return pendingInSearch.every(a => normalizeKey(a.etiqueta || "") === firstEtq);
-  }, [committedSearch, filteredAssets, normalizeKey]);
+  }, [committedSearch, filteredAssets]);
 
   const handleConfirmSearchBatch = async () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
@@ -1126,7 +1126,7 @@ const Inventory: React.FC<InventoryProps> = ({
       _localMaster: selectedLocation || asset.endereco
     });
     setDisplayValue('');
-  }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
+  }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
     setShowNumericKeypad(false);
@@ -1169,7 +1169,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, onBulkUpdateAssets, normalizeKey, selectedUnit, selectedLocation]);
+  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {

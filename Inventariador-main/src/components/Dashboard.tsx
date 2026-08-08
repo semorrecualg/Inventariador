@@ -326,7 +326,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 10);
 
     return s;
-  }, [assets, filterByCampaign, currentCampaignId, sqlStats]);
+  }, [assets, filterByCampaign, currentCampaignId, sqlStats, dexieAssets]);
 
   // ACOPLAMENTO FISICO DEXIE: usa source (dexieAssets fallback) em vez de assets puro
   const auditSource = (dexieAssets && dexieAssets.length > 0) ? dexieAssets : assets;
@@ -345,7 +345,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
-  }, [assets]);
+  }, [auditSource]);
 
   const recentActivity = useMemo(() => {
     const allHistory: (AuditLogEntry & { assetId: string | number; assetTag?: string; assetDesc?: string })[] = [];
@@ -365,7 +365,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     return allHistory
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, 5);
-  }, [assets]);
+  }, [auditSource]);
 
   // Vercel Best Practice: StatCard extracted to module level with React.memo
   // formatCurrency hoisted to module level
@@ -431,7 +431,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       XLSX.utils.book_append_sheet(wb, ws, "GBR_AUDIT");
       XLSX.writeFile(wb, `GBR_${fileName}_${new Date().getTime()}.xlsx`);
     },
-    [assets, user]
+    [assets, user, dexieAssets]
   );
 
   return (

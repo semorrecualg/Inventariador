@@ -70,7 +70,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
     }
 
     return list;
-  }, [missingAssets, selectedLocation, searchTerm]);
+  }, [missingAssets, selectedLocation, committedSearch]);
 
   const exportMissingList = () => {
     if (missingAssets.length === 0) return;

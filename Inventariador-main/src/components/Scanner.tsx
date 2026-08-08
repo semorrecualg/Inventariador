@@ -53,6 +53,16 @@ const Scanner: React.FC<ScannerProps> = ({
   const [isInactive, setIsInactive] = useState(false);
   const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Refs para as funções mais recentes (o efeito de mount roda uma única vez)
+  const resetInactivityTimeoutRef = useRef<() => void>(() => {});
+  const stopScannerRef = useRef<() => Promise<void>>(async () => {});
+  const isInactiveRef = useRef(false);
+  useEffect(() => {
+    resetInactivityTimeoutRef.current = resetInactivityTimeout;
+    stopScannerRef.current = stopScanner;
+    isInactiveRef.current = isInactive;
+  });
+
   useEffect(() => {
     isMounted.current = true;
     
@@ -60,9 +70,9 @@ const Scanner: React.FC<ScannerProps> = ({
       // REGRA DE OURO: Resume scanner ao voltar para o app/aba
       if (!document.hidden && isMounted.current) {
         setIsTabHidden(false);
-        resetInactivityTimeout();
+        resetInactivityTimeoutRef.current();
         // Garantir que tente reiniciar se estava em standby automático
-        if (isInactive) setIsInactive(false);
+        if (isInactiveRef.current) setIsInactive(false);
       } else {
         setIsTabHidden(true);
       }
@@ -72,7 +82,7 @@ const Scanner: React.FC<ScannerProps> = ({
     window.addEventListener("focus", handleEvents);
 
     // RESET INICIAL: Garante que o timer comece no mount
-    resetInactivityTimeout();
+    resetInactivityTimeoutRef.current();
 
     return () => {
       isMounted.current = false;
@@ -80,7 +90,7 @@ const Scanner: React.FC<ScannerProps> = ({
       window.removeEventListener("focus", handleEvents);
       if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
       // Garantir que o track pare ao desmontar para economizar bateria
-      stopScanner();
+      stopScannerRef.current();
       if (trackRef.current) {
         trackRef.current.stop();
         trackRef.current = null;
@@ -110,7 +120,7 @@ const Scanner: React.FC<ScannerProps> = ({
     };
   }, [resetInactivityTimeout]);
 
-  const playBeep = () => {
+  const playBeep = useCallback(() => {
     try {
       if (scanFeedbackMode === ScanFeedbackMode.NONE) return;
 
@@ -142,7 +152,7 @@ const Scanner: React.FC<ScannerProps> = ({
     } catch (e) {
       logger.error('Feedback failed', e);
     }
-  };
+  }, [scanFeedbackMode, batterySaver]);
 
   const stopScanner = useCallback(async () => {
     if (isStoppingRef.current) return;
@@ -353,7 +363,7 @@ const Scanner: React.FC<ScannerProps> = ({
         setIsLoading(false);
       }
     }
-  }, [mode, onScan, batterySaver, currentCameraIndex]);
+  }, [mode, onScan, batterySaver, currentCameraIndex, availableCameras, playBeep, resetInactivityTimeout, stopScanner]);
 
   useEffect(() => {
     if (!isPaused && !isTabHidden && !isInactive) {

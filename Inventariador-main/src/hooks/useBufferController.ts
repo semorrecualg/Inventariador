@@ -38,13 +38,6 @@ export function useBufferController(): BufferStatus {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-flush: quando pendingCount atinge o limite, dispara flush automaticamente
-  useEffect(() => {
-    if (pendingCount >= BUFFER_MAX_SIZE && !isFlushingRef.current) {
-      flushInternal();
-    }
-  }, [pendingCount]);
-
   // Função interna de flush, chamada tanto pelo auto-flush quanto pelo flush manual
   const flushInternal = useCallback(async () => {
     if (isFlushingRef.current) return;
@@ -60,6 +53,15 @@ export function useBufferController(): BufferStatus {
       isFlushingRef.current = false;
     }
   }, []);
+
+
+
+  // Auto-flush: quando pendingCount atinge o limite, dispara flush automaticamente
+  useEffect(() => {
+    if (pendingCount >= BUFFER_MAX_SIZE && !isFlushingRef.current) {
+      flushInternal();
+    }
+  }, [pendingCount, flushInternal]);
 
   // flush manual exposto via interface
   const flush = useCallback(async () => {

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Delete, Lock, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { verifySecurityPin } from '../services/securityService';
@@ -45,7 +45,7 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
     setError(null);
   };
 
-  const handleVerify = async () => {
+  const handleVerify = useCallback(async () => {
     if (pin.length !== 4) return;
     
     setIsVerifying(true);
@@ -68,13 +68,13 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
         navigator.vibrate(200);
       }
     }
-  };
+  }, [pin, onSuccess, onClose]);
 
   useEffect(() => {
     if (pin.length === 4) {
       handleVerify();
     }
-  }, [pin]);
+  }, [pin, handleVerify]);
 
   if (!isOpen) return null;
 

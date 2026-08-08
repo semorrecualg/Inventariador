@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, X, Brain } from 'lucide-react';
 import { getEnvironmentGuidance } from '../services/geminiService';
@@ -13,20 +13,20 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => {
 
   const environment = import.meta.env.VITE_ENVIRONMENT || 'development';
 
-  useEffect(() => {
-    if (isOpen) {
-      loadGuidance();
-    }
-  }, [isOpen]);
-
-  const loadGuidance = async () => {
+  const loadGuidance = useCallback(async () => {
     try {
       const text = await getEnvironmentGuidance(environment);
       setGuidance(text);
     } catch {
       setGuidance("O assistente está pronto para ajudar na análise de dados e auditoria do seu inventário.");
     }
-  };
+  }, [environment]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadGuidance();
+    }
+  }, [isOpen, loadGuidance]);
 
   return (
     <AnimatePresence>

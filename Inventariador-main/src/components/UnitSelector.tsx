@@ -270,7 +270,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         }
       }
     };
-  }, [activeUnitConfigs.length]);
+  }, [activeUnitConfigs]);
 
   // Normalização estrita para mapear chave da unidade com âncora
   const getUnitConfigForFilial = (filialName: string) => {

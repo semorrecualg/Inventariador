@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -101,13 +101,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     };
   }, [assets]);
 
-  useEffect(() => {
-    fetchAssets();
-    fetchAssetGroups();
-    fetchNCMClassifiers();
-    fetchChartOfAccounts();
-    fetchUnits();
-  }, [tenantid, databaseMode]);
+
 
   // Auto-normalização se a base de unidades estiver vazia mas houver ativos
   useEffect(() => {
@@ -117,7 +111,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     }
   }, [assets, unitConfigs, loading, databaseMode]);
 
-  const fetchUnits = async () => {
+  const fetchUnits = useCallback(async () => {
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
         const data = await localDb.unitConfigs.toArray();
@@ -131,18 +125,18 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     } catch (err) {
       logger.error('Erro ao carregar unidades:', err);
     }
-  };
+  }, [databaseMode, tenantid]);
 
-  const fetchChartOfAccounts = async () => {
+  const fetchChartOfAccounts = useCallback(async () => {
     try {
       const data = await assetControlService.getChartOfAccounts(tenantid);
       setChartOfAccounts(data);
     } catch (err) {
       logger.error('Erro ao carregar plano de contas:', err);
     }
-  };
+  }, [tenantid]);
 
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     setLoading(true);
     try {
       if (databaseMode === DatabaseMode.INTERNAL) {
@@ -165,7 +159,7 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     } finally {
       setLoading(false);
     }
-  };
+  }, [databaseMode, tenantid]);
 
   const handleNormalizeUnits = async () => {
     try {
@@ -181,23 +175,33 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
     }
   };
 
-  const fetchAssetGroups = async () => {
+  const fetchAssetGroups = useCallback(async () => {
     try {
       const data = await assetControlService.getAssetGroups(tenantid);
       setAssetGroups(data);
     } catch (err) {
       logger.error('Erro ao carregar grupos contábeis:', err);
     }
-  };
+  }, [tenantid]);
 
-  const fetchNCMClassifiers = async () => {
+  const fetchNCMClassifiers = useCallback(async () => {
     try {
       const data = await assetControlService.getNCMClassifiers(tenantid);
       setNcmClassifiers(data);
     } catch (err) {
       logger.error('Erro ao carregar classificadores NCM:', err);
     }
-  };
+  }, [tenantid]);
+
+  useEffect(() => {
+    fetchAssets();
+    fetchAssetGroups();
+    fetchNCMClassifiers();
+    fetchChartOfAccounts();
+    fetchUnits();
+  }, [tenantid, databaseMode, fetchAssets, fetchAssetGroups, fetchNCMClassifiers, fetchChartOfAccounts, fetchUnits]);
+
+
 
   const handleSaveChartOfAccount = async (acc: Partial<ChartOfAccount>) => {
     try {

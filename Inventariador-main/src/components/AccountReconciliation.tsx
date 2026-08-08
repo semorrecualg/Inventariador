@@ -85,7 +85,7 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
   const isSixDigit = isSixDigitNumeric(asset.etiqueta);
   const isLabeling = String(asset.etiqueta || '').toUpperCase().trim() === 'ETIQUETAR';
   const isLocked = isSixDigit || isLabeling;
-  const normalize = (s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
+  const normalize = React.useCallback((s: string) => s?.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '', []);
   
   const statusUpper = String(asset.status || '').toUpperCase();
   const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Save,
   AlertCircle,
@@ -244,13 +244,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   // ==========================================================================
   // MOTOR MAPLIBRE OFFLINE-FIRST
   // ==========================================================================
-  const flyTo = (lat: number, lng: number, zoom = UNIT_ZOOM) => {
+  const flyTo = useCallback((lat: number, lng: number, zoom = UNIT_ZOOM) => {
     const map = mapInstance.current;
     if (!map) return;
     // Guarda Defensiva: nunca alimenta o motor com coordenadas indefinidas/NaN
     const [safeLng, safeLat] = safeLngLat({ lat, lng });
     map.flyTo({ center: [safeLng, safeLat], zoom, essential: true, duration: 900 });
-  };
+  }, []);
 
   const initMap = () => {
     if (!mapRef.current || mapInstance.current) return;
@@ -331,8 +331,14 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     }
   };
 
+  // Ref para initMap: o efeito de montagem roda uma única vez (init do MapLibre)
+  const initMapRef = useRef<() => void>(() => {});
   useEffect(() => {
-    initMap();
+    initMapRef.current = initMap;
+  });
+
+  useEffect(() => {
+    initMapRef.current();
     return () => {
       if (mapInstance.current) {
         try { mapInstance.current.remove(); } catch { /* ignore */ }
@@ -340,8 +346,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       }
       markerRef.current = null;
     };
-    // initMap é chamado apenas na montagem (efeito vazio intencional; o cleanup
-    // remove o mapa e os listeners internos do MapLibre)
   }, []);
 
   // Sincroniza marcador + círculo de geocerca com a configuração atual
@@ -609,25 +613,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   }, []);
 
   useEffect(() => {
-    loadConfigs();
-  }, [user.tenantid]);
-
-  useEffect(() => {
-    // FIX(CRITICO): a unidade ja foi escolhida na tela anterior (UnitSelector) e chega via
-    // initialUnit. Nao dependa de units.includes() (a lista de empresas pode vir vazia ou
-    // divergir do nome escolhido) — auto-seleciona sempre que houver initialUnit.
-    if (initialUnit && selectedUnit !== initialUnit) {
-      handleSelectUnit(initialUnit);
-    }
-  }, [initialUnit, units, loading, selectedUnit]);
-
-  useEffect(() => {
     if (typeof onUpdateConfigs === 'function' && configs.length > 0) {
       onUpdateConfigs(configs);
     }
   }, [configs, onUpdateConfigs]);
 
-  const loadConfigs = async () => {
+  const loadConfigs = useCallback(async () => {
     setLoading(true);
     const data = await fetchUnitConfigs(user.tenantid);
     // Guarda Defensiva: registros do banco local com coordenadas nulas/NaN são
@@ -635,9 +626,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const sanitized = (data || []).map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
     setConfigs(sanitized);
     setLoading(false);
-  };
+  }, [user?.tenantid]);
 
-  const handleSelectUnit = (unit: string) => {
+  const handleSelectUnit = useCallback((unit: string) => {
     if (!unit) return;
     setSelectedUnit(unit);
     selectedUnitRef.current = unit;
@@ -683,7 +674,24 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
     }
     setMessage(null);
-  };
+  }, [configs, user?.tenantid, flyTo]);
+
+  useEffect(() => {
+    loadConfigs();
+  }, [user.tenantid, loadConfigs]);
+
+  useEffect(() => {
+    // FIX(CRITICO): a unidade ja foi escolhida na tela anterior (UnitSelector) e chega via
+    // initialUnit. Nao dependa de units.includes() (a lista de empresas pode vir vazia ou
+    // divergir do nome escolhido) — auto-seleciona sempre que houver initialUnit.
+    if (initialUnit && selectedUnit !== initialUnit) {
+      handleSelectUnit(initialUnit);
+    }
+  }, [initialUnit, units, loading, selectedUnit, handleSelectUnit]);
+
+
+
+
 
   useEffect(() => {
     if (selectedUnit) {

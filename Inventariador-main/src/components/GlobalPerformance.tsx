@@ -39,7 +39,7 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, campaigns
     };
 
     fetchInsights();
-  }, [assets.length, campaigns.length]);
+  }, [assets, campaigns]);
 
   const { readingsByDate, stats } = useMemo(() => {
     const groups: Record<string, number> = {};

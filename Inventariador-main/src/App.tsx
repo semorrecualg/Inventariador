@@ -527,7 +527,14 @@ const App: React.FC = () => {
     });
   }, []);
 
+    // Ref para setHistory: o boot effect fica ancorado no mount (não re-executa a
+  // rotação forçada para LOGIN quando databaseMode/selectedUnit mudam).
+  const setHistoryRef = useRef(setHistory);
   useEffect(() => {
+    setHistoryRef.current = setHistory;
+  });
+
+useEffect(() => {
     InitializeBootPipeline();
     const verificarEstadoEBoot = async () => {
       try {
@@ -577,15 +584,15 @@ const App: React.FC = () => {
         if (justCleared && hasUser) {
           logger.info("[SRE_NAV] Preservando viewport no Gestor de Base após purga bem-sucedida.");
           sessionStorage.removeItem('app_just_cleared_data');
-          setHistory([AppScreen.DATABASE_MANAGER]);
+          setHistoryRef.current([AppScreen.DATABASE_MANAGER]);
         } else {
           logger.info("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
-          setHistory([AppScreen.LOGIN]);
+          setHistoryRef.current([AppScreen.LOGIN]);
         }
 
       } catch (error) {
         logger.error("[FATAL_BOOT_ROUTE_CRASH]", error);
-        setHistory([AppScreen.LOGIN]);
+        setHistoryRef.current([AppScreen.LOGIN]);
       }
     };
 
@@ -651,7 +658,7 @@ const App: React.FC = () => {
         return finalHistory;
       });
     }
-  }, [databaseMode, selectedUnit]);
+  }, [databaseMode, selectedUnit, setHistory]);
 
   // Expose pushScreen to window for components that need it
   useEffect(() => {
@@ -1196,7 +1203,7 @@ const App: React.FC = () => {
       }
     }, 6000);
     return () => clearTimeout(timeout);
-  }, [isInitializing, bootstrapError]);
+  }, [isInitializing, bootstrapError, setSqliteStatus]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1559,7 +1566,7 @@ const App: React.FC = () => {
       isMounted = false;
       window.removeEventListener('gbr_db_init_failed', handleInitFailed);
     };
-  }, []);
+  }, [databaseMode, isEngineReady, setHistory, setSqliteStatus]);
 
   useEffect(() => {
     const handleSessionExpired = (e: Event) => {
@@ -1792,7 +1799,7 @@ const App: React.FC = () => {
       }
     }
     return filtered;
-  }, [inventory.assets, selectedUnit, normalizeKey, databaseMode, sqliteUnitAssets, sqliteStatus]);
+  }, [inventory.assets, selectedUnit, databaseMode, sqliteUnitAssets, sqliteStatus]);
 
   useEffect(() => {
     let active = true;
@@ -1861,7 +1868,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [selectedUnit, inventory.currentCampaignId, databaseMode, refreshVersion, sqliteStatus, filteredAssetsByUnit.length, user]);
+  }, [selectedUnit, inventory.currentCampaignId, databaseMode, refreshVersion, sqliteStatus, filteredAssetsByUnit.length, user, dbInitialized]);
 
   useEffect(() => {
     if (selectedUnit) {
@@ -1972,7 +1979,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId, selectedAddress, user]);
+  }, [currentUnit, refreshVersion, sqliteStatus, inventory.currentCampaignId, selectedAddress, user, dbInitialized]);
 
   useEffect(() => {
     // Escuta eventos de teclado se estiver no modo nativo (Capacitor)
@@ -2098,7 +2105,7 @@ const App: React.FC = () => {
       const interval = setInterval(checkFileStatus, 5000); // Polling mais frequente (5s) para melhor UX
       return () => clearInterval(interval);
     }
-  }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded, isInitializing, dbInitialized, isEngineReady]);
+  }, [databaseMode, isReconnecting, showReconnectOverlay, screen, isDataLoaded, isInitializing, dbInitialized, isEngineReady, setSqliteStatus]);
 
 
 
@@ -2179,7 +2186,7 @@ const App: React.FC = () => {
     } catch (err) {
       logger.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
     }
-  }, [currentTenantid, currentUnitId, databaseMode, user, screen]);
+  }, [currentTenantid, currentUnitId, databaseMode, user, screen, dbInitialized, inventory.currentCampaignId, selectedUnit, sqliteStatus.loading]);
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
@@ -2200,7 +2207,7 @@ const App: React.FC = () => {
          });
        });
     }
-  }, [user?.tenantid, databaseMode]);
+  }, [user?.tenantid, databaseMode, dbInitialized, sqliteStatus.loading]);
 
   // Sincronização Reativa Obrigatória no Foco (Governança GBR)
   useEffect(() => {
@@ -2287,7 +2294,7 @@ const App: React.FC = () => {
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
     }
-  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode]);
+  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory]);
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
@@ -2312,7 +2319,7 @@ const App: React.FC = () => {
         saveInventory({ ...inventory, assets: repairedAssets });
       }
     }
-  }, [inventory.assets.length, inventory.unitConfigs?.length]);
+  }, [inventory.assets.length, inventory.unitConfigs?.length, inventory]);
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -2378,7 +2385,7 @@ const App: React.FC = () => {
         if (!skipLoadingState) setIsSyncing(false);
       }
     }
-  }, [databaseMode, user?.tenantid, isSyncing]);
+  }, [databaseMode, user?.tenantid, isSyncing, user?.email]);
 
   const toggleFieldMode = useCallback(() => {
     const next = !isFieldMode;
@@ -2636,7 +2643,7 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [databaseMode, user?.tenantid, user?.tenantid, screen, isSyncing, pushLocalChanges, selectedUnit]);
+  }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
 
   // Real-time Cloud Sync Listener
   useEffect(() => {
@@ -2738,7 +2745,7 @@ const App: React.FC = () => {
       if (subscription) subscription.unsubscribe();
       if (assetSubscription) assetSubscription.unsubscribe();
     };
-  }, [databaseMode, inventory.lastUpdated, user]);
+  }, [databaseMode, inventory.lastUpdated, user, pushScreen]);
 
   // Efeito para forçar sincronização se houver atualização pendente
   // Cloud Update Pending Handler
@@ -3148,10 +3155,16 @@ const App: React.FC = () => {
       }
     };
     init();
-  }, [user, databaseMode]);
+  }, [user, databaseMode, integrityFailed, inventory, recoverySource, setSqliteStatus]);
 
 
 
+  // Ref para popScreen (declarado mais abaixo no componente): evita TDZ ao listá-lo
+  // no array de deps do efeito abaixo (e mantém a navegação sempre na versão atual).
+  const popScreenRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    popScreenRef.current = popScreen;
+  });
   // Safety check to prevent getting stuck on screens with missing state
   useEffect(() => {
     if (!isDataLoaded) return;
@@ -3213,7 +3226,7 @@ const App: React.FC = () => {
 
     // 2. If ASSET_DETAIL but no assets selected, go back
     if (currentScreen === AppScreen.ASSET_DETAIL && selectedAssets.length === 0) {
-      popScreen();
+      popScreenRef.current();
       return;
     }
 
@@ -3224,7 +3237,7 @@ const App: React.FC = () => {
     if (user && !selectedUnit && companyRequiredScreens.includes(currentScreen)) {
       pushScreen(AppScreen.UNIT_SELECTION);
     }
-  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen]);
+  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen, inventory.assets, isUserAuthenticated, publicAsset, setHistory]);
 
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {
@@ -3285,7 +3298,7 @@ const App: React.FC = () => {
     };
     
     executePostLoginRouting();
-  }, [isUserAuthenticated, user, setHistory, pushScreen]);
+  }, [isUserAuthenticated, user, setHistory, pushScreen, history]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
@@ -3299,7 +3312,7 @@ const App: React.FC = () => {
         });
       }
     }
-  }, [users, databaseMode, hasFetchedUsers]);
+  }, [users, databaseMode, hasFetchedUsers, user?.email, user?.isAdmin, user?.role]);
 
   // Busca usuários da nuvem ao carregar para admins
   useEffect(() => {
@@ -3351,7 +3364,7 @@ const App: React.FC = () => {
     } else {
       setHasFetchedUsers(true); // Se não for admin ou não estiver em modo supabase, permite sync
     }
-  }, [user?.email, databaseMode]);
+  }, [user?.email, databaseMode, user?.isAdmin, user?.role, user?.tenantid]);
 
 
   const toggleFullscreen = useCallback(() => {
@@ -3506,7 +3519,7 @@ const App: React.FC = () => {
       allLocations: Array.from(locationsSet).sort(),
       uniqueCentrosDeCusto: Array.from(centrosDeCustoSet).sort()
     };
-  }, [inventory.assets, selectedUnit, normalizeKey, manualLocations]);
+  }, [inventory.assets, selectedUnit, manualLocations]);
 
   // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
   const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
@@ -3570,7 +3583,7 @@ const App: React.FC = () => {
 
     // 2) ADOTADO: Localizado em endereço diferente do original
     return TagInventario.ADOTADO;
-  }, [normalizeKey, selectedUnit]);
+  }, [selectedUnit]);
 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -3629,7 +3642,7 @@ const App: React.FC = () => {
       } catch { logger.warn("Storage cap reached"); }
     }, 3000); // Reduzido de 10s para 3s para maior segurança de dados
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters]);
+  }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters, databaseMode, isSyncing, lastSyncTime]);
 
   const updateConfig = useCallback((updates: Partial<InventoryState>) => {
     setInventory(prev => ({
@@ -3968,7 +3981,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, databaseMode, isEngineReady]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
+  }, [databaseMode, isEngineReady, pushScreen, setHistory, syncFromCloud]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;
@@ -4214,7 +4227,7 @@ const App: React.FC = () => {
     } catch (error) {
       logger.error("Erro crítico no completeOnboarding:", error);
     }
-  }, [history, user, ADMIN_EMAIL]);
+  }, [history, setHistory]);
 
   const commitAssetUpdate = useCallback(async (updatedAsset: Asset) => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
@@ -4511,7 +4524,7 @@ const App: React.FC = () => {
     
     // Adiciona à lista de sujos para garantir sync
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
-  }, [inventory.assets, commitAssetUpdate, user, databaseMode, history, currentUnitConfig]);
+  }, [inventory.assets, commitAssetUpdate, user, currentUnitConfig, inventory.currentCampaignId]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
     if (numberOfUnits < 2) return;
@@ -4656,7 +4669,7 @@ const App: React.FC = () => {
     } finally {
       setIsProcessing(false);
     }
-  }, [user, databaseMode, inventory.assets]);
+  }, [user, databaseMode]);
 
   const restoreAsset = useCallback(async (assetId: string) => {
     const assetToRestore = inventory.assets.find(a => String(a.id) === String(assetId));
@@ -4946,7 +4959,7 @@ const App: React.FC = () => {
     } finally {
       setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, normalizeKey, user, databaseMode, history, currentUnitConfig, inventory.assets]);
+  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
@@ -4969,7 +4982,7 @@ const App: React.FC = () => {
       setSelectedAssets([asset]);
     }
     pushScreen(AppScreen.ASSET_DETAIL);
-  }, [inventory.assets, normalizeKey]);
+  }, [inventory.assets, history, pushScreen]);
 
   const handleExport = () => {
     if (inventory.assets.length === 0) return;
@@ -5590,7 +5603,7 @@ const App: React.FC = () => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, normalizeKey, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, campaigns, unitConfigs, refreshVersion, isImportingBatchState]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
 
   const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
@@ -5680,7 +5693,7 @@ const App: React.FC = () => {
         pushScreen(AppScreen.MAIN_MENU);
       }
     }
-  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, UserRole.AUDITOR, UserRole.AUXILIARY_AUDITOR, history, pushScreen]);
+  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, history, pushScreen]);
 
   const showCompanyHeader = !!selectedUnit && screen === AppScreen.DASHBOARD;
 

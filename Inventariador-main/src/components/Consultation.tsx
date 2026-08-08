@@ -136,7 +136,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       if (dexieAssets.length > 0) setDexieAssets([]);
       setIsDexieLoading(false);
     }
-  }, [assets, tenantid, filial]);
+  }, [assets, tenantid, filial, dexieAssets.length]);
   
   const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);

@@ -28,6 +28,13 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [showAdminToast, setShowAdminToast] = useState(false);
 
+  // Ref para o callback externo: o efeito de geofencing não reinicia o watchPosition
+  // quando o callback do pai muda de identidade (evita re-check a cada render).
+  const onGpsStatusChangeRef = React.useRef(onGpsStatusChange);
+  React.useEffect(() => {
+    onGpsStatusChangeRef.current = onGpsStatusChange;
+  });
+
   // Determina se o usuário é Administrador de forma robusta
   const checkIsAdmin = (): boolean => {
     // 1. Pelo prop userRole
@@ -84,7 +91,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     // BYPASS SÍNCRONO DE ADMINISTRAÇÃO: Perfis de liderança e testes têm liberação imediata síncrona
     if (isAdminUser) {
       setStatus('bypassed');
-      onGpsStatusChange?.(true);
+      onGpsStatusChangeRef.current?.(true);
       setShowAdminToast(true);
       return;
     }
@@ -92,7 +99,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     // Se estiver fora do modo de campo ou se não houver configuração de coordenada de âncora, assume liberação rápida
     if (!isFieldMode || !unitConfig || !unitConfig.lat || !unitConfig.lng) {
       setStatus('granted');
-      onGpsStatusChange?.(true);
+      onGpsStatusChangeRef.current?.(true);
       return;
     }
 
@@ -121,26 +128,26 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
           if (distanceM <= allowedRadius) {
             setStatus('granted');
-            onGpsStatusChange?.(true);
+            onGpsStatusChangeRef.current?.(true);
           } else {
             if (isAdminUser) {
               setStatus('bypassed');
-              onGpsStatusChange?.(true);
+              onGpsStatusChangeRef.current?.(true);
               setShowAdminToast(true);
             } else {
               setStatus('out-of-range');
-              onGpsStatusChange?.(false);
+              onGpsStatusChangeRef.current?.(false);
             }
           }
         } catch (err) {
           logger.error('[Geofencing] Erro Turf.js ao calcular perímetro em thread desacoplada:', err);
           if (isAdminUser) {
             setStatus('bypassed');
-            onGpsStatusChange?.(true);
+            onGpsStatusChangeRef.current?.(true);
             setShowAdminToast(true);
           } else {
             setStatus('granted'); // Failsafe para auditores em caso de erro matemático ou leitura espúria
-            onGpsStatusChange?.(true);
+            onGpsStatusChangeRef.current?.(true);
           }
         }
       }, 0);
@@ -162,7 +169,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
             setShowAdminToast(true);
-            onGpsStatusChange?.(true);
+            onGpsStatusChangeRef.current?.(true);
             return;
           }
           geoResult = await getCurrentDeviceLocation(roleStr, anchorCoords);
@@ -174,7 +181,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
             setShowAdminToast(true);
-            onGpsStatusChange?.(true);
+            onGpsStatusChangeRef.current?.(true);
             return;
           } else {
             throw locationErr;
@@ -189,7 +196,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           setUserLocation({ lat: geoResult.latitude, lng: geoResult.longitude });
           setCurrentDistance(0);
           setShowAdminToast(true);
-          onGpsStatusChange?.(true);
+          onGpsStatusChangeRef.current?.(true);
           
           // Oculta o toast após 5 segundos
           const timer = setTimeout(() => {
@@ -211,10 +218,10 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
           setCurrentDistance(0);
           setShowAdminToast(true);
-          onGpsStatusChange?.(true);
+          onGpsStatusChangeRef.current?.(true);
         } else {
           setStatus('denied');
-          onGpsStatusChange?.(false);
+          onGpsStatusChangeRef.current?.(false);
         }
       }
     };
@@ -290,7 +297,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         setStatus('bypassed');
         setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
         setCurrentDistance(0);
-        onGpsStatusChange?.(true);
+        onGpsStatusChangeRef.current?.(true);
       }
     };
 

@@ -57,12 +57,17 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
       if (dexieAssets.length > 0) setDexieAssets([]);
       setIsDexieLoading(false);
     }
-  }, [assets, tenantid, filial]);
+  }, [assets, tenantid, filial, dexieAssets.length]);
   
   const sourceAssets = dexieAssets.length > 0 ? dexieAssets : assets;
 
+  const initMapRef = useRef<() => void>(() => {});
   useEffect(() => {
-    initMap();
+    initMapRef.current = initMap;
+  });
+
+  useEffect(() => {
+    initMapRef.current();
     return () => {
       if (mapInstance.current) mapInstance.current.remove();
     };
@@ -278,9 +283,14 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
 
 
 
+  const renderMapDataRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    renderMapDataRef.current = renderMapData;
+  });
+
   useEffect(() => {
     if (mapReady) {
-      renderMapData();
+      renderMapDataRef.current();
     }
   }, [mapReady, heatmapMode, geojsonAssets, geojsonArea, geojsonGrid]);
 

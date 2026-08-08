@@ -2,6 +2,7 @@ import globals from "globals";
 import pluginJs from "@eslint/js";
 import tseslint from "typescript-eslint";
 import pluginReactConfig from "eslint-plugin-react/configs/recommended.js";
+import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
   { ignores: ["dist/**", "node_modules/**", "public/**", "src/assets/**", "src/types/pwa-assets-generator.d.ts", "src/types/workbox.d.ts"] },
@@ -17,6 +18,15 @@ export default [
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
   pluginReactConfig,
+  {
+    // Regras oficiais de hooks do React (rules-of-hooks + exhaustive-deps).
+    // exhaustive-deps como error para validação real de dependências em effects.
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      "react-hooks/exhaustive-deps": "error"
+    }
+  },
   {
     // Scripts Node (CommonJS) usam require/__dirname/process —
     // bloco no FINAL para não ser sobrescrito pelos configs recomendados

@@ -118,7 +118,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       if (dexieAssets.length > 0) setDexieAssets([]);
       setIsDexieLoading(false);
     }
-  }, [assets, initialAssetId, tenantid]);
+  }, [assets, initialAssetId, tenantid, dexieAssets.length]);
   const isBatch = (assets?.length || 0) > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>(() => ({ ...assets?.[0] } as Asset));
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -143,8 +143,11 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   });
 
   // Carrega rascunho de memória volátil (Pilar 2 de Conectividade)
+  const restoredDraftIdRef = React.useRef<string | null>(null);
   useEffect(() => {
-    if (workingAsset && workingAsset.id) {
+    if (workingAsset && workingAsset.id && restoredDraftIdRef.current !== String(workingAsset.id)) {
+      // Guard: restaura o rascunho apenas UMA vez por ativo (evita loop com setWorkingAsset)
+      restoredDraftIdRef.current = String(workingAsset.id);
       try {
         const key = `kardek_draft_asset_${workingAsset.id}`;
         const savedDraft = sessionStorage.getItem(key);
@@ -158,7 +161,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         logger.error('Erro ao ler rascunho do Ativo:', err);
       }
     }
-  }, [assets?.[0]?.id]);
+  }, [workingAsset]);
 
   // Salva rascunho de memória volátil quando o estado for alterado
   useEffect(() => {
@@ -187,7 +190,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         setUnitizePercentages(newPercentages);
       }
     }
-  }, [unitizeCount, unitizeMethod, unitizePercentages.length]);
+  }, [unitizeCount, unitizeMethod, unitizePercentages]);
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -321,79 +324,79 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     );
   };
 
-  const calculateDynamicLocation = async () => {
-    try {
-      const filialName = (workingAsset.filial || '').toUpperCase().trim();
-      if (!filialName) return;
-      const configs = await localDb.unitConfigs.toArray();
-      const config = configs.find(c => {
-        const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
-        return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
-      });
-
-      const anchorLat = config?.lat ? Number(config.lat) : -23.5505; // default SP
-      const anchorLng = config?.lng ? Number(config.lng) : -46.6333;
-
-      // Obter deslocamento físico do terminal
-      let dispLat = 0;
-      let dispLng = 0;
-
-      const getGPSPosition = () => {
-        return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
-          if (!navigator.geolocation) {
-            reject(new Error('GPS indisponível'));
-            return;
-          }
-          navigator.geolocation.getCurrentPosition(
-            (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            (err) => reject(err),
-            { enableHighAccuracy: false, timeout: 3000 }
-          );
-        });
-      };
-
-      try {
-        const gps = await getGPSPosition();
-        // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
-        if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
-          throw new Error('GPS invalido retornado pelo hardware');
-        }
-        // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
-        dispLat = gps.lat - anchorLat;
-        dispLng = gps.lng - anchorLng;
-        
-        // Se a diferença for muito absurda (fora do limite razoável) ou precisão baixa, limitamos usando amortecimento
-        if (Math.abs(dispLat) > 0.05 || Math.abs(dispLng) > 0.05) {
-          // Fallback matemático (Simulação de sensor de movimento)
-          dispLat = (Math.random() - 0.5) * 0.001;
-          dispLng = (Math.random() - 0.5) * 0.001;
-        }
-      } catch (gpsErr) {
-        logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
-        // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
-        dispLat = (Math.random() - 0.5) * 0.0005;
-        dispLng = (Math.random() - 0.5) * 0.0005;
-      }
-
-      // Equação: Coordenada da Âncora da Filial + Vetor de Deslocamento Físico
-      const finalLat = Number((anchorLat + dispLat).toFixed(6));
-      const finalLng = Number((anchorLng + dispLng).toFixed(6));
-
-      setWorkingAsset(prev => ({
-        ...prev,
-        latitude: String(finalLat),
-        longitude: String(finalLng)
-      }));
-    } catch (e) {
-      logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
-    }
-  };
-
   useEffect(() => {
+    const calculateDynamicLocation = async () => {
+      try {
+        const filialName = (workingAsset.filial || '').toUpperCase().trim();
+        if (!filialName) return;
+        const configs = await localDb.unitConfigs.toArray();
+        const config = configs.find(c => {
+          const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
+          return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
+        });
+
+        const anchorLat = config?.lat ? Number(config.lat) : -23.5505; // default SP
+        const anchorLng = config?.lng ? Number(config.lng) : -46.6333;
+
+        // Obter deslocamento físico do terminal
+        let dispLat = 0;
+        let dispLng = 0;
+
+        const getGPSPosition = () => {
+          return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+            if (!navigator.geolocation) {
+              reject(new Error('GPS indisponível'));
+              return;
+            }
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+              (err) => reject(err),
+              { enableHighAccuracy: false, timeout: 3000 }
+            );
+          });
+        };
+
+        try {
+          const gps = await getGPSPosition();
+          // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
+          if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
+            throw new Error('GPS invalido retornado pelo hardware');
+          }
+          // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
+          dispLat = gps.lat - anchorLat;
+          dispLng = gps.lng - anchorLng;
+
+          // Se a diferença for muito absurda (fora do limite razoável) ou precisão baixa, limitamos usando amortecimento
+          if (Math.abs(dispLat) > 0.05 || Math.abs(dispLng) > 0.05) {
+            // Fallback matemático (Simulação de sensor de movimento)
+            dispLat = (Math.random() - 0.5) * 0.001;
+            dispLng = (Math.random() - 0.5) * 0.001;
+          }
+        } catch (gpsErr) {
+          logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
+          // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
+          dispLat = (Math.random() - 0.5) * 0.0005;
+          dispLng = (Math.random() - 0.5) * 0.0005;
+        }
+
+        // Equação: Coordenada da Âncora da Filial + Vetor de Deslocamento Físico
+        const finalLat = Number((anchorLat + dispLat).toFixed(6));
+        const finalLng = Number((anchorLng + dispLng).toFixed(6));
+
+        setWorkingAsset(prev => ({
+          ...prev,
+          latitude: String(finalLat),
+          longitude: String(finalLng)
+        }));
+      } catch (e) {
+        logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
+      }
+    };
+
     if (workingAsset?.id) {
       calculateDynamicLocation();
     }
-  }, [workingAsset?.id]);
+  }, [workingAsset?.id, workingAsset?.filial]);
 
 
   const effectiveAssets = dexieAssets.length > 0 ? dexieAssets : assets;
@@ -592,7 +595,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       }
     };
     loadLocalPhotoIfNeeded();
-  }, [workingAsset.id]);
+  }, [workingAsset.id, workingAsset._photoUrl]);
 
   const handleProtheusSync = async () => {
     if (!protheusApiUrl || isBatch) return;

@@ -18,29 +18,29 @@ interface FieldConfiguratorProps {
   onBack: () => void;
 }
 
+const fieldLabels: Record<string, string> = {
+  filial: 'Unidade Operacional',
+  GRUPO_EMPRESARIAL: 'Grupo Empresarial',
+  STATUS: 'Status Vital',
+  ETIQUETA: 'Etiqueta de Patrimônio',
+  CENTRODECUSTO: 'Centro de Custo',
+  VLRAQUISIC: 'Valor de Aquisição',
+  DESCRICAODOATIVO: 'Descrição do Ativo',
+  SERIAL: 'Número de Série',
+  DATAAQUISIC: 'Data de Aquisição',
+  DATABAIXA: 'Data de Baixa',
+  CNPJ: 'CNPJ Fornecedor',
+  NOMEFORNECEDOR: 'Fornecedor',
+  NOTAFISCAL: 'Nota Fiscal',
+  ENDERECO: 'Localização Física',
+  REGISTRO: 'Número de Registro',
+  SUBREG: 'Sub-registro',
+  conta_contabil: 'Conta Contábil',
+  PRIMARYKEY: 'Chave Primária'
+};
+
 const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEditable, onSave, onBack }) => {
   const [selectedFields, setSelectedFields] = useState<string[]>(currentEditable);
-
-  const fieldLabels: Record<string, string> = {
-    filial: 'Unidade Operacional',
-    GRUPO_EMPRESARIAL: 'Grupo Empresarial',
-    STATUS: 'Status Vital',
-    ETIQUETA: 'Etiqueta de Patrimônio',
-    CENTRODECUSTO: 'Centro de Custo',
-    VLRAQUISIC: 'Valor de Aquisição',
-    DESCRICAODOATIVO: 'Descrição do Ativo',
-    SERIAL: 'Número de Série',
-    DATAAQUISIC: 'Data de Aquisição',
-    DATABAIXA: 'Data de Baixa',
-    CNPJ: 'CNPJ Fornecedor',
-    NOMEFORNECEDOR: 'Fornecedor',
-    NOTAFISCAL: 'Nota Fiscal',
-    ENDERECO: 'Localização Física',
-    REGISTRO: 'Número de Registro',
-    SUBREG: 'Sub-registro',
-    conta_contabil: 'Conta Contábil',
-    PRIMARYKEY: 'Chave Primária'
-  };
 
   const availableFields = useMemo(() => {
     if (assets.length === 0) return Object.keys(fieldLabels);
