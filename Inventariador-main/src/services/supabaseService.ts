@@ -8,6 +8,7 @@ import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
+import { hasRealAnchor } from '../utils/gpsAnchors';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -2784,13 +2785,68 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     }
 
     // Cache rico (localStorage local_unit_configs + espelho Dexie) — fonte de verdade da
-    // âncora GPS. Vence o SQLite para a mesma unidade (mesma chave unitId).
+    // ancora GPS. Vence o SQLite para a mesma unidade (mesma chave unitId).
+    // O filtro de tenant tolera o fallback 'CICOPAL'/vazio para nunca perder ancoras
+    // gravadas com o tenant padrao.
+    const tNorm = String(tenantid || '').trim().toUpperCase();
+    const tenantIsFallback = !tNorm || tNorm === 'CICOPAL' || tNorm === 'UNDEFINED' || tNorm === 'NULL';
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
-      if (config.tenantid === tenantid) {
+      const cfgTenant = String(config.tenantid || '').trim().toUpperCase();
+      if (cfgTenant === tNorm || (tenantIsFallback && (!cfgTenant || cfgTenant === 'CICOPAL'))) {
         configs[config.filial || config.unit_id || ''] = config;
       }
     });
+
+    // FIX(CRITICO): tambem le as ancoras gravadas diretamente pelo UnitConfigurator
+    // (localStorage `kardek_gps_ancora_<unidade>` + sessionStorage `gps_lat_/gps_lng_`).
+    // Garante que a ancora resolva mesmo se o espelho `local_unit_configs` falhar ou o
+    // tenant divergir — o botao GPS nunca mais fica 'SEM ANCORA' depois de salvar.
+        // Helper canônico de âncora real — utils/gpsAnchors (coberto por testes).
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('kardek_gps_ancora_')) {
+          const rec = JSON.parse(localStorage.getItem(key) || 'null') as Record<string, unknown> | null;
+          const uId = String(rec?.filial || rec?.unit_id || rec?._unitid || '').trim();
+          if (uId && hasRealAnchor(rec?.lat, rec?.lng)) {
+            configs[uId] = {
+              ...(rec as unknown as UnitConfig),
+              filial: uId,
+              unit_id: uId,
+              tenantid: String(rec?.tenantid || tenantid)
+            };
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('>>> [Persistence] Falha ao ler ancoras kardek_gps_ancora do localStorage:', err);
+    }
+
+    try {
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.startsWith('gps_lat_')) {
+          const unit = key.slice('gps_lat_'.length);
+          const lat = Number(sessionStorage.getItem(key));
+          const lng = Number(sessionStorage.getItem('gps_lng_' + unit));
+          if (unit && hasRealAnchor(lat, lng)) {
+            configs[unit] = {
+              filial: unit,
+              unit_id: unit,
+              tenantid: tenantid || 'CICOPAL',
+              lat,
+              lng,
+              radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,
+              is_active: true,
+              updated_at: new Date().toISOString()
+            } as UnitConfig;
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('>>> [Persistence] Falha ao ler ancoras gps_lat do sessionStorage:', err);
+    }
 
     // Se for modo interno, retornamos apenas o que está no local
     if (isInternal) {

@@ -22,6 +22,7 @@ import * as turf from '@turf/turf';
 import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
+import { mergeUnitConfigIntoList } from '../utils/gpsAnchors';
 
 interface UnitConfiguratorProps {
   user: User;
@@ -908,18 +909,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         sessionStorage.removeItem(`kardek_temp_gps_lng_${unitToSave}`);
         sessionStorage.removeItem(`kardek_temp_gps_radius_${unitToSave}`);
 
-        // Atualiza estado local
-        setConfigs(prev => {
-          const list = [...prev];
-          const i = list.findIndex(c => c.unit_id === unitToSave);
-          if (i >= 0) list[i] = { ...list[i], ...configData };
-          else list.push(configData);
-          return list;
-        });
+        // Atualiza estado local E notifica o pai com a MESMA lista já atualizada.
+        // FIX(CRITICO): antes passava `configs` (closure obsoleta, sem a âncora recém-gravada),
+        // então o App mantinha unitConfigs sem a âncora e o botão GPS voltava 'SEM ÂNCORA'.
+        const updatedConfigs = mergeUnitConfigIntoList(configs, configData);
+        setConfigs(updatedConfigs);
 
         // Notifica o componente pai se houver callback
         if (typeof onUpdateConfigs === 'function') {
-          onUpdateConfigs(configs);
+          onUpdateConfigs(updatedConfigs);
         }
       } else {
         setMessage({ text: `NÃO FOI POSSÍVEL GRAVAR NO SQLITE: ${ok}`, type: 'error' });
@@ -988,16 +986,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       localStorage.setItem('campaign_bypass_open', 'true');
       sessionStorage.setItem('kardek_campaign_open', campaignFlag);
 
-      // 3) Estado local sincronizado
-      setConfigs(prev => {
-        const list = [...prev];
-        const i = list.findIndex(c => c.unit_id === unit);
-        if (i >= 0) list[i] = { ...list[i], ...bypassConfig };
-        else list.push(bypassConfig);
-        return list;
-      });
+      // 3) Estado local sincronizado E notifica o pai com a MESMA lista já atualizada.
+      // FIX(CRITICO): a closure antiga (`configs`) não tinha a âncora recém-gravada e
+      // deixava o botão GPS em 'SEM ÂNCORA' após voltar para a lista de unidades.
+      const updatedConfigs = mergeUnitConfigIntoList(configs, bypassConfig);
+      setConfigs(updatedConfigs);
       if (typeof onUpdateConfigs === 'function') {
-        onUpdateConfigs(configs);
+        onUpdateConfigs(updatedConfigs);
       }
 
       setJustSaved(true);

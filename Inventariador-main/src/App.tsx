@@ -9,6 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
+import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 
 // Extend Window interface for pushScreen
@@ -5409,17 +5410,20 @@ const App: React.FC = () => {
       }
     });
 
-    // Pre-calculate units with GPS config (âncora real: coordenadas finitas e não-zero)
+    // Pre-calculate units with GPS config (ancora real: coordenadas finitas e nao-zero)
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      const hasAnchor = Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)) &&
-        Number(c.lat) !== 0 && Number(c.lng) !== 0;
-      if (uId && hasAnchor) {
+      if (uId && hasRealAnchor(c.lat, c.lng)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }
     });
+
+    // FIX(CRITICO): leitura direta das ancoras persistidas no navegador (imune a
+    // estado obsoleto do React) — logica em utils/gpsAnchors (coberta por testes).
+    collectGpsAnchorsFromStorage(localStorage, sessionStorage)
+      .forEach(norm => unitsWithGps.add(norm));
 
     if (unitConfigs.length > 0) {
       logger.info(`>>> [App] GPS Configs: ${unitConfigs.length}, Units with GPS: ${Array.from(unitsWithGps).join(', ')}`);
