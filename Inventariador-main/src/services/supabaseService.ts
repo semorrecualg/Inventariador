@@ -2685,6 +2685,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
   const syncToCloud = async () => {
       try {
         // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantid e filial)
+        // FIX(CRITICO): onConflict 'tenantid, filial' — sem isso, o 1º salvamento insere (201)
+        // mas re-salvar a MESMA unidade estoura 23505 (indice unico), pois o upsert sem
+        // on_conflict resolve so pela PK (id gerado) e cai no INSERT em vez de UPDATE.
         const { error } = await supabase
           .from('inventory_config')
           .upsert({
@@ -2692,7 +2695,7 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
             filial: unitId,
             data: payload,
             updated_at: new Date().toISOString()
-          });
+          }, { onConflict: 'tenantid, filial' });
 
         if (error) {
           logger.warn(`>>> [Supabase] Sincronização de config falhou (Code: ${error.code}): ${error.message}`);

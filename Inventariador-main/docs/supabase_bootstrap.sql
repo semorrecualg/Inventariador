@@ -259,6 +259,24 @@ ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS photo_url text;
 ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS data jsonb;
 
 -- ============================================================================
+-- 6-B. DEFAULT DE `id` EM TABELAS LEGADAS (FONTE DO ERRO 23502)
+--      Se o projeto JÁ TINHA a tabela criada por um script antigo SEM o
+--      `DEFAULT gen_random_uuid()` no `id` (ex.: `id uuid NOT NULL` puro), o
+--      `CREATE TABLE IF NOT EXISTS` NÃO reaplica o default — e todo upsert do
+--      app que NÃO envia `id` explícito falharia com "null value in column id
+--      violates not-null constraint". É o caso da âncora GPS do UnitConfigurator
+--      (grava por tenantid+filial em inventory_config) e dos demais upserts por
+--      índice único. Estes ALTERs são idempotentes e corrigem o schema legado.
+-- ============================================================================
+ALTER TABLE public.assets ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.inventory_config ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.locations ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.campaigns ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.campaign_snapshots ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.asset_logs ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
+
+-- ============================================================================
 -- 7. RLS — políticas PERMISSIVAS (MVP), estáticas e idempotentes.
 --    O app usa a anon key; sem políticas, toda gravação da nuvem falharia com
 --    401/42501 (o app tolera, mas nada sincronizaria).
@@ -311,4 +329,6 @@ COMMIT;
 --   SELECT column_name FROM information_schema.columns
 --   WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
 --   SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public';
+--   SELECT column_name, column_default FROM information_schema.columns
+--   WHERE table_name = 'inventory_config' AND column_name = 'id';
 -- ============================================================================

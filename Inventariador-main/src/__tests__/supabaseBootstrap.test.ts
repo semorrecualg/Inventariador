@@ -77,4 +77,23 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS id uuid');
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false');
   });
+
+  it('garante DEFAULT gen_random_uuid() no id das tabelas com upsert sem id explícito (corrige 23502)', () => {
+    // A âncora GPS (saveUnitConfig → inventory_config) e os demais upserts por
+    // índice único NÃO enviam `id`. Em schema legado sem DEFAULT no id, toda
+    // gravação falharia com 23502 — o que impedia a âncora de chegar à nuvem.
+    const ID_DEFAULT_TABLES = [
+      'assets',
+      'inventory_config',
+      'locations',
+      'campaigns',
+      'campaign_snapshots',
+      'asset_logs',
+      'asset-photos'
+    ];
+    for (const t of ID_DEFAULT_TABLES) {
+      const ident = t === 'asset-photos' ? '"asset-photos"' : t;
+      expect(sql).toContain(`ALTER TABLE public.${ident} ALTER COLUMN id SET DEFAULT gen_random_uuid();`);
+    }
+  });
 });
