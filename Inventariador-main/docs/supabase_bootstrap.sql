@@ -5,7 +5,7 @@
 -- src/services/syncService.ts e src/services/supabaseService.ts).
 --
 -- COMO USAR:
---   1) Supabase Dashboard → SQL Editor → cole TODO o conteúdo → Run.
+--   1) Supabase Dashboard → SQL Editor → New query → cole TODO o conteúdo → Run.
 --   2) Idempotente: pode rodar de novo sem efeito colateral.
 --   3) RESILIENTE A SCHEMA LEGADO: se o projeto JÁ TINHA tabelas (ex.: criadas
 --      por versões anteriores), os `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
@@ -18,6 +18,12 @@
 --        DROP TABLE IF EXISTS public.<tabela>;  -- ex.: public.audit_logs
 --   5) HARDENING (recomendado depois do MVP): troque as políticas permissivas
 --      abaixo por políticas restritas por `tenantid` (auth.uid()/JWT claim).
+--
+-- NOTA IMPORTANTE (erros 42601/26000): as políticas RLS são escritas de forma
+-- ESTÁTICA (uma instrução DROP + CREATE POLICY por tabela) — sem DO/EXECUTE/
+-- format() dinâmico. Isso evita (a) o nome de política inválido p_"asset-photos"_all
+-- e (b) o erro "prepared statement format does not exist" quando o editor divide
+-- o script. O nome da política é fixo (`p_all`) — único por tabela.
 -- ============================================================================
 
 BEGIN;
@@ -251,9 +257,11 @@ ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS photo_url text;
 ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS data jsonb;
 
 -- ============================================================================
--- 7. RLS — políticas PERMISSIVAS (MVP). O app usa a anon key; sem políticas,
---    toda gravação da nuvem falharia com 401/42501 (o app tolera, mas nada
---    sincronizaria). HARDENING depois: restringir por tenantid via JWT.
+-- 7. RLS — políticas PERMISSIVAS (MVP), estáticas e idempotentes.
+--    O app usa a anon key; sem políticas, toda gravação da nuvem falharia com
+--    401/42501 (o app tolera, mas nada sincronizaria).
+--    HARDENING depois: restringir por tenantid via JWT.
+--    Nome de política fixo `p_all` (único por tabela) — nunca interpolado.
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
@@ -265,20 +273,32 @@ ALTER TABLE public.campaign_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asset_logs        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."asset-photos"    ENABLE ROW LEVEL SECURITY;
 
-DO $$
-DECLARE t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'assets','inventory_config','audit_logs','user_permissions',
-    'locations','campaigns','campaign_snapshots','asset_logs','asset-photos'
-  ] LOOP
-    EXECUTE format('DROP POLICY IF EXISTS p_%I_all ON public.%I', t, t);
-    EXECUTE format(
-      'CREATE POLICY p_%I_all ON public.%I FOR ALL TO anon, authenticated USING (true) WITH CHECK (true)',
-      t, t
-    );
-  END LOOP;
-END $$;
+DROP POLICY IF EXISTS p_all ON public.assets;
+CREATE POLICY p_all ON public.assets FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.inventory_config;
+CREATE POLICY p_all ON public.inventory_config FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.audit_logs;
+CREATE POLICY p_all ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.user_permissions;
+CREATE POLICY p_all ON public.user_permissions FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.locations;
+CREATE POLICY p_all ON public.locations FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.campaigns;
+CREATE POLICY p_all ON public.campaigns FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.campaign_snapshots;
+CREATE POLICY p_all ON public.campaign_snapshots FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.asset_logs;
+CREATE POLICY p_all ON public.asset_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public."asset-photos";
+CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 COMMIT;
 
@@ -288,4 +308,5 @@ COMMIT;
 --   WHERE table_schema = 'public' ORDER BY table_name;
 --   SELECT column_name FROM information_schema.columns
 --   WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
+--   SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public';
 -- ============================================================================
