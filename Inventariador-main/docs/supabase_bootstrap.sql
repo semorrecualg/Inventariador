@@ -201,7 +201,10 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
   tenantid    text,
   filial      text,
   name        text,
+  description text,
   status      text,
+  created_by  text,
+  start_date  timestamptz,
   data        jsonb,
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now()
@@ -212,13 +215,20 @@ ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS updated_at timestamptz DEF
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS filial text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS description text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS status text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS start_date timestamptz;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS data jsonb;
 
 CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id text,
   tenantid    text,
+  assets_data jsonb,
+  metadata    jsonb,
+  closed_at   timestamptz,
+  closed_by   text,
   data        jsonb,
   created_at  timestamptz DEFAULT now()
 );
@@ -226,12 +236,17 @@ CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
 ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS campaign_id text;
 ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS assets_data jsonb;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS metadata jsonb;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_at timestamptz;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_by text;
 ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS data jsonb;
 
 CREATE TABLE IF NOT EXISTS public.asset_logs (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenantid    text,
   asset_id    text,
+  user_email  text,
   action      text,
   data        jsonb,
   created_at  timestamptz DEFAULT now()
@@ -240,6 +255,7 @@ CREATE TABLE IF NOT EXISTS public.asset_logs (
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS user_email text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS action text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS data jsonb;
 

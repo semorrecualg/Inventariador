@@ -78,6 +78,25 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false');
   });
 
+  it('declara as colunas extras dos payloads reais (campaigns, campaign_snapshots, asset_logs)', () => {
+    // Validação REST contra o banco vivo: o app envia description/created_by/start_date
+    // (campaigns), assets_data/metadata/closed_at/closed_by (campaign_snapshots) e
+    // user_email (asset_logs). Sem essas colunas, inserts reais quebrariam (PGRST204).
+    const extras = [
+      'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS description text;',
+      'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS created_by text;',
+      'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS start_date timestamptz;',
+      'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS assets_data jsonb;',
+      'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS metadata jsonb;',
+      'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_at timestamptz;',
+      'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_by text;',
+      'ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS user_email text;'
+    ];
+    for (const line of extras) {
+      expect(sql).toContain(line);
+    }
+  });
+
   it('garante DEFAULT gen_random_uuid() no id das tabelas com upsert sem id explícito (corrige 23502)', () => {
     // A âncora GPS (saveUnitConfig → inventory_config) e os demais upserts por
     // índice único NÃO enviam `id`. Em schema legado sem DEFAULT no id, toda
