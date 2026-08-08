@@ -220,6 +220,10 @@ ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS status text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS created_by text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS start_date timestamptz;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS data jsonb;
+-- Schema legado de campanhas pode ter `unit_id NOT NULL` que o app NÃO envia
+-- (probe REST real: 23502 em todo INSERT). Torna a coluna opcional — o app
+-- grava a unidade em `filial`, não em `unit_id`.
+ALTER TABLE public.campaigns ALTER COLUMN IF EXISTS unit_id DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
