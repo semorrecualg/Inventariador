@@ -164,6 +164,8 @@ ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS units jsonb;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS username text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS name text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS role text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS id uuid;
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_permissions_email_key
   ON public.user_permissions (email);

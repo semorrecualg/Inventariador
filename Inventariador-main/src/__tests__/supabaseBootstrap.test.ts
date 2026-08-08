@@ -72,4 +72,9 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(sql).toContain('public."asset-photos"');
     expect(codeLines.some((l) => l.includes('CREATE POLICY p_all ON public."asset-photos"')));
   });
+
+  it('garante id e is_admin em user_permissions legada (upsert do app envia id: data.user.id)', () => {
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS id uuid');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false');
+  });
 });
