@@ -37,7 +37,6 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     }
 
     if (caught) {
-      // eslint-disable-next-line no-console
       console.error('>>> REPRO CRASH:', (caught as Error).stack);
     }
     expect(caught).toBeNull();

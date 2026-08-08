@@ -180,7 +180,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   units,
   onBack,
   onUpdateConfigs,
-  onNavigate,
   initialUnit,
   onBypassApplied
 }) => {
@@ -341,7 +340,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       }
       markerRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // initMap é chamado apenas na montagem (efeito vazio intencional; o cleanup
+    // remove o mapa e os listeners internos do MapLibre)
   }, []);
 
   // Sincroniza marcador + círculo de geocerca com a configuração atual
@@ -1064,7 +1064,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
                 <WifiOff size={16} className="text-white" />
               </div>
               <p className="text-[9px] font-black uppercase tracking-tight leading-tight">
-                Ambiente Offline: o mapa roda em modo simulado local (estilo embutido). Use "Minha Posição", a busca ou o bypass para fixar a âncora.
+                Ambiente Offline: o mapa roda em modo simulado local (estilo embutido). Use “Minha Posição”, a busca ou o bypass para fixar a âncora.
               </p>
             </div>
           </motion.div>
