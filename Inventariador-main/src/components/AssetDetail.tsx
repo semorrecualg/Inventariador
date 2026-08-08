@@ -354,6 +354,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       try {
         const gps = await getGPSPosition();
+        // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
+        if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
+          throw new Error('GPS invalido retornado pelo hardware');
+        }
         // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
         dispLat = gps.lat - anchorLat;
         dispLng = gps.lng - anchorLng;

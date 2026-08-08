@@ -569,12 +569,31 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                           </span>
                         </div>
 
-                        {/* Status de GPS */}
+                        {/* Status de GPS — 2 ESTADOS POR UNIDADE:
+                            1) SEM ÂNCORA: visual desabilitado (cinza); clicável APENAS para admin
+                               definir a posição (não-admin: bloqueado).
+                            2) COM ÂNCORA: verde + 'GPS'; clicável (edição restrita pelas
+                               regras de admin do configurador). */}
                         <button 
                           type="button"
-                          className="flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl active:scale-90 transition-all cursor-pointer min-w-[44px] min-h-[44px] justify-center bg-transparent border-0"
+                          disabled={!unit.hasGps && !isAdmin}
+                          title={
+                            unit.hasGps
+                              ? 'Âncora GPS configurada — clique para editar (restrito)'
+                              : isAdmin
+                                ? 'Sem âncora GPS — clique para definir a posição desta unidade'
+                                : 'Sem âncora GPS — apenas o admin pode definir'
+                          }
+                          aria-label={unit.hasGps ? 'GPS configurado' : 'Definir âncora GPS'}
+                          className={`flex flex-col items-center gap-1 group/icon p-2 -m-2 rounded-xl transition-all min-w-[44px] min-h-[44px] justify-center bg-transparent border-0 ${
+                            unit.hasGps || isAdmin
+                              ? 'cursor-pointer active:scale-90'
+                              : 'cursor-not-allowed opacity-60 grayscale'
+                          }`}
                           onClick={(e) => {
                             e.stopPropagation();
+                            // Não-admin não pode definir âncora de unidade SEM GPS
+                            if (!unit.hasGps && !isAdmin) return;
                             if (onConfigGPS) { 
                               e.preventDefault(); 
                               try { 
@@ -592,12 +611,12 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                           <div className={`w-7.5 h-7.5 rounded-lg flex items-center justify-center border transition-all ${
                             unit.hasGps 
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm hover:bg-emerald-100 hover:scale-105' 
-                              : 'bg-rose-50 text-rose-500 border-rose-100 hover:bg-rose-100/50 hover:scale-105'
+                              : 'bg-gray-100 text-gray-400 border-gray-200'
                           }`}>
                             <NavigationIcon size={14} />
                           </div>
-                          <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-rose-500'}`}>
-                            GPS
+                          <span className={`text-[6px] font-black uppercase tracking-tighter ${unit.hasGps ? 'text-emerald-600' : 'text-gray-400'}`}>
+                            {unit.hasGps ? 'GPS' : 'SEM ÂNCORA'}
                           </span>
                         </button>
 

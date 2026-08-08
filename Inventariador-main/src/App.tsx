@@ -138,16 +138,29 @@ const checkIsAdmin = (u: User | null | undefined) => {
 };
 
 // Error Boundary Component
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null, componentStack?: string }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, componentStack: '' };
   }
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
   }
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     logger.error("App Crash:", error, errorInfo);
+    // Diagnostico: persiste a pilha do crash (message + stack + componentStack) para depuracao
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('gbr_last_crash', JSON.stringify({
+          message: error.message,
+          stack: error.stack,
+          componentStack: errorInfo.componentStack
+        }));
+      }
+    } catch { /* ignore */ }
+    try {
+      this.setState({ componentStack: errorInfo.componentStack || "" });
+    } catch { /* ignore */ }
     try {
       const activeUserJson = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
       const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
@@ -204,6 +217,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
           </div>
           <pre className="mt-8 p-4 bg-white border border-border rounded-lg text-[10px] text-ink-muted overflow-auto max-w-full text-left">
             {String(this.state.error)}
+            {this.state.error && this.state.error.stack ? "\n\n--- STACK ---\n" + this.state.error.stack : ""}
+            {this.state.componentStack ? '\n\n--- COMPONENT STACK ---\n' + this.state.componentStack : ''}
           </pre>
         </div>
       );
@@ -5394,11 +5409,13 @@ const App: React.FC = () => {
       }
     });
 
-    // Pre-calculate units with GPS config
+    // Pre-calculate units with GPS config (âncora real: coordenadas finitas e não-zero)
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
-      const uId = c._unitid || c.unit_id;
-      if (uId) {
+      const uId = c.filial || c._unitid || c.unit_id;
+      const hasAnchor = Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)) &&
+        Number(c.lat) !== 0 && Number(c.lng) !== 0;
+      if (uId && hasAnchor) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }

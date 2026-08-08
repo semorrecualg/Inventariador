@@ -2750,19 +2750,31 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     }
 
     // 1.1 Carrega do SQLite Físico (Soberania de Dados)
+    // ATENÇÃO: a tabela unit_configs guarda flags de política (hasGps/requireNf...) e o
+    // saveUnitConfigs mapeia SEM lat/lng/unit_id. Só consideramos âncora GPS registros com
+    // filial/unit_id + coordenadas não-zero, e NUNCA retornamos cedo no INTERNAL antes de
+    // mesclar o cache rico local (localStorage/Dexie) — senão o botão GPS fica apagado para
+    // todas as unidades, mesmo as que têm âncora gravada.
     try {
       const { sqliteService } = await import('./sqliteService');
       if (sqliteService.getIsInitialized()) {
         const sqlConfigs = await sqliteService.getUnitConfigsFromSql();
         if (sqlConfigs && sqlConfigs.length > 0) {
           sqlConfigs.forEach(c => {
-            const key = `${tenantid}_${c.unit_id}`.replace(/\s+/g, '_');
-            configs[key] = c as unknown as UnitConfig;
+            const rec = c as Record<string, unknown>;
+            const unitId = String(rec.filial || rec.unit_id || '');
+            if (!unitId) return;
+            const hasCoords = rec.lat !== undefined && rec.lng !== undefined &&
+              !isNaN(Number(rec.lat)) && !isNaN(Number(rec.lng)) &&
+              Number(rec.lat) !== 0 && Number(rec.lng) !== 0;
+            if (!hasCoords) return; // registro de política sem âncora GPS → ignora
+            configs[unitId] = {
+              ...(rec as unknown as UnitConfig),
+              filial: unitId,
+              unit_id: unitId,
+              tenantid: String(rec.tenantid || tenantid)
+            };
           });
-          if (isInternal) {
-             logger.info(`>>> [SQL] fetchUnitConfigs retornando ${Object.values(configs).length} configs do SQLite.`);
-             return Object.values(configs);
-          }
         }
       } else {
         logger.warn('>>> [Persistence] SQLite não inicializado ainda. Ignorando consulta de UnitConfigs locais neste ciclo.');
@@ -2771,9 +2783,11 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       logger.warn('>>> [Persistence] Erro ao recuperar UnitConfigs do SQLite:', err);
     }
 
+    // Cache rico (localStorage local_unit_configs + espelho Dexie) — fonte de verdade da
+    // âncora GPS. Vence o SQLite para a mesma unidade (mesma chave unitId).
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
-      if (config.tenantid === tenantid || config.tenantid === tenantid) {
+      if (config.tenantid === tenantid) {
         configs[config.filial || config.unit_id || ''] = config;
       }
     });

@@ -77,9 +77,10 @@ const safeLatLngPair = (coords: unknown): { lat: number; lng: number } => {
 };
 
 /**
- * Estilo LOCAL 100% offline (inline JSON): sem tiles, sem glyphs, sem sprites,
- * sem nenhuma requisição de rede. Previne a tela preta do MapLibre no Capacitor.
- * Duas camadas de fundo (street/satellite) + grade de coordenadas local.
+ * Estilo LOCAL inline JSON (prevenção de tela preta no Capacitor): o STYLE nunca é
+ * buscado da rede (zero crash), mas camadas de TILES RASTER reais (OSM/Esri) são
+ * declaradas no style — com rede o mapa exibe relevo/ruas; offline, a falha de tile
+ * é não-fatal e o fundo + grade de coordenadas continuam visíveis.
  */
 function buildOfflineStyle(): maplibregl.StyleSpecification {
   return {
@@ -88,6 +89,23 @@ function buildOfflineStyle(): maplibregl.StyleSpecification {
       'graticule-source': {
         type: 'geojson',
         data: buildGraticuleGeoJSON() as unknown as maplibregl.GeoJSONSourceSpecification['data']
+      },
+      // Tiles raster REAIS (OSM street / Esri satellite): quando ha rede, o mapa exibe
+      // relevo/ruas de verdade. Quando offline, a falha de tile e NAO-FATAL no MapLibre
+      // (apenas eventos 'error' — o fundo + grade continuam visiveis, sem tela preta).
+      'street-tiles': {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '© OpenStreetMap contributors'
+      },
+      'satellite-tiles': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '© Esri — Source: Esri, Maxar, Earthstar Geographics'
       }
     },
     layers: [
@@ -118,6 +136,20 @@ function buildOfflineStyle(): maplibregl.StyleSpecification {
           'line-color': 'rgba(59, 130, 246, 0.22)',
           'line-width': 0.75
         }
+      },
+      // Camadas raster ACIMA da grade: cobrem a grade quando os tiles carregam;
+      // quando falham (offline) ficam transparentes e o fundo + grade aparecem.
+      {
+        id: 'street-raster',
+        type: 'raster',
+        source: 'street-tiles',
+        paint: { 'raster-opacity': 1 }
+      },
+      {
+        id: 'satellite-raster',
+        type: 'raster',
+        source: 'satellite-tiles',
+        paint: { 'raster-opacity': 1 }
       }
     ]
   };
@@ -186,8 +218,9 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const mapClickRef = useRef<(lat: number, lng: number) => void>(() => {});
 
   useEffect(() => {
-    selectedUnitRef.current = selectedUnit;
-  }, [selectedUnit]);
+    // Mantem o ref sempre alinhado: cai para initialUnit enquanto o estado nao for setado.
+    selectedUnitRef.current = selectedUnit || initialUnit || null;
+  }, [selectedUnit, initialUnit]);
 
   useEffect(() => {
     currentConfigRef.current = currentConfig;
@@ -321,19 +354,35 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // Guarda Defensiva: coordenadas finitas garantidas antes de tocar Marker/geocerca
     const [safeLng, safeLat] = safeLngLat({ lat: Number(lat), lng: Number(lng) });
 
-    if (!markerRef.current) {
-      markerRef.current = new maplibregl.Marker({ color: '#ef4444' }).addTo(map);
+    // FIX(CRITICO): em MapLibre, Marker.addTo(map) chama _update() sincronamente e le
+    // this._lngLat.lng. Se setLngLat nao for chamado ANTES do addTo, _lngLat e undefined e
+    // o motor estoura 'Cannot read properties of undefined (reading lng)' -> ErrorBoundary.
+    try {
+      if (!markerRef.current) {
+        markerRef.current = new maplibregl.Marker({ color: '#ef4444' })
+          .setLngLat([safeLng, safeLat])
+          .addTo(map);
+      } else {
+        markerRef.current.setLngLat([safeLng, safeLat]);
+      }
+    } catch (err) {
+      // Nunca derruba a esteira: sem marcador/geocerca, o mapa continua navegavel.
+      logger.warn('>>> [MAP] Marker indisponivel (modo offline):', err);
+      markerRef.current = null;
     }
-    markerRef.current.setLngLat([safeLng, safeLat]);
 
-    const radiusKm = (currentConfig.radius_meters || 500) / 1000;
-    const circle = turf.circle([safeLng, safeLat], radiusKm, {
-      units: 'kilometers',
-      steps: 64
-    }) as unknown as maplibregl.GeoJSONSourceSpecification['data'];
+    try {
+      const radiusKm = (currentConfig.radius_meters || 500) / 1000;
+      const circle = turf.circle([safeLng, safeLat], radiusKm, {
+        units: 'kilometers',
+        steps: 64
+      }) as unknown as maplibregl.GeoJSONSourceSpecification['data'];
 
-    if (map.getSource('geofence-source')) {
-      (map.getSource('geofence-source') as maplibregl.GeoJSONSource).setData(circle);
+      if (map.getSource('geofence-source')) {
+        (map.getSource('geofence-source') as maplibregl.GeoJSONSource).setData(circle);
+      }
+    } catch (err) {
+      logger.warn('>>> [MAP] Geocerca indisponivel (modo offline):', err);
     }
   }, [mapReady, currentConfig.lat, currentConfig.lng, currentConfig.radius_meters]);
 
@@ -347,6 +396,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       map.setLayoutProperty('bg-satellite', 'visibility', satellite ? 'visible' : 'none');
       map.setLayoutProperty('graticule-layer', 'visibility', satellite ? 'none' : 'visible');
       map.setLayoutProperty('graticule-satellite-layer', 'visibility', satellite ? 'visible' : 'none');
+      map.setLayoutProperty('street-raster', 'visibility', satellite ? 'none' : 'visible');
+      map.setLayoutProperty('satellite-raster', 'visibility', satellite ? 'visible' : 'none');
     } catch { /* camadas ainda não criadas */ }
   }, [mapType, mapReady]);
 
@@ -561,7 +612,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   }, [user.tenantid]);
 
   useEffect(() => {
-    if (initialUnit && units.includes(initialUnit) && selectedUnit !== initialUnit) {
+    // FIX(CRITICO): a unidade ja foi escolhida na tela anterior (UnitSelector) e chega via
+    // initialUnit. Nao dependa de units.includes() (a lista de empresas pode vir vazia ou
+    // divergir do nome escolhido) — auto-seleciona sempre que houver initialUnit.
+    if (initialUnit && selectedUnit !== initialUnit) {
       handleSelectUnit(initialUnit);
     }
   }, [initialUnit, units, loading, selectedUnit]);
@@ -585,6 +639,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const handleSelectUnit = (unit: string) => {
     if (!unit) return;
     setSelectedUnit(unit);
+    selectedUnitRef.current = unit;
 
     // Recuperar rascunhos preventivos do sessionStorage
     const sessionLat = sessionStorage.getItem(`kardek_temp_gps_lat_${unit}`);
@@ -739,7 +794,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const l_lng = currentConfig.lng;
     const l_radius = currentConfig.radius_meters || 500;
 
-    if (!selectedUnit || l_lat === undefined || l_lng === undefined || isNaN(Number(l_lat))) {
+    // FIX(CRITICO): aceita a unidade herdada da tela anterior (initialUnit) caso o estado
+    // selectedUnit ainda nao tenha sido populado — nunca mais bloqueia o FIXAR ANCORA GPS.
+    const unitToSave = selectedUnit || initialUnit || null;
+    if (!unitToSave || l_lat === undefined || l_lng === undefined || isNaN(Number(l_lat))) {
       setMessage({ text: 'SELECIONE UMA UNIDADE E MARQUE A POSIÇÃO NO MAPA.', type: 'error' });
       return;
     }
@@ -819,8 +877,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
 
     const configData: UnitConfig = {
       tenantid: user?.tenantid || 'CICOPAL',
-      filial: selectedUnit,
-      unit_id: selectedUnit,
+      filial: unitToSave,
+      unit_id: unitToSave,
       lat: safeLat,
       lng: safeLng,
       radius_meters: Number(l_radius),
@@ -839,21 +897,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         setMessage({ text: 'COORDENADAS GRAVADAS E ANCORADAS NO DISPOSITIVO!', type: 'success' });
 
         // PERSISTÊNCIA PREVENTIVA COMPULSÓRIA NO SESSIONSTORAGE E LOCALSTORAGE DO OPERADOR
-        sessionStorage.setItem(`unit_gps_config_${selectedUnit}`, JSON.stringify(configData));
-        sessionStorage.setItem('last_configured_gps_unit', selectedUnit);
-        sessionStorage.setItem(`gps_lat_${selectedUnit}`, String(configData.lat));
-        sessionStorage.setItem(`gps_lng_${selectedUnit}`, String(configData.lng));
-        localStorage.setItem(`kardek_gps_ancora_${selectedUnit}`, JSON.stringify(configData));
+        sessionStorage.setItem(`unit_gps_config_${unitToSave}`, JSON.stringify(configData));
+        sessionStorage.setItem('last_configured_gps_unit', unitToSave);
+        sessionStorage.setItem(`gps_lat_${unitToSave}`, String(configData.lat));
+        sessionStorage.setItem(`gps_lng_${unitToSave}`, String(configData.lng));
+        localStorage.setItem(`kardek_gps_ancora_${unitToSave}`, JSON.stringify(configData));
 
         // Limpa rascunhos preventivos de geocerca salvos com sucesso
-        sessionStorage.removeItem(`kardek_temp_gps_lat_${selectedUnit}`);
-        sessionStorage.removeItem(`kardek_temp_gps_lng_${selectedUnit}`);
-        sessionStorage.removeItem(`kardek_temp_gps_radius_${selectedUnit}`);
+        sessionStorage.removeItem(`kardek_temp_gps_lat_${unitToSave}`);
+        sessionStorage.removeItem(`kardek_temp_gps_lng_${unitToSave}`);
+        sessionStorage.removeItem(`kardek_temp_gps_radius_${unitToSave}`);
 
         // Atualiza estado local
         setConfigs(prev => {
           const list = [...prev];
-          const i = list.findIndex(c => c.unit_id === selectedUnit);
+          const i = list.findIndex(c => c.unit_id === unitToSave);
           if (i >= 0) list[i] = { ...list[i], ...configData };
           else list.push(configData);
           return list;
@@ -881,7 +939,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   // define a flag de Campanha aberta para o auditor avançar na esteira operacional.
   // ==========================================================================
   const handleOfflineBypass = async () => {
-    const unit = selectedUnitRef.current || selectedUnit;
+    const unit = selectedUnitRef.current || selectedUnit || initialUnit;
     if (!unit) {
       setMessage({ text: 'SELECIONE UMA UNIDADE ANTES DE APLICAR O BYPASS.', type: 'error' });
       return;

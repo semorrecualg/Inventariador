@@ -431,6 +431,10 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       let gpsData = {};
       try {
         const loc = await getCurrentLocation(true);
+        // Guarda Defensiva: hardware pode retornar null/undefined - nunca ler .lng de undefined
+        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
+          throw new Error('GPS invalido retornado pelo hardware');
+        }
         gpsData = { latitude: loc.lat, longitude: loc.lng };
         logger.info('>>> [GPS] Localização capturada para o ativo:', gpsData);
       } catch (gpsErr) {

@@ -17,6 +17,19 @@ interface AssetMapProps {
   onSelectLocation?: (location: string) => void;
 }
 
+/** Guarda Defensiva: converte para numero finito ou NaN (para descartar). */
+const asFiniteCoord = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Guarda Defensiva: so aceita pontos com coordenadas finitas validas (evita NaN/undefined no MapLibre). */
+const hasValidCoords = (lat: unknown, lng: unknown): boolean => {
+  const la = asFiniteCoord(lat);
+  const lo = asFiniteCoord(lng);
+  return !isNaN(la) && !isNaN(lo) && la >= -90 && la <= 90 && lo >= -180 && lo <= 180;
+};
+
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantid, filial }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<maplibregl.Map | null>(null);
@@ -58,6 +71,13 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const initMap = () => {
     if (!mapRef.current || mapInstance.current) return;
     try {
+      // Guarda Defensiva: centro canonico finito (nunca NaN/undefined no MapLibre)
+      const [latC, lngC] = initialCenter;
+      const safeCenter: [number, number] = [
+        asFiniteCoord(lngC) || -46.6333,
+        asFiniteCoord(latC) || -23.5505
+      ];
+
       const map = new maplibregl.Map({
         container: mapRef.current,
         style: {
@@ -80,8 +100,13 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
             }
           ]
         },
-        center: [initialCenter[1], initialCenter[0]],
+        center: safeCenter,
         zoom: 13
+      });
+
+      // Erros de estilo/tile/geojson sao nao-fatais: loga e segue (previne crash da esteira)
+      map.on('error', (evt) => {
+        logger.warn('>>> [MAP] Evento de erro nao-fatal do MapLibre (AssetMap):', evt?.error?.message);
       });
 
       map.on('load', () => {
@@ -122,7 +147,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const gridData = useMemo(() => {
     if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
 
-    const validAssets = filteredAssets.filter(a => a.latitude && a.longitude);
+    const validAssets = filteredAssets.filter(a => hasValidCoords(a.latitude, a.longitude));
     if (validAssets.length === 0) return [];
 
     // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
@@ -131,8 +156,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
     const bins: Record<string, { count: number, value: number, assets: Asset[], lat: number, lng: number }> = {};
 
     validAssets.forEach(a => {
-      const latBin = Math.floor(a.latitude! / cellSizeDegrees) * cellSizeDegrees;
-      const lngBin = Math.floor(a.longitude! / cellSizeDegrees) * cellSizeDegrees;
+      const latBin = Math.floor(asFiniteCoord(a.latitude) / cellSizeDegrees) * cellSizeDegrees;
+      const lngBin = Math.floor(asFiniteCoord(a.longitude) / cellSizeDegrees) * cellSizeDegrees;
       const key = `${latBin.toFixed(6)}|${lngBin.toFixed(6)}`;
 
       if (!bins[key]) {
@@ -170,11 +195,11 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const geojsonAssets = useMemo(() => {
     // GBR v25: Delegação para GPU. Enviamos todos os ativos (leves) e deixamos o shader filtrar.
     const features = sourceAssets
-      .filter(a => a.latitude && a.longitude)
+      .filter(a => hasValidCoords(a.latitude, a.longitude))
       .map(a => {
         const val = Number(a.vlraquisic) || 0;
-        const lat = a.latitude!;
-        const lng = a.longitude!;
+        const lat = asFiniteCoord(a.latitude);
+        const lng = asFiniteCoord(a.longitude);
         return {
           type: 'Feature',
           geometry: {
@@ -200,10 +225,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const geojsonArea = useMemo(() => {
     // Agrupamento Otimizado via Reduce (GBR v25 Pipeline)
     const groups = filteredAssets.reduce((acc, a) => {
-      if (!a.latitude || !a.longitude) return acc;
+      if (!hasValidCoords(a.latitude, a.longitude)) return acc;
       const loc = a._localMaster || a.endereco || 'SEM LOCAL';
       if (!acc[loc]) acc[loc] = { points: [], totalValue: 0 };
-      acc[loc].points.push([a.longitude!, a.latitude!]);
+      acc[loc].points.push([asFiniteCoord(a.longitude), asFiniteCoord(a.latitude)]);
       acc[loc].totalValue += (Number(a.vlraquisic) || 0);
       return acc;
     }, {} as Record<string, { points: [number, number][], totalValue: number }>);
@@ -453,10 +478,10 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   }, [filteredAssets]);
 
   const initialCenter = useMemo(() => {
-    const validPoints = filteredAssets.filter(a => a.latitude && a.longitude);
+    const validPoints = filteredAssets.filter(a => hasValidCoords(a.latitude, a.longitude));
     if (validPoints.length === 0) return [-23.5505, -46.6333] as [number, number];
-    const sumLat = validPoints.reduce((acc, p) => acc + p.latitude!, 0);
-    const sumLng = validPoints.reduce((acc, p) => acc + p.longitude!, 0);
+    const sumLat = validPoints.reduce((acc, p) => acc + asFiniteCoord(p.latitude), 0);
+    const sumLng = validPoints.reduce((acc, p) => acc + asFiniteCoord(p.longitude), 0);
     return [sumLat / validPoints.length, sumLng / validPoints.length] as [number, number];
   }, [filteredAssets]);
 
