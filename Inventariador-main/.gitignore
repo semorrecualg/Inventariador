@@ -58,4 +58,3 @@ mock_databases/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
-.env.local
