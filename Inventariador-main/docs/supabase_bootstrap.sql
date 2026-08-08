@@ -7,9 +7,16 @@
 -- COMO USAR:
 --   1) Supabase Dashboard → SQL Editor → cole TODO o conteúdo → Run.
 --   2) Idempotente: pode rodar de novo sem efeito colateral.
---   3) Se o projeto JÁ TINHA tabelas (schema legado), rode DEPOIS também:
---      docs/supabase_tenantid_migration.sql (normaliza a coluna `tenantid`).
---   4) HARDENING (recomendado depois do MVP): troque as políticas permissivas
+--   3) RESILIENTE A SCHEMA LEGADO: se o projeto JÁ TINHA tabelas (ex.: criadas
+--      por versões anteriores), os `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+--      abaixo garantem as colunas críticas (created_at/updated_at/tenantid...)
+--      SEM destruir dados. Isso corrige o erro 42703 ("column created_at does
+--      not exist") que ocorre quando a tabela legada não tem a coluna.
+--   4) Se a estrutura legada for INCOMPATÍVEL (ex.: tabela sem coluna `id`),
+--      drope SÓ a tabela conflitante e rode o script de novo — os dados serão
+--      re-sincronizados do dispositivo:
+--        DROP TABLE IF EXISTS public.<tabela>;  -- ex.: public.audit_logs
+--   5) HARDENING (recomendado depois do MVP): troque as políticas permissivas
 --      abaixo por políticas restritas por `tenantid` (auth.uid()/JWT claim).
 -- ============================================================================
 
@@ -49,6 +56,13 @@ CREATE TABLE IF NOT EXISTS public.assets (
   updated_at        timestamptz DEFAULT now()
 );
 
+-- Garante colunas críticas em schema legado (no-op se a tabela foi criada acima)
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS primarykey text;
+
 -- A fila de sync usa upsert por primarykey (sem id duplicado por ativo)
 CREATE UNIQUE INDEX IF NOT EXISTS assets_primarykey_key
   ON public.assets (primarykey) WHERE primarykey IS NOT NULL;
@@ -73,11 +87,22 @@ CREATE TABLE IF NOT EXISTS public.inventory_config (
   created_at  timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS data jsonb;
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS lat numeric;
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS lng numeric;
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS radius_meters numeric;
+
 CREATE UNIQUE INDEX IF NOT EXISTS inventory_config_tenant_filial_key
   ON public.inventory_config (tenantid, filial);
 
 -- ============================================================================
 -- 3. AUDIT_LOGS — trilha de auditoria
+--    (FONTE DO ERRO 42703: tabela legada sem a coluna created_at — corrigido
+--     pelos ALTERs abaixo)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -92,6 +117,17 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
   old_data    jsonb,
   created_at  timestamptz DEFAULT now()
 );
+
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS user_email text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS action text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS table_name text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS record_id text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS details text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS origin text;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS new_data jsonb;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS old_data jsonb;
 
 CREATE INDEX IF NOT EXISTS audit_logs_tenantid_idx ON public.audit_logs (tenantid);
 CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON public.audit_logs (created_at DESC);
@@ -113,6 +149,16 @@ CREATE TABLE IF NOT EXISTS public.user_permissions (
   updated_at  timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS email text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS units jsonb;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS username text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS role text;
+
 CREATE UNIQUE INDEX IF NOT EXISTS user_permissions_email_key
   ON public.user_permissions (email);
 
@@ -127,6 +173,12 @@ CREATE TABLE IF NOT EXISTS public.locations (
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now()
 );
+
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS data jsonb;
 
 CREATE UNIQUE INDEX IF NOT EXISTS locations_name_tenantid_key
   ON public.locations (name, tenantid);
@@ -147,6 +199,14 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
   updated_at  timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS status text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS data jsonb;
+
 CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id text,
@@ -154,6 +214,11 @@ CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   data        jsonb,
   created_at  timestamptz DEFAULT now()
 );
+
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS campaign_id text;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS data jsonb;
 
 CREATE TABLE IF NOT EXISTS public.asset_logs (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,6 +229,12 @@ CREATE TABLE IF NOT EXISTS public.asset_logs (
   created_at  timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS action text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS data jsonb;
+
 CREATE TABLE IF NOT EXISTS public."asset-photos" (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenantid    text,
@@ -172,6 +243,12 @@ CREATE TABLE IF NOT EXISTS public."asset-photos" (
   data        jsonb,
   created_at  timestamptz DEFAULT now()
 );
+
+ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS photo_url text;
+ALTER TABLE public."asset-photos" ADD COLUMN IF NOT EXISTS data jsonb;
 
 -- ============================================================================
 -- 7. RLS — políticas PERMISSIVAS (MVP). O app usa a anon key; sem políticas,
@@ -209,4 +286,6 @@ COMMIT;
 -- VERIFICAÇÃO (opcional — rode depois):
 --   SELECT table_name FROM information_schema.tables
 --   WHERE table_schema = 'public' ORDER BY table_name;
+--   SELECT column_name FROM information_schema.columns
+--   WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
 -- ============================================================================
