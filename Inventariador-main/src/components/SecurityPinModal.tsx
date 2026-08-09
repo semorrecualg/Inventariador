@@ -46,7 +46,10 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
   };
 
   const handleVerify = useCallback(async () => {
-    if (pin.length !== 4) return;
+    // Guard de concorrência: onClose/onSuccess podem ser callbacks inline do pai
+    // (identidade instável) e o effect de auto-verify re-dispara este handler
+    // se o pai re-renderizar durante os 400ms de verificação — evita onSuccess duplo.
+    if (pin.length !== 4 || isVerifying) return;
     
     setIsVerifying(true);
     
@@ -68,7 +71,7 @@ const SecurityPinModal: React.FC<SecurityPinModalProps> = ({
         navigator.vibrate(200);
       }
     }
-  }, [pin, onSuccess, onClose]);
+  }, [pin, onSuccess, onClose, isVerifying]);
 
   useEffect(() => {
     if (pin.length === 4) {

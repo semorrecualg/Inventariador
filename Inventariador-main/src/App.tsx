@@ -2298,13 +2298,14 @@ useEffect(() => {
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
-    if (inventory.assets.length > 0 && inventory.unitConfigs && inventory.unitConfigs.length > 0) {
+    const inv = inventoryRef.current;
+    if (inv.assets.length > 0 && inv.unitConfigs && inv.unitConfigs.length > 0) {
       let hasRepaired = false;
-      const repairedAssets = inventory.assets.map(a => {
+      const repairedAssets = inv.assets.map(a => {
         const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
         if (isConferido && (!a.latitude || !a.longitude)) {
           const unitId = a.filial || a._unidade;
-          const config = inventory.unitConfigs?.find(c => c.unit_id === unitId);
+          const config = inv.unitConfigs?.find(c => c.unit_id === unitId);
           if (config && config.lat && config.lng) {
             hasRepaired = true;
             return { ...a, latitude: config.lat, longitude: config.lng };
@@ -2315,11 +2316,12 @@ useEffect(() => {
 
       if (hasRepaired) {
         logger.info('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
+        const repairedState = { ...inv, assets: repairedAssets };
         setInventory(prev => ({ ...prev, assets: repairedAssets }));
-        saveInventory({ ...inventory, assets: repairedAssets });
+        saveInventory(repairedState);
       }
     }
-  }, [inventory.assets.length, inventory.unitConfigs?.length, inventory]);
+  }, [inventory.assets, inventory.unitConfigs]);
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -3047,7 +3049,7 @@ useEffect(() => {
           if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
             logger.info(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
             const newState: InventoryState = {
-              ...inventory,
+              ...inventoryRef.current,
               ...cloudData.config,
               assets: cloudData.assets,
               status: DatabaseStatus.LOADED,
@@ -3107,7 +3109,7 @@ useEffect(() => {
                 if (isLocalEmptySec && cloudData.assets && cloudData.assets.length > 0 && !justClearedSec) {
                   logger.info('Base local vazia detectada em verificação secundária. Sincronizando com a nuvem...');
                   const newState: InventoryState = {
-                    ...inventory,
+                    ...inventoryRef.current,
                     ...cloudData.config,
                     assets: cloudData.assets,
                     status: DatabaseStatus.LOADED,
@@ -3155,7 +3157,7 @@ useEffect(() => {
       }
     };
     init();
-  }, [user, databaseMode, integrityFailed, inventory, recoverySource, setSqliteStatus]);
+  }, [user, databaseMode, integrityFailed, recoverySource, setSqliteStatus]);
 
 
 
@@ -3185,7 +3187,7 @@ useEffect(() => {
       }
     } else if (etqParam && !publicAsset) {
       // 1. Tenta encontrar no inventário local primeiro (mais rápido)
-      const foundLocal = inventory.assets.find(a => normalizeKey(a.etiqueta || "") === normalizeKey(etqParam));
+      const foundLocal = inventoryRef.current.assets.find(a => normalizeKey(a.etiqueta || "") === normalizeKey(etqParam));
       if (foundLocal) {
         setPublicAsset(foundLocal);
       } else {
@@ -3237,7 +3239,7 @@ useEffect(() => {
     if (user && !selectedUnit && companyRequiredScreens.includes(currentScreen)) {
       pushScreen(AppScreen.UNIT_SELECTION);
     }
-  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen, inventory.assets, isUserAuthenticated, publicAsset, setHistory]);
+  }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen, isUserAuthenticated, publicAsset, setHistory]);
 
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {

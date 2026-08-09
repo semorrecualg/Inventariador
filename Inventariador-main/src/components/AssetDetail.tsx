@@ -393,9 +393,13 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       }
     };
 
-    if (workingAsset?.id) {
+    if (!workingAsset?.id) return;
+    // Debounce: a dep workingAsset?.filial re-executa o effect a cada tecla digitada
+    // no campo filial; agrupa as chamadas em uma única consulta de GPS após pausa.
+    const timer = setTimeout(() => {
       calculateDynamicLocation();
-    }
+    }, 400);
+    return () => clearTimeout(timer);
   }, [workingAsset?.id, workingAsset?.filial]);
 
 
