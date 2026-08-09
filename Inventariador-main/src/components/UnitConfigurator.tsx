@@ -714,7 +714,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       // 🚀 PRIMEIRO PASSO: Soberania Local-First. Busca de endereços/localidades na tabela local assets_counting / ativos
       logger.info(`>>> [Local-First Search] Procurando "${searchQuery}" localmente nas tabelas físicas do dispositivo...`);
       const { sqliteService } = await import('../services/sqliteService');
-      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantid || 'CICOPAL');
+      const localAddresses = await sqliteService.getAddressesFromAssetsCounting(user?.tenantid || '');
 
       const exactMatch = localAddresses.find(
         addr => (addr.endereco && addr.endereco.toUpperCase().includes(searchQuery.toUpperCase())) ||
@@ -885,7 +885,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(l_lat), lng: Number(l_lng) });
 
     const configData: UnitConfig = {
-      tenantid: user?.tenantid || 'CICOPAL',
+      tenantid: user?.tenantid || '',
       filial: unitToSave,
       unit_id: unitToSave,
       lat: safeLat,
@@ -955,7 +955,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
 
     const bypassConfig: UnitConfig = {
-      tenantid: user?.tenantid || 'CICOPAL',
+      tenantid: user?.tenantid || '',
       filial: unit,
       unit_id: unit,
       lat: safeLat,

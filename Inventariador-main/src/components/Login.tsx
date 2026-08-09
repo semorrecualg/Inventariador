@@ -331,8 +331,10 @@ const Login: React.FC<LoginProps> = ({
           let loggedUser: User;
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
-            if (isAdminEmail(loggedUser.email)) {
-              loggedUser.tenantid = 'DEMO_DEFAULT';
+            // v25.70: tenant 100% da base — nenhum valor fixo. Se o registro local
+            // nao tiver tenant, recupera o da sessao (persistido do user_permissions).
+            if (!loggedUser.tenantid) {
+              loggedUser.tenantid = readSessionTenantId() || readLocalTenantId() || '';
             }
           } else if (normalizedUsername === 'admin' && password === '123456') {
             loggedUser = {
@@ -343,7 +345,7 @@ const Login: React.FC<LoginProps> = ({
               is_admin: true,
               isAdmin: true,
               mustChangePassword: false,
-              tenantid: 'DEMO_DEFAULT',
+              tenantid: readSessionTenantId() || readLocalTenantId() || '',
               filial: ''
             };
           } else {
@@ -360,7 +362,7 @@ const Login: React.FC<LoginProps> = ({
                 is_admin: true,
                 isAdmin: true,
                 mustChangePassword: false,
-                tenantid: 'DEMO_DEFAULT',
+                tenantid: readSessionTenantId() || readLocalTenantId() || '',
                 filial: ''
               };
             }
@@ -495,7 +497,7 @@ const Login: React.FC<LoginProps> = ({
                 username: authData.user.email?.split('@')[0],
                 role: is_master ? 'ADMIN' : 'AUDITOR',
                 is_admin: is_master,
-                tenantid: is_master ? 'CICOPAL' : '',
+                tenantid: is_master ? (readSessionTenantId() || readLocalTenantId() || '') : '',
                 filial: is_master ? '' : ''
               } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             });
@@ -521,8 +523,8 @@ const Login: React.FC<LoginProps> = ({
           let unitId = normalizeValue(cloudUser.filial || cloudUser._unitid || cloudUser.unitid || '');
 
           if (is_master) {
-            const storedTenant = readSessionTenantId() || readLocalTenantId() || 'CICOPAL';
-            tenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+            const storedTenant = readSessionTenantId() || readLocalTenantId() || '';
+            tenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? '' : storedTenant;
             unitId = 'TODAS';
           }
 

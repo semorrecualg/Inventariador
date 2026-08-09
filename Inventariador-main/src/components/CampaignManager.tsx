@@ -83,9 +83,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const fetchLocalCampaignsOnScreen = React.useCallback(async () => {
     setIsRefreshing(true);
     try {
-      let currentTenant = (propsTenantid || user?.tenantid || 'CICOPAL').trim();
-      // v25.70: sentinelas de instalacao resolvem para CICOPAL para admins
-      if (isAdminUser(user) && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(currentTenant.trim().toUpperCase())) currentTenant = 'CICOPAL';
+      let currentTenant = (propsTenantid || user?.tenantid || '').trim();
+      // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
+      // tenant real da base é honrado literalmente (nenhum valor fixo).
+      if (['NULL', 'UNDEFINED'].includes(currentTenant.trim().toUpperCase())) currentTenant = '';
       const currentFilial = (initialUnit || '').trim();
       
       logger.info(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
@@ -162,11 +163,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return;
     }
     
-    const isAdmin = !!(isAdminUser(user));
     let tenantid = (propsTenantid || user?.tenantid || '').trim();
-    if (!tenantid && isAdmin) tenantid = 'CICOPAL';
-    // v25.70: sentinelas de instalacao resolvem para CICOPAL no caso de admin
-    if (isAdmin && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(tenantid.trim().toUpperCase())) tenantid = 'CICOPAL';
+    // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
+    // tenant real da base é honrado literalmente (nenhum valor fixo).
+    if (['NULL', 'UNDEFINED'].includes(tenantid.trim().toUpperCase())) tenantid = '';
 
     if (!tenantid || tenantid === 'N/A') {
       setErrorMessage('ERRO DE GOVERNANÇA: Tenant não identificado. Ação bloqueada.');
@@ -329,9 +329,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleSelectCampaign = async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
-    let tenantid = user?.tenantid || user?.tenantid || user?.tenantid;
-    const isAdmin = isAdminUser(user);
-    if (!tenantid && isAdmin) tenantid = 'CICOPAL';
+    // Governança: tenant vem do perfil do usuário (fluxo de dados), sem fallback fixo.
+    const tenantid = user?.tenantid || '';
 
     if (tenantid) {
       setStatsLoading(true);

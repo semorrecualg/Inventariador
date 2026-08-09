@@ -4,13 +4,13 @@
 // `findByEtiquetaInUnit` inoperante. Agora filtra em memória pelos campos do
 // índice composto (docs/PLANO_FASE_C_HIGIENIZACAO.md §8.1).
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { db } from '../services/sqliteService';
 import { assetRepository } from '../services/assetRepository';
 import type { DexieAsset } from '../services/sqliteService';
 
-// getCurrentTenantid() cai em 'DEMO_DEFAULT' quando não há sessão (node env).
-const TENANT = 'DEMO_DEFAULT';
+// Tenant de seed: valor arbitrário de dados (o produto não fixa tenant algum).
+const TENANT = 'TENANT-A';
 
 function seedAsset(over: Partial<DexieAsset>): DexieAsset {
   return {
@@ -54,7 +54,27 @@ function seedAsset(over: Partial<DexieAsset>): DexieAsset {
   };
 }
 
+// O wrapper localDb.assets.where() aplica escopo de tenant a partir da sessão
+// (getCurrentTenantid). O teste estabelece explicitamente esse contexto de
+// dados (tenant = TENANT) — o produto não fixa tenant algum.
+const createStorageMock = () => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { store.set(k, v); },
+    removeItem: (k: string) => { store.delete(k); },
+    clear: () => { store.clear(); },
+    get length() { return store.size; },
+    key: (i: number) => [...store.keys()][i] ?? null,
+  };
+};
+
 beforeEach(async () => {
+  const storage = createStorageMock();
+  vi.stubGlobal('sessionStorage', storage);
+  vi.stubGlobal('localStorage', storage);
+  storage.setItem('app_current_user', JSON.stringify({ tenantid: TENANT }));
+
   await db.open();
   await db.ativos.clear();
   await db.assets.clear();
@@ -62,6 +82,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await db.ativos.clear();
   await db.assets.clear();
   await db.local_assets.clear();

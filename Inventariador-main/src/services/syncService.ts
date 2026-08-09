@@ -104,7 +104,7 @@ const getUserFromLocalStorage = (): UserSessionData | null => {
                 sessionStorage.getItem('tenantId') || 
                 localStorage.getItem('_tenantid') || 
                 sessionStorage.getItem('_tenantid') ||
-                'CICOPAL';
+                '';
 
     if (isStringInvalid(tId)) {
       logger.error(">>> [Sync Guard] Vazamento multidomínio detectado! tenantid é inválido ou ausente.");

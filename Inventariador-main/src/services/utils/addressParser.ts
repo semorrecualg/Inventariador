@@ -10,8 +10,8 @@ export interface RawAddressInput {
 export function parseAndSanitizeAddress(input: RawAddressInput) {
   const cleanStr = (val: unknown): string => String(val ?? '').trim().toUpperCase();
   return {
-    tenantid: cleanStr(input.tenantid ?? input.tenantId) || 'DEMO_DEFAULT',
-    filial: cleanStr(input.filial) || 'MATRIZ',
+    tenantid: cleanStr(input.tenantid ?? input.tenantId) || '',
+    filial: cleanStr(input.filial) || '',
     codigo_endereco: cleanStr(input.codigo_endereco).replace(/[^A-Z0-9-]/g, ''), // Filtra sujeiras do Excel
     setor: cleanStr(input.setor) || 'GERAL',
     bloco: cleanStr(input.bloco) || 'A',

@@ -572,7 +572,7 @@ export class SqliteService {
             const mapped: DexieAsset = {
               id: primaryKeyVal,
               primarykey: primaryKeyVal,
-              tenantid: String(asset.tenantid || 'CICOPAL'),
+              tenantid: String(asset.tenantid || ''),
               filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
               status: String(asset.status || 'P'),
               etiqueta: String(asset.etiqueta || ''),

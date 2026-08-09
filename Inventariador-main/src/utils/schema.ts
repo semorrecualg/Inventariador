@@ -57,10 +57,8 @@ export const matchUnitKeys = (keyA: string, keyB: string): boolean => {
   }
   
   // Suporte a correspondência por contenção (LIKE) para acomodação de strings mais longas
-  // Excluindo 'CICOPAL' de forma estrita de proximidades para evitar colapso incorreto de dados do grupo/tenant
-  if ((normA.includes(normB) || normB.includes(normA)) && 
-      normA !== 'CICOPAL' && normB !== 'CICOPAL' && 
-      !normA.includes('CICOPAL') && !normB.includes('CICOPAL')) {
+  // Correspondência por contenção (LIKE) para acomodação de strings mais longas
+  if (normA.includes(normB) || normB.includes(normA)) {
     const minLen = Math.min(normA.length, normB.length);
     if (minLen >= 4) return true;
   }
@@ -119,7 +117,7 @@ export function getAssetUnit(asset: Asset | Record<string, unknown>): string {
   }
 
   const upper = unitName.toUpperCase();
-  if (!upper || upper === 'UNIT_UNDEFINED' || upper === 'DEFAULT' || upper === 'NULL' || upper === 'UNDEFINED' || upper === '0' || upper === 'CICOPAL') {
+  if (!upper || upper === 'UNIT_UNDEFINED' || upper === 'DEFAULT' || upper === 'NULL' || upper === 'UNDEFINED' || upper === '0') {
     return 'UNIT_UNDEFINED';
   }
   return upper;
@@ -143,7 +141,7 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
     originalAsset.GRUPO_EMPRESARIAL ||
     originalAsset.tenant_id ||
     originalAsset.group_id ||
-    'CICOPAL'
+    ''
   ).toString().trim();
   
   const filial = (

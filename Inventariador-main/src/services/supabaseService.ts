@@ -1624,8 +1624,8 @@ export const fetchFullInventory = async (
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.warn(`>>> [SRE Fail-Safe] Interceptando falha ao ler configs da nuvem (Error: ${errMsg}). Injetando config Fallback...`);
       config = { 
-        id: "config_CICOPAL", 
-        tenantid: "CICOPAL", 
+        id: configId, 
+        tenantid: cleanTenant, 
         status_operacao: "ATIVO", 
         sincronia_automatica: false, 
         geocerca_ativa: false 
@@ -2633,18 +2633,26 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
     }
 
     const tenantidRaw = (config.tenantid || readLocalTenantId() || readSessionTenantId() || '').toString().trim();
-    const cleanTenantidRaw = tenantidRaw !== 'undefined' && tenantidRaw !== 'null' ? tenantidRaw : 'CICOPAL';
+    const cleanTenantidRaw = tenantidRaw !== 'undefined' && tenantidRaw !== 'null' ? tenantidRaw : '';
     
     const unitIdRaw = ((config as unknown as Record<string, unknown>).filial || config.unit_id || config._unitid || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').toString().trim();
-    const cleanUnitIdRaw = unitIdRaw !== 'undefined' && unitIdRaw !== 'null' ? unitIdRaw : 'FEIRA_BOA_BA';
+    const cleanUnitIdRaw = unitIdRaw !== 'undefined' && unitIdRaw !== 'null' ? unitIdRaw : '';
 
     if (!cleanTenantidRaw || !cleanUnitIdRaw) {
-      logger.warn(">>> [Session] Identificador de Contrato ou Filial ausente ao salvar configuração de filial. Fallback injetado.");
+      logger.warn(">>> [Governance] tenantid/filial ausentes ao salvar configuração de filial. Nenhum valor fixo injetado.");
     }
     
-    const tenantid = cleanTenantidRaw || 'CICOPAL';
-    const unitId = cleanUnitIdRaw || 'FEIRA_BOA_BA';
+    const tenantid = cleanTenantidRaw || '';
+    const unitId = cleanUnitIdRaw || '';
     const unitKey = `${tenantid}_${unitId}`.replace(/\s+/g, '_');
+
+    // Governança (produto comercial): tenant/filial vêm sempre do fluxo de dados.
+    // Contexto sem identificador válido => nada é inventado; a âncora permanece
+    // apenas no SQLite físico (já salvo acima) e a sincronização em nuvem é pulada.
+    if (!tenantid || !unitId) {
+      logger.warn('>>> [Governance] tenantid/filial ausentes ao salvar âncora. Sincronização em nuvem ignorada.');
+      return true;
+    }
     
     const payload = {
       filial: unitId,
@@ -2786,14 +2794,14 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
     // Cache rico (localStorage local_unit_configs + espelho Dexie) — fonte de verdade da
     // ancora GPS. Vence o SQLite para a mesma unidade (mesma chave unitId).
-    // O filtro de tenant tolera o fallback 'CICOPAL'/vazio para nunca perder ancoras
-    // gravadas com o tenant padrao.
+    // O filtro de tenant tolera o fallback vazio/sentinelas para nunca perder âncoras
+    // gravadas sem tenant explícito (legado).
     const tNorm = String(tenantid || '').trim().toUpperCase();
-    const tenantIsFallback = !tNorm || tNorm === 'CICOPAL' || tNorm === 'UNDEFINED' || tNorm === 'NULL';
+    const tenantIsFallback = !tNorm || tNorm === 'UNDEFINED' || tNorm === 'NULL';
     Object.values(localData).forEach((c: unknown) => {
       const config = c as UnitConfig;
       const cfgTenant = String(config.tenantid || '').trim().toUpperCase();
-      if (cfgTenant === tNorm || (tenantIsFallback && (!cfgTenant || cfgTenant === 'CICOPAL'))) {
+      if (cfgTenant === tNorm || (tenantIsFallback && !cfgTenant)) {
         configs[config.filial || config.unit_id || ''] = config;
       }
     });
@@ -2834,7 +2842,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
             configs[unit] = {
               filial: unit,
               unit_id: unit,
-              tenantid: tenantid || 'CICOPAL',
+              tenantid: tenantid || '',
               lat,
               lng,
               radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,

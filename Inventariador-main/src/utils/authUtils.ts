@@ -107,7 +107,9 @@ export const checkMasterDrive = (
       isMaster: true,
       masterUser: {
         role: 'ADMIN',
-        tenantid: 'DEMO_DEFAULT',
+        // Master Drive é bypass de sistema (token GBR_SUPER_ADMIN_CORINGA agrega
+        // todos os tenants). tenantid vazio — nenhum valor de cliente fixo.
+        tenantid: '',
         filial: 'TODAS',
         email: 'semorr@gmail.com',
       },
@@ -223,7 +225,7 @@ export const createAdminUser = (
     is_admin: true,
     isAdmin: true,
     mustChangePassword: false,
-    tenantid: 'DEMO_DEFAULT',
+    tenantid: '',
     filial: '',
   };
 };

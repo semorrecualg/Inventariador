@@ -229,8 +229,8 @@ const Inventory: React.FC<InventoryProps> = ({
   const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
   const cleanAndCapitalizeAsset = useCallback((rawAsset: Asset): Asset => {
-    const cleanTenantid = String(rawAsset.tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
-    const cleanFilial = String(rawAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
+    const cleanTenantid = String(rawAsset.tenantid || user?.tenantid || '').trim().toUpperCase();
+    const cleanFilial = String(rawAsset.filial || selectedUnit || user?.filial || '').trim().toUpperCase();
     
     if (!cleanTenantid || cleanTenantid === 'NULL' || cleanTenantid === 'UNDEFINED' || cleanTenantid === '') {
       alert("Erro de Governança: tenantid inválido ou não autenticado.");
@@ -259,7 +259,7 @@ const Inventory: React.FC<InventoryProps> = ({
   // MECANISMO DE PERSISTÊNCIA ESPELHADA (DUPLO GRAVADOR)
   const handleUpdateAssetWithBackup = useCallback(async (cleanAsset: Asset) => {
     try {
-      const activeTenantid = String(cleanAsset.tenantid || user?.tenantid || 'CICOPAL').trim().toUpperCase();
+      const activeTenantid = String(cleanAsset.tenantid || user?.tenantid || '').trim().toUpperCase();
       const activeFilial = String(cleanAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
       const backupKey = `gbr_backup_${activeTenantid}_${activeFilial}`;
       
@@ -296,7 +296,7 @@ const Inventory: React.FC<InventoryProps> = ({
       if (hasRecoveredRef.current) return;
       hasRecoveredRef.current = true;
       
-      const activeTenantid = String(user?.tenantid || 'CICOPAL').trim().toUpperCase();
+      const activeTenantid = String(user?.tenantid || '').trim().toUpperCase();
       const activeFilial = String(selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
       const backupKey = `gbr_backup_${activeTenantid}_${activeFilial}`;
       
@@ -625,7 +625,7 @@ const Inventory: React.FC<InventoryProps> = ({
           table_name: 'local_assets',
           record_id: String(id),
           details: `Ativo conferido via scanner: ${extractedEtiqueta}`,
-          tenantid: user?.tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || ''
         });
 
         setIsHierarchyLoading(false);
@@ -667,7 +667,7 @@ const Inventory: React.FC<InventoryProps> = ({
         table_name: 'local_assets',
         record_id: extractedEtiqueta,
         details: `Ativo divergente isolado via scanner: ${extractedEtiqueta}`,
-        tenantid: user?.tenantid || 'CICOPAL'
+        tenantid: user?.tenantid || ''
       });
 
       setIsHierarchyLoading(false);
@@ -697,7 +697,7 @@ const Inventory: React.FC<InventoryProps> = ({
           table_name: 'local_assets',
           record_id: term,
           details: `Exception in scan query: ${err instanceof Error ? err.message : String(err)}`,
-          tenantid: user?.tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || ''
         });
       } catch (innerErr) {
         logger.error(">>> [Inventory SRE] Falha ao gravar log de erro físico:", innerErr);

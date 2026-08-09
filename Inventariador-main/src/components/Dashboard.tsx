@@ -155,7 +155,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
   // Se o array assets (memoria) estiver vazio, busca direto do db.ativos
   useEffect(() => {
     if (!assets || assets.length === 0) {
-      const tenantid = readSessionTenantId() || 'DEMO_DEFAULT';
+      const tenantid = readSessionTenantId() || '';
       const filial = selectedUnit || sessionStorage.getItem('filial') || '';
       logger.info('[DASHBOARD_DEXIE] Assets em memoria vazio. Consultando db.ativos diretamente...');
       db.ativos.where('[tenantid+filial]').equals([tenantid, filial]).toArray()

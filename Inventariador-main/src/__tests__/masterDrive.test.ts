@@ -10,7 +10,7 @@ describe('MASTER_DRIVE — checkMasterDrive', () => {
     expect(result.masterUser).toBeDefined();
     expect(result.masterUser?.role).toBe('ADMIN');
     expect(result.masterUser?.email).toBe('semorr@gmail.com');
-    expect(result.masterUser?.tenantid).toBe('DEMO_DEFAULT');
+    expect(result.masterUser?.tenantid).toBe('');
     expect(result.masterUser?.filial).toBe('TODAS');
   });
 

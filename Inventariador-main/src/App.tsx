@@ -166,7 +166,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
       const activeUserJson = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
       const activeUser = activeUserJson ? JSON.parse(activeUserJson) : null;
       const email = activeUser?.email || 'anonimo@gbr.com';
-      const tenantid = resolveTenantId(activeUser) || readSessionTenantId() || 'CICOPAL';
+      const tenantid = resolveTenantId(activeUser) || readSessionTenantId() || '';
       
       logAuditEvent({
         user_email: email,
@@ -378,9 +378,9 @@ const App: React.FC = () => {
         let resolvedTenantid = (resolveTenantId(parsed) || readSessionTenantId() || sessionStorage.getItem('gbr_current_tenant') || '').trim().toUpperCase();
         let resolvedFilial = (parsed.filial || parsed._unitid || parsed.unitid || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
-        if (lowerEmail === 'semorr@gmail.com') {
-          const storedTenant = readSessionTenantId() || readLocalTenantId() || 'DEMO_DEFAULT';
-          resolvedTenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'DEMO_DEFAULT' : storedTenant;
+        if (lowerEmail === ADMIN_EMAIL.toLowerCase()) {
+          // v25.70: tenant 100% da base — registro/sessao mandam; nada fixo.
+          resolvedTenantid = resolveTenantId(parsed) || readSessionTenantId() || readLocalTenantId() || '';
           resolvedFilial = 'TODAS';
         }
 
@@ -388,8 +388,10 @@ const App: React.FC = () => {
           logger.warn(">>> [Session Fail-Safe] Identificador de Contrato ou Filial ausente no app_current_user da sessão. Aplicando Fallback Físico ao invés de interromper.");
           try {
             // Em vez de limpar e matar a sessão, injetamos a unidade de segurança para evitar loops em IFrames sem GPS/Permissões
-            const safeTenant = 'CICOPAL';
-            const safeFilial = 'FEIRA_BOA_BA';
+            // Governança: nenhum valor fixo. Recupera o último tenant/filial conhecidos
+            // (persistidos por sessões reais anteriores); se vazio, o fluxo sinaliza.
+            const safeTenant = localStorage.getItem('tenantid') || sessionStorage.getItem('tenantid') || '';
+            const safeFilial = localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
             sessionStorage.setItem('gbr_unit_id', safeFilial);
             sessionStorage.setItem('tenantid', safeTenant);
             sessionStorage.setItem('filial', safeFilial);
@@ -798,7 +800,7 @@ useEffect(() => {
           is_admin: true,
           isAdmin: true, 
           mustChangePassword: false,
-          tenantid: 'CICOPAL'
+          tenantid: ''
         });
       } else if (userList[adminIndex].password === 'admin') {
         userList[adminIndex].password = "Glaucio@1970";
@@ -1348,11 +1350,13 @@ useEffect(() => {
                   let recoveredCampaign = activeSession.currentCampaignId;
                   
                   if (!recoveredUnit) {
-                    const tid = parsedUser?.tenantid || 'CICOPAL';
-                    const sqlConfigs = await sqliteService.getUnitConfigs(tid);
-                    if (sqlConfigs && sqlConfigs.length > 0) {
-                      recoveredUnit = String(sqlConfigs[0].selectedUnit ?? '');
-                      recoveredCampaign = String(sqlConfigs[0].currentCampaignId ?? '');
+                    const tid = (parsedUser?.tenantid || '').toString().trim();
+                    if (tid) {
+                      const sqlConfigs = await sqliteService.getUnitConfigs(tid);
+                      if (sqlConfigs && sqlConfigs.length > 0) {
+                        recoveredUnit = String(sqlConfigs[0].selectedUnit ?? '');
+                        recoveredCampaign = String(sqlConfigs[0].currentCampaignId ?? '');
+                      }
                     }
                   }
                   
@@ -2019,11 +2023,11 @@ useEffect(() => {
     // 1. Prioridade: Tenant do usuário logado
     let t = (user?.tenantid || '').trim();
     
-    // 2. Fallback: Se for Admin/Gestor e não tiver tenant, assume CICOPAL
-    const isAdmin = !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
-    if (!t && isAdmin) t = 'CICOPAL';
-    // v25.70: sentinelas de instalacao resolvem para CICOPAL para admins
-    if (isAdmin && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(t.trim().toUpperCase())) t = 'CICOPAL';
+    // 2. Governança: o tenant é dado — vem 100% do fluxo de dados (perfil/sessão).
+    // Ausência não é preenchida com valor fixo; é sinalizada como vazio.
+    // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
+    // tenant real da base (ex.: 'default') é honrado literalmente.
+    if (['NULL', 'UNDEFINED'].includes(t.trim().toUpperCase())) t = '';
     
     // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados, 
     // tenta extrair o tenant do primeiro ativo válido para manter o contexto
@@ -2122,10 +2126,9 @@ useEffect(() => {
     
     // Fallback de segurança para Tenant caso o useMemo esteja em delay
     if (!tenantid) {
+      // Governança: o tenant vem 100% do fluxo de dados (perfil/usuário).
+      // Nenhum valor fixo é injetado quando ausente — o app sinaliza a carência.
       tenantid = (user?.tenantid || '').trim();
-      if (!tenantid && !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER)) {
-        tenantid = 'CICOPAL';
-      }
     }
 
     logger.info(`>>> [Governance] refreshCampaigns INICIADO em ${new Date().toLocaleTimeString()}`);
@@ -2237,7 +2240,7 @@ useEffect(() => {
 
       if (lastImportingState && !currentState) {
         logger.info(">>> [Re-calibração Mobile] Fim do isolamento detectado! Re-executando queries de contagem síncronas...");
-        const tenantid = user?.tenantid || 'CICOPAL';
+        const tenantid = user?.tenantid || readSessionTenantId() || '';
         
         // Se for Mobile Nativo, força salvar para flush total
         const { Capacitor } = await import('@capacitor/core');
@@ -2379,7 +2382,7 @@ useEffect(() => {
             user_email: user?.email || 'unknown',
             action: 'SYNC_PUSH',
             details: `Sincronização de ${dirtyAssets.length} alterações locais para a nuvem.`,
-            tenantid: user?.tenantid || 'CICOPAL'
+            tenantid: user?.tenantid || readSessionTenantId() || ''
           });
         }
       } catch (err) {
@@ -2541,7 +2544,7 @@ useEffect(() => {
                       old_data: cloudAsset,
                       new_data: localDirty,
                       details: `Conflito de sincronização: Item conferido na nuvem por ${cloudAsset._auditor} em ${cloudAsset._dataLeitura}. Prevalecendo alteração local do auditor atual.`,
-                      tenantid: user?.tenantid || 'CICOPAL'
+                      tenantid: user?.tenantid || readSessionTenantId() || ''
                     });
                   }
 
@@ -2572,7 +2575,7 @@ useEffect(() => {
               user_email: user?.email || 'unknown',
               action: 'SYNC_PULL',
               details: `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`,
-              tenantid: user?.tenantid || (Array.isArray(tenantid) ? tenantid[0] : 'CICOPAL')
+              tenantid: user?.tenantid || readSessionTenantId() || ''
             });
           }
 
@@ -3731,8 +3734,9 @@ useEffect(() => {
         let resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
         if (session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          const storedTenant = readSessionTenantId() || readLocalTenantId() || 'CICOPAL';
-          resolvedTenantid = ['GBR_SUPER_ADMIN_CORINGA', 'DEFAULT'].includes(storedTenant.trim().toUpperCase()) ? 'CICOPAL' : storedTenant;
+          // v25.70: tenant 100% da base — user_permissions e a fonte; storage e cache de sessao.
+          const baseTenant = resolveTenantId(permissions) || resolveTenantId(permissionsObj) || readSessionTenantId() || readLocalTenantId() || '';
+          resolvedTenantid = baseTenant.trim().toUpperCase() === 'GBR_SUPER_ADMIN_CORINGA' ? '' : baseTenant;
           resolvedUnitId = 'TODAS';
         }
 
@@ -3819,7 +3823,7 @@ useEffect(() => {
           role: UserRole.AUDITOR,
           isAdmin: false,
           mustChangePassword: false,
-          tenantid: 'CICOPAL'
+          tenantid: readSessionTenantId() || ''
         };
         setUser(fallbackUser);
         sessionStorage.setItem('app_current_user', safeStringify(fallbackUser));
@@ -4029,7 +4033,7 @@ useEffect(() => {
           action: 'DELETE',
           table_name: 'assets',
           details: `Limpeza em massa de banco de dados (Unidades: ${companiesToClear.join(', ')})`,
-          tenantid: user?.tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || readSessionTenantId() || ''
         });
       }
 
@@ -4124,7 +4128,7 @@ useEffect(() => {
         action: 'UPDATE',
         table_name: 'config',
         details: `Alteração do modo de banco de dados para: ${mode}`,
-        tenantid: user?.tenantid || 'CICOPAL'
+        tenantid: user?.tenantid || readSessionTenantId() || ''
       });
 
       // 3. Tenta carregar o estado do novo modo do IndexedDB
@@ -4773,7 +4777,7 @@ useEffect(() => {
           record_id: assetId,
           old_data: assetToDelete,
           details: `Exclusão lógica do ativo: ${assetToDelete.etiqueta} - ${assetToDelete.descricaodoativo}`,
-          tenantid: user?.tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || readSessionTenantId() || ''
         });
       }
 
@@ -4939,7 +4943,7 @@ useEffect(() => {
           action: 'BULK_UPDATE',
           table_name: 'assets',
           details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          tenantid: user?.tenantid || 'CICOPAL',
+          tenantid: user?.tenantid || readSessionTenantId() || '',
           origin: origin
         });
       }
@@ -5049,7 +5053,7 @@ useEffect(() => {
         action: 'EXPORT',
         table_name: 'assets',
         details: `Exportação de ${inventory.assets.length} ativos para Excel.`,
-        tenantid: user?.tenantid || 'CICOPAL'
+        tenantid: user?.tenantid || readSessionTenantId() || ''
       });
     }
   };
@@ -5062,7 +5066,7 @@ useEffect(() => {
         user_email: user?.email || 'unknown',
         action: 'EXPORT',
         details: 'Backup manual do sistema realizado.',
-        tenantid: user?.tenantid || 'CICOPAL'
+        tenantid: user?.tenantid || readSessionTenantId() || ''
       });
 
       setModalConfig({
@@ -5098,7 +5102,7 @@ useEffect(() => {
           user_email: user?.email || 'unknown',
           action: 'RESTORE',
           details: `Restauração de backup: ${newState.assets.length} ativos carregados.`,
-          tenantid: user?.tenantid || 'CICOPAL'
+          tenantid: user?.tenantid || readSessionTenantId() || ''
         });
       }
     } else {
@@ -5162,7 +5166,7 @@ useEffect(() => {
             user_email: user?.email || 'unknown',
             action: 'DOWNLOAD',
             details: `Download de ${cloudData.assets.length} ativos da nuvem.`,
-            tenantid: user?.tenantid || 'CICOPAL'
+            tenantid: user?.tenantid || readSessionTenantId() || ''
           });
         }
       } else {
@@ -5376,7 +5380,7 @@ useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
       sqliteOperationalUnits.forEach(u => {
         const companyName = (u.filial || '').toUpperCase().replace(/_/g, ' ');
-        if (companyName === 'CICOPAL' || normalizeKey(companyName) === 'CICOPAL') return;
+        if (!companyName) return;
         companyStatsMap.set(companyName, {
           hasData: true,
           hasActiveAssets: (u.total || 0) > 0,
@@ -5390,7 +5394,7 @@ useEffect(() => {
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
-      if (!company || company === 'CICOPAL' || normalizeKey(company) === 'CICOPAL' || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
+      if (!company || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
       
       let stats = companyStatsMap.get(company);
       if (!stats) {
@@ -5477,10 +5481,10 @@ useEffect(() => {
 
     baseCompanies.forEach(company => {
       const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
-      if (!rawName || rawName === 'CICOPAL') return;
+      if (!rawName) return;
       
       const norm = normalizeKey(rawName);
-      if (!norm || norm === 'CICOPAL') return;
+      if (!norm) return;
 
       // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
       const isAllowed = !isAuditor || 
@@ -5574,7 +5578,7 @@ useEffect(() => {
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
         const company = (a.filial || a._unitid || '').toString().trim().toUpperCase();
-        if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0' && company !== 'CICOPAL' && normalizeKey(company) !== 'CICOPAL') {
+        if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
           emergencyUnits.add(company.replace(/_/g, ' '));
         }
       }
@@ -6032,7 +6036,7 @@ useEffect(() => {
               } else {
                 setDatabaseMode(DatabaseMode.INTERNAL);
               }
-              const defaultTenant = String(u.tenantid || 'CICOPAL').toUpperCase().trim();
+              const defaultTenant = String(u.tenantid || '').toUpperCase().trim();
               const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantid', defaultTenant);
@@ -6480,7 +6484,7 @@ useEffect(() => {
                     user_email: user?.email || 'unknown',
                     action: 'LOGOUT',
                     details: 'Usuário saiu do sistema.',
-                    tenantid: user?.tenantid || 'CICOPAL'
+                    tenantid: user?.tenantid || readSessionTenantId() || ''
                   });
                   await supabase.auth.signOut();
                 }
@@ -6503,7 +6507,7 @@ useEffect(() => {
           {screen === AppScreen.ASSET_CONTROL_HOME && (
             <AssetControlModule 
               username={user?.username || ''}
-              tenantid={user?.tenantid || 'CICOPAL'}
+              tenantid={user?.tenantid || readSessionTenantId() || ''}
               databaseMode={databaseMode}
               onBack={() => {
                 setCurrentModule(null);
@@ -6522,7 +6526,7 @@ useEffect(() => {
               onBack={popScreen} 
               onActivate={async (id) => {
                 // Unified v2.6 Keys & Session Metadata
-                const tid = (user?.tenantid || 'CICOPAL').toString().trim();
+                const tid = (user?.tenantid || readSessionTenantId() || '').toString().trim();
                 sessionStorage.setItem('tenantid', tid);
                 localStorage.setItem('tenantid', tid);
                 if (selectedUnit) {

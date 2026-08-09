@@ -45,7 +45,7 @@ export const auditService = {
         details,
         old_data: oldData,
         new_data: newData,
-        tenantid: updatedAsset.tenantid || updatedAsset.tenantid || 'CICOPAL'
+        tenantid: updatedAsset.tenantid || updatedAsset.tenantid || ''
       });
 
       logger.info(`>>> [Audit Engine] Delta gerado com sucesso para o ativo ${updatedAsset.id || updatedAsset.primarykey}`);

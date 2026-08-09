@@ -25,10 +25,10 @@ export const getCurrentTenantid = (): string => {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user.tenantid || user.tenantid || user.tenantid || 'DEMO_DEFAULT';
+      return user.tenantid || '';
     }
   } catch { /* ignore */ }
-  return 'DEMO_DEFAULT';
+  return '';
 };
 
 const handleDemoAuditIncrement = () => {
@@ -705,7 +705,7 @@ export const localDb = {
         ...found,
         is_admin: found.is_admin === true || found.isAdmin === true,
         isAdmin: found.is_admin === true || found.isAdmin === true,
-        tenantid: found.tenantid || found.tenantid || 'CICOPAL'
+        tenantid: found.tenantid || found.tenantid || ''
       } as unknown as User;
     },
 
@@ -723,7 +723,7 @@ export const localDb = {
           ...valueObj,
           is_admin: valueObj.is_admin === true || valueObj.isAdmin === true,
           isAdmin: valueObj.is_admin === true || valueObj.isAdmin === true,
-          tenantid: valueObj.tenantid || valueObj.tenantid || 'CICOPAL'
+          tenantid: valueObj.tenantid || valueObj.tenantid || ''
         } as unknown as User);
       });
       return users;

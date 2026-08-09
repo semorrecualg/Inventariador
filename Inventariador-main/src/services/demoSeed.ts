@@ -45,7 +45,7 @@ export const getDemoSeedAssets = (): Asset[] => {
       contacontabil: t.conta,
       TAG_INVENTARIO: isChecked ? `OK_${itemNum}` : '',
       ESTADO_CONSERVACAO: i % 5 === 0 ? 'REGULAR' : i % 8 === 0 ? 'RUIM' : 'BOM',
-      GRUPO_EMPRESARIAL: 'CICOPAL',
+      GRUPO_EMPRESARIAL: 'EMPRESA_DEMO',
       filial: 'MATRIZ',
       qt: 1,
       serial: `SN_DEMO_${itemNum}_BR`,
