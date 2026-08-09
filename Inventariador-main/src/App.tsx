@@ -11,6 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { canAccessDatabaseManager } from './utils/authUtils';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -3208,7 +3209,7 @@ useEffect(() => {
     }
 
     // 1.2 Administrative Guard for Database Manager screen
-    if (currentScreen === AppScreen.DATABASE_MANAGER && !user?.isSuperAdmin && user?.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+    if (currentScreen === AppScreen.DATABASE_MANAGER && !canAccessDatabaseManager(user)) {
       pushScreen(AppScreen.LOGIN);
       return;
     }

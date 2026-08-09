@@ -30,6 +30,35 @@ export const isAdminEmail = (email: string | null | undefined): boolean => {
 };
 
 /**
+ * Lê o email do admin configurado (VITE_ADMIN_EMAIL) de forma lazy.
+ * Permite que testes controlem o valor via vi.stubEnv, sem depender do
+ * momento de avaliação do módulo. Em produção o valor vem de import.meta.env
+ * (injetado pelo Vite no build); o fallback de process.env cobre o runtime Node/testes.
+ */
+export const getAdminEmail = (): string => {
+  const fromMeta =
+    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_ADMIN_EMAIL : undefined;
+  const fromProcess =
+    typeof process !== 'undefined' ? process.env?.VITE_ADMIN_EMAIL : undefined;
+  return String(fromMeta || fromProcess || '');
+};
+
+/**
+ * Gate de acesso ao Gestor de Base (Database Manager).
+ * Libera apenas para super-admin ou para o email configurado em VITE_ADMIN_EMAIL.
+ * Sem VITE_ADMIN_EMAIL configurado, NENHUM email tem acesso (governança estrita).
+ */
+export const canAccessDatabaseManager = (
+  user: { email?: string | null; isSuperAdmin?: boolean } | null | undefined,
+): boolean => {
+  if (!user) return false;
+  if (user.isSuperAdmin) return true;
+  const email = (user.email || '').trim().toLowerCase();
+  const admin = getAdminEmail().trim().toLowerCase();
+  return !!email && !!admin && email === admin;
+};
+
+/**
  * Checks whether the given email or username matches special local-only
  * accounts used for offline-first operation (admin, demo, etc.).
  */
