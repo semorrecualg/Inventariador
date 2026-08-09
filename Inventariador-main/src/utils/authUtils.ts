@@ -41,7 +41,7 @@ export const isLocalAdminIdentity = (
   const lowerUsername = (username || '').toLowerCase().trim();
 
   if (isAdminEmail(lowerEmail)) return true;
-  if (lowerUsername === 'semorr') return true;
+  if (lowerUsername === (ADMIN_EMAIL.split('@')[0] || 'admin')) return true;
   return false;
 };
 

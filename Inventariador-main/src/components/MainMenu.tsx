@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { ADMIN_EMAIL } from '../utils/authUtils';
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
@@ -189,7 +190,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
     }
   };
 
-  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === "semorr@gmail.com");
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);

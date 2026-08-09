@@ -1,3 +1,4 @@
+import { isLocalAdminIdentity } from '../utils/authUtils';
 import { create } from 'zustand';
 import { User, UserRole } from '../types';
 
@@ -49,10 +50,8 @@ export const useAuthStore = create<AuthState>((set) => ({
           const lowerEmail = (user.email || '').toLowerCase();
           const lowerUsername = (user.username || '').toLowerCase();
           return (
-            lowerUsername === 'admin' ||
-            lowerUsername === 'semorr' ||
+            isLocalAdminIdentity(lowerEmail, lowerUsername) ||
             user.role === 'DEMO' ||
-            lowerEmail === 'semorr@gmail.com' ||
             user.role === 'ADMIN' ||
             user.role === 'MASTER' ||
             user.role === 'MOBILE_SINGLE'

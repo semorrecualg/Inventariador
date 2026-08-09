@@ -335,7 +335,7 @@ const Login: React.FC<LoginProps> = ({
               loggedUser = { ...adminUser };
             } else {
               loggedUser = {
-                username: 'semorr',
+                username: (ADMIN_EMAIL.split('@')[0] || 'admin'),
                 name: 'Administrador Mestre',
                 email: ADMIN_EMAIL || 'admin@system.local',
                 role: UserRole.ADMIN,

@@ -108,7 +108,7 @@ export class AppBootstrapError extends Error {
   }
 }
 
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "semorr@gmail.com";
+const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -134,8 +134,7 @@ const checkIsAdmin = (u: User | null | undefined) => {
          roleStr === 'MASTER' || 
          roleStr === 'GESTOR' || 
          !!isAdm || 
-         email === ADMIN_EMAIL.toLowerCase() || 
-         email === 'semorr@gmail.com';
+         email === ADMIN_EMAIL.toLowerCase();
 };
 
 // Error Boundary Component
@@ -366,11 +365,11 @@ const App: React.FC = () => {
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       if (parsed && parsed.email) {
-        // Normalizar admin para semorr@gmail.com
+        // Normalizar admin conforme ADMIN_EMAIL (configurado via VITE_ADMIN_EMAIL)
         const lowerEmail = parsed.email.toLowerCase();
         let isAdmin = parsed.is_admin || parsed.isAdmin || parsed.role === 'ADMIN' || parsed.role === 'MASTER';
         let role = parsed.role || 'AUDITOR';
-        if (lowerEmail === 'semorr@gmail.com') {
+        if (lowerEmail === ADMIN_EMAIL.toLowerCase()) {
           isAdmin = true;
           role = 'ADMIN';
         }
@@ -475,8 +474,7 @@ const App: React.FC = () => {
   const isProfileLocal = useMemo(() => {
     if (!user) return false;
     const lowerEmail = (user.email || '').toLowerCase();
-    const lowerUsername = (user.username || '').toLowerCase();
-    return lowerUsername === 'admin' || lowerUsername === 'semorr' || user.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE';
+        return user.role === 'DEMO' || user.role === 'ADMIN' || user.role === 'MASTER' || user.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase();
   }, [user]);
 
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
@@ -1432,8 +1430,7 @@ useEffect(() => {
                         try {
                           const parsed = JSON.parse(currentUserStr);
                           const lowerEmail = (parsed.email || '').toLowerCase();
-                          const lowerUsername = (parsed.username || '').toLowerCase();
-                          if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                                                    if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
                             isLocal = true;
                           }
                         } catch { /* ignore */ }
@@ -1471,8 +1468,7 @@ useEffect(() => {
                       try {
                         const parsed = JSON.parse(currentUserStr);
                         const lowerEmail = (parsed.email || '').toLowerCase();
-                        const lowerUsername = (parsed.username || '').toLowerCase();
-                        if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                                                if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
                           isLocal = true;
                         }
                       } catch { /* ignore */ }
@@ -3669,7 +3665,7 @@ useEffect(() => {
         const isReallyEmpty = count === 0;
         setIsDatabaseEmpty(isReallyEmpty);
         
-        const isBypass = user?.email?.trim().toLowerCase() === 'semorr@gmail.com';
+        const isBypass = user?.email?.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
         if (isReallyEmpty && !isBypass) {
           const exemptScreens = [
             AppScreen.LOGIN, 
@@ -3947,8 +3943,7 @@ useEffect(() => {
           if (currentUserStr) {
             const parsed = JSON.parse(currentUserStr);
             const lowerEmail = (parsed.email || '').toLowerCase();
-            const lowerUsername = (parsed.username || '').toLowerCase();
-            if (lowerUsername === 'admin' || lowerUsername === 'semorr' || parsed.role === 'DEMO' || lowerEmail === 'semorr@gmail.com' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE') {
+                        if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
               isLocalUser = true;
             }
           }
