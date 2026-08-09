@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
-import { AppScreen } from '../types';
+import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot } from '../services/localDbService';
+import { syncAssetsToCloud, isInternalMode } from '../services/supabaseService';
+import { isAdminUser } from '../utils/authUtils';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -127,6 +129,65 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
     return sessionFolder || "NENHUM DIRETÓRIO VINCULADO";
   });
+
+  const [isMirroring, setIsMirroring] = useState<boolean>(false);
+  const [mirrorProgress, setMirrorProgress] = useState<number>(0);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+      if (userStr) {
+        const parsed = JSON.parse(userStr);
+        setIsAdmin(isAdminUser(parsed));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const enviarBaseParaNuvem = async () => {
+    try {
+      setIsMirroring(true);
+      setMirrorProgress(1);
+      addLog(`[SRE_CLOUD] Iniciando espelhamento em massa da base local para a Nuvem (Supabase)...`);
+
+      const ativos = await db.ativos.toArray();
+      if (!ativos || ativos.length === 0) {
+        addLog(`[SRE_CLOUD] Aviso: Nenhum ativo local para espelhar.`);
+        return;
+      }
+
+      // REGRA DE CONTRATO (tenant 100% da base): os tenantids vêm EXCLUSIVAMENTE
+      // da própria base carregada (zero valor fixo / zero fallback hard-coded).
+      const tenantsDaBase = Array.from(
+        new Set(
+          ativos
+            .map((a) => (a.tenantid || '').trim().toUpperCase())
+            .filter((t) => t && t !== 'UNDEFINED' && t !== 'NULL')
+        )
+      );
+      addLog(`[SRE_CLOUD] Contratos detectados na base: ${tenantsDaBase.length ? tenantsDaBase.join(' | ') : '(nenhum — Global)'}`);
+      addLog(`[SRE_CLOUD] Enviando ${ativos.length} ativos em lotes de 50 (Política SRE)...`);
+
+      const syncedIds = await syncAssetsToCloud(
+        ativos as unknown as Asset[],
+        tenantsDaBase.length > 0 ? tenantsDaBase : undefined,
+        (processed, total) => {
+          const pct = total > 0 ? Math.round((processed / total) * 100) : 100;
+          setMirrorProgress(Math.min(pct, 100));
+        }
+      );
+
+      setMirrorProgress(100);
+      addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
+      console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
+    } finally {
+      setIsMirroring(false);
+      setMirrorProgress(0);
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -405,6 +466,44 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <Trash2 size={14} />
             <span>{isPurging ? "EXECUTANDO PURGA..." : assetCount === 0 ? "BASE JÁ HIGIENIZADA" : "ZERAR BASE DE DADOS"}</span>
           </button>
+        </div>
+
+        {/* Espelhamento em Massa (Supabase) — Card */}
+        <div className="p-5 bg-sky-950/20 border border-sky-800/40 rounded-2xl flex flex-col md:flex-row md:items-center gap-4">
+          <div className="flex items-start gap-3 flex-1">
+            <div className="p-3 bg-sky-950/40 text-sky-400 rounded-full border border-sky-900/30 shrink-0">
+              <UploadCloud className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black uppercase text-sky-200 tracking-wider">Espelhamento em Massa — Supabase</h3>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide mt-1">
+                Sobe a base carregada para a tabela <b>assets</b> da Nuvem em lotes de 50, preservando o <b>tenantid de cada ativo</b> exatamente como veio da planilha (tenant 100% da base — zero valor fixo).
+              </p>
+            </div>
+          </div>
+          <div className="md:w-64 shrink-0 w-full">
+            <button
+              type="button"
+              onClick={enviarBaseParaNuvem}
+              disabled={isUploading || isPurging || isMirroring || !isAdmin || assetCount === 0 || isInternalMode || !navigator.onLine}
+              className="w-full flex items-center justify-center space-x-2 px-6 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border bg-sky-950/40 hover:bg-sky-900/60 disabled:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed text-sky-300 border-sky-800/60 active:scale-95"
+            >
+              <UploadCloud size={14} />
+              <span>
+                {isMirroring
+                  ? `SINCRONIZANDO: ${mirrorProgress}%`
+                  : !isAdmin
+                    ? "APENAS ADMIN"
+                    : assetCount === 0
+                      ? "BASE VAZIA"
+                      : isInternalMode
+                        ? "SUPABASE NÃO CONFIGURADO"
+                        : !navigator.onLine
+                          ? "SEM CONEXÃO"
+                          : "ENVIAR BASE PARA A NUVEM"}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 

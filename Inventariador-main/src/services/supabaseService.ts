@@ -877,6 +877,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const CHUNK_SIZE = 50; // Bloqueio em max 50 para evitar erro 400 (URL Too Long) na Nuvem
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
+  const failedRows: string[] = []; // Isolamento de registros rejeitados (diagnóstico por id)
 
   for (let i = 0; i < total; i += CHUNK_SIZE) {
     const chunk = assets.slice(i, i + CHUNK_SIZE);
@@ -960,32 +961,51 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       };
     });
 
+    const lote = Math.floor(i / CHUNK_SIZE) + 1;
     try {
       const { error } = await supabase
         .from('assets')
         .upsert(sanitizedAssetsPayload, { onConflict: 'id' });
 
       if (error) {
-        logger.error(`>>> [Supabase] Erro de integridade/esquema no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, error);
-        throw new SupabaseNetworkException(`Falha no upsert: ${error.message || 'Erro de esquema.'}`);
+        throw error;
       }
-
       successfullySyncedIds.push(...chunk.map(a => String(a.id)));
-      
-      if (onProgress) {
-        onProgress(Math.min(i + CHUNK_SIZE, total), total);
-      }
-      
-      // Delay visual para a esteira reativa
-      await new Promise(res => setTimeout(res, 40));
     } catch (err: unknown) {
-      logger.error(`>>> [Supabase] Erro de rede/esquema no lote ${Math.floor(i / CHUNK_SIZE) + 1}:`, err);
-      if (err instanceof SupabaseNetworkException) {
-        throw err;
+      // ISOLAMENTO POR ATIVO: se o lote falhar (ex.: schema incompatível em uma coluna),
+      // tenta cada linha individualmente para sincronizar o que é válido e identificar
+      // exatamente os registros rejeitados (id + motivo) — sem derrubar a esteira inteira.
+      let loteOk = 0;
+      for (const row of sanitizedAssetsPayload) {
+        try {
+          const { error: rowError } = await supabase.from('assets').upsert([row], { onConflict: 'id' });
+          if (rowError) {
+            failedRows.push(`${row.id}: ${rowError.message || 'Erro de esquema.'}`);
+          } else {
+            loteOk++;
+            successfullySyncedIds.push(String(row.id));
+          }
+        } catch (rowErr: unknown) {
+          const rowMsg = rowErr instanceof Error ? rowErr.message : String(rowErr);
+          failedRows.push(`${row.id}: ${rowMsg}`);
+        }
       }
-      const rawMsg = err instanceof Error ? err.message : String(err);
-      throw new SupabaseNetworkException(`Falha estrutural ou de rede: ${rawMsg}`);
+      logger.error(`>>> [Supabase] Lote ${lote}: ${loteOk}/${sanitizedAssetsPayload.length} ativos OK, ${sanitizedAssetsPayload.length - loteOk} rejeitados (isolamento ativo-a-ativo).`, err);
     }
+
+    if (onProgress) {
+      onProgress(Math.min(i + CHUNK_SIZE, total), total);
+    }
+
+    // Delay visual para a esteira reativa
+    await new Promise(res => setTimeout(res, 40));
+  }
+
+  if (failedRows.length > 0) {
+    logger.error(`>>> [Supabase] Espelhamento concluído com ${failedRows.length} registro(s) rejeitado(s) por esquema/dados.`);
+    throw new SupabaseNetworkException(
+      `Espelhamento parcial: ${successfullySyncedIds.length} ativos sincronizados, ${failedRows.length} rejeitados (ex.: ${failedRows.slice(0, 3).join(' | ')})`
+    );
   }
 
   return successfullySyncedIds;
