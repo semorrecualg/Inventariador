@@ -2211,8 +2211,6 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
  * Cria uma nova campanha na tabela oficial única
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
 
   const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
   const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
@@ -2238,7 +2236,9 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   }
 
   // 2. SINCRONIZAÇÃO EM NUVEM (Resiliência Distribuída)
-  if (!isInternal && supabase) {
+  // v25.70: a nuvem e tentada sempre que o client Supabase estiver configurado,
+  // independente do modo — o try-catch isolado mantem o fluxo local-first offline.
+  if (supabase) {
     logger.info(">>> [Hybrid] Tentando subir campanha para nuvem...");
     const payload = {
       id: newCampaign.id,
@@ -2247,6 +2247,7 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       status: newCampaign.status,
       tenantid: tenantVal,
       filial: unitVal,
+      unit_id: unitVal,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
@@ -2619,9 +2620,9 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  */
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   try {
-    const mode = localStorage.getItem('app_database_mode');
-    const isInternal = mode === 'INTERNAL';
-    
+    // v25.70: a sincronizacao com a nuvem e tentada sempre que o client Supabase
+    // estiver configurado, independente do modo (try-catch interno = offline-first).
+
     // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
     try {
       const { sqliteService } = await import('./sqliteService');
@@ -2674,14 +2675,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
     }
 
-    // Se for modo INTERNO, encerramos aqui (Isolamento Total)
-    if (isInternal) {
-      return true;
-    }
+    if (!supabase) return true;
 
-    if (!supabase) return false;
-
-  // 2. TENTATIVA DE SINCRONIZAÇÃO EM BACKGROUND (Apenas modo SUPABASE)
+  // 2. SINCRONIZAÇÃO EM NUVEM (falha silenciosa nao bloqueia o fluxo local)
   const syncToCloud = async () => {
       try {
         // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantid e filial)
@@ -2716,9 +2712,10 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       }
     };
 
-    syncToCloud();
+    // Aguardamos a sincronizacao (try-catch interno) para nao perder a ancora
+    // em caso de fechamento rapido do app — o dado local ja esta garantido antes.
+    await syncToCloud();
 
-    // Retornamos TRUE imediatamente porque o dado já está no localStorage
     return true;
   } catch (err: unknown) {
     const error = err as Error;

@@ -83,7 +83,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const fetchLocalCampaignsOnScreen = React.useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const currentTenant = (propsTenantid || user?.tenantid || 'CICOPAL').trim();
+      let currentTenant = (propsTenantid || user?.tenantid || 'CICOPAL').trim();
+      // v25.70: sentinelas de instalacao resolvem para CICOPAL para admins
+      if (isAdminUser(user) && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(currentTenant.trim().toUpperCase())) currentTenant = 'CICOPAL';
       const currentFilial = (initialUnit || '').trim();
       
       logger.info(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
@@ -102,7 +104,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     } finally {
       setIsRefreshing(false);
     }
-  }, [initialUnit, propsTenantid, campaigns, user?.tenantid]);
+  }, [initialUnit, propsTenantid, campaigns, user]);
 
   React.useEffect(() => {
     fetchLocalCampaignsOnScreen();
@@ -163,6 +165,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     const isAdmin = !!(isAdminUser(user));
     let tenantid = (propsTenantid || user?.tenantid || '').trim();
     if (!tenantid && isAdmin) tenantid = 'CICOPAL';
+    // v25.70: sentinelas de instalacao resolvem para CICOPAL no caso de admin
+    if (isAdmin && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(tenantid.trim().toUpperCase())) tenantid = 'CICOPAL';
 
     if (!tenantid || tenantid === 'N/A') {
       setErrorMessage('ERRO DE GOVERNANÇA: Tenant não identificado. Ação bloqueada.');

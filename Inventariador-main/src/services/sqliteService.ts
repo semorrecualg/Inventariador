@@ -350,7 +350,13 @@ export class SqliteService {
       requireSeriado: cfg.requireSeriado ? 1 : 0,
       allowNewAssets: cfg.allowNewAssets !== false ? 1 : 0,
       allowWriteOffs: cfg.allowWriteOffs !== false ? 1 : 0,
-      requirePlaqueta: cfg.requirePlaqueta ? 1 : 0
+      requirePlaqueta: cfg.requirePlaqueta ? 1 : 0,
+      // v25.70: ancora GPS persistida no disco fisico (Soberania de Dados)
+      lat: cfg.lat !== undefined && cfg.lat !== null ? Number(cfg.lat) : undefined,
+      lng: cfg.lng !== undefined && cfg.lng !== null ? Number(cfg.lng) : undefined,
+      radius_meters: cfg.radius_meters !== undefined && cfg.radius_meters !== null ? Number(cfg.radius_meters) : undefined,
+      is_active: cfg.is_active !== false ? 1 : 0,
+      updated_at: String(cfg.updated_at || '')
     }));
     await db.unit_configs.bulkPut(mapped);
   }
@@ -636,9 +642,15 @@ export class SqliteService {
     const mapped = campaigns.map(c => ({
       id: String(c.id || ''),
       name: String(c.name || ''),
-      status: String(c.status || ''),
-      tenantid: String(c.tenantid || c.tenantid || ''),
-      created_at: String(c.created_at || '')
+      description: String(c.description || ''),
+      status: String(c.status || 'CREATED'),
+      tenantid: String(c.tenantid || ''),
+      created_at: String(c.created_at || new Date().toISOString()),
+      start_date: String(c.start_date || c.created_at || new Date().toISOString()),
+      end_date: c.end_date ? String(c.end_date) : null,
+      unit_id: String(c.unit_id || c.filial || c._unitid || ''),
+      filial: String(c.filial || c.unit_id || c._unitid || ''),
+      created_by: String(c.created_by || '')
     }));
     await db.campaigns.bulkPut(mapped);
   }
@@ -864,9 +876,15 @@ export class SqliteService {
     const mapped = {
       id: String(c.id || ''),
       name: String(c.name || ''),
-      status: String(c.status || ''),
+      description: String(c.description || ''),
+      status: String(c.status || 'CREATED'),
       tenantid: String(c.tenantid || ''),
-      created_at: String(c.created_at || '')
+      created_at: String(c.created_at || new Date().toISOString()),
+      start_date: String(c.start_date || c.created_at || new Date().toISOString()),
+      end_date: c.end_date ? String(c.end_date) : null,
+      unit_id: String(c.unit_id || c.filial || c._unitid || ''),
+      filial: String(c.filial || c.unit_id || c._unitid || ''),
+      created_by: String(c.created_by || '')
     };
     await db.campaigns.put(mapped);
   }

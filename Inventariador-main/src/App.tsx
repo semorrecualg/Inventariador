@@ -2022,6 +2022,8 @@ useEffect(() => {
     // 2. Fallback: Se for Admin/Gestor e não tiver tenant, assume CICOPAL
     const isAdmin = !!(user?.isAdmin || user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
     if (!t && isAdmin) t = 'CICOPAL';
+    // v25.70: sentinelas de instalacao resolvem para CICOPAL para admins
+    if (isAdmin && ['DEFAULT', 'N/A', 'NULL', 'UNDEFINED'].includes(t.trim().toUpperCase())) t = 'CICOPAL';
     
     // 3. Segurança v25.10: Se ainda estiver vazio e houver ativos carregados, 
     // tenta extrair o tenant do primeiro ativo válido para manter o contexto
@@ -2325,7 +2327,8 @@ useEffect(() => {
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
-    return inventory.unitConfigs.find(c => c.unit_id === selectedUnit) || null;
+    const target = normalizeKey(selectedUnit);
+    return inventory.unitConfigs.find(c => normalizeKey(c.unit_id || c.filial || '') === target) || null;
   }, [inventory.unitConfigs, selectedUnit]);
 
   const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
@@ -3729,7 +3732,7 @@ useEffect(() => {
 
         if (session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
           const storedTenant = readSessionTenantId() || readLocalTenantId() || 'CICOPAL';
-          resolvedTenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? 'CICOPAL' : storedTenant;
+          resolvedTenantid = ['GBR_SUPER_ADMIN_CORINGA', 'DEFAULT'].includes(storedTenant.trim().toUpperCase()) ? 'CICOPAL' : storedTenant;
           resolvedUnitId = 'TODAS';
         }
 
