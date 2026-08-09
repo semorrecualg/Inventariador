@@ -22,3 +22,6 @@ create_junction.bat
 .env
 .env.*
 !*.env.example
+
+# Node dependencies — never commit
+node_modules/
