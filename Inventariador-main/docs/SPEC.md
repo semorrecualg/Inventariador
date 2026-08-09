@@ -44,20 +44,17 @@ react-signature-canvas, react-virtuoso, recharts, zustand, motion, lucide-react.
 
 ## 3. Requisitos funcionais
 
-### 3.1 Autenticação (3 camadas)
-1. **MASTER DRIVE (bypass soberano):** credencial `Glaucio@1970` / `admin` → escopo
-   `GLOBAL_SUPER_ADMIN`, pula Dexie/SQLite/Supabase.
-2. **Dexie local (offline):** autentica contra `localDb.users`; papéis
+### 3.1 Autenticação (2 camadas)
+1. **Dexie local (offline):** autentica contra `localDb.users`; papéis
    `TENANT_MASTER` / `OPERATIONAL_AUDITOR`.
-3. **Supabase Cloud:** somente em `databaseMode = SUPABASE_PLUS`; usuário cloud é
+2. **Supabase Cloud:** somente em `databaseMode = SUPABASE_PLUS`; usuário cloud é
    persistido localmente para acesso offline posterior.
 
 Perfis conhecidos:
 
 | Perfil | Usuário / E-mail | Senha |
 |---|---|---|
-| MASTER DRIVE (bypass) | `Glaucio@1970` | `admin` |
-| Admin (perfil) | `semorr@gmail.com` (`VITE_ADMIN_EMAIL`) | `admin` ou `Glaucio@1970` |
+| Admin (perfil) | `semorr@gmail.com` (`VITE_ADMIN_EMAIL`) | `admin` |
 | Backup admin (legado) | `admin` | `123456` |
 
 ### 3.2 Esteira operacional de campo (fluxo de telas)

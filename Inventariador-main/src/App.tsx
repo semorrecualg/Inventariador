@@ -802,9 +802,6 @@ useEffect(() => {
           mustChangePassword: false,
           tenantid: ''
         });
-      } else if (userList[adminIndex].password === 'admin') {
-        userList[adminIndex].password = "Glaucio@1970";
-        userList[adminIndex].mustChangePassword = false;
       }
       
       return userList;
@@ -3215,7 +3212,7 @@ useEffect(() => {
     }
 
     // 1.2 Administrative Guard for Database Manager screen
-    if (currentScreen === AppScreen.DATABASE_MANAGER && !user?.isSuperAdmin && user?.email !== "semorr@gmail.com") {
+    if (currentScreen === AppScreen.DATABASE_MANAGER && !user?.isSuperAdmin && user?.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
       pushScreen(AppScreen.LOGIN);
       return;
     }

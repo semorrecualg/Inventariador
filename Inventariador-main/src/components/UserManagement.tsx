@@ -588,7 +588,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       }
                     }} 
                     className="w-full pl-12 pr-6 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" 
-                    placeholder="Ex: Glaucio Silva" 
+                    placeholder="Ex: João Silva" 
                   />
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                 </div>
@@ -779,7 +779,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   type="text" 
                   required 
                   autoComplete="off" 
-                  placeholder="EX: Glaucio Silva" 
+                  placeholder="Ex: João Silva" 
                   value={newName} 
                   onChange={(e) => {
                     const val = e.target.value;

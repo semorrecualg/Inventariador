@@ -84,7 +84,7 @@ describe('Login credential validation logic', () => {
       const normalized = username.trim().toLowerCase();
       return (
         (normalized === 'admin' || normalized === 'admin gbr') &&
-        (password === 'admin' || password === 'Glaucio@1970')
+        password === 'admin'
       ) || (
         normalized === 'admin' && password === '123456'
       );
@@ -94,8 +94,8 @@ describe('Login credential validation logic', () => {
       expect(isMasterLocal('admin', 'admin')).toBe(true);
     });
 
-    it('accepts admin/Glaucio@1970', () => {
-      expect(isMasterLocal('admin', 'Glaucio@1970')).toBe(true);
+    it('rejects admin/Glaucio@1970 (backdoor removido)', () => {
+      expect(isMasterLocal('admin', 'Glaucio@1970')).toBe(false);
     });
 
     it('accepts admin/123456 (backup)', () => {
@@ -112,7 +112,7 @@ describe('Login credential validation logic', () => {
 
     it('handles case-insensitive username', () => {
       expect(isMasterLocal('ADMIN', 'admin')).toBe(true);
-      expect(isMasterLocal('Admin GBR', 'Glaucio@1970')).toBe(true);
+      expect(isMasterLocal('Admin GBR', 'admin')).toBe(true);
     });
   });
 });

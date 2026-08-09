@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail, ADMIN_EMAIL, checkMasterDrive } from '../utils/authUtils';
+import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
@@ -239,27 +239,7 @@ const Login: React.FC<LoginProps> = ({
       // evitamos redefini-lo aqui dentro para eliminar duplicação.
 
       // =======================================================
-      // A. MASTER DRIVE: BYPASS SOBERANO EXCLUSIVO (Glaucio@1970)
-      // =======================================================
-      const masterCheck = checkMasterDrive(inputUser, password);
-      if (masterCheck.isMaster && masterCheck.masterUser) {
-        logger.info(">>> [MOBILE-SHIELD] Super-Admin autenticado via Chave Mestra Única.");
-        clearTimeout(loginTimeout);
-        sessionStorage.clear();
-
-        sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
-        sessionStorage.setItem('tenantid', 'GBR_SUPER_ADMIN_CORINGA');
-
-        // Usando DATABASE_MANAGER (AppScreen.LOAD_DATABASE nao existe no enum)
-        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.DATABASE_MANAGER]));
-
-        onLogin(masterCheck.masterUser as unknown as User);
-        setIsLoading(false);
-        return;
-      }
-
-      // =======================================================
-      // 2. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
+      // 1. VALIDAÇÃO OFFLINE VIA DEXIE.JS (localDb.users)
       // =======================================================
       const dexieAuthResult = await localAuthenticate(
         (criteria) => localDb.users.get(criteria) as unknown as Promise<Record<string, unknown> | null | undefined>,
@@ -301,7 +281,7 @@ const Login: React.FC<LoginProps> = ({
       }
 
       const isMasterLocal = ((normalizedUsername === 'admin' || normalizedUsername === 'admin gbr' || isAdminEmail(normalizedUsername)) && 
-                            (password === 'admin' || password === 'Glaucio@1970')) ||
+                            password === 'admin') ||
                             (normalizedUsername === 'admin' && password === '123456');
       
       let matchedLocalUser = users.find(u => 
@@ -356,7 +336,7 @@ const Login: React.FC<LoginProps> = ({
             } else {
               loggedUser = {
                 username: 'semorr',
-                name: 'Glaucio (Admin Mestre)',
+                name: 'Administrador Mestre',
                 email: ADMIN_EMAIL || 'admin@system.local',
                 role: UserRole.ADMIN,
                 is_admin: true,
@@ -416,7 +396,7 @@ const Login: React.FC<LoginProps> = ({
 
         if (!localUser) {
           const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin') && 
-                                  (password === 'admin' || password === 'Glaucio@1970');
+                                  password === 'admin';
           
           if (isAdminFallback) {
             const adminUser = users.find(u => isAdminEmail(u.email));

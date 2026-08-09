@@ -142,7 +142,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
               }
             }}
             className="w-full px-4 py-3.5 rounded-2xl border border-accent/10 bg-white focus:border-accent outline-none transition-all text-ink font-bold shadow-sm text-sm"
-            placeholder="EX: Glaucio Silva"
+            placeholder="Ex: João Silva"
           />
         </div>
         <div className="space-y-1">

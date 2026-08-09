@@ -61,8 +61,8 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
   transações `db.transaction('rw', …)`). Proibido SQL raw/inline. Respeitar isolamento por
   tenant (`[tenantid+filial]`). Mudança de schema = nova `version(n)` no
   `InventoryDexieDatabase` (`sqliteService.ts`).
-- **Auth**: 3 camadas (MASTER DRIVE → Dexie → Barreira local/Supabase). Não quebrar o bypass
-  `Glaucio@1970`/`admin` nem o perfil `semorr@gmail.com`.
+- **Auth**: 2 camadas (Dexie → Barreira local/Supabase). Admin definido por
+  `VITE_ADMIN_EMAIL` (`isAdminEmail`) — sem credenciais fixas no código.
 - **Modos**: `INTERNAL` = sem rede (`isInternalMode=true`). **Supabase ativo** com schema
   padronizado no modo `SUPABASE_PLUS`, porém desligado por padrão. Gemini é opcional.
 - **Impacto em cascata**: mudanças em telas/estado exigem análise upstream e downstream
@@ -82,7 +82,7 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 
 Ver issue #6 (`semorrecualg/Inventariador`) e seção "Pendências" do `ARCHITECTURE.md`:
 typecheck limpo (Fase 0 concluída — tsconfig único + declarações ambient; ver `docs/MIGRACAO_HIBRIDA.md`), `logo.png` placeholder,
-`sessionStorage.clear()` do MASTER DRIVE, fluxo "base vazia" no Gestor de Base.
+fluxo "base vazia" no Gestor de Base.
 (Supabase já ativo com schema `tenantid` + `filial` padronizado — migrações em `scripts/`.)
 
 **Fase C pendente (ver `docs/PLANO_FASE_C_HIGIENIZACAO.md` §4–§5):** C3 (coerções N/D/F) ·

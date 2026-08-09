@@ -74,51 +74,6 @@ export const isAdminUser = (user: User | null | undefined): boolean => {
   return false;
 };
 
-/** Result of a MASTER_DRIVE credential check. */
-export interface MasterDriveResult {
-  isMaster: boolean;
-  masterUser?: {
-    role: string;
-    tenantid: string;
-    filial: string;
-    email: string;
-  };
-}
-
-/**
- * Checks whether the given credentials match the sovereign MASTER_DRIVE bypass.
- *
- * Pure function: does not touch sessionStorage, localStorage, or any external
- * state. The caller (Login.tsx handleSubmit) is responsible for side effects
- * such as clearing session, setting tokens, and routing.
- *
- * @param username - Raw username input (trimmed internally)
- * @param password - Raw password input
- * @returns MasterDriveResult with isMaster flag and optional masterUser payload
- */
-export const checkMasterDrive = (
-  username: string,
-  password: string,
-): MasterDriveResult => {
-  const inputUser = username.trim();
-
-  if (inputUser === 'Glaucio@1970' && password === 'admin') {
-    return {
-      isMaster: true,
-      masterUser: {
-        role: 'ADMIN',
-        // Master Drive é bypass de sistema (token GBR_SUPER_ADMIN_CORINGA agrega
-        // todos os tenants). tenantid vazio — nenhum valor de cliente fixo.
-        tenantid: '',
-        filial: 'TODAS',
-        email: 'semorr@gmail.com',
-      },
-    };
-  }
-
-  return { isMaster: false };
-};
-
 /** Result of a local user authentication against Dexie.js. */
 export interface AuthResult {
   user?: Record<string, unknown>;
@@ -167,45 +122,6 @@ export const authenticateLocalUser = async (
   } catch (err) {
     return { error: `Erro ao consultar banco Dexie: ${err instanceof Error ? err.message : String(err)}` };
   }
-};
-
-/**
- * Applies the MASTER_DRIVE bypass including side effects.
- *
- * Unlike the pure checkMasterDrive(), this function performs the real
- * sessionStorage and localStorage mutations that Login.tsx handleSubmit
- * would do on the MASTER_DRIVE path.
- *
- * Can be tested with mocked storage APIs in environments without jsdom.
- * The AppScreen enum values (LOGIN, DATABASE_MANAGER) are hardcoded as
- * stable strings — these enum members have not changed since v1.0.
- *
- * @param username - Raw username input (trimmed internally)
- * @param password - Raw password input
- * @returns MasterDriveResult with isMaster flag
- */
-export const applyMasterDriveSession = (
-  username: string,
-  password: string,
-): MasterDriveResult => {
-  const result = checkMasterDrive(username, password);
-
-  if (result.isMaster && result.masterUser) {
-    // Clear residual session data
-    sessionStorage.clear();
-
-    // Inject sovereign tokens
-    sessionStorage.setItem('gbr_admin_scope', 'GLOBAL_SUPER_ADMIN');
-    sessionStorage.setItem('tenantid', 'GBR_SUPER_ADMIN_CORINGA');
-
-    // Atomic route history: force navigation to database manager
-    localStorage.setItem(
-      'gbr_kardek_history',
-      JSON.stringify(['LOGIN', 'DATABASE_MANAGER']),
-    );
-  }
-
-  return result;
 };
 
 /**

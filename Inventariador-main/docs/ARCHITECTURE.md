@@ -103,24 +103,18 @@ App.tsx
 ## 5. Pipeline de autenticação — 3 CAMADAS
 
 Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
-(`checkMasterDrive`, `isAdminEmail`, `localAuthenticate`), `App.tsx` (onLogin).
+(`isAdminEmail`, `localAuthenticate`), `App.tsx` (onLogin).
 
 ```
-1. MASTER DRIVE (bypass soberano)
-   checkMasterDrive('Glaucio@1970','admin') → masterUser
-   ├─ sessionStorage: gbr_admin_scope=GLOBAL_SUPER_ADMIN, tenantid=GBR_SUPER_ADMIN_CORINGA
-   ├─ localStorage: gbr_kardek_history=[LOGIN, DATABASE_MANAGER]
-   └─ onLogin(masterUser)  →  pula Dexie/SQLite/Supabase
-
-2. DEXIE LOCAL (offline)
+1. DEXIE LOCAL (offline)
    localAuthenticate(findByEmail=localDb.users.get, username, password)
    ├─ role MASTER/ADMIN/is_admin → gbr_admin_scope=TENANT_MASTER (+ tenantid)
    └─ senão → OPERATIONAL_AUDITOR
    ├─ sessionStorage: app_current_user
    └─ onLogin(user)
 
-3. BARREIRA LOCAL + SUPABASE CLOUD
-   ├─ isMasterLocal (admin/‘admin gbr’/adminEmail + senha admin|Glaucio@1970) ou
+2. BARREIRA LOCAL + SUPABASE CLOUD
+   ├─ isMasterLocal (admin/‘admin gbr’/adminEmail + senha admin) ou
    │   matchedLocalUser (users prop ou tabela SQLite local) → login offline imediato
    └─ senão: só segue p/ Supabase se databaseMode === SUPABASE_PLUS
        (em INTERNAL: "Licença SOLO… Bloqueando tentativa…")
@@ -129,8 +123,7 @@ Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
 **Credenciais conhecidas:**
 | Perfil | Usuário / E-mail | Senha |
 |---|---|---|
-| MASTER DRIVE (bypass) | `Glaucio@1970` | `admin` |
-| Admin (perfil) | `semorr@gmail.com` (`VITE_ADMIN_EMAIL`) | `admin` **ou** `Glaucio@1970` |
+| Admin (perfil) | `semorr@gmail.com` (`VITE_ADMIN_EMAIL`) | `admin` |
 | Backup admin (legado) | `admin` | `123456` |
 
 **Escopos de sessão (`sessionStorage`):** `gbr_admin_scope` ∈ `GLOBAL_SUPER_ADMIN` |
@@ -294,7 +287,7 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 2. **Login "sem erro, sem avanço"** — URL presa em `#/login` porque o `pushScreen`
    interno não navegava a URL (o bridge do `AppRouter` era sobrescrito).
    → efeito `[history]` sincroniza `window.location.hash = screenToPath[top]`. ✅ verificado:
-   com `Glaucio@1970`/`admin` o app avança para `#/modules` (MODULE_SELECTION).
+   com o login do admin (VITE_ADMIN_EMAIL) o app avança para `#/modules` (MODULE_SELECTION).
 3. **Testes** — devDeps adicionadas (`jsdom`, `@testing-library/react`, `@testing-library/dom`);
    corrigidos `Modal.test.tsx`, `ErrorBoundary.test.tsx`, `useBufferController.test.tsx`
    → **103/103 verdes**.

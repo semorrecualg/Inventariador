@@ -779,8 +779,8 @@ export const localDb = {
     try {
       const dbUsers = await localDb.users.toArray();
       const normUser = username.trim().toLowerCase();
-      if ((normUser === 'admin' || normUser === 'admin gbr' || isAdminEmail(normUser)) && 
-          (password === 'admin' || password === 'Glaucio@1970')) {
+      if ((normUser === 'admin' || normUser === 'admin gbr' || isAdminEmail(normUser)) &&
+          password === 'admin') {
         return true;
       }
       if (normUser === 'admin' && password === '123456') {
