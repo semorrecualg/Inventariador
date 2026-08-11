@@ -549,7 +549,8 @@ export class SqliteService {
 
   public async bulkInsertAssetsOfflineFirst(
     assets: Record<string, unknown>[],
-    onProgress?: (processed: number, total: number) => void
+    onProgress?: (processed: number, total: number) => void,
+    options?: { markSynced?: boolean }
   ): Promise<void> {
     const total = assets.length;
     let processed = 0;
@@ -593,7 +594,7 @@ export class SqliteService {
               vlraquisic: Number(asset.vlraquisic ?? 0),
               sn1_recno: asset.sn1_recno !== undefined && asset.sn1_recno !== null ? Number(asset.sn1_recno) : null,
               sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
-              _is_synced: Number(asset._is_synced) === 1 ? 1 : 0,
+              _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
               _is_deleted: asset._is_deleted ? 1 : 0,
               _conferido: asset._conferido ? 1 : 0,
               _plaquetado: asset._plaquetado ? 1 : 0,

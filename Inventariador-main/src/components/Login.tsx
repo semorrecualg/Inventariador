@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, downloadBaseToLocal } from '../services/supabaseService';
+import { db } from '../services/sqliteService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
@@ -42,6 +43,8 @@ const Login: React.FC<LoginProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [downloadingBase, setDownloadingBase] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
 
@@ -385,6 +388,8 @@ const Login: React.FC<LoginProps> = ({
       }
 
       let loggedUser: User | null = null;
+      let cameFromCloud = false;
+      let cloudUnits: string[] | undefined;
       const isOnline = navigator.onLine;
 
       const doLocalAuthFallback = (): User => {
@@ -545,6 +550,13 @@ const Login: React.FC<LoginProps> = ({
           } catch (dbPersistErr) {
             logger.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
           }
+
+          cameFromCloud = true;
+          cloudUnits = Array.isArray(cloudUser.units)
+            ? (cloudUser.units as string[]).map(u => String(u).trim().toUpperCase())
+            : unitId
+              ? [unitId]
+              : undefined;
         } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
           logger.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
           
@@ -588,6 +600,30 @@ const Login: React.FC<LoginProps> = ({
       } else {
         // Sem internet ou modo local puro
         loggedUser = doLocalAuthFallback();
+      }
+
+      // REGRA DE OURO (inventariador): após autenticar na nuvem com tenant vinculado,
+      // baixa a base do tenant (somente as filiais atribuídas) se o dispositivo ainda
+      // estiver vazio — erro de download NÃO derruba o login (segue offline-ready).
+      if (loggedUser && cameFromCloud && loggedUser.tenantid) {
+        try {
+          const localCount = await db.local_assets.count();
+          if (localCount === 0) {
+            setDownloadingBase(true);
+            setDownloadProgress(0);
+            await downloadBaseToLocal(
+              loggedUser.tenantid,
+              cloudUnits && cloudUnits.length > 0 ? cloudUnits : undefined,
+              (processed, total) => setDownloadProgress(total > 0 ? Math.round((processed / total) * 100) : 100)
+            );
+            logger.info(`[Login] Base do tenant ${loggedUser.tenantid} baixada com sucesso para o dispositivo.`);
+          }
+        } catch (dlErr: unknown) {
+          const dlMsg = dlErr instanceof Error ? dlErr.message : String(dlErr);
+          logger.warn('[Login] Falha ao baixar a base do tenant (login segue; download pode ser refeito):', dlMsg);
+        } finally {
+          setDownloadingBase(false);
+        }
       }
 
       if (loggedUser) {
@@ -765,10 +801,15 @@ const Login: React.FC<LoginProps> = ({
 
         <button 
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || downloadingBase}
           className="w-full bg-accent text-white font-extrabold py-4 rounded-2xl shadow-md hover:shadow-lg hover:brightness-105 active:scale-[0.98] transition-all mt-6 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70 cursor-pointer"
         >
-          {isLoading ? (
+          {downloadingBase ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Baixando base... {downloadProgress}%</span>
+            </>
+          ) : isLoading ? (
             <>
               <Loader2 size={16} className="animate-spin" />
               <span>Autenticando...</span>

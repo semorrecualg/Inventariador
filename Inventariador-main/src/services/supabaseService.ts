@@ -1011,6 +1011,77 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   return successfullySyncedIds;
 };
 
+/**
+ * REGRA DE OURO (inventariador mobile): baixa a base do tenant da Nuvem para o
+ * banco local do dispositivo — paginado (1000/lote), opcionalmente filtrado
+ * pelas filiais/unidades operacionais atribuídas ao usuário.
+ * Tenant 100% da base: nada fixo, tudo vem da conta autenticada.
+ */
+export const downloadBaseToLocal = async (
+  tenantid: string,
+  filiais?: string[],
+  onProgress?: (processed: number, total: number) => void,
+): Promise<number> => {
+  if (!supabase || !navigator.onLine) {
+    throw new SupabaseNetworkException('Sem conexão ou Supabase não configurado para baixar a base.');
+  }
+
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) {
+    throw new Error('Tenant não identificado para download da base.');
+  }
+
+  const PAGE = 1000;
+  const cols = [
+    'id', 'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo',
+    'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco',
+    'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey',
+    'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno', 'gps_lat', 'gps_lng',
+    'id'
+  ].join(',');
+
+  const filiaisNorm = filiais && filiais.length > 0
+    ? filiais.map(f => String(f).trim().toUpperCase()).filter(Boolean)
+    : undefined;
+
+  logger.info(`>>> [Supabase] Iniciando download da base do tenant ${tenant}${filiaisNorm && filiaisNorm.length ? ` (filiais: ${filiaisNorm.join(' | ')})` : ' (todas as filiais)'}...`);
+
+  // 1. Contagem exata para o progresso
+  let countQuery = supabase.from('assets').select(cols, { count: 'exact' }).eq('tenantid', tenant);
+  if (filiaisNorm && filiaisNorm.length > 0) {
+    countQuery = countQuery.in('filial', filiaisNorm);
+  }
+  const { count, error: countErr } = await countQuery;
+  if (countErr) {
+    throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${countErr.message || 'Erro de esquema.'}`);
+  }
+  const total = count || 0;
+  if (total === 0) {
+    logger.warn(`>>> [Supabase] Base do tenant ${tenant} vazia na Nuvem.`);
+    return 0;
+  }
+
+  // 2. Baixa paginado (PostgREST limita a 1000 linhas por requisição)
+  const all: Record<string, unknown>[] = [];
+  for (let start = 0; start < total; start += PAGE) {
+    let q = supabase.from('assets').select(cols).eq('tenantid', tenant).order('id', { ascending: true }).range(start, start + PAGE - 1);
+    if (filiaisNorm && filiaisNorm.length > 0) {
+      q = q.in('filial', filiaisNorm);
+    }
+    const { data, error } = await q;
+    if (error) {
+      throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
+    }
+    all.push(...(data || []));
+    if (onProgress) onProgress(Math.min(start + PAGE, total), total);
+  }
+
+  // 3. Grava no banco local (markSynced: o que vem da nuvem já está sincronizado)
+  await sqliteService.bulkInsertAssetsOfflineFirst(all, (processed, t) => onProgress?.(processed, t), { markSynced: true });
+  logger.info(`>>> [Supabase] Base do tenant ${tenant} baixada: ${all.length} ativos no dispositivo.`);
+  return all.length;
+};
+
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
   if (getDatabaseMode() === 'INTERNAL') return;
   if (!supabase || !navigator.onLine) return;
