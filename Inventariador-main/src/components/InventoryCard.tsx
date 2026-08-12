@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, DexieAsset } from '../services/sqliteService';
+import { getCurrentTenantid } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { showRecoveryToast } from '../services/NavigationGuardService';
@@ -329,13 +330,18 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       await db.local_assets.put(updatedItem);
 
       // Também replicar nas outras tabelas de compatibilidade se existirem registros correspondentes
-      const existsAtivos = await db.ativos.get(ativoDetalhado.primarykey);
+      // Chave composta [tenantid+primarykey] (v6).
+      const detalhadoKey: [string, string] = [
+        String(ativoDetalhado.tenantid || '').trim().toUpperCase(),
+        String(ativoDetalhado.primarykey || '')
+      ];
+      const existsAtivos = await db.ativos.get(detalhadoKey);
       if (existsAtivos) {
-        await db.ativos.put(updatedItem);
+        await db.ativos.put({ ...updatedItem, tenantid: detalhadoKey[0] });
       }
-      const existsAssets = await db.assets.get(ativoDetalhado.primarykey);
+      const existsAssets = await db.assets.get(detalhadoKey);
       if (existsAssets) {
-        await db.assets.put(updatedItem);
+        await db.assets.put({ ...updatedItem, tenantid: detalhadoKey[0] });
       }
 
       // Log de auditoria local no Dexie
@@ -401,9 +407,15 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
     try {
       // Buscar primeiro por primarykey ou etiqueta na tabela de ativos
-      let asset = await db.ativos.where('primarykey').equals(normalizedBarcode).first();
+      // Escopo por tenant (chave composta v6): jamais cruzar o muro do contrato.
+      const scanTenant = getCurrentTenantid().trim().toUpperCase();
+      let asset = scanTenant
+        ? await db.ativos.get([scanTenant, normalizedBarcode])
+        : await db.ativos.where('primarykey').equals(normalizedBarcode).first();
       if (!asset) {
-        asset = await db.ativos.where('etiqueta').equals(normalizedBarcode).first();
+        asset = await db.ativos.where('etiqueta').equals(normalizedBarcode)
+          .filter(a => !scanTenant || String(a.tenantid || '').trim().toUpperCase() === scanTenant)
+          .first();
       }
 
       if (asset) {

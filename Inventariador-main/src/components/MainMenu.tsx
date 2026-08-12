@@ -4,6 +4,8 @@ import { ADMIN_EMAIL } from '../utils/authUtils';
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
+import { isAdminUser, isAuditorUser } from '../services/rbacService';
+import { canAccessDatabaseManager } from '../utils/authUtils';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -20,7 +22,6 @@ import {
   DatabaseZap,
   Building2,
   Trash2,
-  SlidersHorizontal,
   Tag,
   QrCode,
   Vibrate,
@@ -40,7 +41,8 @@ import {
   FolderOpen,
   HardDrive,
   HelpCircle,
-  PenTool
+  PenTool,
+  History
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
@@ -69,6 +71,8 @@ interface MainMenuProps {
   scanFeedbackMode: ScanFeedbackMode;
   onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
   initialDataMenuOpen?: boolean;
+  /** Painel a abrir automaticamente ao montar (tool grid da Unidade Operacional). */
+  initialOpenPanel?: 'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null;
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   selectedUnit: string | null;
@@ -124,6 +128,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   scanFeedbackMode,
   onUpdateScanFeedbackMode,
   initialDataMenuOpen = false,
+  initialOpenPanel = null,
   databaseMode,
   selectedUnit,
   darkMode,
@@ -158,6 +163,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onOpenHelp
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [isAuditMenuOpen, setIsAuditMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
@@ -190,7 +196,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
     }
   };
 
-  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+  const isAdmin = isAdminUser(user);
+  const isAuditor = isAuditorUser(user);
   const hasData = inventoryInfo.totalDatabase > 0;
 
   const [dirStatus, setDirStatus] = useState<{status: string, path: string, fileName?: string} | null>(null);
@@ -206,6 +213,17 @@ const MainMenu: React.FC<MainMenuProps> = ({
       });
     }
   }, [isDataMenuOpen, isAdmin]);
+
+  // Abre automaticamente o painel solicitado pela tool grid da Unidade Operacional
+  // (AJUSTES/DADOS/PAINEL/AUDITORIA) ao chegar no MainMenu.
+  useEffect(() => {
+    if (!initialOpenPanel) return;
+    if (initialOpenPanel === 'ADMIN' && isAdmin) setIsAdminMenuOpen(true);
+    if (initialOpenPanel === 'AUDIT' && isAuditor) setIsAuditMenuOpen(true);
+    if (initialOpenPanel === 'PREFERENCES') setIsPreferencesMenuOpen(true);
+    if (initialOpenPanel === 'DATA' && isAdmin) setIsDataMenuOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const validateBatteryLevel = async (): Promise<boolean> => {
     if (!Capacitor.isNativePlatform()) return true;
@@ -233,7 +251,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
   // 1. EXTRAÇÃO DEFENSIVA SEM CRASH DE RUNTIME
   const extractTenantid = (): string | null => {
     const tid = user?.tenantid;
-    if (!tid) {
+    // SOBERANIA DO PROPRIETÁRIO: admin global (sem tenantid fixo) navega
+    // livremente entre módulos — tenant vazio = todos os contratos.
+    if (!tid && !isAdmin) {
       showModal(
         "Erro de Segurança", 
         "Contrato (tenantid) não identificado no perfil do usuário logado. Contate o Administrador do sistema.", 
@@ -241,7 +261,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       );
       return null; // Interrompe sem disparar exceção fatal ('throw') que derruba a UI
     }
-    return String(tid).trim().toUpperCase();
+    return String(tid || '').trim().toUpperCase();
   };
 
   // 2. MALHA DE NAVEGAÇÃO À PROVA DE FALHAS DE MEMÓRIA E ESTADOS NULOS
@@ -389,58 +409,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
 
 
-      {/* TOOL GRID - MINIMALIST */}
-      <div className="px-6 py-4 bg-surface border-b border-border flex items-center justify-between">
-        <div className="flex items-center space-x-1.5 md:space-x-4 font-sans">
-          <button 
-            onClick={() => setIsPreferencesMenuOpen(true)} 
-            className="flex flex-col items-center space-y-1 group"
-          >
-            <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
-              <SlidersHorizontal size={20} />
-            </div>
-            <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
-          </button>
-
-          {isAdmin && (
-            <button 
-              onClick={() => setIsDataMenuOpen(true)} 
-              className="flex flex-col items-center space-y-1 group"
-            >
-              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
-                <DatabaseZap size={20} />
-              </div>
-              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Dados</span>
-            </button>
-          )}
-
-
-
-          {isAdmin && (
-            <button 
-              onClick={() => setIsAdminMenuOpen(true)} 
-              className="flex flex-col items-center space-y-1 group"
-            >
-              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
-                <Settings size={20} />
-              </div>
-              <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Painel</span>
-            </button>
-          )}
-        </div>
-
-        <div className="flex flex-col items-end">
-          <span className="text-[10px] font-bold text-ink uppercase tracking-widest">
-            {hasData ? `${inventoryInfo.count} Ativos` : 'Vazio'}
-          </span>
-          <div className="flex items-center space-x-1 mt-1">
-            <div className={`w-1.5 h-1.5 rounded-full ${hasData ? 'bg-success' : 'bg-slate-300'}`} />
-            <span className="text-[8px] font-medium text-ink-muted uppercase">Base Local</span>
-          </div>
-        </div>
-      </div>
-
-
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 no-scrollbar font-sans w-full">
         {/* Module 1: INVENTÁRIO → Seleção de Endereço (AddressSelector) antes do motor */}
         <button
@@ -502,7 +470,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
           <ChevronRight size={20} className="text-slate-300 group-hover:text-amber-600 transition-colors" />
         </button>
 
-        {/* Module 5: CONCILIACAO */}
+        {/* Module 5: CONCILIACAO — TRILHA B (AUDITOR / ADMIN) */}
+        {isAuditor && (
         <button
           onClick={() => onNavigate(AppScreen.ACCOUNT_RECONCILIATION)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:200ms]"
@@ -516,8 +485,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-emerald-600 transition-colors" />
         </button>
+        )}
 
-        {/* Module 6: ASSINATURA DIGITAL */}
+        {/* Module 6: ASSINATURA DIGITAL — TRILHA B (AUDITOR / ADMIN) */}
+        {isAuditor && (
         <button
           onClick={() => onNavigate(AppScreen.SIGNATURE)}
           className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:250ms]"
@@ -531,6 +502,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-rose-600 transition-colors" />
         </button>
+        )}
       </div>
 
 
@@ -613,7 +585,43 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.UNIT_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Building2 size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Filiais</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Configurador e Sincronizador de Unidades</p>
+                </div>
+              </button>
 
+              {canAccessDatabaseManager(user) && (
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.DATABASE_MANAGER); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><HardDrive size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Banco de Dados</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Carga, Limpeza, Backup e Restauração</p>
+                </div>
+              </button>
+              )}
+
+              {canAccessDatabaseManager(user) && (
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LOAD_HISTORY); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><History size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Histórico de Cargas</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">IMPORT / SYNC por contrato</p>
+                </div>
+              </button>
+              )}
+
+              {canAccessDatabaseManager(user) && (
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LICENSE_PROVISIONING); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Building2 size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Licenças</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Provisionar novo cliente (tenant + MASTER)</p>
+                </div>
+              </button>
+              )}
 
               <div className="w-full p-4 bg-bg-main border border-slate-200 rounded-2xl shadow-sm">
                 <div className="flex items-center mb-3">
@@ -688,6 +696,74 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </div>
             </div>
             <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">Security Protocol</div>
+          </div>
+        </div>
+      )}
+
+      {isAuditMenuOpen && (
+        <div className="fixed inset-0 z-[10000] bg-white/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
+          <div className="fixed top-8 left-6 z-[10001]">
+            <BackButton onClick={() => setIsAuditMenuOpen(false)} label="Voltar" />
+          </div>
+          <div className="w-full max-w-sm space-y-3">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-emerald-100 shadow-lg overflow-hidden p-1">
+                  <ListChecks className="text-emerald-600" size={32} />
+                </div>
+                <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Auditoria e Concordância</h2>
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Trilha B · Relatórios e Rastreabilidade</p>
+              </div>
+            
+            <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.ACCOUNT_RECONCILIATION); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ListChecks size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Conciliação Contábil</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Sobra física e contábil</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.IMPAIRMENT_REPORT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ShieldAlert size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Recuperabilidade</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Teste de Impairment (CPC 01 / IAS 36)</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.AUDIT_LOGS); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><FolderOpen size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Trilha de Auditoria</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Logs de inserção, edição e exclusão</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.SOFT_DELETE_REPORT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><Trash2 size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Desmobilizados</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Baixados e deletados com histórico</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.GLOBAL_PERFORMANCE); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><Activity size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Performance Global</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Ritmo de bipagem e avanço por equipe</p>
+                </div>
+              </button>
+
+              <button onClick={() => { setIsAuditMenuOpen(false); onNavigate(AppScreen.SIGNATURE); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><PenTool size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Assinatura Digital</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Encerramento físico do laudo</p>
+                </div>
+              </button>
+            </div>
+            <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">Audit Trail Protocol</div>
           </div>
         </div>
       )}

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { isAdminUser } from '../utils/authUtils';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot } from '../services/supabaseService';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { Device } from '@capacitor/device';
 import { logger } from '../utils/logger';
@@ -77,6 +77,17 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   // Sincronização Local para Resposta Instantânea v25.50
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
 
+  // Agrupamento por filial para a visão de manutenção administrativa (todas as campanhas)
+  const campaignsByFilial = React.useMemo(() => {
+    const groups = new Map<string, InventoryCampaign[]>();
+    localCampaigns.forEach(c => {
+      const filial = String(c.filial || c.unit_id || c._unitid || '').trim().toUpperCase() || 'TODAS';
+      if (!groups.has(filial)) groups.set(filial, []);
+      groups.get(filial)!.push(c);
+    });
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [localCampaigns]);
+
   // CORREÇÃO DA LEITURA LOCAL E RENDERIZAÇÃO CENTRAL:
   // Carrega as campanhas ativas diretamente da tabela local via Dexie/localDb nativo
   // com a tranca de isolamento multidomínio (tenantid / unit_id)
@@ -90,10 +101,28 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       const currentFilial = (initialUnit || '').trim();
       
       logger.info(`>>> [Dexie Native] Lendo campanhas para o Tenant: ${currentTenant}, Filial: ${currentFilial}`);
-      
-      const parsedCampaigns = await localDb.campaigns.toArray(currentTenant, currentFilial);
-      logger.info(`>>> [Dexie Native] Campanhas lidas do banco local:`, parsedCampaigns);
-      
+
+      // Visão de manutenção: merge local + nuvem.
+      // Com tenant identificado usa o fetchCampaigns (local-first + enriquecimento cloud);
+      // sem tenant (admin global / mestre) lista TODAS as campanhas por filial.
+      let parsedCampaigns: InventoryCampaign[] = [];
+      try {
+        parsedCampaigns = currentTenant
+          ? await fetchCampaigns(currentTenant, currentFilial || null)
+          : await fetchAllCampaigns();
+      } catch (mergeErr) {
+        logger.error('>>> [Dexie Native] Erro no merge local+nuvem, caindo para leitura local:', mergeErr);
+        parsedCampaigns = await localDb.campaigns.toArray(currentTenant, currentFilial);
+      }
+
+      // Fallback de soberania: se o merge retornou vazio (ex.: sem rede), tenta o local puro
+      if (parsedCampaigns.length === 0) {
+        const localOnly = await localDb.campaigns.toArray(currentTenant, currentFilial);
+        if (localOnly.length > 0) parsedCampaigns = localOnly;
+      }
+
+      logger.info(`>>> [Dexie Native] Campanhas carregadas (local+nuvem):`, parsedCampaigns);
+
       setLocalCampaigns(parsedCampaigns);
       return parsedCampaigns;
     } catch (err) {
@@ -112,7 +141,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   }, [initialUnit, propsTenantid, fetchLocalCampaignsOnScreen]);
 
   React.useEffect(() => {
-    if (campaigns && !isRefreshing && !isSaving) {
+    // Sincroniza com a prop apenas quando ela trouxer dados de fato. Evita zerar o
+    // resultado local+nuvem carregado pela leitura interna quando o state do App
+    // ainda está vazio (ex.: refreshCampaigns abortou por falta de tenantid).
+    if (campaigns && campaigns.length > 0 && !isRefreshing && !isSaving) {
       setLocalCampaigns(campaigns);
     }
   }, [campaigns, isRefreshing, isSaving]);
@@ -568,8 +600,18 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="space-y-3">
-                {localCampaigns.map(campaign => (
+              <div className="space-y-5">
+                {campaignsByFilial.map(([filial, items]) => (
+                  <div key={filial} className="space-y-3">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.16em]">
+                        FILIAL: {filial}
+                      </span>
+                      <span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-full border border-blue-500/10">
+                        {items.length} EVENTO{items.length !== 1 ? 'S' : ''}
+                      </span>
+                    </div>
+                    {items.map(campaign => (
                   <motion.div 
                     key={campaign.id}
                     initial={{ opacity: 0, y: 10 }}
@@ -651,6 +693,8 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                       </button>
                     </div>
                   </motion.div>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}

@@ -1,4 +1,4 @@
-import { UserRole } from '../types';
+import { AppScreen, UserRole } from '../types';
 import { sqliteService } from '../services/sqliteService';
 import { isAdminEmail } from './authUtils';
 import { logger } from './logger';
@@ -30,7 +30,13 @@ export async function processarRoteamentoPosLoginSaas(
     throw new Error("Erro de consistência: Perfil MASTER sem empresa vinculada.");
   }
 
-  const totalAtivosLocal = await sqliteService.countAtivos().catch(() => 0);
+  // SRE ISOLAMENTO: a contagem que decide o roteamento é escopada ao tenant do
+  // usuário. Sem isso, um MASTER de um tenant novo (ex.: CLIENTETESTE) herdaria
+  // a contagem global (ex.: dados do CICOPAL em cache local) e cairia no fluxo
+  // de "base preenchida" em vez de ser direcionado à primeira carga de dados.
+  const totalAtivosLocal = user.tenantid
+    ? await sqliteService.countAtivosByTenant(user.tenantid).catch(() => 0)
+    : await sqliteService.countAtivos().catch(() => 0);
   const isSuperAdmin = isAdminEmail(user.email);
   const isMaster = String(user.role).toUpperCase() === 'MASTER';
 
@@ -64,4 +70,35 @@ export async function processarRoteamentoPosLoginSaas(
     }
     return;
   }
+}
+
+/**
+ * Resolve a tela de destino APÓS a escolha de um contexto de trabalho
+ * (contrato + filial) no seletor pós-login. Reusa as mesmas regras de
+ * isolamento por tenant do roteamento padrão, com um atalho operacional:
+ * auditores com base preenchida vão DIRETO ao hub da filial (MAIN_MENU),
+ * sem repetir a seleção de unidade — a filial já foi escolhida no seletor.
+ */
+export async function resolvePostSelectionScreen(
+  user: Pick<SupabaseUserProfile, 'email' | 'role'> & { tenantid?: string | null }
+): Promise<AppScreen> {
+  const role = String(user.role || '').toUpperCase();
+  if (role === 'DEMO') return AppScreen.DASHBOARD;
+
+  const totalAtivosLocal = user.tenantid
+    ? await sqliteService.countAtivosByTenant(user.tenantid).catch(() => 0)
+    : await sqliteService.countAtivos().catch(() => 0);
+
+  const isSuperAdmin = isAdminEmail(user.email);
+  const isMaster = role === 'MASTER';
+
+  // Base vazia para o contrato escolhido → primeira carga (ou aguardar admin)
+  if (totalAtivosLocal === 0) {
+    if (isSuperAdmin || isMaster) return AppScreen.DATABASE_MANAGER;
+    return AppScreen.MODULE_SELECTION;
+  }
+
+  // Base preenchida → painel para admin/master, hub direto para auditor
+  if (isSuperAdmin || isMaster || role === 'ADMIN') return AppScreen.MODULE_SELECTION;
+  return AppScreen.MAIN_MENU;
 }

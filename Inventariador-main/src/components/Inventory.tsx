@@ -340,11 +340,25 @@ const Inventory: React.FC<InventoryProps> = ({
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
 
   // BARREIRA DE PROTEÇÃO CONTRA REFRESH (F5 SEGURO)
+  // AUTO-REPARO SRE: além de observar o flag, tenta inicializar o motor Dexie
+  // quando ele não estiver pronto (init() é idempotente e db.open() em banco já
+  // aberto é no-op). Isso impede o congelamento eterno em "RE-INICIALIZANDO
+  // SISTEMA GBR" quando isInitialized estiver false por qualquer motivo.
   const [isDbReady, setIsDbReady] = useState(sqliteService.getIsInitialized());
 
   useEffect(() => {
+    let isMounted = true;
     let checkTimer: NodeJS.Timeout | null = null;
-    const verifyDatabaseInit = () => {
+    const verifyDatabaseInit = async () => {
+      if (!isMounted) return;
+      if (!sqliteService.getIsInitialized()) {
+        try {
+          await sqliteService.init(true);
+        } catch (err) {
+          logger.warn('>>> [Inventory] Falha na inicialização de emergência do motor Dexie:', err);
+        }
+      }
+      if (!isMounted) return;
       const initialized = sqliteService.getIsInitialized();
       if (initialized) {
         setIsDbReady(true);
@@ -354,6 +368,7 @@ const Inventory: React.FC<InventoryProps> = ({
     };
     verifyDatabaseInit();
     return () => {
+      isMounted = false;
       if (checkTimer) clearTimeout(checkTimer);
     };
   }, []);

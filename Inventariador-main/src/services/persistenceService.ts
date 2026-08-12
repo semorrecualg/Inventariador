@@ -172,13 +172,17 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
 
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
   await db.transaction('rw', [db.local_assets, db.ativos], async () => {
-    const existingActive = await db.ativos.get(assetData.primarykey);
-    const existingLocal = await db.local_assets.get(assetData.primarykey);
+    // Chave composta [tenantid+primarykey] — o tenantid é o muro entre contratos.
+    const tenantKey = String(assetData.tenantid || '').trim().toUpperCase();
+    const assetKey: [string, string] = [tenantKey, String(assetData.primarykey || '')];
+    const existingActive = await db.ativos.get(assetKey);
+    const existingLocal = await db.local_assets.get(assetKey);
 
     const mergedData = {
       ...(existingActive || {}),
       ...(existingLocal || {}),
       ...assetData,
+      tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
       _conferido: 1,
       _is_synced: 0,
       updated_at: new Date().toISOString()
@@ -187,7 +191,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
     if (existingActive) {
-      await db.ativos.update(assetData.primarykey, { _conferido: 1 });
+      await db.ativos.update(assetKey, { _conferido: 1 });
     }
   });
 

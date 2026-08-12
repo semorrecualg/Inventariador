@@ -71,4 +71,27 @@ describe('Gate do Gestor de Base (canAccessDatabaseManager)', () => {
       expect(canAccessDatabaseManager({ email: 'operador@x.com', isSuperAdmin: true })).toBe(true);
     });
   });
+
+  describe('Trilha A do RBAC (docs/RBAC_GOVERNANCA.md): ADMIN/MASTER acessam o Gestor de Base', () => {
+    beforeEach(() => {
+      vi.stubEnv('VITE_ADMIN_EMAIL', 'semorr@gmail.com');
+    });
+
+    it('libera MASTER (cliente provisionado) independente do email', () => {
+      expect(canAccessDatabaseManager({ email: 'master@cliente.com', role: 'MASTER' })).toBe(true);
+    });
+
+    it('libera ADMIN independente do email', () => {
+      expect(canAccessDatabaseManager({ email: 'admin@cliente.com', role: 'ADMIN' })).toBe(true);
+    });
+
+    it('bloqueia AUDITOR mesmo com email válido', () => {
+      expect(canAccessDatabaseManager({ email: 'auditor@empresa.com', role: 'AUDITOR' })).toBe(false);
+    });
+
+    it('bloqueia papel desconhecido/sem papel', () => {
+      expect(canAccessDatabaseManager({ email: 'x@y.com', role: 'USER' })).toBe(false);
+      expect(canAccessDatabaseManager({ email: 'x@y.com' })).toBe(false);
+    });
+  });
 });

@@ -28,7 +28,9 @@ import {
 } from 'lucide-react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
+import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
+import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
 
 interface UserManagementProps {
@@ -87,7 +89,19 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       : []
   );
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [showNewPasswordConfirm, setShowNewPasswordConfirm] = useState(false);
   const [provisionOnCreate, setProvisionOnCreate] = useState(true);
+  // Sub-usuário de "login rápido" (credencial local, encapsulado no tenant do MASTER)
+  const [quickLoginMode, setQuickLoginMode] = useState(() => currentUser?.role === UserRole.MASTER);
+  const isMasterCurrent = currentUser?.role === UserRole.MASTER;
+  const strongRequiredForNew = newRole === UserRole.MASTER || newRole === UserRole.ADMIN;
+  const newPwCheck = newPassword
+    ? (strongRequiredForNew ? validateStrongPassword(newPassword) : validateQuickLoginPassword(newPassword))
+    : null;
+  const newPwLabels = strongRequiredForNew
+    ? STRONG_PASSWORD_RULE_LABELS
+    : ['Mínimo de 6 caracteres', 'Pelo menos uma letra', 'Pelo menos um número'];
 
   // Sincronizar estados quando o usuário atual mudar (ex: carregamento lento da nuvem)
   React.useEffect(() => {
@@ -140,8 +154,29 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return;
     }
 
+    // POLÍTICA DE SENHA:
+    //  - MASTER/ADMIN exigem senha FORTE (5 regras);
+    //  - sub-usuário de "login rápido" exige senha LEVE (mín. 6 + letra + número).
+    const strongRequired = newRole === UserRole.MASTER || newRole === UserRole.ADMIN;
+    const pwCheck = quickLoginMode
+      ? validateQuickLoginPassword(password)
+      : strongRequired
+        ? validateStrongPassword(password)
+        : { valid: true, errors: [], score: 0 };
+    if (!pwCheck.valid) {
+      showModal("Senha Inválida", `A senha não atende aos requisitos: ${pwCheck.errors.join('; ')}.`, "error");
+      return;
+    }
+    if (password !== newPasswordConfirm) {
+      showModal("Confirmação de Senha", "As senhas não conferem.", "error");
+      return;
+    }
+
+    // Sub-usuário de login rápido: credencial local, sem conta no Supabase Auth
+    const shouldProvision = provisionOnCreate && !quickLoginMode;
+
     // Provisionamento no Supabase Auth se solicitado
-    if (provisionOnCreate) {
+    if (shouldProvision) {
       setIsProvisioning(true);
       try {
         const result: ProvisionResult = await provisionUserInAuth(
@@ -198,7 +233,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       tenantid: normTenantid,
       filial: normUnitId,
       unitid: normUnitId,
-      units: normUnits
+      units: normUnits,
+      // Encapsulamento: sub-usuário de login rápido é amarrado ao tenant do criador (MASTER)
+      quickLogin: quickLoginMode ? true : undefined
     };
 
     setUsers(prev => {
@@ -206,12 +243,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       localStorage.setItem('app_users', safeStringify(updated));
       return updated;
     });
+
+    // Reflexo local: persiste no armazenamento físico (localforage/Dexie) para
+    // que o usuário sobreviva a reloads e fique disponível no modo offline/INTERNAL.
+    try {
+      await localDb.users.add(newUser);
+      logger.info(`[UserManagement] Usuário ${email} persistido no armazenamento local.`);
+    } catch (persistErr) {
+      logger.warn('[UserManagement] Falha ao persistir usuário no armazenamento local:', persistErr);
+    }
     
     setNewName('');
     setNewUsername('');
     setNewEmail('');
     setNewPassword('');
+    setNewPasswordConfirm('');
+    setShowNewPasswordConfirm(false);
     setNewRole(UserRole.AUDITOR);
+    setQuickLoginMode(currentUser?.role === UserRole.MASTER);
     setIsAddModalOpen(false);
     
     // Feedback de sucesso para o usuário
@@ -282,7 +331,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     }
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || !editEmail) {
       logger.warn('[UserManagement] Tentativa de salvar edição com campos obrigatórios vazios.');
@@ -339,6 +388,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return updated;
     });
 
+    // Reflexo local: atualiza o registro no armazenamento físico (upsert por e-mail).
+    try {
+      await localDb.users.add(updatedUser);
+      logger.info(`[UserManagement] Edição de ${email} persistida no armazenamento local.`);
+    } catch (persistErr) {
+      logger.warn('[UserManagement] Falha ao persistir edição no armazenamento local:', persistErr);
+    }
+
     // Se o usuário editado for o usuário logado, atualiza o estado global e o localStorage
     if (currentUser && selectedUser.email.toLowerCase() === currentUser.email.toLowerCase()) {
       logger.info('[UserManagement] Atualizando dados do usuário logado...');
@@ -379,6 +436,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
             localStorage.setItem('app_users', safeStringify(updated));
             return updated;
           });
+          try {
+            await localDb.users.remove(email);
+            logger.info(`[UserManagement] Acesso de ${email} removido do armazenamento local.`);
+          } catch (persistErr) {
+            logger.warn('[UserManagement] Falha ao remover usuário do armazenamento local:', persistErr);
+          }
         } catch (err) {
           logger.error('Erro ao remover usuário da nuvem:', err);
           showModal("Erro", "Não foi possível remover o usuário da nuvem. Tente novamente.", "error");
@@ -617,6 +680,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
+                  <button 
+                    type="button"
+                    onClick={() => setEditRole(UserRole.AUXILIARY_AUDITOR)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.AUXILIARY_AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Aux. Audit.
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setEditRole(UserRole.USER)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.USER ? 'bg-white text-slate-700 shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Operador
+                  </button>
                   {(currentUser?.role === UserRole.ADMIN || isAdminEmail(currentUser?.email)) && (
                     <>
                       <button 
@@ -708,7 +785,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       {isAddModalOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn overflow-y-auto">
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative animate-slideUp my-auto modern-card">
-            <button onClick={() => setIsAddModalOpen(false)} className="absolute top-6 right-6 p-3 bg-bg-main border border-border rounded-2xl text-ink-muted hover:text-ink transition-all shadow-sm"><X size={20} /></button>
+            <button onClick={() => { setIsAddModalOpen(false); setNewPasswordConfirm(''); setShowNewPasswordConfirm(false); setQuickLoginMode(currentUser?.role === UserRole.MASTER); }} className="absolute top-6 right-6 p-3 bg-bg-main border border-border rounded-2xl text-ink-muted hover:text-ink transition-all shadow-sm"><X size={20} /></button>
             <div className="text-center mb-8">
               <h3 className="text-2xl font-bold text-ink uppercase tracking-tight">Novo Inventariante</h3>
               <p className="text-[11px] font-bold text-ink-muted uppercase tracking-widest mt-2">Criação de Username de Acesso</p>
@@ -821,6 +898,20 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   >
                     Auditor
                   </button>
+                  <button 
+                    type="button"
+                    onClick={() => setNewRole(UserRole.AUXILIARY_AUDITOR)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.AUXILIARY_AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Aux. Audit.
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setNewRole(UserRole.USER)}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.USER ? 'bg-white text-slate-700 shadow-sm border border-border' : 'text-ink-muted'}`}
+                  >
+                    Operador
+                  </button>
                   {(currentUser?.role === UserRole.ADMIN || isAdminEmail(currentUser?.email)) && (
                     <>
                       <button 
@@ -853,21 +944,69 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                     {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                {newPwCheck && (
+                  <ul className="space-y-1 mt-1">
+                    {newPwLabels.map((label) => {
+                      const ok = !newPwCheck.errors.includes(label);
+                      return (
+                        <li key={label} className={`flex items-center text-[9px] font-bold uppercase tracking-widest ${ok ? 'text-emerald-600' : 'text-ink-muted'}`}>
+                          {ok ? <Check size={11} className="mr-1.5" /> : <X size={11} className="mr-1.5" />}
+                          {label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
 
-              {databaseMode !== DatabaseMode.INTERNAL && (
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Confirmar Senha</label>
+                <div className="relative">
+                  <input type={showNewPasswordConfirm ? "text" : "password"} required autoComplete="off" placeholder="••••••••" value={newPasswordConfirm} onChange={(e) => setNewPasswordConfirm(e.target.value)} className="w-full pl-6 pr-14 py-4 bg-bg-main rounded-3xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all shadow-sm" />
+                  <button 
+                    type="button"
+                    onClick={() => setShowNewPasswordConfirm(!showNewPasswordConfirm)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted p-2 hover:text-accent transition-colors"
+                  >
+                    {showNewPasswordConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                {newPasswordConfirm && (
+                  <p className={`text-[9px] font-bold uppercase tracking-widest ${newPassword === newPasswordConfirm ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {newPassword === newPasswordConfirm ? '✓ Senhas conferem' : '✕ Senhas não conferem'}
+                  </p>
+                )}
+              </div>
+
+              {/* LOGIN RÁPIDO — sub-usuário encapsulado no tenant do MASTER */}
+              {isMasterCurrent ? (
                 <div 
-                  className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
-                  onClick={() => setProvisionOnCreate(!provisionOnCreate)}
+                  className="flex items-center space-x-3 p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100/50 cursor-pointer hover:bg-indigo-50 transition-all" 
+                  onClick={() => setQuickLoginMode(!quickLoginMode)}
                 >
-                  <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${provisionOnCreate ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-emerald-200 bg-white'}`}>
-                    {provisionOnCreate && <Check size={12} strokeWidth={4} />}
+                  <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${quickLoginMode ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-indigo-200 bg-white'}`}>
+                    {quickLoginMode && <Check size={12} strokeWidth={4} />}
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-tight">Ativar Acesso Cloud Imediato</span>
-                    <span className="text-[8px] font-medium text-emerald-600/70 uppercase tracking-widest">Cria login no Supabase Auth agora</span>
+                    <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-tight">Login Rápido (credencial local)</span>
+                    <span className="text-[8px] font-medium text-indigo-600/70 uppercase tracking-widest">Sub-usuário encapsulado no tenant {currentUser?.tenantid || ''} — sem conta Supabase</span>
                   </div>
                 </div>
+              ) : (
+                databaseMode !== DatabaseMode.INTERNAL && (
+                  <div 
+                    className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
+                    onClick={() => setProvisionOnCreate(!provisionOnCreate)}
+                  >
+                    <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${provisionOnCreate ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-emerald-200 bg-white'}`}>
+                      {provisionOnCreate && <Check size={12} strokeWidth={4} />}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-tight">Ativar Acesso Cloud Imediato</span>
+                      <span className="text-[8px] font-medium text-emerald-600/70 uppercase tracking-widest">Cria login no Supabase Auth agora</span>
+                    </div>
+                  </div>
+                )
               )}
 
               <button 

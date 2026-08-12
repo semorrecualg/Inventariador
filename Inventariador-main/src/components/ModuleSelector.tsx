@@ -8,8 +8,7 @@ import {
   ShieldCheck,
   TrendingUp,
   BarChart3,
-  Database,
-  ShieldAlert
+  Database
 } from 'lucide-react';
 import { sqliteService } from '../services/sqliteService';
 import { readVirtualSnapshot } from '../services/localDbService';
@@ -23,34 +22,46 @@ interface ModuleSelectorProps {
   username: string;
   userRole?: UserRole;
   isDatabaseEmpty?: boolean;
+  /** Tenant do usuário logado — usado para escopar a checagem de dados (SRE: isolamento por contrato). */
+  tenantid?: string;
+  /** Proprietário global (admin): nunca é barrado pelo gate de primeira carga. */
+  isOwner?: boolean;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole, isDatabaseEmpty = false }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole, isDatabaseEmpty = false, tenantid = '', isOwner = false }) => {
   const [canAccessModules, setCanAccessModules] = useState<boolean>(!isDatabaseEmpty);
 
   useEffect(() => {
-    const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isOnlineSession = dbMode === 'SUPABASE';
-    setCanAccessModules(!isDatabaseEmpty || isOnlineSession);
+    setCanAccessModules(!isDatabaseEmpty);
   }, [isDatabaseEmpty]);
 
   useEffect(() => {
     let active = true;
     const runCheck = async () => {
       try {
-        let count = await sqliteService.getAssetCount();
-        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-        if (count === 0 && isIframe) {
-          // Lê o snapshot virtual com fallback (localStorage → IndexedDB) para
-          // cobrir cargas grandes cujo espelho foi persistido em IndexedDB.
-          const virtualData = await readVirtualSnapshot();
-          if (Array.isArray(virtualData)) count = virtualData.length;
+        const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
+        const isOnlineSession = dbMode === 'SUPABASE';
+        // SRE ISOLAMENTO: a checagem é escopada ao tenant do usuário — nunca
+        // pela contagem global (que poderia conter dados de outro contrato em
+        // cache local, ex.: CICOPAL para um MASTER de CLIENTETESTE).
+        let count = 0;
+        if (tenantid) {
+          count = await sqliteService.countAtivosByTenant(tenantid);
+        } else {
+          count = await sqliteService.getAssetCount();
+          const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+          if (count === 0 && isIframe) {
+            // Lê o snapshot virtual com fallback (localStorage → IndexedDB) para
+            // cobrir cargas grandes cujo espelho foi persistido em IndexedDB.
+            const virtualData = await readVirtualSnapshot();
+            if (Array.isArray(virtualData)) count = virtualData.length;
+          }
         }
         if (active) {
-          const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-          const isOnlineSession = dbMode === 'SUPABASE';
-          const hasLocalData = count > 0;
-          setCanAccessModules(hasLocalData || isOnlineSession);
+          // Módulos liberados apenas se o tenant tem dados locais OU a nuvem já
+          // populou o inventário deste tenant (isDatabaseEmpty reflete o
+          // inventário pós-sync).
+          setCanAccessModules(count > 0 || (isOnlineSession && !isDatabaseEmpty));
         }
       } catch (e) {
         logger.error("Error checking asset count in ModuleSelector:", e);
@@ -60,47 +71,43 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
     return () => {
       active = false;
     };
-  }, []);
+  }, [tenantid, isDatabaseEmpty]);
 
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
 
-  // v24.50.8 - Interceptador SRE: Barreira de Proteção Física no acesso ao Gestor de Base
+  // v24.50.8 - Interceptador SRE: acesso ao Gestor de Base.
+  // WEB: navega direto para o Gestor (o vínculo de pasta é opcional e feito
+  // dentro do Gestor, em "Vincular Pasta e Ver Planilhas") — sem exigir a
+  // seleção de pasta antes, como o usuário espera ao abrir a gestão de base.
+  // NATIVO (Android): mantém a barreira de vínculo físico existente.
   const handleDatabaseManagerClick = async () => {
     const isNative = Capacitor.isNativePlatform();
-    const hasFolderLinked = !!sessionStorage.getItem('gbr_physical_folder_name');
 
-    if (!isNative && !hasFolderLinked) {
-      logger.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Windows. Forçando Picker...");
-      
-      const isIframe = window.self !== window.top;
-      if (isIframe) {
-        logger.warn(">>> [SRE-GUARD] Executando dentro de iFrame. Simulando vínculo sob DIRETÓRIO C:\\GBR_Inventario (Virtual) para estabilização de runtime...");
-        sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
-        localStorage.setItem('gbr_physical_link_active', 'true');
-      } else {
-        try {
-          const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
-            mode: 'readwrite'
-          });
-          if (directoryHandle) {
-            sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
-            localStorage.setItem('gbr_physical_link_active', 'true');
-            logger.info(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
-          } else {
-            return; // Aborta navegação se o usuário cancelar
-          }
-        } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-          logger.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
-          
-          if (err?.name === 'SecurityError' || String(err?.message || '').includes('Cross origin') || String(err?.message || '').includes('sub frames')) {
-            logger.warn(">>> [SRE-GUARD] Falha de segurança/iFrame detectada no catch. Ativando pasta virtual de fallback.");
-            sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
-            localStorage.setItem('gbr_physical_link_active', 'true');
-          } else {
-            return; // Bloqueia a navegação para evitar tela com erro
-          }
+    if (!isNative) {
+      if (onOpenDatabaseManager) {
+        onOpenDatabaseManager();
+      }
+      return;
+    }
+
+    const hasFolderLinked = !!sessionStorage.getItem('gbr_physical_folder_name');
+    if (!hasFolderLinked) {
+      logger.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Android. Forçando Picker...");
+      try {
+        const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
+          mode: 'readwrite'
+        });
+        if (directoryHandle) {
+          sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
+          localStorage.setItem('gbr_physical_link_active', 'true');
+          logger.info(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
+        } else {
+          return; // Aborta navegação se o usuário cancelar
         }
+      } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+        logger.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
+        return; // Bloqueia a navegação para evitar tela com erro
       }
     }
 
@@ -110,20 +117,40 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
     }
   };
 
-  if (isAuditor && !canAccessModules) {
+  // SRE ISOLAMENTO + PRIMEIRA CARGA: qualquer perfil não-dono cujo TENANT não
+  // tenha dados (local ou nuvem) é bloqueado aqui — jamais vê dados de outro
+  // contrato — e é direcionado à carga inicial (ADMIN/MASTER) ou a aguardar o
+  // provisionamento (auditor/operador).
+  if (!canAccessModules && !isOwner) {
+    const canLoad = isAdmin && onOpenDatabaseManager;
     return (
       <div className="min-h-screen bg-bg-main flex flex-col p-6 animate-fadeIn justify-center items-center text-center">
-        <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mb-6 border border-red-100">
-          <ShieldAlert size={40} />
+        <div className="w-20 h-20 bg-indigo-50 text-indigo-500 rounded-[2rem] flex items-center justify-center mb-6 border border-indigo-100">
+          <Database size={40} />
         </div>
-        <h2 className="text-2xl font-black text-ink uppercase tracking-tight mb-2">Acesso Impeditivo</h2>
-        <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-4">Base de dados vazia</p>
-        <p className="text-ink-muted text-xs max-w-md mb-8 leading-relaxed font-bold uppercase">
-          O banco de dados local está vazio. Solicite ao administrador do sistema para realizar a carga de dados inicial antes de prosseguir com o inventário.
+        <h2 className="text-2xl font-black text-ink uppercase tracking-tight mb-2">
+          {canLoad ? "Primeira Carga de Dados" : "Acesso Impeditivo"}
+        </h2>
+        <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-4">
+          {canLoad ? "SRE · Isolamento por Tenant" : "Base de dados do contrato vazia"}
         </p>
+        <p className="text-ink-muted text-xs max-w-md mb-8 leading-relaxed font-bold uppercase">
+          {canLoad
+            ? "Nenhum dado foi encontrado para o seu contrato (tenantid). Para começar a operar, realize a primeira carga da base de dados através do Gestor de Base."
+            : "O banco de dados do seu contrato está vazio. Solicite ao administrador para realizar a carga de dados inicial antes de prosseguir com o inventário."}
+        </p>
+        {canLoad && (
+          <button
+            onClick={onOpenDatabaseManager}
+            className="flex items-center space-x-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm active:scale-95 transition-all cursor-pointer"
+          >
+            <Database size={16} />
+            <span>GESTOR DE BASE — PRIMEIRA CARGA</span>
+          </button>
+        )}
         <button 
           onClick={onLogout}
-          className="px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm active:scale-95 transition-all hover:bg-slate-50 cursor-pointer"
+          className="mt-4 px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm active:scale-95 transition-all hover:bg-slate-50 cursor-pointer"
         >
           Sair do Sistema
         </button>

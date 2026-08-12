@@ -12,6 +12,7 @@ import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager } from './utils/authUtils';
+import { userHasPermission } from './services/rbacService';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -26,6 +27,8 @@ const Login = React.lazy(() => import('./components/Login'));
 import Register from './components/Register';
 const MainMenu = React.lazy(() => import('./components/MainMenu'));
 const DatabaseManagerScreen = React.lazy(() => import('./screens/DatabaseManagerScreen').then(m => ({ default: m.DatabaseManagerScreen })));
+const LoadHistoryScreen = React.lazy(() => import('./screens/LoadHistoryScreen').then(m => ({ default: m.LoadHistoryScreen })));
+const LicenseProvisioning = React.lazy(() => import('./components/LicenseProvisioning'));
 import AssetDetail from './components/AssetDetail';
 import SoftDeleteReport from './components/SoftDeleteReport';
 import ImpairmentReport from './components/ImpairmentReport';
@@ -50,8 +53,11 @@ import AssetMap from './components/AssetMap';
 import ActiveSearch from './components/ActiveSearch';
 import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
-import { processarRoteamentoPosLoginSaas, SupabaseUserProfile } from './utils/routingUtils';
-import { resolveTenantId, readSessionTenantId, readLocalTenantId } from './utils/tenantUtils';
+import TenantWorkSelector from './components/TenantWorkSelector';
+import { processarRoteamentoPosLoginSaas, resolvePostSelectionScreen, SupabaseUserProfile } from './utils/routingUtils';
+import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
+import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial } from './utils/workContextUtils';
+import type { WorkContext } from './utils/workContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -437,7 +443,10 @@ const App: React.FC = () => {
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => {
     const saved = localStorage.getItem('app_database_mode');
-    return (saved as DatabaseMode) || DatabaseMode.INTERNAL;
+    if (saved) return saved as DatabaseMode;
+    // SUPABASE_PLUS ativa automaticamente quando as credenciais da nuvem estão
+    // presentes (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY); sem chaves → INTERNAL.
+    return isInternalMode ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE_PLUS;
   });
 
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
@@ -561,7 +570,11 @@ useEffect(() => {
                 // Sincroniza e marca o flag de conferido na tabela operacional ativa mapeando as chaves primárias
                 for (const asset of (dadosFisicos as DexieAsset[])) {
                   if (asset.primarykey) {
-                    await db.ativos.update(asset.primarykey, { _conferido: 1, _is_synced: 0 });
+                    // Chave composta [tenantid+primarykey] (v6).
+                    await db.ativos.update(
+                      [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
+                      { _conferido: 1, _is_synced: 0 }
+                    );
                   }
                 }
               });
@@ -637,6 +650,9 @@ useEffect(() => {
     }
 
     if (s === AppScreen.LOGIN || s === AppScreen.MAIN_MENU) {
+      // Tool grid da Unidade Operacional: abre o painel pedido ao chegar no MainMenu
+      // (ou limpa o pedido quando a navegação não veio dos botões AJUSTES/DADOS/PAINEL/AUDITORIA).
+      setMenuPanelToOpen(s === AppScreen.MAIN_MENU ? (params?.openPanel || null) : null);
       logger.info(`>>> [Navigation] Resetting history to: ${s}`);
       setHistory([s]);
     } else {
@@ -737,6 +753,8 @@ useEffect(() => {
   const [isConsultationFromInventory, setIsConsultationFromInventory] = useState(false);
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
+  // Painel do MainMenu a abrir ao chegar — acionado pela tool grid da Unidade Operacional.
+  const [menuPanelToOpen, setMenuPanelToOpen] = useState<'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null>(null);
   const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
     try {
       const saved = localStorage.getItem('app_consultation_filters');
@@ -1262,6 +1280,13 @@ useEffect(() => {
         if (!isNative) {
           logger.info(">>> [App] Ambiente WEB / iFrame detectado. Inicialização instantânea.");
           success = await sqliteService.init(true);
+          if (!success) {
+            // GARANTIA SRE: nunca avançar com o motor local não inicializado.
+            // Uma segunda tentativa evita a tela congelada "RE-INICIALIZANDO
+            // SISTEMA GBR" no Inventory quando o primeiro db.open() falha.
+            logger.warn(">>> [App] Primeira tentativa de init do Dexie falhou no Web. Tentando novamente...");
+            success = await sqliteService.init(true);
+          }
           if (isMounted) {
             setDbInitialized(true);
             setSqliteStatus('ACTIVE');
@@ -2279,7 +2304,8 @@ useEffect(() => {
       AppScreen.DATABASE_MANAGER,
       AppScreen.BIOMETRIC_REGISTRATION,
       AppScreen.STRESS_TEST,
-      AppScreen.CHANGE_PASSWORD
+      AppScreen.CHANGE_PASSWORD,
+      AppScreen.TENANT_WORK_SELECTION
     ];
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
@@ -2501,12 +2527,29 @@ useEffect(() => {
           const cloudCompanies = cloudData.config.companies || [];
           const cloudAssets = cloudData.assets || [];
           
-          // SEGURANÇA: Se a nuvem retornou 0 ativos mas temos dados locais, 
-          // e não foi um erro de rede, pode ser um problema de tenantid.
-          // Não limpamos a base local se ela já tiver dados, a menos que seja um admin global
+          // SEGURANÇA + ISOLAMENTO SRE: Se a nuvem retornou 0 ativos mas temos
+          // dados locais, mantemos a base local SOMENTE se ela pertencer ao
+          // tenant do usuário logado (protege contra perda por falha de rede).
+          // Se a base local pertencer a OUTRO tenant (ex.: cache de sessão
+          // anterior do CICOPAL), ela é descartada — jamais exibimos dados de
+          // um contrato para outro (regra de isolamento por tenantid).
           if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
-            logger.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local para evitar perda de dados.');
-            return prev;
+            const userTenant = String((user?.tenantid || readSessionTenantId() || '').trim()).toUpperCase();
+            const leaksForeignTenant = prev.assets.some(a => {
+              const t = String((a as Record<string, unknown>).tenantid || '').trim().toUpperCase();
+              return !userTenant || (t && t !== userTenant);
+            });
+            if (!leaksForeignTenant) {
+              logger.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local do MESMO tenant para evitar perda de dados.');
+              return prev;
+            }
+            logger.warn('>>> [SRE ISOLAMENTO] Base local pertence a outro tenantid. Descartando dados locais para preservar isolamento entre contratos.');
+            return {
+              ...prev,
+              assets: [],
+              companies: [],
+              status: DatabaseStatus.EMPTY
+            };
           }
 
           // MERGE: Preserva alterações locais que ainda não foram sincronizadas
@@ -3048,6 +3091,19 @@ useEffect(() => {
           );
           if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
             logger.info(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
+            // RASTREIO DE CARGAS: registra o pull do boot loader no audit_logs da
+            // nuvem — antes disso, as cargas do CICOPAL passavam invisíveis pelo boot.
+            try {
+              await logAuditEvent({
+                user_email: user.email || 'unknown',
+                action: 'SYNC_PULL',
+                table_name: 'assets',
+                details: `Sincronização de ${cloudData.assets.length} ativos da nuvem para o local (boot loader)${user.tenantid ? ` (contrato ${user.tenantid})` : ''}.`,
+                tenantid: user.tenantid || undefined
+              });
+            } catch (auditErr) {
+              logger.warn('[Boot Loader] Falha ao registrar pull no audit_logs:', auditErr);
+            }
             const newState: InventoryState = {
               ...inventoryRef.current,
               ...cloudData.config,
@@ -3214,6 +3270,12 @@ useEffect(() => {
       return;
     }
 
+    // 1.2.1 Administrative Guard for Load History screen (same RBAC gate)
+    if (currentScreen === AppScreen.LOAD_HISTORY && !canAccessDatabaseManager(user)) {
+      pushScreen(AppScreen.LOGIN);
+      return;
+    }
+
     // 1.5 If user is logged in but on LOGIN or REGISTER, go to appropriate screen
     // Comentado para cumprir com o Regime de eliminação de bypass fantasma no boot
     /*
@@ -3241,6 +3303,21 @@ useEffect(() => {
     }
   }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen, isUserAuthenticated, publicAsset, setHistory]);
 
+  // 🏷️ Filiais reais por contrato encontradas na base local — fonte do seletor
+  // de contrato de trabalho quando o perfil não declara units/filial (ex.:
+  // CICOPAL com 6 filiais na base → o seletor aparece para o auditor).
+  const workContextFiliais = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const a of inventory.assets) {
+      const t = String((a as Record<string, unknown>).tenantid || '').trim().toUpperCase();
+      const f = String((a as Record<string, unknown>).filial || '').trim().toUpperCase();
+      if (!t || !f || f === 'DEFAULT' || f === 'NULL' || f === '0' || f === 'TODAS') continue;
+      if (!map[t]) map[t] = [];
+      if (!map[t].includes(f)) map[t].push(f);
+    }
+    return map;
+  }, [inventory.assets]);
+
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {
     if (!isUserAuthenticated || !user) return;
@@ -3250,6 +3327,17 @@ useEffect(() => {
     
     const executePostLoginRouting = async () => {
       logger.info(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
+      
+      // SELEÇÃO DE CONTRATO DE TRABALHO (multi-contrato): se o usuário está
+      // autorizado em mais de um contexto (tenantid + filial), exige a escolha
+      // ANTES de qualquer roteamento — a carga de dados só ocorre para o
+      // contrato selecionado (isolamento SRE por contrato).
+      const workContexts = buildWorkContexts(user, users, workContextFiliais);
+      if (workContexts.length > 1) {
+        logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contratos. Exigindo seleção de contrato/filial antes do roteamento.`);
+        await pushScreen(AppScreen.TENANT_WORK_SELECTION);
+        return;
+      }
       
       const activeTenant = user.tenantid || null;
       const profile: SupabaseUserProfile = {
@@ -3300,7 +3388,7 @@ useEffect(() => {
     };
     
     executePostLoginRouting();
-  }, [isUserAuthenticated, user, setHistory, pushScreen, history]);
+  }, [isUserAuthenticated, user, setHistory, pushScreen, history, users, workContextFiliais]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
@@ -3677,7 +3765,8 @@ useEffect(() => {
             AppScreen.UNIT_CONFIGURATOR,
             AppScreen.CAMPAIGN_MANAGEMENT,
             AppScreen.MODULE_SELECTION,
-            AppScreen.ASSET_CONTROL_HOME
+            AppScreen.ASSET_CONTROL_HOME,
+            AppScreen.TENANT_WORK_SELECTION
           ];
           
           if (!exemptScreens.includes(screen)) {
@@ -3692,6 +3781,57 @@ useEffect(() => {
     
     checkDatabaseEmptiness();
   }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, sqliteStatus, pushScreen]);
+
+  // 🎯 SELEÇÃO DE CONTRATO DE TRABALHO (pós-login, multi-contrato)
+  // O usuário escolhe o contrato (tenantid) e a filial com que vai operar;
+  // a escolha define QUAL base é carregada — isolamento SRE por contrato.
+  const handleSelectWorkContext = useCallback(async (ctx: WorkContext) => {
+    const prevTenant = String(user?.tenantid || '').trim().toUpperCase();
+    const newTenant = normalizeWorkTenant(ctx.tenantid);
+    const newFilial = normalizeWorkFilial(ctx.filial);
+    const changedTenant = !!prevTenant && prevTenant !== newTenant;
+
+    logger.info(`>>> [SRE_NAV] Contrato de trabalho escolhido: ${newTenant}${newFilial ? ' / ' + newFilial : ''}${changedTenant ? ' (troca de contrato)' : ''}`);
+
+    // SRE ISOLAMENTO: troca de contrato → zera o inventário em memória para
+    // jamais exibir dados de outro contrato (o sync seguinte repopula apenas
+    // com os dados do contrato escolhido).
+    if (changedTenant) {
+      setInventory(prev => ({ ...prev, assets: [], companies: [], status: DatabaseStatus.EMPTY }));
+    }
+
+    // Persiste o contexto nas chaves canônicas (sessão + local)
+    persistWorkContext(ctx);
+    setSelectedUnit(newFilial || null);
+
+    const updatedUser: User = {
+      ...(user as User),
+      tenantid: newTenant,
+      filial: newFilial,
+      units: newFilial ? [newFilial] : []
+    };
+    setUser(updatedUser);
+    sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
+
+    // Sincroniza APENAS o contrato escolhido
+    if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
+      syncFromCloud(newTenant, DatabaseMode.SUPABASE, newFilial || undefined).catch(err => {
+        logger.warn('[Sync] Sincronização do contrato escolhido falhou:', err);
+      });
+    }
+
+    // Roteia com o novo contexto: base vazia → primeira carga (GESTOR);
+    // auditor com base pronta → hub da filial direto (sem repetir seleção).
+    const target = await resolvePostSelectionScreen({
+      email: updatedUser.email,
+      role: updatedUser.role,
+      tenantid: updatedUser.tenantid
+    });
+    await pushScreen(target);
+  }, [user, databaseMode, isInternalMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
+
+  // Contextos de trabalho do usuário logado (fonte do seletor)
+  const workContexts = useMemo(() => buildWorkContexts(user, users, workContextFiliais), [user, users, workContextFiliais]);
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
@@ -3728,13 +3868,16 @@ useEffect(() => {
         let resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
 
         if (session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          // v25.70: tenant 100% da base — user_permissions e a fonte; storage e cache de sessao.
-          const baseTenant = resolveTenantId(permissions) || resolveTenantId(permissionsObj) || readSessionTenantId() || readLocalTenantId() || '';
+          // DONO GLOBAL: o tenant vem EXCLUSIVAMENTE da base (user_permissions).
+          // NUNCA de storage/cache de sessão anterior — evita que o dono herde o
+          // contrato de uma sessão velha (ex.: CLIENTETESTE após purga/logout).
+          const baseTenant = resolveTenantId(permissions) || resolveTenantId(permissionsObj) || '';
           resolvedTenantid = baseTenant.trim().toUpperCase() === 'GBR_SUPER_ADMIN_CORINGA' ? '' : baseTenant;
           resolvedUnitId = 'TODAS';
         }
 
-        if (!resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') {
+        const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        if ((!resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') && !isOwnerAccount) {
           logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
@@ -3781,6 +3924,17 @@ useEffect(() => {
           setUser(loggedUser);
           sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
         }
+
+        // SRE ISOLAMENTO: se o inventário carregado no boot (cache de sessão
+        // anterior) pertence a outro tenant, zera o estado imediatamente para
+        // jamais exibir dados de outro contrato ao usuário logado. O sync
+        // seguinte repopula com os dados DO tenant dele (ou fica vazio, e o
+        // roteamento pós-login o direciona à primeira carga).
+        const bootTenant = (inventoryRef.current.assets.find(a => a.tenantid) as Asset | undefined)?.tenantid || '';
+        if (loggedUser.tenantid && bootTenant && bootTenant.trim().toUpperCase() !== loggedUser.tenantid.trim().toUpperCase()) {
+          logger.warn(`>>> [SRE ISOLAMENTO] Inventário carregado pertence a '${bootTenant}' mas o usuário é '${loggedUser.tenantid}'. Zerando estado local.`);
+          setInventory(prev => ({ ...prev, assets: [], companies: [] }));
+        }
         
         // Log de Auditoria na Nuvem
         try {
@@ -3800,8 +3954,15 @@ useEffect(() => {
             setDatabaseMode(DatabaseMode.SUPABASE);
             localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
           }
-          // Sincroniza dados da nuvem para este usuário (Tenant + Unit)
-          syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
+          // Sincroniza dados da nuvem para este usuário (Tenant + Unit).
+          // Multi-contrato: o sync fica para a escolha no seletor pós-login,
+          // evitando puxar dados de um contrato que o usuário não escolheu.
+          const multiContextProfile = buildWorkContexts(loggedUser, undefined, workContextFiliais).length > 1;
+          if (!multiContextProfile) {
+            syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
+          } else {
+            logger.info(`>>> [SRE_NAV] Perfil multi-contrato detectado. Sync adiado até a escolha do contrato no seletor.`);
+          }
         } else {
           if ((databaseMode as DatabaseMode) !== DatabaseMode.INTERNAL) {
             setDatabaseMode(DatabaseMode.INTERNAL);
@@ -3906,16 +4067,39 @@ useEffect(() => {
         if (isValid) {
           processSession(session);
         } else {
-          // GBR KARDEK SRE: Proibido recuperar sessões locais fantasmas em nova montagem (F5)
-          logger.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
-          removerLoaderEstatico();
-          setIsDataLoaded(true);
-          setUser(null);
-          setIsSessionValid(false);
-          sessionStorage.removeItem('app_current_user');
-          sessionStorage.removeItem('filial');
-          sessionStorage.removeItem('tenantid');
-          setHistory([AppScreen.LOGIN]);
+          // Soberania Nativa: usuário local (proprietário/offline-first) é mantido mesmo
+          // sem sessão de nuvem — espelha a proteção isLocalUser do listener onAuthStateChange
+          // (o login local via Barreira Local não cria token Supabase; destruí-lo aqui deslogaria
+          // o proprietário sempre que o databaseMode mudar e re-disparar este useEffect).
+          const currentUserStr = sessionStorage.getItem('app_current_user');
+          let isLocalUser = false;
+          try {
+            if (currentUserStr) {
+              const parsed = JSON.parse(currentUserStr);
+              const lowerEmail = (parsed.email || '').toLowerCase();
+              if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
+                isLocalUser = true;
+              }
+            }
+          } catch { /* ignore */ }
+
+          if (isLocalUser) {
+            logger.info('[Boot SRE] Usuário local autenticado (Soberania Nativa). Mantendo sessão offline...');
+            setIsSessionValid(true);
+            removerLoaderEstatico();
+            setIsDataLoaded(true);
+          } else {
+            // GBR KARDEK SRE: Proibido recuperar sessões locais fantasmas em nova montagem (F5)
+            logger.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
+            removerLoaderEstatico();
+            setIsDataLoaded(true);
+            setUser(null);
+            setIsSessionValid(false);
+            sessionStorage.removeItem('app_current_user');
+            sessionStorage.removeItem('filial');
+            sessionStorage.removeItem('tenantid');
+            setHistory([AppScreen.LOGIN]);
+          }
         }
       }).catch((err: unknown) => {
         logger.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
@@ -5796,6 +5980,7 @@ useEffect(() => {
                   await supabase.auth.signOut();
                 }
                 sessionStorage.removeItem('app_current_user');
+                clearTenantContext();
                 setUser(null);
                 setHistory([AppScreen.LOGIN]);
               }}
@@ -6031,14 +6216,17 @@ useEffect(() => {
               }
               const defaultTenant = String(u.tenantid || '').toUpperCase().trim();
               const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
+              const multiContextLogin = buildWorkContexts(u, users, workContextFiliais).length > 1;
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantid', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
-              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
+              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
                 logger.info('[App] Login detectado. Iniciando sincronizacao silenciosa...');
                 syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
                   logger.warn('[Sync] Sincronizacao em background falhou:', err);
                 });
+              } else if (multiContextLogin) {
+                logger.info(">>> [SRE_NAV] Login multi-contrato: sync adiado até a escolha do contrato/filial no seletor.");
               }
               try {
                 const bioSupported = await isBiometricSupported();
@@ -6080,6 +6268,7 @@ useEffect(() => {
             scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
             onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
             initialDataMenuOpen={startWithDataMenu}
+            initialOpenPanel={menuPanelToOpen}
             selectedUnit={selectedUnit}
             darkMode={inventory.darkMode || false}
             onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
@@ -6299,7 +6488,7 @@ useEffect(() => {
               responsibleName={screenParams?.responsibleName || user?.name || user?.email}
             />
           )}
-          {screen === AppScreen.SOFT_DELETE_REPORT && (
+          {screen === AppScreen.SOFT_DELETE_REPORT && (userHasPermission(user, 'view_soft_delete') ? (
             <SoftDeleteReport 
               assets={inventory.assets}
               onBack={popScreen}
@@ -6307,8 +6496,8 @@ useEffect(() => {
               onPermanentDelete={permanentDeleteAsset}
               isAdmin={isAdmin}
             />
-          )}
-          {screen === AppScreen.IMPAIRMENT_REPORT && (
+          ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.IMPAIRMENT_REPORT && (userHasPermission(user, 'view_impairment') ? (
             <ImpairmentReport 
               assets={inventory.assets}
               onBack={() => setHistory([AppScreen.MAIN_MENU])}
@@ -6317,17 +6506,19 @@ useEffect(() => {
                 pushScreen(AppScreen.ASSET_DETAIL);
               }}
             />
-          )}{screen === AppScreen.SIGNATURE && (
+          ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}{screen === AppScreen.SIGNATURE && (userHasPermission(user, 'sign_documents') ? (
             <Signature 
               assets={filteredAssetsByUnit.filter(a => a._conferido)}
               onBack={popScreen}
               onConfirm={handleSignatureConfirm}
               unitName={selectedUnit || ''}
             />
-          )}
+          ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={!!(user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
    units={fullCompaniesWithStatus
@@ -6360,7 +6551,12 @@ useEffect(() => {
               } 
               onSelect={(u) => { 
                 const tid = user?.tenantid ? String(user.tenantid).trim().toUpperCase() : '';
-                if (!tid || tid.trim().toUpperCase() === '') {
+                // SOBERANIA DO PROPRIETÁRIO: o admin global (sem tenantid fixo) é
+                // superusuário e pode operar em qualquer unidade — o contrato é
+                // resolvido pela filial/unidade selecionada (tenant vazio = todos).
+                const isOwnerOrGlobalAdmin = (user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())
+                  || ((user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin) && !tid);
+                if (!tid && !isOwnerOrGlobalAdmin) {
                   setModalConfig({
                     isOpen: true,
                     title: "Erro de Segurança",
@@ -6414,6 +6610,29 @@ useEffect(() => {
               isImportingBatch={isImportingBatchState}
             />
           )}
+          {screen === AppScreen.TENANT_WORK_SELECTION && user && (
+            <TenantWorkSelector
+              user={user}
+              contexts={workContexts}
+              onSelect={handleSelectWorkContext}
+              onLogout={async () => {
+                if (supabase) {
+                  await logAuditEvent({
+                    user_email: user.email || 'unknown',
+                    action: 'LOGOUT',
+                    details: 'Usuário saiu do sistema (seleção de contrato).',
+                    tenantid: user.tenantid || readSessionTenantId() || ''
+                  }).catch(() => {});
+                  await supabase.auth.signOut();
+                }
+                setUser(null);
+                setCurrentModule(null);
+                localStorage.removeItem('app_current_module');
+                clearTenantContext();
+                pushScreen(AppScreen.LOGIN);
+              }}
+            />
+          )}
           {screen === AppScreen.ADDRESS_SELECTION && selectedUnit && (
             <AddressSelector 
               selectedUnit={selectedUnit}
@@ -6425,7 +6644,7 @@ useEffect(() => {
               isImportingBatch={isImportingBatchState}
             />
           )}
-          {screen === AppScreen.UNIT_CONFIGURATOR && user && (
+          {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') ? (
             <UnitConfigurator 
               user={user}
               units={unitNames}
@@ -6445,7 +6664,9 @@ useEffect(() => {
                 pushScreen(AppScreen.ADDRESS_SELECTION);
               }}
             />
-          )}{screen === AppScreen.ASSET_MAP && (
+          ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.LICENSE_PROVISIONING && (canAccessDatabaseManager(user) ? <LicenseProvisioning onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.ASSET_MAP && (
             <AssetMap 
               assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} 
               onBack={popScreen} 
@@ -6470,6 +6691,8 @@ useEffect(() => {
               username={user?.username || ''}
               userRole={user?.role}
               isDatabaseEmpty={isDatabaseEmpty}
+              tenantid={user?.tenantid || ''}
+              isOwner={user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
@@ -6484,6 +6707,7 @@ useEffect(() => {
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
+                clearTenantContext();
                 pushScreen(AppScreen.LOGIN);
               }}
               onSelect={(module) => {
@@ -6512,8 +6736,9 @@ useEffect(() => {
           {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.AUDIT_LOGS && <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} />}
-          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (
+          {screen === AppScreen.AUDIT_LOGS && (userHasPermission(user, 'view_audit_logs') ? <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.LOAD_HISTORY && (userHasPermission(user, 'manage_database') ? <LoadHistoryScreen onBack={popScreen} tenantid={(user?.tenantid || readSessionTenantId() || '').toString().trim().toUpperCase()} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') ? (
             <CampaignManager 
               user={user} 
               onBack={popScreen} 
@@ -6560,9 +6785,9 @@ useEffect(() => {
               unitId={currentUnitId}
               databaseMode={databaseMode}
             />
-          )}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU])} />}
-          {screen === AppScreen.ACCOUNT_RECONCILIATION && <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} />}
+          ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && (userHasPermission(user, 'view_global_performance') ? <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU])} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.ACCOUNT_RECONCILIATION && (userHasPermission(user, 'view_reconciliation') ? <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
               onBack={popScreen} 

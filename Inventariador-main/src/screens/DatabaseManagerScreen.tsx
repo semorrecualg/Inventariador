@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../services/sqliteService';
+import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud } from 'lucide-react';
+import { logger } from '../utils/logger';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -133,6 +134,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const [isMirroring, setIsMirroring] = useState<boolean>(false);
   const [mirrorProgress, setMirrorProgress] = useState<number>(0);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  // SRE ISOLAMENTO: tenant ativo do usuário logado — as estatísticas do Gestor
+  // são escopadas a ele (nunca à contagem global, que poderia expor dados de
+  // outro contrato, ex.: CICOPAL para um MASTER de CLIENTETESTE).
+  const [activeTenantid, setActiveTenantid] = useState<string>('');
 
   useEffect(() => {
     try {
@@ -140,6 +145,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       if (userStr) {
         const parsed = JSON.parse(userStr);
         setIsAdmin(isAdminUser(parsed));
+        setActiveTenantid(String(parsed?.tenantid || '').trim().toUpperCase());
       }
     } catch { /* ignore */ }
   }, []);
@@ -156,20 +162,33 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         return;
       }
 
+      // SRE ISOLAMENTO: o espelhamento é escopado pelo tenant ATIVO do usuário
+      // logado. O cache local pode conter dados de OUTROS contratos (ex.:
+      // CICOPAL de sessão anterior) — um MASTER jamais pode enviá-los.
+      // Sem tenant ativo (dono/global), espelha a base completa.
+      const baseParaEspelhar = activeTenantid
+        ? ativos.filter((a) => String(a.tenantid || '').trim().toUpperCase() === activeTenantid)
+        : ativos;
+
+      if (baseParaEspelhar.length === 0) {
+        addLog(`[SRE_CLOUD] Nenhum ativo do contrato ${activeTenantid || 'global'} para espelhar. Nada enviado.`);
+        return;
+      }
+
       // REGRA DE CONTRATO (tenant 100% da base): os tenantids vêm EXCLUSIVAMENTE
       // da própria base carregada (zero valor fixo / zero fallback hard-coded).
       const tenantsDaBase = Array.from(
         new Set(
-          ativos
+          baseParaEspelhar
             .map((a) => (a.tenantid || '').trim().toUpperCase())
             .filter((t) => t && t !== 'UNDEFINED' && t !== 'NULL')
         )
       );
       addLog(`[SRE_CLOUD] Contratos detectados na base: ${tenantsDaBase.length ? tenantsDaBase.join(' | ') : '(nenhum — Global)'}`);
-      addLog(`[SRE_CLOUD] Enviando ${ativos.length} ativos em lotes de 50 (Política SRE)...`);
+      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes de 50 (Política SRE)...`);
 
       const syncedIds = await syncAssetsToCloud(
-        ativos as unknown as Asset[],
+        baseParaEspelhar as unknown as Asset[],
         tenantsDaBase.length > 0 ? tenantsDaBase : undefined,
         (processed, total) => {
           const pct = total > 0 ? Math.round((processed / total) * 100) : 100;
@@ -191,7 +210,19 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   const loadStats = async () => {
     try {
-      const aCount = await db.local_assets.count();
+      // SRE ISOLAMENTO: com tenant ativo, conta apenas os ativos DO contrato.
+      let tid = activeTenantid;
+      if (!tid) {
+        // Fallback: lê o tenant direto da sessão (cobre a primeira execução no
+        // boot, antes do estado do tenant ser resolvido).
+        try {
+          const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+          if (userStr) tid = String(JSON.parse(userStr)?.tenantid || '').trim().toUpperCase();
+        } catch { /* ignore */ }
+      }
+      const aCount = tid
+        ? await sqliteService.countAtivosByTenant(tid)
+        : await db.local_assets.count();
       setAssetCount(aCount);
       const lCount = await db.audit_logs.count();
       setLogCount(lCount);
@@ -200,13 +231,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
+  // Recalcula as estatísticas quando o tenant ativo é detectado (após o boot).
+  useEffect(() => {
+    if (activeTenantid) loadStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenantid]);
+
   useEffect(() => {
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
     loadStats();
   }, []);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // Carga central de planilha (usada pelo input de arquivo E pela listagem de
+  // planilhas da pasta vinculada). O parser XLSX (SheetJS) suporta .xls/.xlsx/.csv.
+  const loadSpreadsheetFile = async (file: File) => {
     if (!file) return;
 
     addLog(`[SRE_LOADER] Arquivo selecionado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
@@ -227,6 +265,32 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       });
 
       addLog(`[SRE_LOADER] ${assetsInjected.length} ativos injetados com sucesso.`);
+      // RASTREIO DE CARGAS: registra no audit_logs da nuvem quantos ativos esta
+      // carga trouxe e para qual contrato — alimenta o histórico de cargas.
+      // O tenantid do evento vem do usuário logado; se ele não tiver contrato
+      // (ex.: dono global), deriva dos PRÓPRIOS dados carregados (a planilha
+      // carrega o tenantid de cada ativo) para nunca perder o rastro do contrato.
+      try {
+        const storedUser = sessionStorage.getItem('app_current_user');
+        const userEmail = storedUser ? (JSON.parse(storedUser) as { email?: string })?.email || 'unknown' : 'unknown';
+        const contratosDaCarga = [...new Set(
+          assetsInjected.map((a) => String((a as { tenantid?: unknown }).tenantid ?? '').trim())
+            .filter(Boolean)
+        )];
+        const tenantDoEvento = (activeTenantid || contratosDaCarga[0] || '').toUpperCase();
+        const sufixo = tenantDoEvento
+          ? ` (contrato ${tenantDoEvento}${contratosDaCarga.length > 1 ? `; também presentes: ${contratosDaCarga.slice(1).join(', ')}` : ''})`
+          : '';
+        await logAuditEvent({
+          user_email: userEmail,
+          action: 'IMPORT',
+          table_name: 'assets',
+          details: `Carga de planilha ${file.name}: ${assetsInjected.length} ativos injetados${sufixo}.`,
+          tenantid: tenantDoEvento || undefined
+        });
+      } catch (auditErr) {
+        logger.warn('[SRE_LOADER] Falha ao registrar carga no audit_logs:', auditErr);
+      }
       addLog("[SRE_LOADER] Gerando backup físico na sandbox...");
       try {
         const isFileSaved = await saveSnapshotToWorkspace(assetsInjected);
@@ -278,6 +342,54 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       } else {
         showRecoveryToast("❌ ERRO NO PROCESSAMENTO DA PLANILHA.", "red");
       }
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await loadSpreadsheetFile(file);
+    // Limpa o input para permitir recarregar o mesmo arquivo depois
+    e.target.value = '';
+  };
+
+  // ── Pasta vinculada: listar as planilhas .xls/.xlsx/.csv existentes ──
+  const [workspaceSheets, setWorkspaceSheets] = useState<{ name: string; handle: FileSystemFileHandle }[]>([]);
+  const [workspaceFolderName, setWorkspaceFolderName] = useState<string | null>(null);
+
+  const handleLinkFolder = async () => {
+    const w = window as unknown as { showDirectoryPicker?: (opts?: { mode?: string }) => Promise<{ name: string; values: () => AsyncIterable<{ kind: string; name: string; getFile: () => Promise<File> }> }> };
+    if (typeof w.showDirectoryPicker !== 'function') {
+      addLog('[SRE_LOADER] Seletor de pasta indisponível neste navegador. Use SELECIONAR E CARREGAR PLANILHA.');
+      showRecoveryToast('Seletor de pasta indisponível — use SELECIONAR E CARREGAR PLANILHA.', 'red');
+      return;
+    }
+    try {
+      const handle = await w.showDirectoryPicker({ mode: 'read' });
+      const sheets: { name: string; handle: FileSystemFileHandle }[] = [];
+      for await (const entry of handle.values()) {
+        if (entry.kind === 'file' && /\.(xlsx?|csv)$/i.test(entry.name)) {
+          sheets.push({ name: entry.name, handle: entry as unknown as FileSystemFileHandle });
+        }
+      }
+      setWorkspaceSheets(sheets);
+      setWorkspaceFolderName(handle.name);
+      sessionStorage.setItem('gbr_physical_folder_name', handle.name);
+      localStorage.setItem('gbr_physical_link_active', 'true');
+      addLog(`[SRE_LOADER] Pasta vinculada: ${handle.name} — ${sheets.length} planilha(s) encontrada(s).`);
+    } catch {
+      addLog('[SRE_LOADER] Seletor de pasta cancelado.');
+    }
+  };
+
+  const handleLoadWorkspaceSheet = async (sheet: { name: string; handle: FileSystemFileHandle }) => {
+    try {
+      const file = await sheet.handle.getFile();
+      addLog(`[SRE_LOADER] Carregando planilha da pasta: ${sheet.name}`);
+      await loadSpreadsheetFile(file);
+    } catch (err) {
+      addLog(`[SRE ERROR] Falha ao ler planilha da pasta: ${err instanceof Error ? err.message : String(err)}`);
+      showRecoveryToast('❌ ERRO AO LER PLANILHA DA PASTA.', 'red');
     }
   };
 
@@ -361,12 +473,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         <div className="mt-1.5 font-mono text-xs font-black uppercase text-slate-200 tracking-wide break-all">
           {activePathName}
         </div>
+        <div className="mt-2 flex items-center space-x-2 text-[10px] font-mono text-indigo-300 uppercase tracking-wider">
+          <span className="text-indigo-400">🏷️</span>
+          <span>Contrato Ativo (tenantid):</span>
+          <span className="font-black text-indigo-200">{activeTenantid || 'GLOBAL / SEM CONTRATO'}</span>
+        </div>
       </div>
 
       {/* 3. Painel de Status */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
-          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Ativos Locais</span>
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{activeTenantid ? 'Ativos do Contrato' : 'Ativos Locais'}</span>
           <span className="text-xl font-black text-emerald-400 mt-1 font-mono">{assetCount}</span>
         </div>
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
@@ -382,7 +499,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           type="file" 
           ref={fileInputRef} 
           id="file-loader" 
-          accept=".xlsx,.csv" 
+          accept=".xlsx,.xls,.csv" 
           style={{ display: 'none' }} 
           onChange={handleFileChange} 
         />
@@ -403,7 +520,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <div>
             <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Carga de Planilhabase</h3>
             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
-              Selecione o arquivo higienizado para importar na base de dados
+              Selecione o arquivo higienizado (.xls/.xlsx/.csv) para importar na base de dados
             </p>
           </div>
           <button 
@@ -414,6 +531,55 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
           </button>
+        </div>
+
+        {/* Planilhas da Pasta Vinculada: lista os .xls/.xlsx/.csv existentes */}
+        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-indigo-950/40 text-indigo-400 rounded-full border border-indigo-900/30">
+              <FolderOpen className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Planilhas da Pasta</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+                Vincule a pasta e veja os arquivos .xls/.xlsx/.csv existentes nela
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={handleLinkFolder}
+            className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 border border-indigo-500/20"
+          >
+            <FolderOpen size={14} />
+            <span>VINCULAR PASTA E VER PLANILHAS</span>
+          </button>
+          {workspaceFolderName && (
+            <p className="text-[9px] font-mono text-indigo-300 uppercase tracking-wider">Pasta: {workspaceFolderName}</p>
+          )}
+          {workspaceSheets.length === 0 && workspaceFolderName && (
+            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide">
+              Nenhuma planilha .xls/.xlsx/.csv encontrada na pasta.
+            </p>
+          )}
+          {workspaceSheets.length > 0 && (
+            <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar">
+              {workspaceSheets.map((sheet) => (
+                <div key={sheet.name} className="flex items-center justify-between bg-slate-800/40 border border-slate-700/50 rounded-xl px-3 py-2.5">
+                  <span className="text-[10px] font-bold text-slate-300 truncate flex items-center space-x-2 min-w-0">
+                    <FileSpreadsheet size={14} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">{sheet.name}</span>
+                  </span>
+                  <button
+                    disabled={isUploading}
+                    onClick={() => handleLoadWorkspaceSheet(sheet)}
+                    className="ml-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shrink-0"
+                  >
+                    {isUploading ? '...' : 'Carregar'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Reconexão de Backup Físico Sandbox */}

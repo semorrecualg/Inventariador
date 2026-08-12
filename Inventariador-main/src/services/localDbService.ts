@@ -201,10 +201,13 @@ export const localDb = {
           mappedChunk.push(toDexieAsset(a));
         }
 
+        // SRE ISOLAMENTO (local): preserva registros de outro contrato com chaves
+        // coincidentes (mesma proteção do bulkInsertAssetsOfflineFirst).
+        const safeChunk = await sqliteService.filterCrossTenantWrites(mappedChunk);
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-          await db.ativos.bulkPut(mappedChunk);
-          await db.assets.bulkPut(mappedChunk);
-          await db.local_assets.bulkPut(mappedChunk);
+          await db.ativos.bulkPut(safeChunk);
+          await db.assets.bulkPut(safeChunk);
+          await db.local_assets.bulkPut(safeChunk);
         });
         
         // Respiro para SRE e GC (Garbage Collector)
@@ -219,7 +222,12 @@ export const localDb = {
     update: async (id: string, changes: Partial<Asset>, userId?: string) => {
       const cleanId = String(id);
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-        const existing = await db.ativos.get(cleanId);
+        // Chave composta [tenantid+primarykey] (v6): resolve o tenant pelo próprio
+        // objeto de alteração quando presente, senão pelo tenant da sessão.
+        const tenantKey = String((changes as Record<string, unknown>).tenantid || getCurrentTenantid() || '').trim().toUpperCase();
+        const existing = tenantKey
+          ? await db.ativos.get([tenantKey, cleanId])
+          : await db.ativos.where('primarykey').equals(cleanId).first();
         if (existing) {
           const mappedChanges: Record<string, unknown> = { ...changes } as unknown as unknown as Record<string, unknown>;
           // Format boolean values properly
@@ -228,7 +236,11 @@ export const localDb = {
               mappedChanges[k] = mappedChanges[k] ? 1 : 0;
             }
           });
-          const updated = { ...existing, ...mappedChanges };
+          const updated = {
+            ...existing,
+            ...mappedChanges,
+            tenantid: String((mappedChanges.tenantid ?? existing.tenantid) || '').trim().toUpperCase()
+          };
           await db.ativos.put(updated);
           await db.assets.put(updated);
           await db.local_assets.put(updated);
@@ -731,6 +743,13 @@ export const localDb = {
 
     clear: async () => {
       await usersStore.clear();
+    },
+
+    remove: async (email: string) => {
+      const emailClean = String(email || '').trim().toLowerCase();
+      if (emailClean) {
+        await usersStore.removeItem(emailClean);
+      }
     }
   },
 

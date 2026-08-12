@@ -9,6 +9,7 @@ import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
+import { isAdminEmail } from '../utils/authUtils';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -622,6 +623,11 @@ export const signUp = async (email: string, password: string, username: string, 
     if (error.message.includes('already registered')) {
       throw new Error('Este e-mail já está cadastrado. Tente fazer login ou recupere sua senha.');
     }
+    if (error.message.includes('Database error saving new user')) {
+      // Erro de backend: trigger de provisionamento em auth.users quebrado.
+      // Diagnóstico/correção: docs/supabase_signup_500_diagnostico.sql
+      throw new Error('O Supabase rejeitou o cadastro (500: trigger de provisionamento em auth.users). Execute docs/supabase_signup_500_diagnostico.sql no SQL Editor do Supabase para corrigir.');
+    }
     throw error;
   }
   
@@ -963,9 +969,13 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
     const lote = Math.floor(i / CHUNK_SIZE) + 1;
     try {
+      // SRE ISOLAMENTO DE CONTRATO: upsert escopado por (tenantid, id).
+      // Antes, onConflict 'id' permitia que a carga de um contrato SOBRESCREVESSE
+      // ativos de outro contrato que compartilhassem a mesma chave primária de
+      // origem (ex.: base de teste do CLIENTETESTE copiada do CICOPAL).
       const { error } = await supabase
         .from('assets')
-        .upsert(sanitizedAssetsPayload, { onConflict: 'id' });
+        .upsert(sanitizedAssetsPayload, { onConflict: 'tenantid, id' });
 
       if (error) {
         throw error;
@@ -978,7 +988,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       let loteOk = 0;
       for (const row of sanitizedAssetsPayload) {
         try {
-          const { error: rowError } = await supabase.from('assets').upsert([row], { onConflict: 'id' });
+          // Mesmo escopo por (tenantid, id) no fallback ativo-a-ativo
+          const { error: rowError } = await supabase.from('assets').upsert([row], { onConflict: 'tenantid, id' });
           if (rowError) {
             failedRows.push(`${row.id}: ${rowError.message || 'Erro de esquema.'}`);
           } else {
@@ -1323,6 +1334,11 @@ export const provisionUserInAuth = async (email: string, password?: string, user
       }
       
       logger.error('[Supabase] Erro definitivo no signUp do Supabase:', error);
+      if (error.message.includes('Database error saving new user')) {
+        // Erro de backend: trigger de provisionamento em auth.users quebrado.
+        // Diagnóstico/correção: docs/supabase_signup_500_diagnostico.sql
+        throw new Error('O Supabase rejeitou o cadastro (500: trigger de provisionamento em auth.users). Execute docs/supabase_signup_500_diagnostico.sql no SQL Editor do Supabase para corrigir.');
+      }
       throw error;
     }
 
@@ -1384,7 +1400,14 @@ export const syncUsersToCloud = async (users: User[]) => {
   if (!supabase || !users || users.length === 0) return;
 
   try {
-    const usersToSync = users.map(u => {
+    // SRE: nunca sincronizar usuários sem e-mail — upsert com e-mail vazio cria
+    // linhas fantasmas em user_permissions (sem id de auth, impossíveis de logar
+    // e imunes ao trigger on_auth_user_created). Também deduplica por e-mail.
+    const seen = new Set<string>();
+    const usersToSync = users.filter(u => u && u.email && String(u.email).trim() !== '').map(u => {
+      const emailKey = String(u.email).trim().toLowerCase();
+      if (seen.has(emailKey)) return null;
+      seen.add(emailKey);
       const normalizeValue = (val: string) => {
         if (!val) return '';
         const upper = val.toUpperCase();
@@ -1399,7 +1422,7 @@ export const syncUsersToCloud = async (users: User[]) => {
       const tenantVal = normalizeValue(u.tenantid || u.tenantid || u.tenantid || '');
       const filialVal = normalizeValue(u.filial || u._unitid || u.unitid || '');
       return {
-        email: u.email.toLowerCase().trim(),
+        email: emailKey,
         username: u.username,
         name: u.name || u.username,
         role: u.role,
@@ -1408,7 +1431,12 @@ export const syncUsersToCloud = async (users: User[]) => {
         filial: filialVal,
         units: normalizeArray(u.units || (filialVal ? [filialVal] : []))
       };
-    });
+    }).filter((x): x is NonNullable<typeof x> => x !== null);
+
+    if (usersToSync.length === 0) {
+      logger.warn('[Supabase] syncUsersToCloud: nenhum usuário válido (com e-mail) para sincronizar.');
+      return;
+    }
 
     const { error } = await supabase
       .from('user_permissions')
@@ -1624,7 +1652,7 @@ export const fetchFullInventory = async (
         else q = q.eq('tenantid', resolvedTenantid);
       }
       
-      if (unitid && unitid !== '') {
+      if (unitid && unitid !== '' && unitid.toUpperCase() !== 'TODAS') {
         const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
         q = q.eq('filial', cleanUnitId);
       }
@@ -2127,6 +2155,47 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
 };
 
 /**
+ * Busca o histórico de cargas/sincronizações no audit_logs da nuvem
+ * (ações IMPORT/SYNC_PULL/SYNC_PUSH/LOAD/CARGA/RESTORE/BACKUP, além de
+ * qualquer ação cujo nome contenha LOAD/IMPORT/SYNC).
+ *
+ * Quando o usuário tem contrato (tenantid), filtra por ele; quando não tem
+ * (ex.: dono global), retorna o histórico completo para monitoramento geral.
+ */
+export const fetchLoadHistory = async (tenantid?: string, limit = 300): Promise<Record<string, unknown>[]> => {
+  if (!supabase) return [];
+
+  try {
+    let query = supabase
+      .from('audit_logs')
+      .select('*')
+      .or(
+        'action.in.(IMPORT,SYNC_PULL,SYNC_PUSH,LOAD,CARGA,RESTORE,BACKUP),' +
+        'action.ilike.%LOAD%,action.ilike.%IMPORT%,action.ilike.%SYNC%'
+      )
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    const tid = String(tenantid || '').trim();
+    if (tid) {
+      query = query.eq('tenantid', tid);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      logger.error('Erro ao buscar histórico de cargas:', error);
+      return [];
+    }
+
+    return (data || []) as Record<string, unknown>[];
+  } catch (err) {
+    logger.error('Erro inesperado ao buscar histórico de cargas:', err);
+    return [];
+  }
+};
+
+/**
  * Busca um ativo globalmente no Supabase (em qualquer unidade/localização)
  */
 export const findAssetGlobally = async (etiqueta: string, tenantid: string): Promise<Asset | null> => {
@@ -2220,8 +2289,11 @@ export const updateAssetPhotoUrl = async (assetId: string, photoUrl: string, ten
  * Busca todas as campanhas de um tenant/unidade na tabela única oficial
  */
 export const fetchCampaigns = async (tenantid: string, unitid?: string | null): Promise<InventoryCampaign[]> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Modo explícito persistido tem prioridade; sem valor salvo, decide pela config do env
+  // (isInternalMode = sem credenciais Supabase) — evita ignorar a nuvem quando o modo
+  // SUPABASE_PLUS está ativo apenas em memória (não persistido no localStorage).
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode ? mode === 'INTERNAL' : isInternalMode;
   const cleanTenantid = (tenantid || '').trim();
 
   // 1. SEMPRE BUSCA NO SQLITE PRIMEIRO (Soberania Local)
@@ -2294,6 +2366,60 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
 
   } catch (err) {
     logger.warn('>>> [Supabase] Erro de rede ao buscar campanhas. Retornando apenas locais.', err);
+    return localCampaigns;
+  }
+};
+
+/**
+ * Lista TODAS as campanhas (todas as filiais) — uso administrativo (admin global).
+ * Quando o tenant não está identificado (ex.: perfil mestre sem tenant fixo),
+ * busca direto na nuvem sem filtro, para dar visibilidade de manutenção
+ * (validar/excluir/incluir) por filial.
+ */
+export const fetchAllCampaigns = async (): Promise<InventoryCampaign[]> => {
+  // Mesma regra do fetchCampaigns: modo persistido tem prioridade; sem valor,
+  // decide pela config do env (isInternalMode).
+  const mode = localStorage.getItem('app_database_mode');
+  const isInternal = mode ? mode === 'INTERNAL' : isInternalMode;
+
+  // Sempre tenta o local primeiro (Soberania Local)
+  let localCampaigns: InventoryCampaign[] = [];
+  try {
+    localCampaigns = await localDb.campaigns.toArray();
+  } catch (err) {
+    logger.warn('>>> [Local] Erro ao ler campanhas locais (fetchAllCampaigns):', err);
+  }
+
+  if (isInternal || !supabase) return localCampaigns;
+
+  try {
+    const { data: cloudData, error } = await supabase
+      .from('campaigns')
+      .select('*')
+      .order('start_date', { ascending: false });
+
+    if (error) {
+      logger.warn('>>> [Supabase] Falha ao buscar todas as campanhas (mantendo local):', error);
+      return localCampaigns;
+    }
+
+    const cloudCampaigns = (cloudData || []).map((c: Record<string, unknown>) => ({
+      ...c,
+      filial: (c.filial || c.unit_id || c._unitid) as string,
+      tenantid: c.tenantid as string,
+      unit_id: (c.filial || c.unit_id || c._unitid) as string
+    })) as InventoryCampaign[];
+
+    // Merge sem duplicatas (prioridade nuvem em caso de conflito de ID)
+    const campaignMap = new Map<string, InventoryCampaign>();
+    localCampaigns.forEach(c => campaignMap.set(c.id, c));
+    cloudCampaigns.forEach(c => campaignMap.set(c.id, c));
+
+    const merged = Array.from(campaignMap.values());
+    logger.info(`>>> [Governance] fetchAllCampaigns: ${localCampaigns.length} locais, ${cloudCampaigns.length} nuvem. Total: ${merged.length}`);
+    return merged;
+  } catch (err) {
+    logger.warn('>>> [Supabase] Erro de rede ao buscar todas as campanhas:', err);
     return localCampaigns;
   }
 };

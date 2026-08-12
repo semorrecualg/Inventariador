@@ -49,10 +49,14 @@ export const getAdminEmail = (): string => {
  * Sem VITE_ADMIN_EMAIL configurado, NENHUM email tem acesso (governança estrita).
  */
 export const canAccessDatabaseManager = (
-  user: { email?: string | null; isSuperAdmin?: boolean } | null | undefined,
+  user: { email?: string | null; isSuperAdmin?: boolean; role?: string | null } | null | undefined,
 ): boolean => {
   if (!user) return false;
   if (user.isSuperAdmin) return true;
+  // Trilha A do RBAC (docs/RBAC_GOVERNANCA.md): ADMIN/MASTER têm governança
+  // técnica, incluindo carga de bases (GESTOR DE BASE).
+  const role = String(user.role || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'MASTER') return true;
   const email = (user.email || '').trim().toLowerCase();
   const admin = getAdminEmail().trim().toLowerCase();
   return !!email && !!admin && email === admin;

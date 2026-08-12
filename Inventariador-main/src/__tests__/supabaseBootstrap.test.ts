@@ -30,11 +30,17 @@ const APP_TABLES = [
 ] as const;
 
 describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42703)', () => {
-  it('não usa código dinâmico DO/EXECUTE/format (causas dos erros 42601 e 26000)', () => {
+  it('não usa EXECUTE/format() dinâmico e no máximo 1 bloco DO estático (causas dos erros 42601 e 26000)', () => {
+    // O 42601 vinha de "ALTER COLUMN IF EXISTS" (inexistente no PostgreSQL); o
+    // 26000 de format()/EXECUTE dinâmico nas políticas. O único DO permitido é o
+    // bloco estático e condicional que torna unit_id opcional em schema legado
+    // (sem ele, o ALTER quebraria em instalação nova — coluna inexistente).
     const dynamic = codeLines.filter(
-      (l) => /^(DO\s*\$\$|EXECUTE\s)/i.test(l) || /format\(/.test(l)
+      (l) => /^(EXECUTE\s)/i.test(l) || /format\(/.test(l)
     );
     expect(dynamic).toEqual([]);
+    const doBlocks = codeLines.filter((l) => /^DO\s*\$\$/i.test(l));
+    expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
   it('tem exatamente 9 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
@@ -88,13 +94,18 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
       'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS description text;',
       'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS created_by text;',
       'ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS start_date timestamptz;',
-      'ALTER TABLE public.campaigns ALTER COLUMN IF EXISTS unit_id DROP NOT NULL;',
+      // PostgreSQL NÃO tem "ALTER COLUMN IF EXISTS" (42601). O bootstrap usa um
+      // DO condicional (estático, sem EXECUTE/format) que só altera unit_id se a
+      // coluna existir — instalação nova não quebra e schema legado fica ok.
+      'ALTER TABLE public.campaigns ALTER COLUMN unit_id DROP NOT NULL',
       'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS assets_data jsonb;',
       'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS metadata jsonb;',
       'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_at timestamptz;',
       'ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS closed_by text;',
       'ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS user_email text;'
     ];
+    // Guarda condicional do DO de unit_id (schema legado × instalação nova).
+    expect(sql).toContain("table_name = 'campaigns' AND column_name = 'unit_id'");
     for (const line of extras) {
       expect(sql).toContain(line);
     }

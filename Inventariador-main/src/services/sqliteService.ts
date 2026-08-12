@@ -112,9 +112,12 @@ export interface DexieAddress {
 }
 
 class InventoryDexieDatabase extends Dexie {
-  local_assets!: Dexie.Table<DexieAsset, string>;
-  ativos!: Dexie.Table<DexieAsset, string>;
-  assets!: Dexie.Table<DexieAsset, string>;
+  // v6: chave primária composta [tenantid+primarykey] — o tenantid é o muro que
+  // separa os mundos de cada cliente (mesma regra da nuvem com PK (tenantid, id)).
+  // Dois contratos podem ter a MESMA chave de origem (e filial homônima) sem colidir.
+  local_assets!: Dexie.Table<DexieAsset, [string, string]>;
+  ativos!: Dexie.Table<DexieAsset, [string, string]>;
+  assets!: Dexie.Table<DexieAsset, [string, string]>;
   audit_logs!: Dexie.Table<DexieAuditLog, string>;
   campaigns!: Dexie.Table<DexieCampaign, string>;
   SYSTEM_CONTEXT!: Dexie.Table<DexieSystemContext, string>;
@@ -203,6 +206,76 @@ class InventoryDexieDatabase extends Dexie {
         return Promise.resolve();
       }
       return runV5Upgrade(tx);
+    });
+    // v6 — FASE 1 (docs/SPEC.md §Isolamento): chave primária composta
+    // `[tenantid+primarykey]` nas 3 tabelas de ativos. O muro entre clientes é o
+    // tenantid; antes, a chave era `primarykey` sozinha e dois contratos com a
+    // mesma chave de origem colidiam (sobrescrita silenciosa — bug sanitizado na
+    // nuvem e no local).
+    //
+    // O Dexie NÃO suporta trocar a chave primária num upgrade direto
+    // ("Not yet support for changing primary key") — a receita oficial é
+    // REMOVER a tabela numa versão e RECRIÁ-LA na versão seguinte. A migração
+    // em 2 passos preserva 100% dos registros:
+    //   v6: DROP das 3 tabelas + cópia integral para tabelas de backup;
+    //   v7: RECREATE com a chave composta + restauração a partir do backup.
+    this.version(6).stores({
+      local_assets: null,
+      ativos: null,
+      assets: null,
+      _v6_bkp_local: 'primarykey',
+      _v6_bkp_ativos: 'primarykey',
+      _v6_bkp_assets: 'primarykey',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced'
+    }).upgrade(async (tx) => {
+      const pairs: Array<[string, string]> = [
+        ['local_assets', '_v6_bkp_local'],
+        ['ativos', '_v6_bkp_ativos'],
+        ['assets', '_v6_bkp_assets'],
+      ];
+      for (const [src, dst] of pairs) {
+        const rows = (await tx.table(src).toArray()) as Record<string, unknown>[];
+        await tx.table(dst).bulkAdd(rows as never[]);
+        logger.info(`[MigrationV6] Backup ${src} → ${dst}: ${rows.length} registros copiados.`);
+      }
+    });
+    // v7 — RECREATE com chave composta [tenantid+primarykey] e restauração.
+    // `primarykey` vira ÍNDICE; o tenantid é normalizado para UPPER (canônico)
+    // para chaves compostas consistentes. As tabelas de backup são descartadas.
+    this.version(7).stores({
+      local_assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      ativos: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      _v6_bkp_local: null,
+      _v6_bkp_ativos: null,
+      _v6_bkp_assets: null,
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced'
+    }).upgrade(async (tx) => {
+      const pairs: Array<[string, string]> = [
+        ['_v6_bkp_local', 'local_assets'],
+        ['_v6_bkp_ativos', 'ativos'],
+        ['_v6_bkp_assets', 'assets'],
+      ];
+      for (const [src, dst] of pairs) {
+        const rows = (await tx.table(src).toArray()) as Record<string, unknown>[];
+        const normalized = rows.map((row) => ({
+          ...row,
+          tenantid: String(row.tenantid || '').trim().toUpperCase(),
+          id: String(row.primarykey || row.id || ''),
+        }));
+        await tx.table(dst).bulkAdd(normalized as never[]);
+        logger.info(`[MigrationV7] ${dst}: ${rows.length} registros restaurados com chave composta [tenantid+primarykey].`);
+      }
     });
   }
 }
@@ -547,6 +620,47 @@ export class SqliteService {
     return 'GERAL';
   }
 
+  /**
+   * SRE ISOLAMENTO (local): filtra registros cuja chave (primarykey) já existe
+   * localmente sob OUTRO tenantid. O upsert local é por primarykey; sem essa
+   * proteção, um sync/restore de outro contrato sobrescreveria (e re-etiquetaria)
+   * os ativos deste contrato — mesmo bug sanitizado na nuvem. Registros de outro
+   * contrato são preservados intactos (a carga é ignorada apenas nessas chaves).
+   */
+  public async filterCrossTenantWrites(mappedChunk: DexieAsset[]): Promise<DexieAsset[]> {
+    // Normaliza o tenantid para UPPER (canônico) — garante chaves compostas
+    // consistentes [tenantid+primarykey] independentemente do case da fonte.
+    const normalizedChunk = mappedChunk.map(m => ({
+      ...m,
+      tenantid: String(m.tenantid || '').trim().toUpperCase(),
+    }));
+    const existingRows = await db.local_assets.bulkGet(
+      normalizedChunk.map(m => [String(m.tenantid || '').trim().toUpperCase(), String(m.primarykey || '')] as [string, string])
+    );
+    const safeChunk: DexieAsset[] = [];
+    let skipped = 0;
+    for (let k = 0; k < normalizedChunk.length; k++) {
+      const incoming = normalizedChunk[k];
+      const existing = existingRows[k];
+      // Com a chave composta [tenantid+primarykey] a colisão entre contratos é
+      // estruturalmente impossível; este guard permanece como invariante de
+      // segurança para escritas legadas que ignorem o par composto.
+      if (existing && String(existing.tenantid || '').trim().toUpperCase() !== String(incoming.tenantid || '').trim().toUpperCase()) {
+        skipped++;
+        logger.warn(
+          `[SRE ISOLAMENTO] Bloqueada sobrescrita entre contratos na chave ${incoming.primarykey}: ` +
+          `local=${String(existing.tenantid || '(vazio)')} × carga=${String(incoming.tenantid || '(vazio)')}. Registro local preservado.`
+        );
+        continue;
+      }
+      safeChunk.push(incoming);
+    }
+    if (skipped > 0) {
+      logger.warn(`[SRE ISOLAMENTO] ${skipped} registro(s) de outro contrato preservado(s) neste lote (chaves coincidentes).`);
+    }
+    return safeChunk;
+  }
+
   public async bulkInsertAssetsOfflineFirst(
     assets: Record<string, unknown>[],
     onProgress?: (processed: number, total: number) => void,
@@ -573,7 +687,8 @@ export class SqliteService {
             const mapped: DexieAsset = {
               id: primaryKeyVal,
               primarykey: primaryKeyVal,
-              tenantid: String(asset.tenantid || ''),
+              // UPPER canônico — chave composta [tenantid+primarykey] consistente.
+              tenantid: String(asset.tenantid || '').trim().toUpperCase(),
               filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
               status: String(asset.status || 'P'),
               etiqueta: String(asset.etiqueta || ''),
@@ -613,9 +728,12 @@ export class SqliteService {
             return mapped;
           });
 
-          await db.ativos.bulkPut(mappedChunk);
-          await db.assets.bulkPut(mappedChunk);
-          await db.local_assets.bulkPut(mappedChunk);
+          // SRE ISOLAMENTO (local): nunca sobrescrever registros de OUTRO contrato
+          // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
+          const safeChunk = await this.filterCrossTenantWrites(mappedChunk);
+          await db.ativos.bulkPut(safeChunk);
+          await db.assets.bulkPut(safeChunk);
+          await db.local_assets.bulkPut(safeChunk);
 
           processed += chunk.length;
           if (onProgress) {
@@ -822,6 +940,27 @@ export class SqliteService {
 
   public async countAtivos(): Promise<number> {
     return await this.getAssetCount();
+  }
+
+  /**
+   * Contagem de ativos escopada por tenantid (SRE: isolamento entre contratos).
+   * Sem tenant, delega à contagem global. Usado no roteamento pós-login para
+   * decidir se o usuário deve ser direcionado à primeira carga de dados.
+   */
+  public async countAtivosByTenant(tenantid?: string | null): Promise<number> {
+    const t = String(tenantid || '').trim().toUpperCase();
+    if (!t) return await this.getAssetCount();
+    try {
+      const [localAssets, ativos] = await Promise.all([
+        db.local_assets.toArray(),
+        db.ativos.toArray()
+      ]);
+      const countOf = (list: { tenantid?: unknown }[]) =>
+        list.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
+      return Math.max(countOf(localAssets as { tenantid?: unknown }[]), countOf(ativos as { tenantid?: unknown }[]));
+    } catch {
+      return 0;
+    }
   }
 
   public async saveInventoryConfig(config: Record<string, unknown>): Promise<void> {
@@ -1045,10 +1184,14 @@ export class SqliteService {
       const asset = change.asset;
       const primaryKeyVal = String(asset.primarykey || asset.id || '');
       if (primaryKeyVal) {
-        const existing = await db.ativos.get(primaryKeyVal);
+        const tenantKey = String(asset.tenantid || '').trim().toUpperCase();
+        const existing = tenantKey
+          ? await db.ativos.get([tenantKey, primaryKeyVal])
+          : undefined;
         const updatedItem = {
           ...existing,
           ...asset,
+          tenantid: String(asset.tenantid || existing?.tenantid || '').trim().toUpperCase(),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
           _is_synced: 0
@@ -1075,9 +1218,20 @@ export class SqliteService {
 
 export const sqliteService = new Proxy({} as SqliteService, {
   get(target, prop, receiver) {
-    return Reflect.get(SqliteService.getInstance(), prop, receiver);
+    const inst = SqliteService.getInstance();
+    const value = Reflect.get(inst, prop, receiver);
+    // Liga os métodos à instância real do singleton. Sem o bind, `this` dentro
+    // dos métodos é o proxy, e escritas internas (ex: this.isInitialized = true
+    // no init(), this.dbStatus = ...) caem no target vazio do proxy — nunca na
+    // instância. Isso mantinha isInitialized sempre false e congelava o
+    // Inventory em "RE-INICIALIZANDO SISTEMA GBR" (mesmo padrão do syncService).
+    if (typeof value === 'function') {
+      return (value as (...args: unknown[]) => unknown).bind(inst);
+    }
+    return value;
   },
-  set(target, prop, value, receiver) {
-    return Reflect.set(SqliteService.getInstance(), prop, value, receiver);
+  set(target, prop, value) {
+    (SqliteService.getInstance() as unknown as Record<string, unknown>)[prop as string] = value;
+    return true;
   }
 });

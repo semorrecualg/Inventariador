@@ -5,9 +5,10 @@ declare module 'lucide-react/dist/esm/icons/*' {
   export default icon;
 }
 
-// Declaração global para isAdminEmail usado em supabaseService
+// A função isAdminEmail deve ser importada de '../utils/authUtils' (não declarada
+// globalmente — a declaração global apenas de tipos mascarava a ausência do
+// import e quebrava o runtime com ReferenceError em supabaseService).
 declare global {
-  function isAdminEmail(email: string): boolean;
   interface Window {
     pushScreen?: (s: import('../types').AppScreen, params?: import('../types').NavigationParams) => void;
   }

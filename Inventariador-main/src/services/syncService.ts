@@ -342,11 +342,14 @@ export const photoSyncManager = {
             .from('asset-photos')
             .getPublicUrl(filePath);
 
-          // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro
+          // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro.
+          // Chave composta [tenantid+primarykey] (v6): flags são aplicadas por
+          // primarykey via índice (todas as linhas da chave, qualquer contrato).
           const assetKey = String(item.assetId).trim();
-          await db.ativos.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
-          await db.local_assets.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
-          await db.assets.update(assetKey, { _photoUrl: publicUrl, _is_synced: 1 });
+          const photoChanges = { _photoUrl: publicUrl, _is_synced: 1 };
+          await db.ativos.where('primarykey').equals(assetKey).modify(photoChanges);
+          await db.local_assets.where('primarykey').equals(assetKey).modify(photoChanges);
+          await db.assets.where('primarykey').equals(assetKey).modify(photoChanges);
 
           await photoQueueStore.removeItem(key);
           uploadCount++;
@@ -523,9 +526,10 @@ const _syncService = {
         await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
           for (let m = 0; m < syncedPrimaryKeys.length; m++) {
             const keyToUpdate = syncedPrimaryKeys[m];
-            await db.local_assets.update(keyToUpdate, { _is_synced: 1 });
-            await db.ativos.update(keyToUpdate, { _is_synced: 1 });
-            await db.assets.update(keyToUpdate, { _is_synced: 1 });
+            // Chave composta (v6): marca por primarykey via índice, sem depender do tenant.
+            await db.local_assets.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
+            await db.ativos.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
+            await db.assets.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
           }
         });
         

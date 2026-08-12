@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, downloadBaseToLocal } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, downloadBaseToLocal } from '../services/supabaseService';
 import { db } from '../services/sqliteService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -314,10 +314,34 @@ const Login: React.FC<LoginProps> = ({
           let loggedUser: User;
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
-            // v25.70: tenant 100% da base — nenhum valor fixo. Se o registro local
-            // nao tiver tenant, recupera o da sessao (persistido do user_permissions).
+            const roleUpper = String(loggedUser.role || '').toUpperCase();
+            const isMasterLike = isAdminEmail(loggedUser.email) || !!loggedUser.is_admin || !!loggedUser.isAdmin ||
+                                 roleUpper === 'ADMIN' || roleUpper === 'MASTER';
             if (!loggedUser.tenantid) {
-              loggedUser.tenantid = readSessionTenantId() || readLocalTenantId() || '';
+              // REGRA SRE usuário×tenant: o app NUNCA aceita um perfil sem contrato
+              // virando "GLOBAL" (dados de vários contratos misturados). A fonte da
+              // verdade é o user_permissions na NUVEM — tenta resolver antes de
+              // recorrer à sessão; admin/master sem tenant vinculado é BLOQUEADO.
+              let cloudTenant = '';
+              try {
+                if (!isInternalMode && supabase) {
+                  const cloudProfile = await ensureUserProfile(loggedUser.email, undefined, undefined);
+                  cloudTenant = String(cloudProfile?.tenantid || '').trim();
+                }
+              } catch (cloudErr) {
+                logger.warn('[Login] Falha ao resolver tenant do perfil na nuvem (Barreira Local):', cloudErr);
+              }
+              if (cloudTenant) {
+                loggedUser.tenantid = cloudTenant;
+              } else if (isMasterLike) {
+                logger.warn(`[Login] [CHECK 3] Bloqueando login de admin/master sem tenantid vinculado: ${loggedUser.email}`);
+                setIsLoading(false);
+                setError('Perfil de administrador sem tenantid vinculado. Contate o administrador para vincular seu contrato antes de logar.');
+                clearTimeout(loginTimeout);
+                return;
+              } else {
+                loggedUser.tenantid = readSessionTenantId() || readLocalTenantId() || '';
+              }
             }
           } else if (normalizedUsername === 'admin' && password === '123456') {
             loggedUser = {
@@ -482,8 +506,8 @@ const Login: React.FC<LoginProps> = ({
                 username: authData.user.email?.split('@')[0],
                 role: is_master ? 'ADMIN' : 'AUDITOR',
                 is_admin: is_master,
-                tenantid: is_master ? (readSessionTenantId() || readLocalTenantId() || '') : '',
-                filial: is_master ? '' : ''
+                tenantid: '',
+                filial: ''
               } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             });
           
@@ -508,8 +532,10 @@ const Login: React.FC<LoginProps> = ({
           let unitId = normalizeValue(cloudUser.filial || cloudUser._unitid || cloudUser.unitid || '');
 
           if (is_master) {
-            const storedTenant = readSessionTenantId() || readLocalTenantId() || '';
-            tenantid = storedTenant === 'GBR_SUPER_ADMIN_CORINGA' ? '' : storedTenant;
+            // DONO GLOBAL: tenant EXCLUSIVAMENTE do perfil (user_permissions).
+            // Nunca de storage/cache de sessão anterior — o dono é GLOBAL e o
+            // contrato é escolhido no seletor pós-login (multi-contrato).
+            tenantid = normalizeValue(cloudUser.tenantid || '');
             unitId = 'TODAS';
           }
 
@@ -707,13 +733,13 @@ const Login: React.FC<LoginProps> = ({
       {/* Header com Logotipo - Ocultado quando teclado está aberto para preservar espaço */}
       {!isKeyboardVisible && (
         <div className="mb-4 text-center relative flex flex-col items-center animate-fadeIn">
-          {/* Seletor de Ambiente Dinâmico GBR v${pkg.version} - Forçado a LOCAL por Orientação */}
+          {/* Seletor de Ambiente Dinâmico — reflete o modo real (Supabase vs local) */}
           <div
             className="absolute top-0 right-0 bg-accent/10 border border-accent/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 z-[100] select-none"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isInternalMode ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
             <span className="text-[7px] font-black text-slate-900 uppercase tracking-wider">
-              AMBIENTE: MOBILE (LOCAL)
+              AMBIENTE: {isInternalMode ? 'MOBILE (LOCAL)' : 'SUPABASE (WEB)'}
             </span>
           </div>
 

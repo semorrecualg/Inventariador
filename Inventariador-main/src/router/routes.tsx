@@ -40,5 +40,8 @@ export const screenToPath: Record<AppScreen, string> = {
   [AppScreen.UNIT_CONFIGURATOR]: '/unit-config',
   [AppScreen.STRESS_TEST]: '/stress-test',
   [AppScreen.ASSET_REPORT_PRINT]: '/print',
+  [AppScreen.LICENSE_PROVISIONING]: '/licenses',
+  [AppScreen.TENANT_WORK_SELECTION]: '/selecionar-contrato',
+  [AppScreen.LOAD_HISTORY]: '/load-history',
 };
 

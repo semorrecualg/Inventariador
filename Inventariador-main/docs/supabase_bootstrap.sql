@@ -69,9 +69,22 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS filial text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS primarykey text;
 
--- A fila de sync usa upsert por primarykey (sem id duplicado por ativo)
-CREATE UNIQUE INDEX IF NOT EXISTS assets_primarykey_key
-  ON public.assets (primarykey) WHERE primarykey IS NOT NULL;
+-- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
+-- a mesma chave primária pode existir legitimamente em contratos diferentes
+-- (ex.: base de teste do CLIENTETESTE copiada do CICOPAL). O índice GLOBAL
+-- antigo (assets_primarykey_key em primarykey) impedia a coexistência e, com
+-- o upsert por 'id', permitia que uma carga SOBRESCREVESSE ativos de outro
+-- contrato. Ambos os problemas são resolvidos escopando por (tenantid, ...).
+DROP INDEX IF EXISTS public.assets_primarykey_key;
+CREATE UNIQUE INDEX IF NOT EXISTS assets_tenant_primarykey_key
+  ON public.assets (tenantid, primarykey) WHERE primarykey IS NOT NULL;
+
+-- PK COMPOSTA (tenantid, id): a MESMA chave de origem pode existir em
+-- contratos diferentes SEM sobrescrever — é o alvo de conflito do upsert do
+-- syncAssetsToCloud (onConflict: 'tenantid, id'). Remove a PK antiga em id
+-- sozinho, que impedia a coexistência multi-tenant.
+ALTER TABLE public.assets DROP CONSTRAINT IF EXISTS assets_pkey;
+ALTER TABLE public.assets ADD PRIMARY KEY (tenantid, id);
 
 CREATE INDEX IF NOT EXISTS assets_tenantid_idx ON public.assets (tenantid);
 CREATE INDEX IF NOT EXISTS assets_tenant_filial_idx ON public.assets (tenantid, filial);
@@ -150,7 +163,7 @@ CREATE TABLE IF NOT EXISTS public.user_permissions (
   is_admin    boolean DEFAULT false,
   tenantid    text,
   filial      text,
-  units       jsonb,
+  units       text[], -- text[] (schema real/legado e payload do app); NÃO usar jsonb
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now()
 );
@@ -160,7 +173,7 @@ ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS updated_at timestam
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS filial text;
-ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS units jsonb;
+ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS units text[];
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS username text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS name text;
 ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS role text;
@@ -223,7 +236,17 @@ ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS data jsonb;
 -- Schema legado de campanhas pode ter `unit_id NOT NULL` que o app NÃO envia
 -- (probe REST real: 23502 em todo INSERT). Torna a coluna opcional — o app
 -- grava a unidade em `filial`, não em `unit_id`.
-ALTER TABLE public.campaigns ALTER COLUMN IF EXISTS unit_id DROP NOT NULL;
+-- PostgreSQL NÃO suporta "ALTER COLUMN IF EXISTS" (erro 42601).
+-- O bloco DO abaixo é condicional e idempotente: só altera se a coluna existir.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'campaigns' AND column_name = 'unit_id'
+  ) THEN
+    ALTER TABLE public.campaigns ALTER COLUMN unit_id DROP NOT NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

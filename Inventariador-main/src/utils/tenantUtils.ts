@@ -58,3 +58,22 @@ export function readSessionTenantId(): string {
 export function readLocalTenantId(): string {
   return localStorage.getItem('tenantid') || localStorage.getItem('tenantId') || '';
 }
+
+/**
+ * Limpa o contexto de trabalho (contrato/filial/unidade) do sessionStorage e
+ * localStorage. Usado no LOGOUT: o próximo login NUNCA deve herdar o contrato
+ * de uma sessão anterior (bug clássico: dono global logava como CLIENTETESTE
+ * por causa do tenantid velho deixado no storage após purga/troca de sessão).
+ */
+export function clearTenantContext(): void {
+  const keys = [
+    'tenantid', 'tenantId', 'filial', 'unitid',
+    'selectedUnit', 'app_selected_unit', 'app_last_tenant'
+  ];
+  keys.forEach((k) => {
+    try {
+      sessionStorage.removeItem(k);
+      localStorage.removeItem(k);
+    } catch { /* storage indisponível — ignora */ }
+  });
+}

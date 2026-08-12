@@ -4,6 +4,7 @@ export enum UserRole {
   MASTER = 'MASTER',
   AUDITOR = 'AUDITOR',
   AUXILIARY_AUDITOR = 'AUXILIARY_AUDITOR',
+  USER = 'USER', // OPERADOR de campo (Trilha C)
   DEMO = 'DEMO',
   MOBILE_SINGLE = 'MOBILE_SINGLE'
 }
@@ -19,6 +20,7 @@ export interface User {
   isAdmin?: boolean; // Deprecated: use is_admin
   isSuperAdmin?: boolean; // Super administrator flag
   mustChangePassword?: boolean;
+  quickLogin?: boolean;   // Sub-usuário de "login rápido" (credencial local, encapsulado no tenant do MASTER)
   tenantid: string;   // 1ª Coluna / ID do Tenant (ex: CICOPAL) - Oficial
   filial?: string;    // 2ª Coluna / Unidade Operacional - Oficial
   // @deprecated Legado (somente leitura): use 'filial'
@@ -212,7 +214,10 @@ export enum AppScreen {
   IMPAIRMENT_REPORT = 'IMPAIRMENT_REPORT',
   UNIT_CONFIGURATOR = 'UNIT_CONFIGURATOR',
   STRESS_TEST = 'STRESS_TEST',
-  ASSET_REPORT_PRINT = 'ASSET_REPORT_PRINT'
+  ASSET_REPORT_PRINT = 'ASSET_REPORT_PRINT',
+  LICENSE_PROVISIONING = 'LICENSE_PROVISIONING',
+  TENANT_WORK_SELECTION = 'TENANT_WORK_SELECTION',
+  LOAD_HISTORY = 'LOAD_HISTORY'
 }
 
 export enum AppModule {
@@ -347,6 +352,8 @@ export interface NavigationParams {
   campaign?: InventoryCampaign | null;
   mode?: 'PARTIAL' | 'FINAL';
   responsibleName?: string;
+  /** Painel do MainMenu a abrir automaticamente ao chegar (usado pela tool grid da Unidade Operacional). */
+  openPanel?: 'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT';
 }
 
 export interface UnitConfig {

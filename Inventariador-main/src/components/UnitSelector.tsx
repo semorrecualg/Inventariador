@@ -12,10 +12,14 @@ import {
   Navigation as NavigationIcon,
   Database,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  SlidersHorizontal,
+  DatabaseZap,
+  Settings,
+  ListChecks
 } from 'lucide-react';
 import BackButton from './BackButton';
-import { DatabaseMode, UnitConfig } from '../types';
+import { AppScreen, DatabaseMode, NavigationParams, UnitConfig } from '../types';
 import * as turf from '@turf/turf';
 import { localDb, readVirtualSnapshot } from '../services/localDbService';
 import { resolveTenantId } from '../utils/tenantUtils';
@@ -42,9 +46,12 @@ interface UnitSelectorProps {
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   isAdmin?: boolean;
+  isAuditor?: boolean;
   databaseMode?: DatabaseMode;
   isImportingBatch?: boolean; // UX v2.6 Isolated state
   onForceToggleView?: () => void;
+  /** Navegação para o MainMenu com painel pré-aberto (tool grid da Unidade Operacional). */
+  onNavigate?: (target: AppScreen, params?: NavigationParams) => void;
 }
 
 interface SqliteUnitStats {
@@ -64,11 +71,20 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   onLoadDatabase, 
   isSyncing, 
   isAdmin, 
+  isAuditor = false, 
   databaseMode,
   isImportingBatch = false,
-  onForceToggleView
+  onForceToggleView,
+  onNavigate
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  // Total de ativos das unidades listadas (fallback do indicador da tool grid).
+  const totalAssets = units.reduce((acc, u) => acc + (Number(u.assetCount) || 0), 0);
+  // Total GERAL da base local (modo INTERNAL/SQLite): soma de todas as filiais
+  // reais encontradas no banco local (escopadas ao contrato ativo), em vez de
+  // apenas as unidades listadas na tela.
+  const [localTotalAssets, setLocalTotalAssets] = useState<number | null>(null);
+  const displayTotalAssets = localTotalAssets ?? totalAssets;
   const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
   const [sqliteUnits, setSqliteUnits] = useState<SqliteUnitStats[]>([]);
@@ -96,6 +112,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   useEffect(() => {
     let active = true;
     const fetchSqliteUnits = async () => {
+      setLocalTotalAssets(null);
       setStatsLoading(databaseMode === DatabaseMode.INTERNAL);
       try {
         if (databaseMode === DatabaseMode.INTERNAL) {
@@ -170,6 +187,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
           if (active) {
             setSqliteUnits(mapped);
+            // Total geral da base local (todas as filiais reais do contrato ativo).
+            setLocalTotalAssets(mapped.reduce((acc, m) => acc + m.total, 0));
             setStatsLoading(false);
           }
         } else if (active) {
@@ -488,6 +507,71 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
             className="w-full pl-11 pr-5 py-2.5 bg-bg-main rounded-xl text-[10px] font-bold uppercase border border-border focus:border-accent outline-none transition-all shadow-inner placeholder:text-ink-muted/30"
           />
+        </div>
+
+        {/* TOOL GRID — transferida do MainMenu (fig. 1): AJUSTES · DADOS · PAINEL · AUDITORIA */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-1.5 md:space-x-4 font-sans">
+            <button 
+              onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'PREFERENCES' })} 
+              className="flex flex-col items-center space-y-1 group"
+              title="Ajustes de Campo"
+            >
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                <SlidersHorizontal size={20} />
+              </div>
+              <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
+            </button>
+
+            {isAdmin && (
+              <button 
+                onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'DATA' })} 
+                className="flex flex-col items-center space-y-1 group"
+                title="Gestão de Dados"
+              >
+                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                  <DatabaseZap size={20} />
+                </div>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Dados</span>
+              </button>
+            )}
+
+            {isAdmin && (
+              <button 
+                onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'ADMIN' })} 
+                className="flex flex-col items-center space-y-1 group"
+                title="Painel Administrativo"
+              >
+                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
+                  <Settings size={20} />
+                </div>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Painel</span>
+              </button>
+            )}
+
+            {isAuditor && (
+              <button 
+                onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'AUDIT' })} 
+                className="flex flex-col items-center space-y-1 group"
+                title="Trilha de Auditoria"
+              >
+                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 group-active:scale-90 transition-all group-hover:bg-emerald-600 group-hover:text-white">
+                  <ListChecks size={20} />
+                </div>
+                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Auditoria</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] font-bold text-ink uppercase tracking-widest">
+              {displayTotalAssets > 0 ? `${displayTotalAssets.toLocaleString('pt-BR')} Ativos` : 'Vazio'}
+            </span>
+            <div className="flex items-center space-x-1 mt-1">
+              <div className={`w-1.5 h-1.5 rounded-full ${displayTotalAssets > 0 ? 'bg-success' : 'bg-slate-300'}`} />
+              <span className="text-[8px] font-medium text-ink-muted uppercase">Base Local</span>
+            </div>
+          </div>
         </div>
       </div>
 

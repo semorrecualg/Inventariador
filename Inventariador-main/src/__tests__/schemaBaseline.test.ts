@@ -1,15 +1,21 @@
 // src/__tests__/schemaBaseline.test.ts
 // CONTRATO DE CONGELAMENTO DO SCHEMA LOCAL (Fase 0 — docs/MIGRACAO_HIBRIDA.md).
 //
-// Trava o baseline canônico `InventoryLocalStore` v5:
-//  - `db.verno === 5`
+// Trava o baseline canônico `InventoryLocalStore` v7:
+//  - `db.verno === 7`
+//
+// A chave composta `[tenantid+primarykey]` foi aplicada na cadeia v6→v7
+// (v6: DROP + backup; v7: RECREATE + restauração — o Dexie não permite trocar
+// a chave primária num único upgrade).
 //  - conjunto exato das 9 tabelas Dexie
 //  - assinatura de chave primária + índices de cada tabela (order-insensitive)
 //  - os 21 canônicos do contrato de carga presentes em DB_ASSET_COLUMNS
 //
-// v5 (Fase C4) = MESMAS assinaturas do v4 — sem mudança estrutural; apenas a
-// etapa de DADOS (normalização de chaves/valores + reconcile aditivo de
-// addresses) no upgrade. Referência congelada: docs/SCHEMA_BASELINE.md.
+// v6 = chave primária COMPOSTA `[tenantid+primarykey]` nas 3 tabelas de ativos
+// (o tenantid é o muro entre contratos — mesma regra da nuvem com PK (tenantid, id)).
+// `primarykey` passou de chave primária para ÍNDICE. v5 (Fase C4) não mudou a
+// estrutura; a etapa de DADOS (normalização) segue no upgrade do v5.
+// Referência congelada: docs/SCHEMA_BASELINE.md.
 // Qualquer evolução do schema exige nova version(n) no InventoryDexieDatabase,
 // atualização do doc E deste contrato.
 import { describe, it, expect } from 'vitest';
@@ -43,12 +49,12 @@ function normalize(sig: string): string {
     .join(', ');
 }
 
-// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v5 canônico `tenantid`
-// (v5 = v4 sem mudança estrutural; docs/PLANO_FASE_C_HIGIENIZACAO.md §6).
+// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v6: chave primária
+// composta `[tenantid+primarykey]` nas 3 tabelas de ativos; `primarykey` virou índice.
 const BASELINE: Record<string, string> = {
-  local_assets: 'primarykey, [tenantid+filial], filial, _is_synced',
-  ativos: 'primarykey, [tenantid+filial], filial, _is_synced',
-  assets: 'primarykey, [tenantid+filial], filial, _is_synced',
+  local_assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
+  ativos: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
+  assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
   audit_logs: 'id, updated_at',
   campaigns: 'id, tenantid',
   SYSTEM_CONTEXT: 'key',
@@ -67,9 +73,9 @@ const LOADER_CONTRACT_21 = [
 ];
 
 describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () => {
-  it('banco canônico `InventoryLocalStore` na versão de schema v5', () => {
+  it('banco canônico `InventoryLocalStore` na versão de schema v7', () => {
     expect(db.name).toBe('InventoryLocalStore');
-    expect(db.verno).toBe(5);
+    expect(db.verno).toBe(7);
   });
 
   it('conjunto exato de 9 tabelas (sem tabelas órfãs nem faltantes)', () => {
@@ -77,7 +83,7 @@ describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () =
     expect(names).toEqual(Object.keys(BASELINE).sort());
   });
 
-  it('assinatura de chave primária + índices de cada tabela corresponde ao baseline v4', () => {
+  it('assinatura de chave primária + índices de cada tabela corresponde ao baseline v6', () => {
     for (const table of db.tables) {
       expect(normalize(tableSignature(table)), `tabela: ${table.name}`).toBe(
         normalize(BASELINE[table.name])
