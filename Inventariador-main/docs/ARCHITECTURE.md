@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (13 arquivos / 144 testes) — ver §13 |
+| Testes | Vitest (30 arquivos / 295 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -100,34 +100,38 @@ App.tsx
 
 ---
 
-## 5. Pipeline de autenticação — 3 CAMADAS
+## 5. Pipeline de autenticação — LOGIN POR CONTRATO (usuário × tenantid)
 
 Arquivos: `components/Login.tsx` (handleSubmit), `utils/authUtils.ts`
-(`isAdminEmail`, `localAuthenticate`), `App.tsx` (onLogin).
+(`isAdminEmail`, `localAuthenticate`), `App.tsx` (onLogin), `utils/workContextUtils.ts`
+(`buildWorkContexts`/`persistWorkContext`).
 
 ```
-1. DEXIE LOCAL (offline)
-   localAuthenticate(findByEmail=localDb.users.get, username, password)
-   ├─ role MASTER/ADMIN/is_admin → gbr_admin_scope=TENANT_MASTER (+ tenantid)
-   └─ senão → OPERATIONAL_AUDITOR
-   ├─ sessionStorage: app_current_user
-   └─ onLogin(user)
+1. BARREIRA LOCAL (offline-first)
+   localAuthenticate / localDb.users / app_users (email + senha)
+   ├─ admin/master SEM tenantid → resolve na nuvem (ensureUserProfile)
+   │    └─ ainda vazio → LOGIN BLOQUEADO (nunca "GLOBAL")
+   └─ com tenantid → onLogin(user) — contrato do registro local
 
-2. BARREIRA LOCAL + SUPABASE CLOUD
-   ├─ isMasterLocal (admin/‘admin gbr’/adminEmail + senha admin) ou
-   │   matchedLocalUser (users prop ou tabela SQLite local) → login offline imediato
-   └─ senão: só segue p/ Supabase se databaseMode === SUPABASE_PLUS
-       (em INTERNAL: "Licença SOLO… Bloqueando tentativa…")
+2. SUPABASE CLOUD (quando online e databaseMode SUPABASE/PLUS)
+   signInWithPassword → ensureUserProfile (user_permissions = fonte do contrato)
+   ├─ downloadBaseToLocal: se base local vazia, baixa a do tenant (progresso %)
+   ├─ persistência local do perfil p/ acesso offline posterior
+   └─ onLogin(user) — tenantid 100% do perfil da nuvem
+
+3. PÓS-LOGIN (App.tsx onLogin)
+   multiContextLogin = buildWorkContexts(user) > 1 → Seletor de Contrato/Filial
+   (TenantWorkSelector) → syncFromCloud(tenantid, mode, filial) — SÓ o contrato escolhido
 ```
 
-**Credenciais conhecidas:**
-| Perfil | Usuário / E-mail | Senha |
-|---|---|---|
-| Admin (perfil) | `semorr@gmail.com` (`VITE_ADMIN_EMAIL`) | `admin` |
-| Backup admin (legado) | `admin` | `123456` |
+**Regra de isolamento:** o app NUNCA opera sem contrato — cada usuário é amarrado a um
+`tenantid` (`semorr@gmail.com` → `CICOPAL`; `master.teste@cliente.com` → `CLIENTETESTE`).
+O "GLOBAL"/MASTER DRIVE foi **removido** (backdoor desativado). Provisionamento de novos
+contratos: `LicenseProvisioning` + `tenantProvisioningService` (MASTER com senha forte
+validada por `passwordPolicy`).
 
-**Escopos de sessão (`sessionStorage`):** `gbr_admin_scope` ∈ `GLOBAL_SUPER_ADMIN` |
-`TENANT_MASTER` | `OPERATIONAL_AUDITOR`; `tenantid`; `app_current_user`; `filial`.
+**Escopos de sessão (`sessionStorage`):** `gbr_admin_scope` ∈ `TENANT_MASTER` |
+`OPERATIONAL_AUDITOR`; `tenantid`; `app_current_user`; `filial`.
 
 ---
 
@@ -154,16 +158,16 @@ Guarda: `DATABASE_MANAGER` só para `isSuperAdmin` ou `semorr@gmail.com`.
 
 ### 7.1 O "SQLite" local é Dexie/IndexedDB
 Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedDB**:
-- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→4 — **baseline
+- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→7 — **baseline
   congelado em `docs/SCHEMA_BASELINE.md`**, Fase 0 do plano de migração).
 - `sqliteService = new Proxy({}, …)` — inicialização lazy.
 - `getStorageSource()` → `'IndexedDB://InventoryLocalStore'` (no Capacitor nativo há
   caminho físico; em Web `persist()` é no-op).
 
-**Tabelas (v4 canônica — snapshot congelado em `docs/SCHEMA_BASELINE.md`):**
+**Tabelas (v7 canônica — snapshot congelado em `docs/SCHEMA_BASELINE.md`):**
 | Tabela | Chave/índices |
 |---|---|
-| `local_assets`, `ativos`, `assets` (DexieAsset) | `primarykey, filial, _is_synced, [tenantid+filial]` |
+| `local_assets`, `ativos`, `assets` (DexieAsset) | **`[tenantid+primarykey]`** (composta), `primarykey, filial, _is_synced, [tenantid+filial]` |
 | `addresses` | `++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced` |
 | `audit_logs` | `id, updated_at` |
 | `campaigns` | `id, tenantid` |
@@ -200,7 +204,11 @@ ausente/vazio. O `tenantid` vem **sempre da planilha** — nunca valor fixo em c
 | Desktop Windows | File System Access API: `initializeWindowsDirectoryHandle`, `saveSnapshotToWorkspace`, `writeSnapshotToWindowsDirectory` |
 | Boot (restauração) | `verifyAndRestorePhysicalBackup()` → repõe `local_assets` se IndexedDB zerado |
 
-### 7.5 Sincronização em nuvem (off por padrão)
+### 7.5 Sincronização em nuvem (ativa com credenciais)
+`syncFromCloud` (App.tsx): push local primeiro → pull **escopado ao tenant**
+(`fetchFullInventory(tenantid, unitid)` — `'TODAS'` = sem filtro de unidade; guards
+bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')` +
+índice único composto `(tenantid, primarykey)` no `docs/supabase_bootstrap.sql`.
 `syncService.ts`: fila de sync (assetId + photoBlob), `photoSyncManager`,
 `processDataSyncQueue`, `addCampaignToSyncQueue`, `checkHardwareSafety`.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
@@ -242,7 +250,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | `app_screen_history` | localStorage | Espelho da pilha |
 | `app_screen_params` | localStorage | Params da navegação |
 | `app_current_user` | sessionStorage | Usuário logado (JSON) |
-| `gbr_admin_scope` | sessionStorage | GLOBAL_SUPER_ADMIN / TENANT_MASTER / OPERATIONAL_AUDITOR |
+| `gbr_admin_scope` | sessionStorage | TENANT_MASTER / OPERATIONAL_AUDITOR (MASTER DRIVE removido) |
 | `tenantid`, `filial` | sessionStorage | Contexto do tenant/unidade (`tenantId` legado lido como fallback via `tenantUtils`) |
 | `current_selected_address` | sessionStorage | Endereço físico selecionado (anchor do inventário) |
 
@@ -259,8 +267,9 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | `VITE_API_URL` | `vercel.json` (deploy) | não |
 
 `DatabaseMode`: `INTERNAL` · `INTERNAL_PLUS` · `SUPABASE` · `SUPABASE_PLUS`.
-O app roda **INTERNAL** por padrão (`isInternalMode=true` → sem rede); `SUPABASE_PLUS`
-habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
+`isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)`: sem credenciais →
+**INTERNAL** (sem rede, offline puro); com credenciais → **SUPABASE** (Web/Desktop),
+schema multi-tenant padronizado (`tenantid` + `filial`) e login por contrato.
 
 ---
 
@@ -275,7 +284,7 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (144 testes).
+5. **Valide**: `npx tsc -b --noEmit` (zero erros em `src/`) + `npx vitest run` (295 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
@@ -311,9 +320,11 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
 ## 13. Testes (Vitest)
 
 `npx vitest run` (script `npm test`). Suítes em `src/__tests__/`:
-`Login`, `localAuth`, `masterDrive` (+ integração), `ErrorBoundary`, `Modal`,
-`useBufferController`, `io_buffer`, `tenantUtils`, `navigationMap`, `virtualSnapshot`,
-`schemaBaseline`, `securityExport` (13 arquivos / 144 testes).
+`Login`, `localAuth`, `ErrorBoundary`, `Modal`, `useBufferController`, `io_buffer`,
+`tenantUtils`, `navigationMap`, `virtualSnapshot`, `schemaBaseline`, `securityExport`,
+`rbacService`, `tenantProvisioning`, `passwordPolicy`, `workContextUtils`,
+`routingTenantIsolation`, `postSelectionRouting`, `tenantContext`, `loadHistoryUtils`,
+`countAtivosByTenant` (30 arquivos / 295 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 
@@ -328,9 +339,15 @@ habilita a nuvem com o schema multi-tenant padronizado (`tenantid` + `filial`).
   `references`, mais declarações ambient `src/types/workbox.d.ts` +
   `src/types/pwa-assets-generator.d.ts`. Verificado: `tsc -b --force` e `tsc --noEmit -p` → zero erros.
 - `public/logo.png` é placeholder 1×1 — gerar ícones PWA reais.
-- `sessionStorage.clear()` do MASTER DRIVE é agressivo (pode apagar flags de boot).
-- Nuvem Supabase **ativa com schema padronizado** (`tenantid` + `filial`) — migrações em
-  `scripts/migrate-*-supabase.sql`; o default do app permanece INTERNAL (sem rede).
+- Nuvem Supabase **ativa** com schema padronizado (`tenantid` + `filial`) — índice único
+  composto `(tenantid, primarykey)` e upsert `onConflict('tenantid, id')` aplicados;
+  migrações em `scripts/migrate-*-supabase.sql` + `docs/supabase_bootstrap.sql`.
+- Muro multi-tenant local: chave composta `[tenantid+primarykey]` (v6→v7) + guard
+  `filterCrossTenantWrites` — validado com coexistência de contratos no mesmo device.
+- Login por contrato: perfil do dono amarrado ao `tenantid` (user_permissions + metadata
+  do auth); Barreira Local bloqueia admin sem contrato.
+- Provisionamento MASTER: `LicenseProvisioning`/`tenantProvisioningService` com senha
+  forte (`passwordPolicy`) — validar fluxo completo ponta a ponta no device.
 - Fluxo "base vazia": admin cai no Gestor de Base — validar carga de `.db`/Excel.
 
 Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
@@ -355,7 +372,8 @@ Plano completo em fases (0–5, com garantias anti-perda, riscos e critérios de
 - `SKILL.md` — skill de release (changelog/versão/GitHub release).
 - `CHANGELOG.md` — histórico de versões (v2.6.0: MASTER DRIVE, boot estável, offline-first).
 - `TROUBLESHOOTING.md` — problemas conhecidos e instalação (`--legacy-peer-deps`).
-- `docs/SCHEMA_BASELINE.md` — **snapshot congelado do schema local** (Fase 0, v4 `tenantid` canônico), garantido por `src/__tests__/schemaBaseline.test.ts`.
+- `docs/SCHEMA_BASELINE.md` — **snapshot congelado do schema local** (Fase 0, v7 `[tenantid+primarykey]`), garantido por `src/__tests__/schemaBaseline.test.ts`.
+- `docs/RBAC_GOVERNANCA.md` — **matriz de papéis e rotinas RBAC** (Trilhas A/B/C + PermissionGate).
 - `docs/MIGRACAO_HIBRIDA.md` — **plano aprovado de migração híbrida de dados** (Dexie + SQLite
   nativo Android + Supabase), fases 0–5 com garantias anti-perda.
 - `docs/FLOW_GRAPH.md` — **mapa canônico de navegação** (GRAPH TD) com status por nó e

@@ -1,20 +1,60 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+<img width="1200" height="300" alt="GBR Banner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Run and deploy your AI Studio app
+# GBR KARDEK — Inventariador
 
-This contains everything you need to run your app locally.
+PWA mobile-first para **auditoria física de ativos imobilizados em campo** (GBR Auditoria):
+conferência patrimonial com leitura de código de barras/QR, etiquetagem, assinatura
+eletrônica, georreferenciamento e relatórios — **offline-first** (Dexie/IndexedDB) com
+**sincronização multi-tenant no Supabase** (login por contrato: cada usuário amarrado a
+um `tenantid`).
 
-View your app in AI Studio: https://ai.studio/apps/575eae72-9243-422e-a3aa-284a49a7a23d
+## Stack
 
-## Run Locally
+React 18 · TypeScript · Vite 5 · Tailwind CSS v4 · Dexie.js · Supabase · Capacitor 6
+(Android) · Vitest · Playwright
 
-**Prerequisites:**  Node.js
+## Rodar localmente
 
+**Pré-requisitos:** Node.js
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install --legacy-peer-deps   # flag obrigatória neste projeto
+npm run dev                      # dev server Vite (porta 3000)
+```
+
+O modo de banco é definido pelas credenciais de ambiente:
+
+| Variável | Efeito |
+|---|---|
+| `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` | Ativa o modo **SUPABASE** (nuvem multi-tenant) |
+| (ausentes) | Modo **INTERNAL** — 100% offline, sem chamadas de rede |
+| `VITE_ADMIN_EMAIL` | E-mail admin (default `semorr@gmail.com`) |
+| `GEMINI_API_KEY` | Insights de IA (`geminiService`) — opcional |
+
+## Comandos
+
+| Comando | Ação |
+|---|---|
+| `npm run dev` | Dev server (porta 3000) |
+| `npm run build` | Build de produção (`dist/`) |
+| `npm test` | Vitest — 295 testes / 30 arquivos |
+| `npx tsc -b --noEmit` | Typecheck (deve estar zerado) |
+| `npm run lint` | ESLint |
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| `docs/SPEC.md` | Especificação canônica do projeto |
+| `docs/ARCHITECTURE.md` | Arquitetura interna, fluxos, checklist SRE |
+| `docs/RBAC_GOVERNANCA.md` | Matriz de papéis e rotinas RBAC |
+| `docs/SCHEMA_BASELINE.md` | Snapshot congelado do schema local (v7 — chave composta `[tenantid+primarykey]`) |
+| `docs/MIGRACAO_HIBRIDA.md` | Plano de dados (fases 0–5) |
+| `SYSTEM_INSTRUCTIONS.md` | Governança SRE do repositório |
+| `SKILL.md` | Skill de release (changelog/versão/GitHub release) |
+| `CHANGELOG.md` | Histórico de versões |
+| `TROUBLESHOOTING.md` | Problemas conhecidos e instalação |
+
+Repositório: [semorrecualg/Inventariador](https://github.com/semorrecualg/Inventariador)

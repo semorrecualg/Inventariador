@@ -42,12 +42,12 @@ uma **única camada de repositórios** por trás das telas:
 
 | Item | Situação |
 |---|---|
-| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema **v4** — baseline congelado em `docs/SCHEMA_BASELINE.md`) |
+| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema **v7** — chave composta `[tenantid+primarykey]`; baseline congelado em `docs/SCHEMA_BASELINE.md`) |
 | `sqliteService.getStorageSource()` | Retorna `'DEXIE_INDEXEDDB'` (hardcoded) |
 | `sql.js`, `jeep-sqlite`, `@capacitor-community/sqlite` | **Instalados + assets wasm configurados, mas NÃO usados em código** (grep em `src` = zero) |
 | Checagens `'PHYSICAL'`/`'CACHE'` no App.tsx | Código morto (nunca casam) |
-| Supabase | **Integração completa já codificada** (~30 funções: auth, sync, realtime, storage, auditoria) — desligada por `isInternalMode = true` |
-| Pontos de contato com dados | **292** em `src` (excl. testes) |
+| Supabase | **Integração ativa** (~30 funções: auth, sync, realtime, storage, auditoria) — modo SUPABASE quando `VITE_SUPABASE_URL`+`VITE_SUPABASE_ANON_KEY` presentes; INTERNAL (offline) sem elas |
+| Pontos de contato com dados | **292** em `src` (excl. testes) — base histórica; ver status atual em `docs/SPEC.md` |
 | Tabelas Dexie | `local_assets`, `ativos`, `assets`, `addresses`, `audit_logs`, `campaigns`, `SYSTEM_CONTEXT`, `unit_configs`, `campaign_snapshots` |
 | Backups existentes | Capacitor `GBR_KARDEK_DATA/local_assets_secure.dat`, File System Access (Windows), `backupService` (nuvem), `persistenceService` (export/restore) |
 
@@ -64,6 +64,12 @@ uma **única camada de repositórios** por trás das telas:
       `tsc -b --force` e `tsc --noEmit -p` → **zero erros**. Baseline limpo para mover os 292 pontos.
 - [x] Congelar o **schema atual** (snapshot das 9 tabelas Dexie + `schema.ts`) ✅ 2026-08-06
       — `docs/SCHEMA_BASELINE.md` (v4 canônica `tenantid`) + contrato `src/__tests__/schemaBaseline.test.ts`.
+- [x] **Muro multi-tenant local** (chave composta) ✅ 2026-08-12 — migração v6→v7 em 2
+      passos (DROP+backup → RECREATE+restauração) com PK `[tenantid+primarykey]` nas 3
+      tabelas de ativos; guard `filterCrossTenantWrites`; baseline atualizado para `verno 7`.
+- [x] **Login por contrato** ✅ 2026-08-12 — perfil do dono amarrado ao `tenantid`;
+      Barreira Local bloqueia admin sem contrato; sync escopado `onConflict('tenantid, id')`
+      + índice único composto `(tenantid, primarykey)` no bootstrap SQL.
 - [x] **Export de segurança** completo: JSON + `.dat` físico + contagem por tabela
       (checksum SHA-256) ✅ 2026-08-06 — `src/services/securityExportService.ts`
       (`buildSecurityExport`/`restoreSecurityExport`/`serializeSecurityExport`, com
@@ -79,7 +85,7 @@ uma **única camada de repositórios** por trás das telas:
       **`local_assets` = baseline imutável** (comparação), **`ativos` = legado → sai na
       Fase 1** (`version(5)` idempotente com dry-run). Registro:
       `docs/ANALISE_TABELAS_ATIVOS_ASSETS.md`.
-- **Critério de aceite:** `tsc` limpo em `src/`; 144 testes verdes (13 arquivos); restore validado.
+- **Critério de aceite:** `tsc` limpo em `src/`; 295 testes verdes (30 arquivos); restore validado.
 - **Risco:** baixo. **Rollback:** n/a (não altera runtime).
 
 ### Fase 1 — Camada de Repositórios (abstração)
@@ -87,7 +93,7 @@ uma **única camada de repositórios** por trás das telas:
       `UnitRepository`, `ContextRepository` — interface única por domínio.
 - [ ] Implementar 1º backend = **Dexie** (delega para `localDb`/`db` atuais, comportamento idêntico).
 - [ ] Migrar os **292 touchpoints** para os repositórios (telas/serviços não tocam mais em `db.*` direto).
-- [ ] Testes de repositório (mock do backend) + 144 testes existentes verdes.
+- [ ] Testes de repositório (mock do backend) + 295 testes existentes verdes.
 - **Critério de aceite:** nenhuma mudança de comportamento; testes verdes; rollback = reverter imports.
 - **Risco:** médio (refactor amplo). **Rollback:** trivial (commit anterior).
 
@@ -167,7 +173,7 @@ uma **única camada de repositórios** por trás das telas:
 | Risco | Mitigação |
 |---|---|
 | Perda de dados na migração | Export+checksum, dry-run, idempotência, restore testado |
-| Regressão nos 292 touchpoints | Camada de repositórios com testes + 144 testes baseline |
+| Regressão nos 292 touchpoints | Camada de repositórios com testes + 295 testes baseline |
 | Conflitos de sync | `_lastUpdated`/`_version` + reconciliação de fila offline |
 | Segurança/RLS no Supabase | RLS por `tenant_id`, service role só no backend |
 | SQLite nativo instável no APK | Dual-write + flag + rollback `.dat` |

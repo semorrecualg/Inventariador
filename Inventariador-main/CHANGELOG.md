@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Muro multi-tenant ponta a ponta — isolamento por `tenantid` (usuário × contrato)
+
+Fechamento do muro de isolamento entre contratos no local e na nuvem, com login
+estritamente amarrado ao contrato do usuário (sem "GLOBAL").
+
+- **Chave composta local `[tenantid+primarykey]`** — migração Dexie v6→v7 em 2 passos
+  (v6: DROP + backup integral; v7: RECREATE + restauração), preservando 100% dos
+  registros; `primarykey` vira índice. Dois contratos com a mesma chave de origem
+  coexistem sem colidir. Guard `filterCrossTenantWrites` bloqueia sobrescritas legadas.
+- **Nuvem:** upsert escopado `onConflict('tenantid, id')` no `syncAssetsToCloud` + índice
+  único composto no `docs/supabase_bootstrap.sql`; sanitização das cargas misturadas
+  (CICOPAL × CLIENTETESTE) local e nuvem.
+- **Login por contrato:** perfil do dono amarrado ao `tenantid` (semorr → CICOPAL) no
+  `user_permissions` + metadata do auth; Barreira Local bloqueia admin/master sem
+  contrato (resolve na nuvem antes); sync do dono não puxa mais todos os contratos.
+- **RBAC:** `services/rbacService.ts` + `PermissionGate` nos submenus administrativos e
+  de auditoria; matriz documentada em `docs/RBAC_GOVERNANCA.md`.
+- **Provisionamento de licença:** `LicenseProvisioning` + `tenantProvisioningService` +
+  `passwordPolicy` (senha forte validada) — criação de MASTER amarrado ao tenant; correção
+  do erro 500 do signUp (`docs/supabase_signup_500_correcao.sql`).
+- **Histórico de cargas:** `LoadHistoryScreen` (import/sync por contrato a partir do
+  `audit_logs`); tool grid (AJUSTES/DADOS/PAINEL/AUDITORIA) movida para a tela de
+  Unidade Operacional (`UnitSelector`) com navegação por painel via `NavigationParams.openPanel`.
+- **Testes:** 295/295 (30 arquivos) — baseline do schema atualizado para `verno 7`;
+  novos: `rbacService`, `tenantProvisioning`, `passwordPolicy`, `workContextUtils`,
+  `routingTenantIsolation`, `postSelectionRouting`, `tenantContext`, `loadHistoryUtils`,
+  `countAtivosByTenant`. Gate: `tsc -b --noEmit` ✓ · `vitest run` 295/295 ✓.
+
 ### Fase C — Padronização canônica de chaves/valores (UPPER → minúsculo)
 
 Higienização completa do ecossistema para o canônico minúsculo (`endereco`, `etiqueta`, …),

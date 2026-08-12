@@ -7,6 +7,32 @@ description: Automates changelog generation from git history, version bumping, a
 
 Automates the release workflow for this project: changelog generation, version bumping, tag creation, and GitHub release publishing.
 
+## Project Context (atualizado 2026-08-12)
+
+**GBR KARDEK – Inventariador** (`semorrecualg/Inventariador`, branch `main`): PWA
+mobile-first (React 18 + Vite + Capacitor) de auditoria física de ativos imobilizados,
+offline-first (Dexie/IndexedDB) com **Supabase multi-tenant ativo**. Convenções para
+qualquer release, changelog ou análise:
+
+- **Commits:** Conventional Commits em **português** (`feat(tenant):`, `fix(login):`, …).
+- **Versão atual:** `package.json` (v2.6.x) — app roda em `Inventariador-main/`.
+- **Muro multi-tenant:** schema Dexie **v7** com chave composta `[tenantid+primarykey]`
+  nas 3 tabelas de ativos (migração v6→v7 em 2 passos, baseline em
+  `docs/SCHEMA_BASELINE.md`, contrato `schemaBaseline.test.ts` asserta `verno === 7`);
+  nuvem com índice único composto `(tenantid, primarykey)` e upsert
+  `onConflict('tenantid, id')`. NUNCA propor chave única global de volta.
+- **Login por contrato:** cada usuário é amarrado a UM `tenantid` (ex.:
+  `semorr@gmail.com` → `CICOPAL`); **não existe "GLOBAL"** — admin/master sem contrato
+  tem login bloqueado. Dados exibidos/sincronizados somente do contrato do usuário.
+- **RBAC:** `src/services/rbacService.ts` + `PermissionGate` — matriz em
+  `docs/RBAC_GOVERNANCA.md`. **Provisionamento:** `LicenseProvisioning` +
+  `tenantProvisioningService` + `passwordPolicy` (MASTER com senha forte).
+- **Validação obrigatória antes de release:** `npx tsc -b --noEmit` (zero erros) +
+  `npx vitest run` (**295 testes / 30 arquivos**) + `npm run build`.
+- **Documentos de referência:** `docs/SPEC.md`, `docs/ARCHITECTURE.md`,
+  `docs/RBAC_GOVERNANCA.md`, `docs/SCHEMA_BASELINE.md`, `SYSTEM_INSTRUCTIONS.md`
+  (governança SRE), `docs/MIGRACAO_HIBRIDA.md` (plano de dados fases 0–5).
+
 ## When to Use
 
 Activate this skill when the user asks to:

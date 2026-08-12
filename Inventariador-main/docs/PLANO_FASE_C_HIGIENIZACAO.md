@@ -345,6 +345,11 @@ Entregue:
 
 Gate C4: `tsc -b --noEmit` ✓ · `vitest run` 179/179 ✓ (6 novos).
 
+> **Nota (2026-08-12):** após a Fase C, o schema evoluiu para **v7** (muro multi-tenant:
+> chave composta `[tenantid+primarykey]` nas 3 tabelas de ativos — ver
+> `docs/SCHEMA_BASELINE.md` §1). O `version(5)` descrito aqui continua como etapa
+> histórica da cadeia v1→v7; o baseline vigente é `db.verno === 7`.
+
 Pendências pós-C4 (C5): **resolvidas em §8.1** (tolerância híbrida removida + varredura
 final), **§8.2** (`findByEtiquetaInUnit` corrigido) e **§8.3** (`.eq('TAG_INVENTARIO')`
 alinhado ao contrato do `public`). Sem achados SRE pendentes na Fase C.
