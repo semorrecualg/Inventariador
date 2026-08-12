@@ -17,6 +17,10 @@ graph TD
     CHANGE_PWD[Alteração de Senha]
     STRESS[Stress Test / Carga]
 
+    %% Pós-login: Contrato e Histórico de Cargas
+    TENANT_WORK[Seletor de Contrato/Filial]
+    LOAD_HISTORY[Histórico de Cargas]
+
     %% Módulos e Seleção de Unidade
     MODULE_SEL[Seleção de Módulo]
     ASSET_CONTROL[Controle de Ativos e Movimentações]
@@ -56,6 +60,7 @@ graph TD
 
     %% Transições - Autenticação
     LOGIN -->|Validação de Credenciais| MODULE_SEL
+    LOGIN -->|Multi-contrato detectado (buildWorkContexts > 1)| TENANT_WORK
     LOGIN -->|Clique em Novo Usuário| REGISTER
     LOGIN -->|Detectada Opção Biométrica| BIOMETRIC
     LOGIN -->|Troca Obrigatória de Senha| CHANGE_PWD
@@ -64,6 +69,14 @@ graph TD
     BIOMETRIC -->|Concluir ou Ignorar| MODULE_SEL
     CHANGE_PWD -->|Senha Atualizada| UNIT_SEL
     STRESS -->|Voltar| LOGIN
+
+    %% Transições - Pós-login (contrato) e Histórico
+    TENANT_WORK -->|Escolher Contrato/Filial| MODULE_SEL
+    TENANT_WORK -->|Base vazia → Primeira Carga| DB_MGR
+    TENANT_WORK -->|Auditor com base pronta| UNIT_SEL
+    TENANT_WORK -->|Sair / Logout| LOGIN
+    MAIN_MENU -->|Histórico de Cargas (Admin)| LOAD_HISTORY
+    LOAD_HISTORY -->|Voltar| MAIN_MENU
 
     %% Transições - Módulos e Seleção
     MODULE_SEL -->|Selecionar Módulo Inventário| UNIT_SEL
@@ -142,9 +155,11 @@ graph TD
     ONBOARDING -->|Concluir Onboarding| DASHBOARD
 ```
 
-## 2. Status de implementação (auditoria de 05/08/2026)
+## 2. Status de implementação (auditoria de 05/08/2026 · atualizado 2026-08-12)
 
-**32/32 nós do grafo → implementados** (enum + componente + render no `App.tsx` + rota única).
+**34/34 nós do grafo → implementados** (enum + componente + render no `App.tsx` + rota única).
+Novos nós: `TENANT_WORK_SELECTION` (seletor de contrato/filial pós-login — `TenantWorkSelector.tsx`)
+e `LOAD_HISTORY` (histórico de cargas por contrato — `LoadHistoryScreen.tsx`).
 
 | Nó do grafo | AppScreen | Rota | Render |
 |---|---|---|---|
@@ -180,6 +195,8 @@ graph TD
 | IMPAIRMENT | `IMPAIRMENT_REPORT` | `/impairment` | ✅ |
 | SYNC_MGR | `SYNC_MANAGER` | `/sync` | ✅ |
 | ONBOARDING | `ONBOARDING` | `/onboarding` | ✅ |
+| TENANT_WORK | `TENANT_WORK_SELECTION` | `/selecionar-contrato` | ✅ |
+| LOAD_HISTORY | `LOAD_HISTORY` | `/load-history` | ✅ |
 
 ## 3. Decisões de transição (fonte de verdade — caso a caso)
 
@@ -192,6 +209,8 @@ literal do grafo, a decisão registrada é a seguinte:
 | 2 | CHANGE_PWD → | `UNIT_SEL` | `UNIT_SELECTION`, **exceto** base vazia + admin → `MAIN_MENU` | **Manter o desvio.** Com base vazia, não há unidades para selecionar; o admin vai ao menu de dados (`startWithDataMenu`) para forçar a carga. Consistente com o roteamento "base vazia + admin → Gestor de Base" (ARCHITECTURE §6). |
 | 3 | LOGIN → BIOMETRIC | acionado na tela de login | pós-login automático (`pushScreen(BIOMETRIC_REGISTRATION)` após auth, com `popScreen` ao concluir/ignorar) | **Manter.** Resultado equivalente ao grafo: usuário cai em `MODULE_SELECTION` após concluir/ignorar (o `pop` retorna à tela abaixo, que é o destino pós-login). |
 | 4 | STRESS → | `LOGIN` | `setHistory([LOGIN])` ao voltar | ✅ Conforme o grafo. Sem mudança. |
+| 5 | LOGIN → TENANT_WORK | `MODULE_SEL` (grafo antigo) | `TENANT_WORK_SELECTION` quando `buildWorkContexts(user) > 1` (multi-contrato/filial) | **Manter o seletor.** Com autorização em mais de um contrato/filial, o usuário escolhe onde vai operar antes de qualquer carga; ao escolher, `handleSelectWorkContext` persiste o contexto, sincroniza SÓ o contrato e roteia por perfil/base (`resolvePostSelectionScreen`: base vazia → `DATABASE_MANAGER`; auditor com base → `UNIT_SELECTION`; demais → `MODULE_SELECTION`). |
+| 6 | MAIN_MENU → LOAD_HISTORY | — (tela nova) | Submenu Admin → `onNavigate(LOAD_HISTORY)` com gate `manage_database` | **Manter.** A tela lê o `audit_logs` (IMPORT/SYNC_PULL) por contrato e só aparece para quem gerencia a base; `onBack` retorna ao menu via `popScreen`. |
 
 ## 4. Higienização estrutural (consolidado em 05/08/2026)
 
@@ -206,7 +225,7 @@ Removidas **2 telas órfãs** do enum/rotas (zero referências no código — nu
 - todo `AppScreen` possui rota única em `screenToPath`;
 - nenhuma rota duplicada;
 - todo `AppScreen` é referenciado no `App.tsx` (zero telas órfãs);
-- os 32 nós do grafo acima estão cobertos pelo enum.
+- os 34 nós do grafo acima estão cobertos pelo enum.
 
 ## 5. Referências
 

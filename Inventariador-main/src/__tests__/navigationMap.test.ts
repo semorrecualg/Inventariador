@@ -6,7 +6,7 @@
  * 2) Nenhuma rota é duplicada (zero colisões de URL);
  * 3) Todo `AppScreen` é referenciado no `App.tsx` (zero telas órfãs sem render);
  * 4) As telas órfãs consolidadas (`SETTINGS`, `QR_CONFIGURATOR`) não existem mais;
- * 5) Os 32 nós do grafo de negócio estão cobertos pelo enum.
+ * 5) Os 34 nós do grafo de negócio estão cobertos pelo enum.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,8 @@ const GRAPH_NODES: string[] = [
   'IMPAIRMENT_REPORT',
   'SYNC_MANAGER',
   'ONBOARDING',
+  'TENANT_WORK_SELECTION',
+  'LOAD_HISTORY',
 ];
 
 describe('Contrato de navegação (docs/FLOW_GRAPH.md)', () => {
@@ -78,7 +80,7 @@ describe('Contrato de navegação (docs/FLOW_GRAPH.md)', () => {
     expect(qrConfigPaths).toHaveLength(1);
   });
 
-  it('os 32 nós do grafo estão cobertos pelo enum', () => {
+  it('os 34 nós do grafo estão cobertos pelo enum', () => {
     const enumValues = Object.values(AppScreen) as string[];
     const missing = GRAPH_NODES.filter((n) => !enumValues.includes(n));
     expect(missing).toEqual([]);
