@@ -2,7 +2,8 @@
 
 > **Roteiro navegável:** sequência de telas do app, citando o **componente React** que
 > renderiza cada tela (fonte: `src/App.tsx`, `src/types.ts`, `src/router/routes.tsx`).
-> Atualizado em 2026-08-06.
+> Atualizado em 2026-08-06 · revisado em 2026-08-12 (tool grid na Unidade Operacional,
+> seletor de contrato, histórico de cargas e provisionamento de licença).
 
 ---
 
@@ -16,12 +17,15 @@ graph TD
     BIOMETRIC[BIOMETRIC_REGISTRATION · BiometricRegistration.tsx]
     CHANGE_PWD[CHANGE_PASSWORD · ChangePassword.tsx]
     STRESS[STRESS_TEST · StressTestManager.tsx]
+    TENANT_WORK[TENANT_WORK_SELECTION · TenantWorkSelector.tsx]
 
     %% ===== Hub Principal / Módulos =====
     MODULE_SEL[MODULE_SELECTION · ModuleSelector.tsx]
     ASSET_CONTROL[ASSET_CONTROL_HOME · AssetControlModule.tsx]
-    UNIT_SEL[UNIT_SELECTION · UnitSelector.tsx]
+    UNIT_SEL[UNIT_SELECTION · UnitSelector.tsx]  %% tool grid: AJUSTES · DADOS · PAINEL · AUDITORIA
     DB_MGR[DATABASE_MANAGER · DatabaseManagerScreen.tsx]
+    LOAD_HISTORY[LOAD_HISTORY · LoadHistoryScreen.tsx]
+    LICENSES[LICENSE_PROVISIONING · LicenseProvisioning.tsx]
 
     %% ===== Hub Operacional (MainMenu) / Dashboard legado =====
     DASHBOARD[DASHBOARD · Dashboard.tsx]  %% legado, fora do fluxo principal
@@ -56,6 +60,7 @@ graph TD
 
     %% ===== Transições - Autenticação =====
     LOGIN -->|Validação de Credenciais| MODULE_SEL
+    LOGIN -->|Multi-contrato (buildWorkContexts > 1)| TENANT_WORK
     LOGIN -->|Novo Usuário| REGISTER
     LOGIN -->|Biometria pós-login| BIOMETRIC
     LOGIN -->|Troca de Senha| CHANGE_PWD
@@ -65,6 +70,12 @@ graph TD
     CHANGE_PWD -->|Senha Atualizada| UNIT_SEL
     STRESS -->|Voltar| LOGIN
 
+    %% ===== Transições - Pós-login (contrato) =====
+    TENANT_WORK -->|Escolher Contrato/Filial| MODULE_SEL
+    TENANT_WORK -->|Base vazia → Primeira Carga| DB_MGR
+    TENANT_WORK -->|Auditor com base pronta| UNIT_SEL
+    TENANT_WORK -->|Sair / Logout| LOGIN
+
     %% ===== Transições - Módulos e Seleção =====
     MODULE_SEL -->|Módulo Inventário| UNIT_SEL
     MODULE_SEL -->|Módulo Controle de Ativo| ASSET_CONTROL
@@ -72,9 +83,12 @@ graph TD
     MODULE_SEL -->|Logout| LOGIN
     ASSET_CONTROL -->|Voltar| MODULE_SEL
     UNIT_SEL -->|Unidade Selecionada| MAIN_MENU
+    UNIT_SEL -->|AJUSTES / DADOS / PAINEL / AUDITORIA (tool grid)| MAIN_MENU
     UNIT_SEL -->|Carga / Migração| DB_MGR
     UNIT_SEL -->|Trocar Módulo| MODULE_SEL
     DB_MGR -->|Voltar| MODULE_SEL
+    LOAD_HISTORY -->|Voltar| MAIN_MENU
+    LICENSES -->|Voltar| MAIN_MENU
 
     %% ===== Hub Operacional (MAIN_MENU → funcionalidades do auditor) =====
     MAIN_MENU -->|INVENTÁRIO| ADDR_SEL
@@ -127,6 +141,9 @@ graph TD
     MAIN_MENU -->|Gerenciador de Sync| SYNC_MGR
     MAIN_MENU -->|Tutorial| ONBOARDING
     MAIN_MENU -->|Trocar Unidade| UNIT_SEL
+    MAIN_MENU -->|Banco de Dados| DB_MGR
+    MAIN_MENU -->|Histórico de Cargas| LOAD_HISTORY
+    MAIN_MENU -->|Licenças (novo cliente/MASTER)| LICENSES
 
     CAMPAIGNS -->|Ativar Campanha| INVENTORY
     CAMPAIGNS -->|Voltar| MAIN_MENU
@@ -181,7 +198,7 @@ MODULE_SELECTION · ModuleSelector.tsx
 **Fluxo 3 — Menu Principal (hub operacional + configurações e relatórios)**
 
 ```
-MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade
+MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade (tool grid)
   → ADDRESS_SELECTION · AddressSelector.tsx → INVENTORY · Inventory.tsx  (INVENTÁRIO)
   → CONSULTATION · Consultation.tsx                   (FICHA DO ATIVO · CONSULTA DE ATIVOS)
   → LABELING · Labeling.tsx                           (ETIQUETAR ATIVOS)
@@ -199,7 +216,16 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade
   → IMPAIRMENT_REPORT · ImpairmentReport.tsx
   → SYNC_MANAGER · SyncManager.tsx
   → ONBOARDING · OnboardingWizard.tsx
+  → DATABASE_MANAGER · DatabaseManagerScreen.tsx      (submenu Admin: Banco de Dados)
+  → LOAD_HISTORY · LoadHistoryScreen.tsx              (submenu Admin: Histórico de Cargas)
+  → LICENSE_PROVISIONING · LicenseProvisioning.tsx    (submenu Admin: Licenças → tenant + MASTER)
 ```
+
+**Tool grid na Unidade Operacional (2026-08-12):** o `UnitSelector.tsx` agora exibe a
+fileira **AJUSTES · DADOS · PAINEL · AUDITORIA** (transferida do MainMenu) + contador
+"X Ativos · Base Local". Cada botão abre o `MAIN_MENU` com o painel correspondente já
+aberto via `NavigationParams.openPanel`: AJUSTES → `PREFERENCES`, DADOS → `DATA`,
+PAINEL → `ADMIN`, AUDITORIA → `AUDIT`. O MainMenu **não** exibe mais a tool grid.
 
 ---
 
@@ -239,6 +265,9 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade
 | `IMPAIRMENT_REPORT` | `ImpairmentReport.tsx` | `/impairment` |
 | `SYNC_MANAGER` | `SyncManager.tsx` | `/sync` |
 | `ONBOARDING` | `OnboardingWizard.tsx` | `/onboarding` |
+| `LICENSE_PROVISIONING` | `LicenseProvisioning.tsx` | `/licenses` |
+| `TENANT_WORK_SELECTION` | `TenantWorkSelector.tsx` | `/selecionar-contrato` |
+| `LOAD_HISTORY` | `LoadHistoryScreen.tsx` (`src/screens/`) | `/load-history` |
 
 > **Nota de correção (2026-08-06):** a tela `INVENTORY` renderiza **`Inventory.tsx`**
 > (motor canônico, Virtuoso, lê a tabela de trabalho `assets` via `assetRepository`).
@@ -256,6 +285,13 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade
 > roteiro: `LOGIN → MODULE_SELECTION → UNIT_SELECTION → MAIN_MENU`. Os relatórios
 > (`AuditLogs`, `GlobalPerformance`, `ImpairmentReport`) também voltam **apenas ao
 > `MAIN_MENU`** (`setHistory([AppScreen.MAIN_MENU])`), sem passar pelo `DASHBOARD` legado.
+>
+> **Pós-login multi-contrato (2026-08-12):** quando `buildWorkContexts(user) > 1`, o login
+> cai no **Seletor de Contrato/Filial** (`TenantWorkSelector`) antes de qualquer carga; ao
+> escolher, o app persiste o contexto, sincroniza SÓ o contrato e roteia por perfil/base
+> (`resolvePostSelectionScreen`). `LICENSE_PROVISIONING`, `TENANT_WORK_SELECTION` e
+> `LOAD_HISTORY` são telas novas cobertas pelo enum/rotas/render e pelo contrato
+> `navigationMap.test.ts` (34 nós).
 
 ---
 
