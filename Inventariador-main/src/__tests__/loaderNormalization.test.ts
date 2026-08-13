@@ -6,7 +6,6 @@ import { normalizeFieldValue } from '../utils/normalize';
 
 describe('normalizeFieldValue — regra por classe (M1 carga)', () => {
   it('Classe K código: UPPER + TRIM + expurgo [^A-Z0-9-]', () => {
-    expect(normalizeFieldValue('endereco', ' Corredor A ')).toBe('CORREDORA');
     expect(normalizeFieldValue('serial', ' ab-c1 ')).toBe('AB-C1');
     expect(normalizeFieldValue('registro', 'REG- x ')).toBe('REG-X');
     expect(normalizeFieldValue('subreg', ' s1 ')).toBe('S1');
@@ -18,6 +17,8 @@ describe('normalizeFieldValue — regra por classe (M1 carga)', () => {
 
   it('filial: UPPER + TRIM preservando espaços internos (nomes físicos)', () => {
     expect(normalizeFieldValue('filial', '010101 CICOPAL GO')).toBe('010101 CICOPAL GO');
+    // endereco é nome de local físico — preserva a grafia com separadores da planilha
+    expect(normalizeFieldValue('endereco', '151840 PRODUCAO - PV1 REFRESCO - ENVASE 1 / 2 CDC 70110')).toBe('151840 PRODUCAO - PV1 REFRESCO - ENVASE 1 / 2 CDC 70110');
     expect(normalizeFieldValue('filial', '  filial a ')).toBe('FILIAL A');
   });
 

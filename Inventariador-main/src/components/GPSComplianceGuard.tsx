@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as turf from '@turf/turf';
-import { ShieldAlert, Unlock, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { ShieldAlert, Loader2 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
@@ -16,9 +15,9 @@ interface GPSComplianceGuardProps {
   isFieldMode?: boolean;
 }
 
-const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({ 
-  children, 
-  onGpsStatusChange, 
+const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
+  children,
+  onGpsStatusChange,
   userRole,
   unitConfig,
   isFieldMode = true
@@ -26,7 +25,6 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
   const [status, setStatus] = useState<'checking' | 'granted' | 'denied' | 'out-of-range' | 'bypassed'>('checking');
   const [currentDistance, setCurrentDistance] = useState<number | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [showAdminToast, setShowAdminToast] = useState(false);
 
   // Ref para o callback externo: o efeito de geofencing não reinicia o watchPosition
   // quando o callback do pai muda de identidade (evita re-check a cada render).
@@ -49,10 +47,10 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         const uRole = u.role?.toUpperCase();
         const uEmail = u.email?.toLowerCase();
         if (
-          uRole === 'ADMIN' || 
-          uRole === 'MASTER' || 
-          uRole === 'GESTOR' || 
-          u.isAdmin === true || 
+          uRole === 'ADMIN' ||
+          uRole === 'MASTER' ||
+          uRole === 'GESTOR' ||
+          u.isAdmin === true ||
           u.is_admin === true ||
           isAdminEmail(uEmail)
         ) {
@@ -92,7 +90,6 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     if (isAdminUser) {
       setStatus('bypassed');
       onGpsStatusChangeRef.current?.(true);
-      setShowAdminToast(true);
       return;
     }
 
@@ -111,14 +108,14 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           if (lat === null || lat === undefined || isNaN(lat) || lng === null || lng === undefined || isNaN(lng)) {
             throw new Error("Coordenadas do dispositivo inválidas ou nulas.");
           }
-          
+
           if (!unitConfig || !unitConfig.lat || !unitConfig.lng || isNaN(Number(unitConfig.lat)) || isNaN(Number(unitConfig.lng))) {
             throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
           }
 
           const fromPoint = turf.point([lng, lat]);
           const toPoint = turf.point([Number(unitConfig.lng), Number(unitConfig.lat)]);
-          
+
           // Distância em metros via Turf.js com isolamento à prova de falhas
           const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
           setCurrentDistance(distanceM);
@@ -133,7 +130,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             if (isAdminUser) {
               setStatus('bypassed');
               onGpsStatusChangeRef.current?.(true);
-              setShowAdminToast(true);
+
             } else {
               setStatus('out-of-range');
               onGpsStatusChangeRef.current?.(false);
@@ -144,7 +141,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           if (isAdminUser) {
             setStatus('bypassed');
             onGpsStatusChangeRef.current?.(true);
-            setShowAdminToast(true);
+
           } else {
             setStatus('granted'); // Failsafe para auditores em caso de erro matemático ou leitura espúria
             onGpsStatusChangeRef.current?.(true);
@@ -160,7 +157,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         const roleStr = userRole || (isAdminUser ? 'ADMIN' : 'USER');
         const anchorCoords = { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) };
         const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-        
+
         let geoResult;
         try {
           if (isAdminUser || isIframe) {
@@ -168,7 +165,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             setStatus('bypassed');
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
-            setShowAdminToast(true);
+
             onGpsStatusChangeRef.current?.(true);
             return;
           }
@@ -180,14 +177,14 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             setStatus('bypassed');
             setUserLocation(anchorCoords);
             setCurrentDistance(0);
-            setShowAdminToast(true);
+
             onGpsStatusChangeRef.current?.(true);
             return;
           } else {
             throw locationErr;
           }
         }
-        
+
         if (!isActive) return;
 
         if (geoResult.isBypassed || geoResult.source === 'admin_bypass') {
@@ -195,14 +192,8 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           setStatus('bypassed');
           setUserLocation({ lat: geoResult.latitude, lng: geoResult.longitude });
           setCurrentDistance(0);
-          setShowAdminToast(true);
+
           onGpsStatusChangeRef.current?.(true);
-          
-          // Oculta o toast após 5 segundos
-          const timer = setTimeout(() => {
-            if (isActive) setShowAdminToast(false);
-          }, 5000);
-          return () => clearTimeout(timer);
         } else {
           checkLocation(geoResult.latitude, geoResult.longitude);
         }
@@ -210,14 +201,14 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         if (!isActive) return;
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error('[Geofencing] Falha ao obter posição pelo getCurrentDeviceLocation:', errMsg);
-        
+
         const isIframe = typeof window !== 'undefined' && window.self !== window.top;
         if (isAdminUser || isIframe) {
           logger.warn('[Sandbox GPS Bypass Active] Forçando bypass em bloco catch externo devido a Sandbox/iFrame ou perfil Admin.');
           setStatus('bypassed');
           setUserLocation({ lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) });
           setCurrentDistance(0);
-          setShowAdminToast(true);
+
           onGpsStatusChangeRef.current?.(true);
         } else {
           setStatus('denied');
@@ -325,15 +316,15 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         </div>
 
         <div className="flex flex-col gap-3 w-full max-w-xs block">
-          <button 
+          <button
             onClick={handleRequestOSPermissions}
             className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
           >
             Solicitar Permissão (OS / WebView)
           </button>
-          
+
           {isAdminUser && (
-            <button 
+            <button
               onClick={handleUseReferenceCoordinates}
               className="w-full py-4 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-emerald-100 active:scale-95 transition-all cursor-pointer"
             >
@@ -341,7 +332,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
             </button>
           )}
 
-          <button 
+          <button
             onClick={() => window.history.back()}
             className="w-full py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all cursor-pointer"
           >
@@ -362,7 +353,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
         <p className="text-xs text-red-600 uppercase font-black tracking-wider mb-4">
           Dispositivo fora do perímetro permitido para esta filial.
         </p>
-        
+
         <div className="w-full max-w-xs bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left mb-8 space-y-3">
           <div className="flex items-center justify-between border-b pb-2 border-slate-200">
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sua Distância:</span>
@@ -384,13 +375,13 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
           )}
         </div>
 
-        <button 
+        <button
           onClick={() => window.location.reload()}
           className="w-full max-w-xs py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 active:scale-95 transition-all mb-3 cursor-pointer"
         >
           Tentar Novamente (Recarregar)
         </button>
-        <button 
+        <button
           onClick={() => window.history.back()}
           className="w-full max-w-xs py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all cursor-pointer"
         >
@@ -402,32 +393,15 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
   return (
     <div className="relative">
-      {/* Toast flutuante discreto indicando soberania do Admin */}
-      <AnimatePresence>
-        {showAdminToast && (
-          <motion.div 
-            initial={{ opacity: 0, y: -50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -50 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-xs px-4 pointer-events-none"
-          >
-            <div className="bg-slate-950/95 backdrop-blur border border-emerald-500/30 text-white p-3.5 rounded-2xl flex items-center gap-3 shadow-2xl">
-              <div className="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-xl text-emerald-400">
-                <Unlock size={16} />
-              </div>
-              <div className="text-left flex-1">
-                <p className="text-[9.2px] font-black text-emerald-400 uppercase tracking-wider leading-none mb-1">🔓 BYPASS SÍNCRONO IMEDIATO ATIVO</p>
-                <p className="text-[8.5px] text-slate-300 font-bold uppercase tracking-wide leading-normal">STATUS DE HOMOLOGAÇÃO: LIBERADO PARA TESTE DE MESA NO AI STUDIO PERIMETER.</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+      {/* Banner inline do bypass administrativo — renderizado no FLUXO normal,
+          logo abaixo do header da filial; nunca sobreposto ao conteúdo. */}
       {status === 'bypassed' && (
-        <div className="fixed bottom-4 right-4 z-[9998] pointer-events-auto bg-slate-900/95 backdrop-blur text-white px-3 py-1.5 rounded-full flex items-center gap-2 border border-emerald-500/30 shadow-lg text-[9px] font-bold uppercase tracking-wider animate-fadeIn">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-          <span>[Bypass Admin Ativo] ({unitConfig?.unit_id || 'Âncora'})</span>
+        <div className="bg-emerald-50/80 border-b border-emerald-200/70 px-4 py-2 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0" />
+          <p className="text-[9px] font-black text-emerald-700 uppercase tracking-widest flex-1 leading-tight">
+            🔓 Bypass Síncrono Imediato Ativo — Status de Homologação: Liberado
+            <span className="text-emerald-600/80 ml-1.5 font-bold">({unitConfig?.unit_id || 'Âncora'})</span>
+          </p>
         </div>
       )}
 

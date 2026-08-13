@@ -96,8 +96,8 @@ describe('migrationV5 — normalização de dados version(5) (Fase C4)', () => {
       expect(r.primarykey).toBe('PK-001');
       expect(r.id).toBe('PK-001');
 
-      // Classe K — UPPER + TRIM + expurgo
-      expect(r.endereco).toBe('CORREDORA');
+      // endereco — nome físico com espaços preservados; demais — Classe K
+      expect(r.endereco).toBe('CORREDOR A');
       expect(r.serial).toBe('SN-01');
       expect(r.registro).toBe('REG-X');
       expect(r.subreg).toBe('S1');
@@ -266,10 +266,10 @@ describe('migrationV5 — normalização de dados version(5) (Fase C4)', () => {
       .map((r) => String((r as Record<string, unknown>).codigo_endereco))
       .sort();
     expect(codigos).toContain('MANUAL-X'); // preservada
-    expect(codigos).toContain('CORREDORA'); // derivada (endereco normalizado)
-    expect(codigos).toContain('SALA3'); // derivada (classe K)
+    expect(codigos).toContain('CORREDOR A'); // derivada (endereco com espaços preservados)
+    expect(codigos).toContain('SALA 3'); // derivada (endereco com espaços preservados)
 
-    const derived = addr.find((r) => (r as Record<string, unknown>).codigo_endereco === 'CORREDORA') as Record<string, unknown>;
+    const derived = addr.find((r) => (r as Record<string, unknown>).codigo_endereco === 'CORREDOR A') as Record<string, unknown>;
     expect(derived).toMatchObject({
       tenantid: 'CICOPAL',
       filial: '010101 CICOPAL GO',

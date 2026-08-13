@@ -83,13 +83,17 @@ export function canonicalKey(key: string): string {
 const CLASS_K_IDENTITY_FIELDS = new Set(['etiqueta', 'tag', 'primarykey']);
 /** Campos K de código — expurgo `[^A-Z0-9-]` aprovado. */
 const CLASS_K_CODE_FIELDS = new Set([
-  'endereco', 'serial', 'registro', 'subreg', 'contacontabil',
+  'serial', 'registro', 'subreg', 'contacontabil',
   'centrodecusto', 'cnpj', 'notafiscal'
 ]);
 /** Classe T — caixa preservada. */
 const CLASS_T_FIELDS = new Set(['descricaodoativo', 'nomefornecedor', 'status']);
-/** filial — UPPER + TRIM com espaços internos preservados. */
-const CLASS_FILIAL_FIELDS = new Set(['filial']);
+/** Texto exibível em UPPER com espaços internos preservados — `filial` e
+ *  `endereco` são nomes físicos legíveis (ex.: "151840 PRODUCAO - PV1 REFRESCO
+ *  - ENVASE 1 / 2 CDC 70110"). O expurgo `[^A-Z0-9-]` quebrava a grafia com
+ *  separadores da planilha (tudo emendado), prejudicando a identificação do
+ *  local a inventariar. */
+const CLASS_UPPER_SPACE_FIELDS = new Set(['filial', 'endereco']);
 
 /**
  * Aplica a regra de normalização da classe do campo canônico. É o primitivo
@@ -100,7 +104,7 @@ const CLASS_FILIAL_FIELDS = new Set(['filial']);
 export function normalizeFieldValue(field: string, raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   let out: string;
-  if (CLASS_FILIAL_FIELDS.has(field)) {
+  if (CLASS_UPPER_SPACE_FIELDS.has(field)) {
     out = normalizeUpperTrim(raw) ?? '';
   } else if (CLASS_K_CODE_FIELDS.has(field)) {
     out = normalizeClassK(raw) ?? '';

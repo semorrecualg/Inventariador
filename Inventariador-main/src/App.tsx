@@ -9,6 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
+import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager } from './utils/authUtils';
@@ -723,7 +724,7 @@ useEffect(() => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number }>>([]);
+  const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>>([]);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
 
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
@@ -5551,14 +5552,16 @@ useEffect(() => {
 
     // 1. Agrupar estatísticas e campanhas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
-    const companyStatsMap = new Map<string, { hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
+    const companyStatsMap = new Map<string, { tenantid: string; hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
     
     // v24.50: Se temos unidades via SQL (Modo Interno), usamos elas como base prioritária
     if (databaseMode === DatabaseMode.INTERNAL && sqliteOperationalUnits.length > 0) {
       sqliteOperationalUnits.forEach(u => {
         const companyName = (u.filial || '').toUpperCase().replace(/_/g, ' ');
         if (!companyName) return;
-        companyStatsMap.set(companyName, {
+        const tenant = (u.tenantid || '').toUpperCase().trim();
+        companyStatsMap.set(unitContextKey(tenant, companyName), {
+          tenantid: tenant,
           hasData: true,
           hasActiveAssets: (u.total || 0) > 0,
           unitIds: new Set(),
@@ -5572,11 +5575,13 @@ useEffect(() => {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
       if (!company || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
+      const tenant = String(a.tenantid || '').toUpperCase().trim();
+      const statsKey = unitContextKey(tenant, company);
       
-      let stats = companyStatsMap.get(company);
+      let stats = companyStatsMap.get(statsKey);
       if (!stats) {
-        stats = { hasData: true, hasActiveAssets: false, unitIds: new Set(), hasAssetCampaign: false };
-        companyStatsMap.set(company, stats);
+        stats = { tenantid: tenant, hasData: true, hasActiveAssets: false, unitIds: new Set(), hasAssetCampaign: false };
+        companyStatsMap.set(statsKey, stats);
       }
       
       const status = String(a.status || '').toUpperCase();
@@ -5633,7 +5638,11 @@ useEffect(() => {
     if (inventory.companies) {
       inventory.companies.forEach(c => baseCompaniesSet.add(c.toUpperCase().replace(/_/g, ' ').trim()));
     }
-    for (const c of companyStatsMap.keys()) baseCompaniesSet.add(c);
+    // Chaves compostas [tenantid+filial] entram apenas pela FILIAL (o contrato já
+    // é resolvido no 4a) — nunca como nome literal com o separador.
+    for (const c of companyStatsMap.keys()) {
+      baseCompaniesSet.add(splitUnitContextKey(c).filial);
+    }
     
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
     
@@ -5653,54 +5662,76 @@ useEffect(() => {
     // 3. Normalizar unidades do usuário para busca rápida
     const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
 
-    // 4. Agrupar e Mesclar empresas por chave normalizada para evitar duplicatas (ex: "UNIDADE A" vs "UNIDADE_A")
-    const mergedCompanies = new Map<string, { name: string; hasData: boolean; hasActiveAssets: boolean; hasAssetCampaign: boolean }>();
+    // 4. Agrupar e Mesclar empresas por CHAVE COMPOSTA [tenantid+filial] — o muro
+    // multi-tenant: a mesma filial em contratos diferentes é uma unidade DISTINTA.
+    // A normalização por nome (ex: "UNIDADE A" vs "UNIDADE_A") continua valendo DENTRO
+    // do mesmo contrato.
+    const mergedCompanies = new Map<string, { name: string; tenantid: string; hasData: boolean; hasActiveAssets: boolean; hasAssetCampaign: boolean }>();
 
-    baseCompanies.forEach(company => {
-      const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
-      if (!rawName) return;
-      
-      const norm = normalizeKey(rawName);
-      if (!norm) return;
-
-      // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
-      const isAllowed = !isAuditor || 
+    // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
+    const isUnitAllowed = (norm: string) => !isAuditor || 
                       inventory.databaseMode === DatabaseMode.INTERNAL || 
                       userUnits.length === 0 || 
                       normalizedUserUnits.includes(norm) ||
                       (normalizedUserUnits.length === 1 && normalizedUserUnits[0] === '');
-      
-      const stats = companyStatsMap.get(rawName);
-      
-      if (isAllowed) {
-        const existing = mergedCompanies.get(norm);
-        
-        // Critérios para escolher o "melhor" nome de exibição:
-        // 1. Preferir nomes SEM underscores (mais legíveis)
-        // 2. Preferir nomes com espaços
-        // 3. Preferir o nome que está na lista de unidades do usuário
-        const hasUnderscore = rawName.includes('_');
-        const existingHasUnderscore = existing ? existing.name.includes('_') : false;
-        
-        const isBetterName = !existing || 
-          (existingHasUnderscore && !hasUnderscore) ||
-          (rawName.includes(' ') && !existing.name.includes(' ')) ||
-          (userUnits.includes(rawName) && !userUnits.includes(existing.name));
 
-        if (!existing || isBetterName || stats?.hasData) {
-          mergedCompanies.set(norm, {
-            name: isBetterName ? rawName : existing.name,
-            hasData: (existing?.hasData || !!stats),
-            hasActiveAssets: (existing?.hasActiveAssets || stats?.hasActiveAssets || false),
-            hasAssetCampaign: (existing?.hasAssetCampaign || stats?.hasAssetCampaign || false)
-          });
-        }
+    // 4a. Unidades detectadas nos ativos/SQL (chave composta com tenantid real)
+    companyStatsMap.forEach((stats, statsKey) => {
+      const { tenantid, filial } = splitUnitContextKey(statsKey);
+      const rawName = filial.replace(/_/g, ' ');
+      const norm = normalizeKey(rawName);
+      if (!norm) return;
+      if (!isUnitAllowed(norm)) return;
+
+      const existing = mergedCompanies.get(statsKey);
+      // Preferir nome legível (sem underscore, com espaços)
+      const isBetterName = !existing ||
+        ((existing.name.includes('_') || !existing.name.includes(' ')) && (!rawName.includes('_') && rawName.includes(' '))) ||
+        (userUnits.includes(rawName) && !userUnits.includes(existing.name));
+
+      if (!existing || isBetterName || stats.hasData) {
+        mergedCompanies.set(statsKey, {
+          name: isBetterName ? rawName : (existing?.name || rawName),
+          tenantid,
+          hasData: (existing?.hasData || stats.hasData),
+          hasActiveAssets: (existing?.hasActiveAssets || stats.hasActiveAssets || false),
+          hasAssetCampaign: (existing?.hasAssetCampaign || stats.hasAssetCampaign || false)
+        });
       }
+    });
+
+    // 4b. Empresas da lista base sem stats (ex.: unidades autorizadas do usuário) —
+    // amarradas ao tenant do usuário logado (contrato do perfil)
+    baseCompanies.forEach(company => {
+      const rawName = (company || '').trim().toUpperCase().replace(/_/g, ' ');
+      if (!rawName) return;
+      // Chave composta vazada (ex.: "CICOPAL|010101 CICOPAL GO") — já coberta no 4a
+      if (rawName.includes(UNIT_SEPARATOR)) return;
+      
+      const norm = normalizeKey(rawName);
+      if (!norm) return;
+      if (!isUnitAllowed(norm)) return;
+
+      const key = unitContextKey(userTenant, rawName);
+      if (mergedCompanies.has(key)) return;
+      // Anti-fantasma: se a MESMA filial já foi detectada em QUALQUER contrato
+      // (ex.: dado legado sem tenantid), não criamos uma cópia vazia do contrato
+      // do usuário — ela só duplicaria a lista sem dados reais.
+      const sameNameExists = Array.from(mergedCompanies.values()).some(u => normalizeKey(u.name) === norm);
+      if (sameNameExists) return;
+      mergedCompanies.set(key, {
+        name: rawName,
+        tenantid: userTenant,
+        hasData: false,
+        hasActiveAssets: false,
+        hasAssetCampaign: false
+      });
     });
 
     const sqlCountsMap = new Map<string, number>();
     sqliteOperationalUnits.forEach(u => {
-      sqlCountsMap.set(normalizeKey(u.filial || ''), u.total || 0);
+      const key = unitContextKey(u.tenantid || '', u.filial || '');
+      sqlCountsMap.set(key, (sqlCountsMap.get(key) || 0) + (u.total || 0));
     });
 
     const localCountsMap = new Map<string, number>();
@@ -5708,13 +5739,14 @@ useEffect(() => {
       assets.forEach(a => {
         const company = getAssetUnit(a).replace(/_/g, ' ');
         if (!company) return;
-        const norm = normalizeKey(company);
-        localCountsMap.set(norm, (localCountsMap.get(norm) || 0) + 1);
+        const key = unitContextKey(String(a.tenantid || ''), company);
+        localCountsMap.set(key, (localCountsMap.get(key) || 0) + 1);
       });
     }
 
     const result = Array.from(mergedCompanies.values()).map(unit => {
       const norm = normalizeKey(unit.name);
+      const unitTenant = (unit.tenantid || '').toUpperCase().trim();
       
       // Cache reativo duplo para evitar "pisca-pisca" visual do botão CAMPANHA
       const cachedActive = localStorage.getItem(`kardek_campanha_ativa_${norm}`) === 'true';
@@ -5724,13 +5756,15 @@ useEffect(() => {
       let assetCount = 0;
       if (inventory.databaseMode === DatabaseMode.INTERNAL) {
         for (const [sqlKey, count] of sqlCountsMap.entries()) {
-          if (matchUnitKeys(sqlKey, norm)) {
+          const { tenantid: kTenant, filial: kFilial } = splitUnitContextKey(sqlKey);
+          if (matchTenantUnit(unitTenant, unit.name, kTenant, kFilial)) {
             assetCount += count;
           }
         }
       } else {
         for (const [localKey, count] of localCountsMap.entries()) {
-          if (matchUnitKeys(localKey, norm)) {
+          const { tenantid: kTenant, filial: kFilial } = splitUnitContextKey(localKey);
+          if (matchTenantUnit(unitTenant, unit.name, kTenant, kFilial)) {
             assetCount += count;
           }
         }
@@ -5738,6 +5772,7 @@ useEffect(() => {
 
       return {
         name: unit.name,
+        tenantid: unit.tenantid,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
         hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table or cached enables button
@@ -5751,23 +5786,24 @@ useEffect(() => {
     // a inclusão de todas as unidades encontradas nos ativos para evitar o bloqueio do app.
     if (result.length === 0 && assets.length > 0) {
       logger.warn('>>> [fullCompaniesWithStatus] CRITICAL: Assets exist but no units were extracted! Applying EMERGENCY extraction.');
-      const emergencyUnits = new Set<string>();
+      const emergencyUnits = new Map<string, { name: string; tenantid: string }>();
       for (let i = 0; i < assets.length; i++) {
         const a = assets[i];
         const company = (a.filial || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
-          emergencyUnits.add(company.replace(/_/g, ' '));
+          const tenant = String(a.tenantid || '').toUpperCase().trim();
+          emergencyUnits.set(unitContextKey(tenant, company), { name: company.replace(/_/g, ' '), tenantid: tenant });
         }
       }
       
       if (emergencyUnits.size > 0) {
-        return Array.from(emergencyUnits).map(name => {
-          const norm = normalizeKey(name);
+        return Array.from(emergencyUnits.values()).map(({ name, tenantid }) => {
           const assetCount = inventory.databaseMode === DatabaseMode.INTERNAL 
-            ? (sqlCountsMap.get(norm) || 0)
-            : (localCountsMap.get(norm) || 0);
+            ? (sqlCountsMap.get(unitContextKey(tenantid, name)) || 0)
+            : (localCountsMap.get(unitContextKey(tenantid, name)) || 0);
           return {
             name,
+            tenantid,
             hasData: true,
             hasActiveAssets: true,
             hasCampaign: false,
@@ -6541,6 +6577,8 @@ useEffect(() => {
                 })
                 .map(c => ({ 
                   filial: c.name,
+                  // Muro multi-tenant: cada unidade carrega o contrato dela (chave composta)
+                  tenantid: (c as { tenantid?: string }).tenantid || '',
                   // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
                   hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
                   isDownloaded: false,
@@ -6549,13 +6587,18 @@ useEffect(() => {
                   assetCount: (c as { assetCount?: number }).assetCount
                 }))
               } 
-              onSelect={(u) => { 
-                const tid = user?.tenantid ? String(user.tenantid).trim().toUpperCase() : '';
+              onSelect={(u, t) => { 
+                // Muro multi-tenant: o contrato de trabalho é o da UNIDADE selecionada
+                // (chave composta [tenantid+filial]); se a unidade não carregar contrato,
+                // cai para o tenantid do perfil do usuário.
+                const unitTenant = (t || '').trim().toUpperCase();
+                const profileTenant = user?.tenantid ? String(user.tenantid).trim().toUpperCase() : '';
+                const tid = unitTenant || profileTenant;
                 // SOBERANIA DO PROPRIETÁRIO: o admin global (sem tenantid fixo) é
                 // superusuário e pode operar em qualquer unidade — o contrato é
                 // resolvido pela filial/unidade selecionada (tenant vazio = todos).
                 const isOwnerOrGlobalAdmin = (user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())
-                  || ((user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin) && !tid);
+                  || ((user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin) && !profileTenant);
                 if (!tid && !isOwnerOrGlobalAdmin) {
                   setModalConfig({
                     isOpen: true,

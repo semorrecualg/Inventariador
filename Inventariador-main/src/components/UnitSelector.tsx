@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   Search, 
@@ -23,6 +23,7 @@ import { AppScreen, DatabaseMode, NavigationParams, UnitConfig } from '../types'
 import * as turf from '@turf/turf';
 import { localDb, readVirtualSnapshot } from '../services/localDbService';
 import { resolveTenantId } from '../utils/tenantUtils';
+import { findHomonymUnits } from '../utils/unitContextUtils';
 import { isAdminEmail } from '../utils/authUtils';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
@@ -31,13 +32,14 @@ import type { DexieAsset } from '../services/sqliteService';
 interface UnitSelectorProps {
   units: Array<{ 
     filial: string; // Unified GBR v2.6 filial field
+    tenantid?: string; // Muro multi-tenant: contrato da unidade (chave composta)
     hasData: boolean; 
     isDownloaded?: boolean; 
     hasCampaign?: boolean;
     hasGps?: boolean;
     assetCount?: number;
   }>;
-  onSelect: (unit: string) => void;
+  onSelect: (unit: string, tenantid?: string) => void;
   onBack: () => void;
   onSync?: () => void;
   onConfigGPS?: (unit: string) => void;
@@ -57,6 +59,7 @@ interface UnitSelectorProps {
 interface SqliteUnitStats {
   filial: string;
   displayName: string;
+  tenantid: string;
   total: number;
   checked: number;
 }
@@ -180,6 +183,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             return {
               filial: f,
               displayName: f,
+              tenantid: currentTenantid,
               total: Math.max(0, filialAssets.length),
               checked: Math.max(0, checkedAssets.length)
             };
@@ -395,6 +399,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         const propUnit = units.find(u => u.filial.toUpperCase().trim() === su.filial.toUpperCase().trim());
         return {
           filial: su.filial,
+          tenantid: su.tenantid,
           hasData: su.total > 0,
           isDownloaded: propUnit?.isDownloaded ?? true,
           hasCampaign: propUnit?.hasCampaign ?? false,
@@ -407,6 +412,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         ...pu,
         checkedCount: 0
       }));
+
+  // Muro multi-tenant: nomes de filial que existem em MAIS DE UM contrato
+  // (homônimos) ganham o badge do contrato para o usuário distinguir.
+  const homonymSet = useMemo(() => findHomonymUnits(displayUnitsList), [displayUnitsList]);
 
   const filteredUnits = displayUnitsList.filter(u => {
     const unitName = u.filial || '';
@@ -595,12 +604,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
               }
 
               const displayName = rawName.trim().toUpperCase();
+              const unitTenant = (unit.tenantid || '').trim().toUpperCase();
               const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
+              const showTenantBadge = homonymSet.has(displayName);
 
               return (
                 <div
-                  key={displayName}
-                  onClick={() => unit.hasData && onSelect(displayName)}
+                  key={unitTenant ? `${unitTenant}::${displayName}` : displayName}
+                  onClick={() => unit.hasData && onSelect(displayName, unitTenant || undefined)}
                   className={`w-full bg-white p-4 rounded-2xl flex items-center justify-between shadow-sm border transition-all duration-200 group overflow-hidden relative modern-card ${
                     unit.hasData 
                       ? 'hover:border-accent hover:shadow-md active:scale-[0.99] border-gray-100 cursor-pointer' 
@@ -614,6 +625,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                     <div className="text-left flex-1 min-w-0">
                       <div className="unit-row-item flex items-center flex-wrap">
                         <span style={{ fontSize: '14px', color: '#0a192f', fontWeight: '500' }}>{displayName}</span>
+                        {showTenantBadge && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[8px] font-black uppercase tracking-wider border border-slate-200">
+                            {unitTenant || 'SEM CONTRATO'}
+                          </span>
+                        )}
                         {typeof unit.assetCount === 'number' && (
                           <>
                             <span style={{ margin: '0 8px', color: '#8892b0' }}>•</span>

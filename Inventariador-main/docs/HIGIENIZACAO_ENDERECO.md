@@ -327,12 +327,19 @@ Consolidado na seção 2.2. Resumo executivo por categoria:
 
 | Classe | Campos | Regra de correção (Fases C/D) | Regra do `endereco`? |
 |---|---|---|---|
-| **K — código/chave** | `filial, etiqueta, tag, primarykey, registro, subreg, contacontabil, centrodecusto, cnpj, notafiscal, serial, endereco` | `UPPER + TRIM + expurgo [^A-Z0-9-]` (padrão já existente) | ✅ SIM |
+| **K — código/chave** | `etiqueta, tag, primarykey, registro, subreg, contacontabil, centrodecusto, cnpj, notafiscal, serial` | `UPPER + TRIM + expurgo [^A-Z0-9-]` (padrão já existente) | ✅ SIM |
 | **T — texto descritivo** | `descricaodoativo, nomefornecedor, status (enum), _history, DE_PARA` | `TRIM` + colapso de espaços + **preservar caixa** | ❌ **NÃO** (corromperia dados) |
 | **N — numérico** | `qt, vlraquisic, sn1_recno, sn3_recno, gps_lat, gps_lng` | validar parse numérico (sem case) | N/A |
 | **D — data** | `dataaqusic, databaixa` | normalizar formato de data | N/A |
 | **F — flags 0\|1** | `_is_synced, _is_deleted, _conferido, _plaquetado, _aprovado, _isNew, _is_unitized, _is_divergent_baixa` | `coerce Number(x)===1` | N/A |
 | **S — âncora/derivada** | `current_selected_address`, `addresses.codigo_endereco` | alinhar à classe K | parcial |
+
+> **Atualização 2026-08-13 (correção de UX):** `endereco` e `filial` são **nomes físicos
+> legíveis** e foram movidos para a regra `UPPER + TRIM preservando espaços internos`
+> (normalize.ts `CLASS_UPPER_SPACE_FIELDS`). O expurgo `[^A-Z0-9-]` emendava a grafia da
+> planilha (ex.: `151840 PRODUCAO - PV1 REFRESCO - ENVASE 1 / 2 CDC 70110` virava
+> `151840PRODUCAO-PV1REFRESCO-ENVASE12CDC70110`), prejudicando a identificação do local a
+> inventariar. O `codigo_endereco` (chave da tabela `addresses`) mantém o expurgo como chave.
 
 ### 6.3 ETAPA 1 generalizada (Supabase — read-only, SQL Editor)
 **Status: queries (e) e (f) EXECUTADAS 2026-08-06 (resultados em §6.6 e §6.7).**

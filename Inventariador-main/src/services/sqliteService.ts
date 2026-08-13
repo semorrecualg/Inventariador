@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
+import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -454,29 +455,42 @@ export class SqliteService {
     }
   }
 
-  public async getOperationalUnitsWithStats(tenantid?: string): Promise<Array<{ filial: string; displayName: string; total: number; checked: number }>> {
+  public async getOperationalUnitsWithStats(tenantid?: string): Promise<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>> {
     try {
       if (tenantid) {
         logger.info(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantid);
       }
       const list = await db.local_assets.toArray();
       const nonDeleted = list.filter(a => a._is_deleted === 0);
-      
-      const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
-      
+
+      // Muro multi-tenant: unidade identificada pela chave composta [tenantid+filial].
+      // Filiais homônimas de contratos diferentes viram entradas DISTINTAS.
+      const filiaisAssets = Array.from(new Set(
+        nonDeleted
+          .map(a => unitContextKey(String(a.tenantid || ''), String(a.filial || '')))
+          .filter(k => splitUnitContextKey(k).filial !== '')
+      ));
+
       // Busca unidades configuradas
       const configList = await db.unit_configs.toArray();
-      const filiaisConfigs = configList.map(c => String(c.filial || c.nome)).filter(f => f && f.trim() !== '');
-      
-      // União única de todas as filiais do tenant
-      const allFiliais = Array.from(new Set([...filiaisAssets.map(f => f.toUpperCase().trim()), ...filiaisConfigs.map(f => f.toUpperCase().trim())]));
-      
-      const stats = allFiliais.map(f => {
-        const filialAssets = nonDeleted.filter(a => String(a.filial || '').toUpperCase().trim() === f);
+      const filiaisConfigs = configList
+        .map(c => unitContextKey(String((c as { tenantid?: string }).tenantid || ''), String(c.filial || c.nome || '')))
+        .filter(k => splitUnitContextKey(k).filial !== '');
+
+      // União única de todas as unidades por chave composta
+      const allKeys = Array.from(new Set([...filiaisAssets, ...filiaisConfigs]));
+
+      const stats = allKeys.map(k => {
+        const { tenantid: t, filial: f } = splitUnitContextKey(k);
+        const filialAssets = nonDeleted.filter(a =>
+          String(a.filial || '').toUpperCase().trim() === f &&
+          String(a.tenantid || '').toUpperCase().trim() === t
+        );
         const checkedAssets = filialAssets.filter(a => a._conferido === 1);
         return {
           filial: f,
           displayName: f,
+          tenantid: t,
           total: filialAssets.length,
           checked: checkedAssets.length
         };
