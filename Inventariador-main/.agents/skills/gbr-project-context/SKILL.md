@@ -22,11 +22,12 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 5. **`docs/HIGIENIZACAO_ENDERECO.md`** — auditoria estrutural fechada do campo
    `endereco`/assets: `public.assets` 26/26 colunas canônicas (**no-op definitivo** —
    nenhuma DDL) · `staging.assets` = schema morto, fora de escopo (Fase D).
-6. **`docs/PLANO_FASE_C_HIGIENIZACAO.md`** — contrato de execução da Fase C
-   (padronização UPPER→canônico): helpers + `CANONICAL_KEY_MAP` + M1 (C1) e Classe T (C2)
-   **entregues**; C3–C5 pendentes (decisões §9 aprovadas em 2026-08-07).
-7. **`docs/SCHEMA_BASELINE.md`** — baseline congelado do `InventoryLocalStore` **v4**
-   (9 tabelas + contrato de 21 colunas; travado em `schemaBaseline.test.ts`).
+6. **`docs/PLANO_FASE_C_HIGIENIZACAO.md`** — **Fase C concluída** (2026-08-07, C1–C5):
+   padronização UPPER→canônico minúsculo aplicada no loader e nas leituras; schema canônico
+   ativo (baseline v7).
+7. **`docs/SCHEMA_BASELINE.md`** — baseline congelado do `InventoryLocalStore` **v7**
+   (9 tabelas + contrato de 21 colunas; **chave composta `[tenantid+primarykey]`** nas 3
+   tabelas de ativos; travado em `schemaBaseline.test.ts` — `verno === 7`).
 
 > Se o `docs/ARCHITECTURE.md` não existir, crie-o antes de prosseguir (estrutura base na seção 5).
 
@@ -43,28 +44,27 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
   são **legadas**: leitura permitida apenas como fallback via `utils/tenantUtils.ts`
   (`resolveTenantId`, `readLocalTenantId`, `readSessionTenantId`); **escrita proibida**.
   Alterações de schema no Supabase passam por `scripts/migrate-*-supabase.sql`.
+- **Muro multi-tenant**: chave composta local `[tenantid+primarykey]` (migração v6→v7 em 2
+  passos, `filterCrossTenantWrites`) + nuvem com índice único composto `(tenantid, primarykey)`
+  e upsert `onConflict('tenantid, id')`. **NUNCA** propor chave única global de volta.
 - **Loader (contrato rígido)**: planilha com **exatamente 21 colunas** em nome E ordem fixas
   (`tenantid` na posição 0; cabeçalho completo em `docs/ARCHITECTURE.md` §7.2). Carga
   **bloqueada** se o cabeçalho divergir (nome/posição) ou se `tenantid` estiver ausente/vazio.
-- **Fase C — higienização canônica (chaves/valores UPPER→lower)**: helpers em
-  `src/utils/normalize.ts` — `normalizeClassK` (UPPER+TRIM+expurgo `[^A-Z0-9-]`),
-  `normalizeClassT` (TRIM+colapso, **caixa preservada** — `status`/`descricaodoativo`/
-  `nomefornecedor`), `normalizeUpperTrim` (`filial` preserva espaços internos),
-  `normalizeFieldValue` (regra por campo), `pickCanonical` (leitura tolerante: canônico
-  minúsculo vence, UPPER é fallback — remover só na C5), `canonicalKey` e a flag
-  `NORMALIZE_ON_UPGRADE`. `CANONICAL_KEY_MAP` em `src/constants/schema.ts` resolve variantes
-  de cabeçalho. A carga (M1) já aplica `normalizeFieldValue` nos 3 caminhos do
-  `DatabaseLoaderService`. Identidade/PK (`etiqueta`, `tag`, `primarykey`) só TRIM na C1
-  (política definida na C4). Supabase: `public.assets` **no-op definitivo** · `staging`
-  **fora de escopo**.
 - **Dados**: manipular persistência **somente via API Dexie** (`localDb`/`sqliteService`,
-  transações `db.transaction('rw', …)`). Proibido SQL raw/inline. Respeitar isolamento por
-  tenant (`[tenantid+filial]`). Mudança de schema = nova `version(n)` no
-  `InventoryDexieDatabase` (`sqliteService.ts`).
-- **Auth**: 2 camadas (Dexie → Barreira local/Supabase). Admin definido por
-  `VITE_ADMIN_EMAIL` (`isAdminEmail`) — sem credenciais fixas no código.
-- **Modos**: `INTERNAL` = sem rede (`isInternalMode=true`). **Supabase ativo** com schema
-  padronizado no modo `SUPABASE_PLUS`, porém desligado por padrão. Gemini é opcional.
+  transações `db.transaction('rw', …)`). Proibido SQL raw/inline. Mudança de schema = nova
+  `version(n)` no `InventoryDexieDatabase` (`sqliteService.ts`).
+- **Login por contrato**: cada usuário é amarrado a UM `tenantid` (ex.: `semorr@gmail.com` →
+  `CICOPAL`). **Não existe "GLOBAL"**: admin/master sem contrato tem login bloqueado (Barreira
+  Local consulta a nuvem e, sem contrato, bloqueia). Dados exibidos/sincronizados somente do
+  contrato do usuário; `TenantWorkSelector` pós-login para multi-contrato/multi-filial.
+- **RBAC**: `src/services/rbacService.ts` + `PermissionGate` — matriz em
+  `docs/RBAC_GOVERNANCA.md`. **Provisionamento:** `LicenseProvisioning` +
+  `tenantProvisioningService` + `passwordPolicy` (MASTER com senha forte; sub-usuários de
+  "login rápido" amarrados ao tenant do MASTER).
+- **Modos**: `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)` — flag
+  **derivada do ambiente**, nunca hard-coded. Com credenciais (`.env.local` presente) →
+  **Supabase ATIVO** (auth + dados + sync, modo `SUPABASE_PLUS`); sem credenciais (build sem
+  secrets, ex.: CI) → `INTERNAL` (offline puro, zero chamadas de rede). **Hoje: Supabase ativo.**
 - **Impacto em cascata**: mudanças em telas/estado exigem análise upstream e downstream
   (`MODULE_SELECTION → UNIT_SELECTION → DASHBOARD → ADDRESS_SELECTION → INVENTORY`).
 
@@ -72,24 +72,17 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 
 1. `npx tsc -b --noEmit` → **zero erros em `src/`** (erros em
    `node_modules`/config de terceiros são pré-existentes — não produzir novos).
-2. `npx vitest run` → **16 arquivos / 165 testes verdes**
-   (inclui `normalize`/`pickCanonical`/`loaderNormalization`/`schemaBaseline` da Fase C).
+2. `npx vitest run` → **30 arquivos / 295 testes verdes**.
 3. Bugs de fluxo/UI → reproduzir em navegador (Playwright headless) e/ou `freebuff-preview`.
 4. Atualizar **`docs/ARCHITECTURE.md`** sempre que a arquitetura mudar (novas telas, fluxos,
    tabelas ou schema).
 
 ## 4. Pendências conhecidas
 
-Ver issue #6 (`semorrecualg/Inventariador`) e seção "Pendências" do `ARCHITECTURE.md`:
-typecheck limpo (Fase 0 concluída — tsconfig único + declarações ambient; ver `docs/MIGRACAO_HIBRIDA.md`), `logo.png` placeholder,
-fluxo "base vazia" no Gestor de Base.
-(Supabase já ativo com schema `tenantid` + `filial` padronizado — migrações em `scripts/`.)
-
-**Fase C pendente (ver `docs/PLANO_FASE_C_HIGIENIZACAO.md` §4–§5):** C3 (coerções N/D/F) ·
-M2 (chaves UPPER→lower, ~700 ocorrências em 40+ arquivos via `pickCanonical`/canônicas) ·
-C4 (migração Dexie `version(5)` com dry-run + flag `NORMALIZE_ON_UPGRADE`; atualizar
-`schemaBaseline.test.ts` para verno 5 e `docs/SCHEMA_BASELINE.md`) · C5 (remoção da
- tolerância `pickCanonical` + varredura final `grep` de UPPER em `src/` fora de `schema.ts`).
+Ver issue #6 (`semorrecualg/Inventariador`) e §14 "Pendências conhecidas" do `ARCHITECTURE.md`:
+`public/logo.png` placeholder (gerar ícones PWA reais) · fluxo "base vazia" no Gestor de Base ·
+exibição de filiais homônimas entre contratos (separadas no banco pela chave composta;
+a exibição por nome de filial ainda mistura contratos — próximo passo).
 
 ## 5. Manutenção deste skill
 
