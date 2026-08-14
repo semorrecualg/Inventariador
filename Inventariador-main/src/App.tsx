@@ -55,10 +55,13 @@ import ActiveSearch from './components/ActiveSearch';
 import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
+import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolvePostSelectionScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
-import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial } from './utils/workContextUtils';
+import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
+import { markPullCompleted, wasPullCompleted, shouldSkipPull } from './utils/syncDedup';
+import { resolveUnitFilter } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -821,6 +824,16 @@ useEffect(() => {
           tenantid: ''
         });
       }
+
+      // Sanitização do dono (ADMIN_EMAIL): filiais obsoletas que sobraram no
+      // app_users local (ex.: 'MATRIZ' de sessão antiga/demo) são normalizadas
+      // para o padrão canônico do dono ('TODAS' + sem units). Sem isso, o
+      // registro sequestrava o seletor de filiais pós-login e o syncUsersToCloud
+      // (upsert por e-mail) re-enviava o valor obsoleto para a nuvem.
+      if (ADMIN_EMAIL && adminIndex !== -1) {
+        userList[adminIndex].filial = 'TODAS';
+        userList[adminIndex].units = [];
+      }
       
       return userList;
     } catch { return []; }
@@ -864,10 +877,23 @@ useEffect(() => {
   }, []);
 
   const userRef = useRef<User | null>(user);
+  // SINCRONIZA userRef com o usuário logado atual. Sem isso, o guard anti-loop
+  // do processSession (que compara userRef.current) nunca retorna cedo, e cada
+  // re-registro do listener de auth (INITIAL_SESSION/TOKEN_REFRESHED) reprocessa
+  // o login e seta o usuário de novo → loop infinito do overlay "Processando
+  // Login" + tela piscando (relatado 2026-08-13).
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
   const isSyncRunningRef = useRef<boolean>(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
+  // Guarda de re-execução do Boot Loader (Etapa 1 do FLUXO_ACESSO_INICIAL):
+  // o effect que baixa a base vazia re-roda quando o `user` muda durante o
+  // processSession — isso iniciava pulls REPETIDOS do contrato inteiro.
+  // Uma vez iniciado o download, as re-execuções do efeito são ignoradas.
+  const bootLoaderStartedRef = useRef<boolean>(false);
 
   const setSqliteStatus = useCallback((val: unknown) => {
     setSqliteStatusState(prev => {
@@ -3070,15 +3096,29 @@ useEffect(() => {
         // permaneçam ativos até que a busca e os 12.636 ativos sejam concluídos de fato!
         const isLocalEmpty = !savedInventory || !savedInventory.assets || savedInventory.assets.length === 0;
         const justCleared = sessionStorage.getItem('app_just_cleared_data') === 'true';
-        if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared && user) {
-          logger.info('>>> [Boot Loader] Base local vazia detectada. Baixando 12.636 ativos via busca paginada antes de dispensar o splash...');
+        // SRE ISOLAMENTO: o Boot Loader só baixa com tenantid RESOLVIDO. Se o
+        // perfil ainda não foi processado (corrida com o auto-login), aguarda —
+        // o effect re-executa quando o user ganhar o tenantid (deps [user]).
+        const bootTenant = String(user?.tenantid || '').trim().toUpperCase();
+        if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared && user && bootTenant && bootLoaderStartedRef.current) {
+          logger.info('>>> [Boot Loader] Download já iniciado nesta sessão. Pulando re-execução do efeito (Etapa 1 — anti-loop).');
+        } else if (isLocalEmpty && databaseMode !== DatabaseMode.INTERNAL && navigator.onLine && !justCleared && user && bootTenant) {
+          bootLoaderStartedRef.current = true;
+          logger.info(`>>> [Boot Loader] Base local vazia detectada. Baixando ativos do contrato ${bootTenant} via busca paginada antes de dispensar o splash...`);
           // Define flag indicando gravação em andamento para bloquear salvamentos parciais fast path
           if (typeof window !== 'undefined') {
             ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = true;
           }
+          // ETAPA 2 (FLUXO_ACESSO_INICIAL): quando o perfil define UMA filial
+          // (ex.: auditor de campo), o Boot Loader baixa SÓ essa filial em vez
+          // do contrato inteiro — menos tráfego e dados sob demanda.
+          const bootFilial = resolveUnitFilter(user?.filial);
+          if (bootFilial) {
+            logger.info(`>>> [Boot Loader] Filial definida no perfil (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2).`);
+          }
           const cloudData = await fetchFullInventory(
             user?.tenantid, 
-            undefined, 
+            bootFilial, 
             undefined, 
             async (loadedConfig) => {
               // Mova a chamada de persistência de configuração para ser executada uma única vez, de forma atômica, junto ao método onComplete() no final de toda a paginação de registros
@@ -3105,6 +3145,9 @@ useEffect(() => {
             } catch (auditErr) {
               logger.warn('[Boot Loader] Falha ao registrar pull no audit_logs:', auditErr);
             }
+            // ETAPA 1 (FLUXO_ACESSO_INICIAL): registra que o pull completo deste
+            // contrato+filial já foi realizado — o sync do auto-login não vai repetir.
+            markPullCompleted(user?.tenantid, resolveUnitFilter(user?.filial));
             const newState: InventoryState = {
               ...inventoryRef.current,
               ...cloudData.config,
@@ -3319,6 +3362,12 @@ useEffect(() => {
     return map;
   }, [inventory.assets]);
 
+  // Ref para o handler de contexto (Etapa 4 — "lembrar escolha"): o dispatcher
+  // pós-login fica declarado ANTES do useCallback que aplica a escolha; a ref
+  // sincronizada evita o erro de uso antes da declaração (TDZ) e mantém o
+  // dispatcher sempre com a identidade mais recente do handler.
+  const applyWorkContextRef = useRef<((ctx: WorkContext, module: AppModule) => Promise<void>) | null>(null);
+
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {
     if (!isUserAuthenticated || !user) return;
@@ -3334,9 +3383,30 @@ useEffect(() => {
       // ANTES de qualquer roteamento — a carga de dados só ocorre para o
       // contrato selecionado (isolamento SRE por contrato).
       const workContexts = buildWorkContexts(user, users, workContextFiliais);
+
+      // ETAPA 4 (FLUXO_ACESSO_INICIAL): "lembrar escolha" — se o usuário já
+      // escolheu contrato+filial+módulo numa sessão anterior e a escolha
+      // continua autorizada (valida contra a lista atual de contextos e o
+      // papel), pula o seletor e vai direto para o módulo daquela filial.
+      // A troca fica disponível pelo botão "Trocar" no hub (MainMenu).
+      const lastCtx = readLastWorkContext();
+      if (workContexts.length > 0 && isValidLastContext(lastCtx, workContexts, user)) {
+        logger.info(`>>> [SRE_NAV] Etapa 4: última escolha válida (${String(lastCtx?.tenantid)}/${String(lastCtx?.filial || 'TODAS')} · ${String(lastCtx?.module)}). Pulando seletor de contexto.`);
+        if (applyWorkContextRef.current) {
+          await applyWorkContextRef.current(
+            { tenantid: String(lastCtx?.tenantid), filial: String(lastCtx?.filial || '') },
+            lastCtx?.module as AppModule
+          );
+        } else {
+          // Sem handler pronto (borda rara) → mantém o seletor como fallback seguro.
+          await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+        }
+        return;
+      }
+
       if (workContexts.length > 1) {
-        logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contratos. Exigindo seleção de contrato/filial antes do roteamento.`);
-        await pushScreen(AppScreen.TENANT_WORK_SELECTION);
+        logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contratos. Exigindo seleção de contrato/filial/módulo (Etapa 3).`);
+        await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
         return;
       }
       
@@ -3361,10 +3431,12 @@ useEffect(() => {
         const pathToScreen: Record<string, AppScreen> = {
           '/load-database': AppScreen.DATABASE_MANAGER,
           '/dashboard-demo': AppScreen.DASHBOARD,
-          '/saas/painel-global': AppScreen.MODULE_SELECTION,
-          '/admin/painel-controle': AppScreen.MODULE_SELECTION,
+          // Etapa 3: base preenchida → tela única (contrato + filial + módulo)
+          // em vez do passeio Módulos → Unidade Operacional.
+          '/saas/painel-global': AppScreen.WORK_CONTEXT_SELECTION,
+          '/admin/painel-controle': AppScreen.WORK_CONTEXT_SELECTION,
           '/auditor/aguardando-carga': AppScreen.MODULE_SELECTION,
-          '/auditor/selecionar-filial': AppScreen.UNIT_SELECTION,
+          '/auditor/selecionar-filial': AppScreen.WORK_CONTEXT_SELECTION,
         };
         const targetScreen = pathToScreen[path] || AppScreen.MODULE_SELECTION;
         await pushScreen(targetScreen);
@@ -3745,9 +3817,17 @@ useEffect(() => {
 
 
 
-  // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico estiver vazio pós-inicialização
+  // Blindagem de Base Vazia: Redireciona para Carga Inicial se o banco físico
+  // estiver vazio APÓS a inicialização terminar. Correção do roteamento do boot
+  // (2026-08-14): o check não pode rodar no meio do load — com isDataLoaded=false
+  // a base aparece vazia (count 0) enquanto o pull do contrato está em andamento,
+  // e o redirect forçado para a Unidade Operacional sequestrava o hub da filial
+  // (auto-aplicar da Etapa 4) ou o seletor de contexto, mesmo para o dono.
   useEffect(() => {
     if (!dbInitialized || !user) return;
+    // Só avalia a base vazia depois que o load/sync do boot terminou
+    // (isDataLoaded=true é setado no fim do carregamento).
+    if (!isDataLoaded) return;
 
     const checkDatabaseEmptiness = async () => {
       try {
@@ -3767,7 +3847,11 @@ useEffect(() => {
             AppScreen.CAMPAIGN_MANAGEMENT,
             AppScreen.MODULE_SELECTION,
             AppScreen.ASSET_CONTROL_HOME,
-            AppScreen.TENANT_WORK_SELECTION
+            AppScreen.TENANT_WORK_SELECTION,
+            // Telas do fluxo pós-login (Etapa 3/4): base vazia aqui é resolvida
+            // pelo próprio fluxo (seletor/sync/carga), nunca por redirect forçado.
+            AppScreen.MAIN_MENU,
+            AppScreen.WORK_CONTEXT_SELECTION
           ];
           
           if (!exemptScreens.includes(screen)) {
@@ -3781,7 +3865,7 @@ useEffect(() => {
     };
     
     checkDatabaseEmptiness();
-  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, sqliteStatus, pushScreen]);
+  }, [dbInitialized, user, screen, databaseMode, inventory.assets.length, sqliteStatus, pushScreen, isDataLoaded]);
 
   // 🎯 SELEÇÃO DE CONTRATO DE TRABALHO (pós-login, multi-contrato)
   // O usuário escolhe o contrato (tenantid) e a filial com que vai operar;
@@ -3830,6 +3914,75 @@ useEffect(() => {
     });
     await pushScreen(target);
   }, [user, databaseMode, isInternalMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
+
+  // 🎯 TELA ÚNICA PÓS-LOGIN (Etapa 3 do FLUXO_ACESSO_INICIAL):
+  // contrato (tenantid) + filial + módulo num único passo. A escolha persiste
+  // o contexto, sincroniza SÓ a filial escolhida e roteia direto para o hub do
+  // módulo — substitui o passeio Módulos → Unidade Operacional do fluxo antigo.
+  const handleWorkContextModuleSelect = useCallback(async (ctx: WorkContext, module: AppModule) => {
+    const prevTenant = String(user?.tenantid || '').trim().toUpperCase();
+    const newTenant = normalizeWorkTenant(ctx.tenantid);
+    const newFilial = normalizeWorkFilial(ctx.filial);
+    const changedTenant = !!prevTenant && prevTenant !== newTenant;
+
+    logger.info(`>>> [SRE_NAV] Contexto escolhido: ${newTenant}${newFilial ? ' / ' + newFilial : ''} módulo=${module}`);
+
+    // SRE ISOLAMENTO: troca de contrato → zera o inventário em memória para
+    // jamais exibir dados de outro contrato (o sync seguinte repopula apenas
+    // com os dados do contrato/filial escolhidos).
+    if (changedTenant) {
+      setInventory(prev => ({ ...prev, assets: [], companies: [], status: DatabaseStatus.EMPTY }));
+    }
+
+    // Persiste o contexto nas chaves canônicas (sessão + local)
+    persistWorkContext(ctx);
+    // Etapa 4 (FLUXO_ACESSO_INICIAL): lembra a escolha para pular o seletor
+    // na próxima sessão (reentrada offline instantânea).
+    persistLastWorkContext(ctx, module);
+    setSelectedUnit(newFilial || null);
+
+    const updatedUser: User = {
+      ...(user as User),
+      tenantid: newTenant,
+      filial: newFilial,
+      units: newFilial ? [newFilial] : []
+    };
+    setUser(updatedUser);
+    sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
+
+    // Sincroniza APENAS a filial escolhida (Etapa 2/3) — dados sob demanda.
+    // Etapa 1/4: se o Boot Loader já baixou este [tenant+unidade] nesta sessão
+    // (pull do contrato cobre as filiais) E a base local tem dados, pula o
+    // pull — reentrada offline instantânea; a troca de contrato zera o
+    // inventário acima, então o sync volta a ocorrer.
+    const unitFilter = resolveUnitFilter(newFilial);
+    const bootPulled = shouldSkipPull(
+      wasPullCompleted(newTenant, unitFilter),
+      (inventoryRef.current?.assets?.length ?? 0) > 0
+    );
+    if (!bootPulled && databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
+      syncFromCloud(newTenant, DatabaseMode.SUPABASE, unitFilter).catch(err => {
+        logger.warn('[Sync] Sincronização da filial escolhida falhou:', err);
+      });
+    }
+
+    setCurrentModule(module);
+    localStorage.setItem('app_current_module', module);
+
+    // Roteia direto para o módulo escolhido.
+    if (module === AppModule.ASSET_CONTROL) {
+      await pushScreen(AppScreen.ASSET_CONTROL_HOME);
+    } else if (newFilial) {
+      await pushScreen(AppScreen.MAIN_MENU); // hub operacional da filial
+    } else {
+      await pushScreen(AppScreen.UNIT_SELECTION); // sem filial definida → escolher depois
+    }
+  }, [user, databaseMode, isInternalMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
+
+  // Sincroniza a ref usada pelo dispatcher pós-login (Etapa 4).
+  useEffect(() => {
+    applyWorkContextRef.current = handleWorkContextModuleSelect;
+  }, [handleWorkContextModuleSelect]);
 
   // Contextos de trabalho do usuário logado (fonte do seletor)
   const workContexts = useMemo(() => buildWorkContexts(user, users, workContextFiliais), [user, users, workContextFiliais]);
@@ -3960,7 +4113,20 @@ useEffect(() => {
           // evitando puxar dados de um contrato que o usuário não escolheu.
           const multiContextProfile = buildWorkContexts(loggedUser, undefined, workContextFiliais).length > 1;
           if (!multiContextProfile) {
-            syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE);
+            // ETAPA 1 (FLUXO_ACESSO_INICIAL): se o Boot Loader já baixou o
+            // contrato inteiro nesta sessão, o auto-login não repete o pull.
+            // ETAPA 2 (FLUXO_ACESSO_INICIAL): o auto-login respeita o filtro de
+            // filial do perfil (auditor de filial única baixa só a filial dela).
+            const unitFilter = resolveUnitFilter(resolvedUnitId);
+            const bootPulled = shouldSkipPull(
+              wasPullCompleted(loggedUser.tenantid, unitFilter),
+              (inventoryRef.current?.assets?.length ?? 0) > 0
+            );
+            if (bootPulled) {
+              logger.info(`>>> [Sync] Boot Loader já baixou ${String(loggedUser.tenantid || '')}/${String(unitFilter || 'GERAL')} nesta sessão. Pulando pull duplicado do auto-login (Etapa 1).`);
+            } else {
+              syncFromCloud(loggedUser.tenantid, DatabaseMode.SUPABASE, unitFilter);
+            }
           } else {
             logger.info(`>>> [SRE_NAV] Perfil multi-contrato detectado. Sync adiado até a escolha do contrato no seletor.`);
           }
@@ -5312,7 +5478,9 @@ useEffect(() => {
     });
 
     try {
-      const cloudData = await fetchFullInventory();
+      // Ação EXPLÍCITA do dono (backup completo da nuvem): permitida sem filtro.
+      // O boot/sync automático NUNCA usa allowUnscoped (muro de isolamento SRE).
+      const cloudData = await fetchFullInventory(undefined, undefined, undefined, undefined, { allowUnscoped: true });
       if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
         const backupData = {
           assets: cloudData.assets,
@@ -6257,10 +6425,22 @@ useEffect(() => {
               sessionStorage.setItem('tenantid', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
               if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
-                logger.info('[App] Login detectado. Iniciando sincronizacao silenciosa...');
-                syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, defaultUnit).catch(err => {
-                  logger.warn('[Sync] Sincronizacao em background falhou:', err);
-                });
+                // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
+                // Boot Loader para o mesmo contrato+filial, e o pull respeita o
+                // filtro de filial do perfil (dados sob demanda da filial).
+                const unitFilter = resolveUnitFilter(defaultUnit);
+                const bootPulled = shouldSkipPull(
+                  wasPullCompleted(defaultTenant, unitFilter),
+                  (inventoryRef.current?.assets?.length ?? 0) > 0
+                );
+                if (bootPulled) {
+                  logger.info(`>>> [Sync] Pull já realizado nesta sessão para ${String(defaultTenant || '')}/${String(unitFilter || 'GERAL')}. Pulando sincronização silenciosa do login (Etapa 1).`);
+                } else {
+                  logger.info('[App] Login detectado. Iniciando sincronizacao silenciosa...');
+                  syncFromCloud(defaultTenant, DatabaseMode.SUPABASE, unitFilter).catch(err => {
+                    logger.warn('[Sync] Sincronizacao em background falhou:', err);
+                  });
+                }
               } else if (multiContextLogin) {
                 logger.info(">>> [SRE_NAV] Login multi-contrato: sync adiado até a escolha do contrato/filial no seletor.");
               }
@@ -6664,6 +6844,29 @@ useEffect(() => {
                     user_email: user.email || 'unknown',
                     action: 'LOGOUT',
                     details: 'Usuário saiu do sistema (seleção de contrato).',
+                    tenantid: user.tenantid || readSessionTenantId() || ''
+                  }).catch(() => {});
+                  await supabase.auth.signOut();
+                }
+                setUser(null);
+                setCurrentModule(null);
+                localStorage.removeItem('app_current_module');
+                clearTenantContext();
+                pushScreen(AppScreen.LOGIN);
+              }}
+            />
+          )}
+          {screen === AppScreen.WORK_CONTEXT_SELECTION && user && (
+            <WorkContextSelector
+              user={user}
+              contexts={workContexts}
+              onSelect={handleWorkContextModuleSelect}
+              onLogout={async () => {
+                if (supabase) {
+                  await logAuditEvent({
+                    user_email: user.email || 'unknown',
+                    action: 'LOGOUT',
+                    details: 'Usuário saiu do sistema (seleção de contexto de trabalho).',
                     tenantid: user.tenantid || readSessionTenantId() || ''
                   }).catch(() => {});
                   await supabase.auth.signOut();

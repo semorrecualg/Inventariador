@@ -10,6 +10,7 @@ import { logger } from '../utils/logger';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isAdminEmail } from '../utils/authUtils';
+import { pullDedupKey } from '../utils/syncDedup';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -1603,11 +1604,30 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
   }
 };
 
+export interface FetchInventoryOptions {
+  /**
+   * Permite a busca SEM filtro de tenantid (todos os contratos). Uso EXCLUSIVO
+   * de ações explícitas do dono (ex.: download de backup completo da nuvem).
+   * Nunca habilitar no boot/sync automático — vazaria dados de outros contratos.
+   */
+  allowUnscoped?: boolean;
+}
+
+/**
+ * Pulls em andamento por chave [tenantid|unidade] — deduplicação de request
+ * (Etapa 1 do FLUXO_ACESSO_INICIAL). Quando o Boot Loader, o sync do auto-login
+ * e o boot effect disparam fetchFullInventory ao mesmo tempo para o MESMO
+ * contrato, TODOS compartilham uma única paginação de rede em vez de baixar
+ * o contrato inteiro 2-3× em paralelo.
+ */
+const pendingPulls = new Map<string, Promise<{ assets: Asset[]; config: Partial<InventoryState> } | null>>();
+
 export const fetchFullInventory = async (
   tenantid?: string | string[], 
   unitid?: string,
   onProgress?: (processed: number, total: number) => void,
-  onComplete?: (config: Partial<InventoryState>) => void
+  onComplete?: (config: Partial<InventoryState>) => void,
+  options?: FetchInventoryOptions
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase || !navigator.onLine) return null;
 
@@ -1629,6 +1649,46 @@ export const fetchFullInventory = async (
       logger.warn(">>> [Supabase Param err] Falha ao resolver tenantid via Auth Check:", authErr);
     }
   }
+
+  // SRE ISOLAMENTO: nunca baixar sem contrato. Se o tenantid não foi resolvido
+  // (nem explícito nem via perfil), aborta — JAMAIS busca todos os contratos e
+  // mistura os mundos dos clientes (ex.: CICOPAL + CLIENTETESTE na mesma base).
+  if (!resolvedTenantid && !options?.allowUnscoped) {
+    logger.error('>>> [SRE ISOLAMENTO] fetchFullInventory sem tenantid resolvido. Abortando para não vazar dados de outros contratos.');
+    return null;
+  }
+
+  // Deduplicação de request: se já existe um pull EM ANDAMENTO para o mesmo
+  // [tenantid|unidade], compartilha a mesma promise — uma única paginação.
+  const firstTenant = Array.isArray(resolvedTenantid) ? resolvedTenantid[0] : resolvedTenantid;
+  const pullKey = `${pullDedupKey(firstTenant, unitid)}${options?.allowUnscoped ? '|U' : '|S'}`;
+  const inFlight = pendingPulls.get(pullKey);
+  if (inFlight) {
+    logger.info(`>>> [Sync] Pull em andamento para ${pullKey}. Deduplicando chamadas concorrentes (Etapa 1).`);
+    return inFlight;
+  }
+
+  const promise = fetchFullInventoryImpl(resolvedTenantid, unitid, onProgress, onComplete);
+  pendingPulls.set(pullKey, promise);
+  void promise
+    .finally(() => {
+      if (pendingPulls.get(pullKey) === promise) pendingPulls.delete(pullKey);
+    })
+    .catch(() => { /* rejeição já tratada pelo chamador original */ });
+  return promise;
+};
+
+/**
+ * Implementação real da paginação. Nunca chamar diretamente fora do wrapper
+ * fetchFullInventory (que resolve o tenantid e deduplica requisições).
+ */
+const fetchFullInventoryImpl = async (
+  resolvedTenantid: string | string[] | undefined,
+  unitid?: string,
+  onProgress?: (processed: number, total: number) => void,
+  onComplete?: (config: Partial<InventoryState>) => void
+): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+  if (!supabase) return null;
 
   logger.info(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantid)}, unitid: ${unitid || 'GERAL'}`);
 

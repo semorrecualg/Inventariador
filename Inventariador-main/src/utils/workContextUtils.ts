@@ -14,13 +14,17 @@
 //      permitem declarar filiais de OUTROS contratos no mesmo perfil.
 //   3. `tenantid` multi-valor por vírgula — "CICOPAL,CLIENTETESTE".
 //   4. `extraUsers` (registros locais) com o MESMO e-mail e outro tenant —
-//      cobre o caso offline-first de múltiplos registros por login.
+//      cobre o caso offline-first de múltiplos registros por login. Quando o
+//      contrato tem filiais REAIS na base local, elas definem o escopo do
+//      seletor: filiais obsoletas do registro (ex.: 'MATRIZ' de sessão antiga)
+//      são descartadas, preservando a autorização explícita (filial na base).
 //   5. `availableFiliais` (filiais reais encontradas na base local por tenant,
 //      ex.: CICOPAL com 6 filiais) — quando o perfil NÃO declara units/filial,
 //      as filiais da base do contrato viram os contextos do seletor.
 // ============================================================================
 
 import type { User } from '../types';
+import { AppModule } from '../types';
 
 export interface WorkContext {
   tenantid: string;
@@ -127,9 +131,25 @@ export function buildWorkContexts(
         ...(u.filial ? [u.filial] : []),
         ...(u.unitid ? [u.unitid] : []),
         ...(u._unitid ? [u._unitid] : []),
-      ].map((x) => String(x || '').trim()).filter(Boolean);
-      if (us.length) us.forEach((f) => add(t, f));
-      else add(t, '');
+      ].map(normalizeWorkFilial).filter((f) => f && !isInvalidFilial(f));
+
+      // Sanitização SRE: quando o contrato tem filiais REAIS na base local
+      // (availableFiliais), elas definem o escopo do seletor — um registro
+      // local com filial obsoleta (ex.: 'MATRIZ' de sessão antiga/demo) não
+      // pode sequestrar a lista. A autorização explícita (filial declarada
+      // que EXISTE na base) continua valendo; só o lixo é descartado.
+      const realFiliais = ((availableFiliais && availableFiliais[t]) || [])
+        .map(normalizeWorkFilial)
+        .filter((f) => f && f !== t && !isInvalidFilial(f));
+
+      if (realFiliais.length) {
+        const real = new Set(realFiliais);
+        const kept = us.filter((f) => real.has(f));
+        (kept.length ? kept : realFiliais).forEach((f) => add(t, f));
+      } else {
+        if (us.length) us.forEach((f) => add(t, f));
+        else add(t, '');
+      }
     }
   }
 
@@ -151,6 +171,104 @@ export function buildWorkContexts(
   }
 
   return Array.from(out.values());
+}
+
+// ============================================================================
+// "Lembrar escolha" (Etapa 4 do FLUXO_ACESSO_INICIAL): persiste a última
+// combinação contrato + filial + módulo escolhida pelo usuário para que a
+// reentrada (mesmo offline) pule o seletor de contexto e vá direto ao módulo
+// da filial — com o botão "Trocar filial/contrato" disponível no hub.
+// ============================================================================
+
+const LAST_CONTEXT_KEY = 'app_last_work_context';
+
+export interface LastWorkContext {
+  tenantid: string;
+  filial: string;
+  module: AppModule;
+  savedAt: string;
+}
+
+/** Persiste a última escolha de contexto + módulo (localStorage). */
+export function persistLastWorkContext(ctx: WorkContext, module: AppModule): void {
+  try {
+    localStorage.setItem(LAST_CONTEXT_KEY, JSON.stringify({
+      tenantid: normalizeWorkTenant(ctx.tenantid),
+      filial: normalizeWorkFilial(ctx.filial),
+      module,
+      savedAt: new Date().toISOString()
+    } satisfies LastWorkContext));
+  } catch (err) {
+    console.warn('[workContext] Falha ao persistir última escolha:', err);
+  }
+}
+
+/** Lê a última escolha persistida (null quando nunca houve ou está corrompida). */
+export function readLastWorkContext(): LastWorkContext | null {
+  try {
+    const raw = localStorage.getItem(LAST_CONTEXT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<LastWorkContext>;
+    if (!parsed || !parsed.tenantid || !parsed.module) return null;
+    return {
+      tenantid: normalizeWorkTenant(parsed.tenantid),
+      filial: normalizeWorkFilial(parsed.filial || ''),
+      module: parsed.module,
+      savedAt: parsed.savedAt || ''
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Limpa a última escolha (ex.: ao trocar de contrato pelo seletor). */
+export function clearLastWorkContext(): void {
+  try {
+    localStorage.removeItem(LAST_CONTEXT_KEY);
+  } catch {
+    // noop
+  }
+}
+
+/**
+ * Valida a última escolha contra a autorização atual do usuário.
+ *
+ * Duas regras:
+ * 1. Dono/admin SEM unidades declaradas (filial TODAS/vazia): a autorização é
+ *    o CONTRATO INTEIRO — a última escolha vale para qualquer filial do próprio
+ *    tenantid, independentemente de a base local já ter carregado (Etapa 4:
+ *    reentrada instantânea mesmo no primeiro run do roteamento pós-login).
+ * 2. Demais usuários (auditores, admins com units): a última escolha precisa
+ *    continuar na lista de contextos autorizados (a autorização pode ter
+ *    mudado entre sessões).
+ *
+ * Em ambos os casos, o módulo precisa ser permitido para o papel.
+ */
+export function isValidLastContext(
+  stored: LastWorkContext | null,
+  contexts: WorkContext[],
+  user?: { role?: string; tenantid?: string; units?: string[]; filial?: string } | null
+): boolean {
+  if (!stored) return false;
+  const roleUpper = String(user?.role || '').toUpperCase();
+  if (roleUpper === 'AUDITOR' || roleUpper === 'AUXILIARY_AUDITOR') {
+    if (stored.module === AppModule.ASSET_CONTROL) return false;
+  }
+
+  // Regra 1 — dono/admin sem unidades declaradas (autorização = contrato todo)
+  const hasDeclaredUnits = Array.isArray(user?.units) && user!.units!.length > 0;
+  const declaredFilial = normalizeWorkFilial(user?.filial || '');
+  const wholeTenantAuth = !hasDeclaredUnits && (!declaredFilial || isInvalidFilial(declaredFilial));
+  if (wholeTenantAuth && user?.tenantid && normalizeWorkTenant(user.tenantid) === normalizeWorkTenant(stored.tenantid)) {
+    return true;
+  }
+
+  // Regra 2 — precisa estar na lista de contextos autorizados
+  if (!contexts || contexts.length === 0) return false;
+  return contexts.some(c =>
+    normalizeWorkTenant(c.tenantid) === normalizeWorkTenant(stored.tenantid) &&
+    normalizeWorkFilial(c.filial) === normalizeWorkFilial(stored.filial)
+  );
 }
 
 /** Persiste o contexto escolhido nas chaves canônicas de sessão/local. */

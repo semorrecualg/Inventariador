@@ -394,8 +394,12 @@ const Login: React.FC<LoginProps> = ({
         }
       }
 
-      // SOBERANIA LOCAL: Se a licença ativa não for PLUS, o login só é permitido se bater com as credenciais locais acima.
-      if (databaseMode !== DatabaseMode.SUPABASE_PLUS) {
+      // SOBERANIA LOCAL: apenas os modos INTERNAL bloqueiam autenticação via nuvem.
+      // SUPABASE e SUPABASE_PLUS são ambos modos de nuvem — o processSession persiste
+      // 'SUPABASE' após autenticar no Supabase (ver App.tsx), então exigir PLUS aqui
+      // impedia o login manual na segunda sessão (falso "Supabase desligado").
+      const isCloudMode = databaseMode === DatabaseMode.SUPABASE || databaseMode === DatabaseMode.SUPABASE_PLUS;
+      if (!isCloudMode) {
         logger.info('[Login] [CHECK 2] Licença SOLO/Local ativa (Soberania Offline). Bloqueando tentativa de autenticação direta no Supabase Cloud.');
         setIsLoading(false);
         setError("Usuário ou senha inválidos no banco de dados local. A licença ativa é SOLO (Offline-First).");
@@ -403,8 +407,8 @@ const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      // Passo de Segurança: se o databaseMode for SUPABASE_PLUS e as credenciais locais acima não serviram, verificamos se o cliente supabase existe
-      if (databaseMode === DatabaseMode.SUPABASE_PLUS && !supabase) {
+      // Passo de Segurança: em modo de nuvem, verificamos se o cliente supabase existe
+      if (isCloudMode && !supabase) {
         setIsLoading(false);
         setError("O Supabase não está configurado. Verifique as variáveis de ambiente (URL e Anon Key) nas configurações do projeto.");
         clearTimeout(loginTimeout);

@@ -398,6 +398,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
           )}
           <button 
+            onClick={() => onNavigate(AppScreen.WORK_CONTEXT_SELECTION)}
+            className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all hover:bg-slate-100"
+            title="Trocar filial / contrato de trabalho"
+          >
+            <RefreshCw size={20} />
+          </button>
+          <button 
             onClick={() => onOpenHelp?.()}
             className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"
           >

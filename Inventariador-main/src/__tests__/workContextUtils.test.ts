@@ -10,9 +10,14 @@ import {
   buildWorkContexts,
   groupContextsByTenant,
   persistWorkContext,
+  persistLastWorkContext,
+  readLastWorkContext,
+  clearLastWorkContext,
+  isValidLastContext,
   splitTenantList,
   type WorkContext
 } from '../utils/workContextUtils';
+import { AppModule } from '../types';
 
 function user(overrides: Partial<User>): User {
   return {
@@ -84,6 +89,37 @@ describe('buildWorkContexts — lista de contextos autorizados', () => {
     const ctxs = buildWorkContexts(user({ tenantid: 'CICOPAL', units: ['010101 CICOPAL GO'] }), extra);
     expect(ctxs).toHaveLength(2);
     expect(ctxs).toContainEqual({ tenantid: 'CLIENTETESTE', filial: '020202 CLIENTETESTE GO' });
+  });
+
+  it('registro local com filial obsoleta (MATRIZ) + base com filiais reais → base vence', () => {
+    const base: Record<string, string[]> = {
+      CICOPAL: ['010101 CICOPAL GO', '010201 SNACKS PA', '010401 CARPER BA']
+    };
+    const extra: User[] = [user({
+      username: 'user',
+      email: 'user@cliente.com',
+      tenantid: 'CICOPAL',
+      filial: 'MATRIZ',
+      units: []
+    })];
+    const ctxs = buildWorkContexts(user({ tenantid: 'CICOPAL', filial: 'TODAS', units: [] }), extra, base);
+    expect(ctxs.map(c => c.filial).sort()).toEqual(['010101 CICOPAL GO', '010201 SNACKS PA', '010401 CARPER BA']);
+    expect(ctxs.map(c => c.filial)).not.toContain('MATRIZ');
+  });
+
+  it('registro local com filial REAL existente na base → autorização explícita mantida', () => {
+    const base: Record<string, string[]> = {
+      CICOPAL: ['010101 CICOPAL GO', '010201 SNACKS PA', '010401 CARPER BA']
+    };
+    const extra: User[] = [user({
+      username: 'user',
+      email: 'user@cliente.com',
+      tenantid: 'CICOPAL',
+      filial: '010201 SNACKS PA',
+      units: ['010201 SNACKS PA']
+    })];
+    const ctxs = buildWorkContexts(user({ tenantid: 'CICOPAL', filial: 'TODAS', units: [] }), extra, base);
+    expect(ctxs).toEqual([{ tenantid: 'CICOPAL', filial: '010201 SNACKS PA' }]);
   });
 
   it('e-mails diferentes NÃO mesclam registros locais', () => {
@@ -174,6 +210,71 @@ describe('splitTenantList — tenantid multi-valor', () => {
 
   it('descarta vazios e sentinelas', () => {
     expect(splitTenantList('CICOPAL,,NULL,UNDEFINED')).toEqual(['CICOPAL']);
+  });
+});
+
+describe('lembrar escolha (Etapa 4 FLUXO_ACESSO_INICIAL)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('persiste e lê a última escolha normalizada (tenant/filial uppercase)', () => {
+    persistLastWorkContext({ tenantid: 'cicopal', filial: ' 010201 snacks pa ' }, AppModule.INVENTORY);
+    const stored = readLastWorkContext();
+    expect(stored?.tenantid).toBe('CICOPAL');
+    expect(stored?.filial).toBe('010201 SNACKS PA');
+    expect(stored?.module).toBe(AppModule.INVENTORY);
+    expect(stored?.savedAt).toBeTruthy();
+  });
+
+  it('readLastWorkContext retorna null sem escolha salva ou com dados corrompidos', () => {
+    expect(readLastWorkContext()).toBeNull();
+    localStorage.setItem('app_last_work_context', 'not-json{');
+    expect(readLastWorkContext()).toBeNull();
+    localStorage.setItem('app_last_work_context', JSON.stringify({ filial: 'X' })); // sem tenantid/module
+    expect(readLastWorkContext()).toBeNull();
+  });
+
+  it('clearLastWorkContext remove a escolha', () => {
+    persistLastWorkContext({ tenantid: 'CICOPAL', filial: '010201 SNACKS PA' }, AppModule.INVENTORY);
+    clearLastWorkContext();
+    expect(readLastWorkContext()).toBeNull();
+  });
+
+  it('isValidLastContext: contexto na lista autorizada → true; fora → false', () => {
+    const contexts: WorkContext[] = [
+      { tenantid: 'CICOPAL', filial: '010201 SNACKS PA' },
+      { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' }
+    ];
+    const stored = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA', module: AppModule.INVENTORY, savedAt: '' };
+    const auditor = { role: 'AUDITOR', tenantid: 'CICOPAL', units: ['010201 SNACKS PA'], filial: '010201 SNACKS PA' };
+    expect(isValidLastContext(stored, contexts, auditor)).toBe(true);
+    expect(isValidLastContext({ ...stored, filial: '010999 OUTRA FILIAL' }, contexts, auditor)).toBe(false);
+    expect(isValidLastContext(null, contexts, auditor)).toBe(false);
+    expect(isValidLastContext(stored, [], auditor)).toBe(false);
+  });
+
+  it('isValidLastContext: dono/admin sem units é autorizado para QUALQUER filial do próprio contrato (Etapa 4)', () => {
+    const stored = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA', module: AppModule.INVENTORY, savedAt: '' };
+    const owner = { role: 'ADMIN', tenantid: 'CICOPAL', units: [], filial: 'TODAS' };
+    // Base ainda não carregou (contexts só com o placeholder de contrato) → mesmo assim válido.
+    expect(isValidLastContext(stored, [{ tenantid: 'CICOPAL', filial: '' }], owner)).toBe(true);
+    // Contrato diferente do do usuário → inválido (muro multi-tenant).
+    expect(isValidLastContext(stored, [], { ...owner, tenantid: 'CLIENTETESTE' })).toBe(false);
+    // Admin COM units declaradas volta para a regra da lista autorizada.
+    const scopedAdmin = { role: 'ADMIN', tenantid: 'CICOPAL', units: ['010101 CICOPAL GO'], filial: '010101 CICOPAL GO' };
+    expect(isValidLastContext(stored, [{ tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' }], scopedAdmin)).toBe(false);
+    expect(isValidLastContext(stored, [{ tenantid: 'CICOPAL', filial: '010201 SNACKS PA' }], scopedAdmin)).toBe(true);
+  });
+
+  it('isValidLastContext bloqueia CONTROLE DE ATIVO para auditor', () => {
+    const contexts: WorkContext[] = [{ tenantid: 'CICOPAL', filial: '010201 SNACKS PA' }];
+    const stored = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA', module: AppModule.ASSET_CONTROL, savedAt: '' };
+    const auditor = { role: 'AUDITOR', tenantid: 'CICOPAL', units: ['010201 SNACKS PA'], filial: '010201 SNACKS PA' };
+    expect(isValidLastContext(stored, contexts, auditor)).toBe(false);
+    expect(isValidLastContext(stored, contexts, { ...auditor, role: 'AUXILIARY_AUDITOR' })).toBe(false);
+    const owner = { role: 'ADMIN', tenantid: 'CICOPAL', units: [], filial: 'TODAS' };
+    expect(isValidLastContext(stored, contexts, owner)).toBe(true);
   });
 });
 

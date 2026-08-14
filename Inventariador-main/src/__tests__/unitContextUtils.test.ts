@@ -3,8 +3,29 @@ import {
   unitContextKey,
   splitUnitContextKey,
   matchTenantUnit,
-  findHomonymUnits
+  findHomonymUnits,
+  resolveUnitFilter
 } from '../utils/unitContextUtils';
+
+describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
+  it('filial real do perfil → filtro em UPPER/trim (baixa só a filial)', () => {
+    expect(resolveUnitFilter('010201 snacks pa')).toBe('010201 SNACKS PA');
+  });
+
+  it('sem filial / vazio → undefined (baixa o contrato inteiro)', () => {
+    expect(resolveUnitFilter('')).toBeUndefined();
+    expect(resolveUnitFilter(null)).toBeUndefined();
+    expect(resolveUnitFilter(undefined)).toBeUndefined();
+    expect(resolveUnitFilter('   ')).toBeUndefined();
+  });
+
+  it('sentinelas TODAS/NULL/UNDEFINED → undefined (sem filtro)', () => {
+    expect(resolveUnitFilter('TODAS')).toBeUndefined();
+    expect(resolveUnitFilter('todas')).toBeUndefined();
+    expect(resolveUnitFilter('NULL')).toBeUndefined();
+    expect(resolveUnitFilter('undefined')).toBeUndefined();
+  });
+});
 
 describe('unitContextUtils — muro multi-tenant de Unidades Operacionais', () => {
   it('unitContextKey monta a chave composta [tenantid+filial] em UPPER/trim', () => {

@@ -43,5 +43,6 @@ export const screenToPath: Record<AppScreen, string> = {
   [AppScreen.LICENSE_PROVISIONING]: '/licenses',
   [AppScreen.TENANT_WORK_SELECTION]: '/selecionar-contrato',
   [AppScreen.LOAD_HISTORY]: '/load-history',
+  [AppScreen.WORK_CONTEXT_SELECTION]: '/contexto',
 };
 

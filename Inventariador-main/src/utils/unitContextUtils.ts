@@ -42,6 +42,22 @@ export function matchTenantUnit(
 }
 
 /**
+ * Resolve o filtro de unidade (filial) para os pulls do fluxo inicial
+ * (Etapa 2 do FLUXO_ACESSO_INICIAL).
+ *
+ * Retorna a filial em UPPER/trim quando o perfil define UMA filial real
+ * (ex.: auditor de campo com filial no perfil) → o fetch baixa SÓ essa filial.
+ * Retorna undefined quando não há filial definida (admin/multi-filial) →
+ * o fetch baixa o contrato inteiro. Sentinelas TODAS/NULL/UNDEFINED são
+ * descartadas (significam "sem filtro").
+ */
+export function resolveUnitFilter(filial?: string | null): string | undefined {
+  const f = String(filial || '').trim().toUpperCase();
+  if (!f || f === 'TODAS' || f === 'NULL' || f === 'UNDEFINED') return undefined;
+  return f;
+}
+
+/**
  * Retorna o conjunto de nomes de filial que aparecem em MAIS DE UM tenant
  * (homônimos entre contratos) — esses devem exibir o badge do contrato na UI.
  */
