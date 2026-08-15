@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
+import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles, Building2, CheckCircle2, DownloadCloud, CloudOff } from 'lucide-react';
 import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, downloadBaseToLocal } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, downloadBaseToLocal, fetchTenantFiliais } from '../services/supabaseService';
+import type { TenantFilial } from '../services/supabaseService';
 import { db } from '../services/sqliteService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
@@ -47,6 +48,24 @@ const Login: React.FC<LoginProps> = ({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
+
+  // ETAPA 2/2 (FLUXO UNIFICADO): após validar credenciais (nuvem OU cadastro local),
+  // o usuário vê o contrato (tenantid) e escolhe a(s) filial(is) de atuação — com
+  // lazy-loading paginado das filiais do banco — e acompanha a carga seletiva
+  // (downloadBaseToLocal) com progresso antes de iniciar o inventário.
+  const BRANCH_PAGE_SIZE = 20;
+  const [loginStage, setLoginStage] = useState<'credentials' | 'branch'>('credentials');
+  const [pendingCloudUser, setPendingCloudUser] = useState<User | null>(null);
+  const [pendingIsMaster, setPendingIsMaster] = useState(false);
+  // true = usuário validado no cadastro LOCAL (Barreira Local / fallback offline):
+  // a base já está no dispositivo, então a confirmação não baixa nada da nuvem.
+  const [pendingIsLocal, setPendingIsLocal] = useState(false);
+  // Filiais do contrato carregadas do banco (nuvem + local + perfil), com paginação.
+  const [tenantFiliais, setTenantFiliais] = useState<TenantFilial[]>([]);
+  const [visibleFiliais, setVisibleFiliais] = useState<TenantFilial[]>([]);
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [selectedBranches, setSelectedBranches] = useState<Set<string>>(new Set());
+  const [allBranches, setAllBranches] = useState(false); // TODAS as filiais do contrato
 
   // Reset loading state when database mode changes to prevent "stuck" UI
   React.useEffect(() => {
@@ -174,6 +193,214 @@ const Login: React.FC<LoginProps> = ({
         }
       }
     });
+  };
+
+  // =======================================================
+  // ETAPA 2/2 (FLUXO UNIFICADO): contrato + seleção de filial(is) + carga seletiva
+  // =======================================================
+  const persistBranchSelection = (branches: string[], all: boolean) => {
+    // A filial "primária" alimenta as chaves legadas de contexto (unidade de trabalho).
+    const branch = all || branches.length === 0 ? '' : branches[0];
+    if (!branch || branch === 'TODAS') return;
+    try {
+      localStorage.setItem('selectedUnit', branch);
+      sessionStorage.setItem('selectedUnit', branch);
+      localStorage.setItem('app_selected_unit', branch);
+      localStorage.setItem('app_current_unit', branch);
+      localStorage.setItem('filial', branch);
+      sessionStorage.setItem('filial', branch);
+    } catch (storageErr) {
+      logger.warn('[Login] Falha ao persistir filial selecionada:', storageErr);
+    }
+  };
+
+  /**
+   * Pausa o fluxo na ETAPA 2/2 (tela de login): mostra o contrato (tenantid) e a
+   * lista lazy-loading de filiais do banco, permitindo a carga seletiva por
+   * [tenantid + filiais] antes de iniciar o inventário. Sem contrato resolvível
+   * (dono global), segue direto — o contrato é escolhido no pós-login.
+   */
+  const enterBranchStage = (user: User, profileUnits: string[], isMaster: boolean, isLocal: boolean) => {
+    const tenant = String(user.tenantid || '').trim().toUpperCase();
+    if (!tenant) {
+      onLogin(user);
+      return;
+    }
+    setPendingCloudUser(user);
+    setPendingIsMaster(isMaster);
+    setPendingIsLocal(isLocal);
+    setError(null);
+    // Pré-seleção: master → TODAS; auditor com UMA filial autorizada → ela;
+    // múltiplas → a primeira; nenhuma → TODAS (fallback seguro de escopo).
+    const units = (profileUnits || [])
+      .map((u) => String(u || '').trim().toUpperCase())
+      .filter((u) => u && !['DEFAULT', 'NULL', '0', 'UNDEFINED', 'TODAS'].includes(u));
+    if (isMaster || units.length === 0) {
+      setSelectedBranches(new Set());
+      setAllBranches(true);
+    } else {
+      setSelectedBranches(new Set([units[0]]));
+      setAllBranches(false);
+    }
+    setLoginStage('branch');
+    setIsLoading(false);
+    void loadTenantFiliais(tenant, units);
+  };
+
+  // Carrega as filiais do contrato (banco nuvem → fallback local → perfil) e
+  // reinicia a paginação lazy-loading da lista.
+  const loadTenantFiliais = async (tenant: string, profileUnits: string[]) => {
+    setBranchLoading(true);
+    try {
+      const all = await fetchTenantFiliais(tenant, { profileUnits });
+      setTenantFiliais(all);
+      setVisibleFiliais(all.slice(0, BRANCH_PAGE_SIZE));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('[Login] Falha ao carregar filiais do contrato:', errMsg);
+      const fallback = profileUnits.map((u) => ({
+        filial: u.trim().toUpperCase(),
+        tenantid: tenant,
+        source: 'profile' as const,
+      }));
+      setTenantFiliais(fallback);
+      setVisibleFiliais(fallback.slice(0, BRANCH_PAGE_SIZE));
+    } finally {
+      setBranchLoading(false);
+    }
+  };
+
+  // Paginação (Lazy Loading): ao rolar até o fim da lista, carrega a próxima
+  // página de filiais do contrato.
+  const handleBranchScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (branchLoading || visibleFiliais.length >= tenantFiliais.length) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+      setVisibleFiliais((prev) => {
+        const next = tenantFiliais.slice(0, prev.length + BRANCH_PAGE_SIZE);
+        return next.length > prev.length ? next : prev;
+      });
+    }
+  };
+
+  const toggleBranch = (filial: string) => {
+    setSelectedBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(filial)) next.delete(filial);
+      else next.add(filial);
+      return next;
+    });
+    setAllBranches(false);
+  };
+
+  const toggleAllBranches = () => {
+    setAllBranches((prev) => {
+      if (!prev) setSelectedBranches(new Set());
+      return !prev;
+    });
+  };
+
+  const handleConfirmBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingCloudUser || !pendingCloudUser.tenantid) return;
+
+    const tenantId = String(pendingCloudUser.tenantid).trim().toUpperCase();
+    const branchList = allBranches ? [] : Array.from(selectedBranches);
+    const primaryBranch = branchList[0] || '';
+    const userWithBranch: User = {
+      ...pendingCloudUser,
+      filial: primaryBranch || pendingCloudUser.filial,
+      units: branchList.length ? branchList : pendingCloudUser.units
+    };
+
+    persistBranchSelection(branchList, allBranches);
+    sessionStorage.setItem('app_current_user', safeStringify(userWithBranch));
+
+    // Caminho LOCAL (Barreira Local / fallback offline): a base já está no
+    // dispositivo — nenhum download; entra direto com a filial escolhida.
+    if (pendingIsLocal) {
+      logAuditEvent({
+        user_email: userWithBranch.email,
+        action: 'LOGIN',
+        details: `Login local efetuado (etapa 2/2 — filial: ${primaryBranch || 'TODAS'})`,
+        tenantid: tenantId
+      });
+      onLogin(userWithBranch);
+      return;
+    }
+
+    setDownloadingBase(true);
+    setDownloadProgress(0);
+    setError(null);
+
+    try {
+      // REGRA DE OURO (escopo multi-tenant): só baixa as filiais escolhidas que
+      // ainda não existirem localmente (par [tenantid+filial]). Contagem global
+      // vazaria o isolamento entre contratos em dispositivo multi-contrato.
+      const missing: string[] = [];
+      if (branchList.length > 0) {
+        for (const b of branchList) {
+          const count = await db.local_assets.where('[tenantid+filial]').equals([tenantId, b]).count();
+          if (count === 0) missing.push(b);
+        }
+      } else {
+        // TODAS selecionadas: se o contrato ainda não tem NADA local, baixa a
+        // base completa; caso contrário, nada a fazer (já está no dispositivo).
+        const localCount = await db.local_assets
+          .filter((a) => String(a.tenantid || '').trim().toUpperCase() === tenantId)
+          .count();
+        if (localCount === 0) {
+          logger.info(`[Login] [ETAPA 2/2] Baixando base completa do contrato ${tenantId} (TODAS as filiais)...`);
+          await downloadBaseToLocal(tenantId, undefined, (processed, total) => {
+            setDownloadProgress(total > 0 ? Math.round((processed / total) * 100) : 100);
+          });
+        } else {
+          logger.info(`[Login] Base local já presente (${localCount} registros do contrato ${tenantId}) — pulando download.`);
+        }
+      }
+      if (branchList.length > 0 && missing.length > 0) {
+        logger.info(`[Login] [ETAPA 2/2] Baixando base do contrato ${tenantId} (filiais: ${missing.join(' | ')})...`);
+        await downloadBaseToLocal(tenantId, missing, (processed, total) => {
+          setDownloadProgress(total > 0 ? Math.round((processed / total) * 100) : 100);
+        });
+        logger.info(`[Login] Base do contrato ${tenantId} baixada com sucesso (filiais: ${missing.join(' | ')}).`);
+      }
+
+      logAuditEvent({
+        user_email: userWithBranch.email,
+        action: 'LOGIN',
+        details: `Login efetuado via Nuvem (etapa 2/2 — filiais: ${branchList.length ? branchList.join(' | ') : 'TODAS'})`,
+        tenantid: tenantId
+      });
+
+      onLogin(userWithBranch);
+    } catch (err: unknown) {
+      const dlMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('[Login] Falha na carga seletiva da filial (pode tentar novamente ou entrar sem sincronizar):', dlMsg);
+      setError(`Falha no sincronismo da filial: ${dlMsg}`);
+    } finally {
+      setDownloadingBase(false);
+    }
+  };
+
+  const handleSkipSync = () => {
+    if (!pendingCloudUser) return;
+    const branchList = allBranches ? [] : Array.from(selectedBranches);
+    const primaryBranch = branchList[0] || '';
+    const userWithBranch: User = {
+      ...pendingCloudUser,
+      filial: primaryBranch || pendingCloudUser.filial,
+      units: branchList.length ? branchList : pendingCloudUser.units
+    };
+    persistBranchSelection(branchList, allBranches);
+    sessionStorage.setItem('app_current_user', safeStringify(userWithBranch));
+    logAuditEvent({
+      user_email: userWithBranch.email,
+      action: 'LOGIN',
+      details: `Login efetuado via Nuvem (etapa 2/2 — sem sincronismo imediato, filiais: ${branchList.length ? branchList.join(' | ') : 'TODAS'})`,
+      tenantid: String(userWithBranch.tenantid || '').trim().toUpperCase()
+    });
+    onLogin(userWithBranch);
   };
 
   const handleDemoMode = (): void => {
@@ -377,18 +604,16 @@ const Login: React.FC<LoginProps> = ({
 
           logger.info('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
           sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
-          
-          logAuditEvent({
-            user_email: loggedUser.email,
-            action: 'LOGIN',
-            details: `Login efetuado via Barreira Local Offline (SQLite Isolado)`,
-            tenantid: loggedUser.tenantid
-          });
 
-          onLogin(loggedUser);
+          // ETAPA 2/2 também no caminho local: com tenantid resolvido, mostra o
+          // contrato + filiais (do banco local) na tela de login antes de entrar;
+          // sem contrato (dono global), enterBranchStage chama onLogin direto.
+          const localIsMaster = isAdminEmail(loggedUser.email) || !!loggedUser.is_admin || !!loggedUser.isAdmin ||
+            ['ADMIN', 'MASTER'].includes(String(loggedUser.role || '').toUpperCase());
+          const localUnits = loggedUser.units || (loggedUser.unitid ? [loggedUser.unitid] : []);
+          enterBranchStage(loggedUser, localUnits, localIsMaster, true);
           clearTimeout(loginTimeout);
-          setIsLoading(false);
-          return; // ENCERRA O LOGOUT SEM COCORRER CÓDIGOS DO SUPABASE
+          return; // ENCERRA O FLUXO SEM COCORRER CÓDIGOS DO SUPABASE
         } catch (localErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
           logger.error('[Login] Falha inesperada na barreira local:', localErr);
         }
@@ -416,7 +641,6 @@ const Login: React.FC<LoginProps> = ({
       }
 
       let loggedUser: User | null = null;
-      let cameFromCloud = false;
       let cloudUnits: string[] | undefined;
       const isOnline = navigator.onLine;
 
@@ -581,12 +805,30 @@ const Login: React.FC<LoginProps> = ({
             logger.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
           }
 
-          cameFromCloud = true;
-          cloudUnits = Array.isArray(cloudUser.units)
+          // Sanitização SRE: sentinelas DEFAULT/NULL/0/UNDEFINED nunca viram opção de filial.
+          // Para MASTER, 'TODAS' também é filtrado — a opção "Todas as filiais do contrato"
+          // já representa o escopo global e evita opção duplicada no <select>.
+          const rawCloudUnits = Array.isArray(cloudUser.units)
             ? (cloudUser.units as string[]).map(u => String(u).trim().toUpperCase())
             : unitId
               ? [unitId]
-              : undefined;
+              : [];
+          cloudUnits = Array.from(new Set(
+            rawCloudUnits.filter(u => u && !['DEFAULT', 'NULL', '0', 'UNDEFINED'].includes(u) && !(is_master && u === 'TODAS'))
+          ));
+
+          // ETAPA 2/2 (FLUXO UNIFICADO): autenticado na nuvem com contrato resolvível —
+          // pausa o fluxo para o usuário ver o contrato, escolher a(s) filial(is) do
+          // banco e acompanhar a carga seletiva (lazy-loading). A REGRA DE OURO
+          // (baixar base quando dispositivo vazio) ocorre em handleConfirmBranch; erro
+          // de download NÃO bloqueia o login (skip disponível). Dono global sem
+          // tenantid no perfil NÃO entra nesta etapa: segue direto para o pós-login,
+          // onde o contrato é escolhido no UNIT_SELECTION (fluxo antigo).
+          if (tenantid) {
+            clearTimeout(loginTimeout);
+            enterBranchStage(loggedUser, cloudUnits || [], is_master, false);
+            return;
+          }
         } catch (supErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
           logger.warn('[Login] Falha no Supabase, analisando possibilidade de login local offline...', supErr);
           
@@ -632,36 +874,30 @@ const Login: React.FC<LoginProps> = ({
         loggedUser = doLocalAuthFallback();
       }
 
-      // REGRA DE OURO (inventariador): após autenticar na nuvem com tenant vinculado,
-      // baixa a base do tenant (somente as filiais atribuídas) se o dispositivo ainda
-      // estiver vazio — erro de download NÃO derruba o login (segue offline-ready).
-      if (loggedUser && cameFromCloud && loggedUser.tenantid) {
-        try {
-          const localCount = await db.local_assets.count();
-          if (localCount === 0) {
-            setDownloadingBase(true);
-            setDownloadProgress(0);
-            await downloadBaseToLocal(
-              loggedUser.tenantid,
-              cloudUnits && cloudUnits.length > 0 ? cloudUnits : undefined,
-              (processed, total) => setDownloadProgress(total > 0 ? Math.round((processed / total) * 100) : 100)
-            );
-            logger.info(`[Login] Base do tenant ${loggedUser.tenantid} baixada com sucesso para o dispositivo.`);
-          }
-        } catch (dlErr: unknown) {
-          const dlMsg = dlErr instanceof Error ? dlErr.message : String(dlErr);
-          logger.warn('[Login] Falha ao baixar a base do tenant (login segue; download pode ser refeito):', dlMsg);
-        } finally {
-          setDownloadingBase(false);
-        }
-      }
+      // ETAPA 2/2 (FLUXO UNIFICADO): a carga seletiva com progresso agora ocorre em
+      // handleConfirmBranch (filial escolhida pelo usuário). O download automático
+      // silencioso foi removido daqui — erro de download não bloqueia o login.
 
       if (loggedUser) {
         logger.info('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
         
         // Salva no sessionStorage para persistência (Token Local)
         sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
-        
+
+        // ETAPA 2/2 também aqui: usuário local/fallback com tenantid resolvível
+        // escolhe a filial (do banco local) antes de entrar; sem contrato, segue
+        // direto (dono global escolhe o contrato no pós-login).
+        const tailTenant = String(loggedUser.tenantid || '').trim().toUpperCase();
+        if (tailTenant) {
+          const fbUnits = loggedUser.units || (loggedUser.unitid ? [loggedUser.unitid] : []);
+          const fbIsMaster = isAdminEmail(loggedUser.email) || !!loggedUser.is_admin || !!loggedUser.isAdmin ||
+            ['ADMIN', 'MASTER'].includes(String(loggedUser.role || '').toUpperCase());
+          enterBranchStage(loggedUser, fbUnits, fbIsMaster, true);
+          clearTimeout(loginTimeout);
+          setIsLoading(false);
+          return;
+        }
+
         // Log de Auditoria Local
         logAuditEvent({
           user_email: loggedUser.email,
@@ -785,7 +1021,161 @@ const Login: React.FC<LoginProps> = ({
 
       {/* O Bloco Condicional 'CARGA LOCAL VAZIA' foi completamente expurgado daqui */}
 
-      <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
+      {loginStage === 'branch' && pendingCloudUser ? (
+        <form onSubmit={handleConfirmBranch} className="space-y-3.5 max-w-sm mx-auto w-full animate-fadeIn">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
+              <AlertCircle size={16} className="mr-3 shrink-0" />
+              <span className="flex-1">{error}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 justify-center mb-1">
+            <span className="text-[9px] font-black text-accent uppercase tracking-widest">Etapa 2 de 2</span>
+            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">· Escolha a filial</span>
+          </div>
+
+          <div className="bg-accent/10 border border-accent/20 rounded-2xl p-3.5 flex items-center gap-3">
+            <Building2 size={20} className="text-accent shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Contrato Autenticado</span>
+              <span className="text-xs font-extrabold text-slate-900 truncate">{String(pendingCloudUser.tenantid || '').toUpperCase()}</span>
+              <span className="text-[9px] font-semibold text-slate-500 truncate">{pendingCloudUser.email}</span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              Filiais do contrato ({tenantFiliais.length})
+            </label>
+            <div className="relative group">
+              {/* Lista lazy-loading (paginação): carrega mais filiais ao rolar */}
+              <div
+                data-testid="branch-list"
+                onScroll={handleBranchScroll}
+                className="max-h-56 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-sm divide-y divide-slate-100 no-scrollbar"
+              >
+                {(pendingIsMaster || (tenantFiliais.length === 0 && !branchLoading)) && (
+                  <button
+                    type="button"
+                    onClick={toggleAllBranches}
+                    disabled={downloadingBase}
+                    className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all cursor-pointer ${allBranches ? 'bg-accent/10' : 'hover:bg-slate-50'}`}
+                  >
+                    <Building2 size={16} className={`shrink-0 ${allBranches ? 'text-accent' : 'text-slate-300'}`} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[12px] font-extrabold text-slate-900 truncate">TODAS AS FILIAIS DO CONTRATO</span>
+                      <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wider">Escopo global do contrato</span>
+                    </span>
+                    {allBranches ? <CheckCircle2 size={18} className="text-accent shrink-0" /> : <span className="w-[18px] shrink-0" />}
+                  </button>
+                )}
+                {visibleFiliais.map((f) => {
+                  const isSelected = allBranches || selectedBranches.has(f.filial);
+                  return (
+                    <button
+                      type="button"
+                      key={f.filial}
+                      onClick={() => toggleBranch(f.filial)}
+                      disabled={downloadingBase}
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all cursor-pointer ${isSelected ? 'bg-accent/10' : 'hover:bg-slate-50'}`}
+                    >
+                      <Building2 size={16} className={`shrink-0 ${isSelected ? 'text-accent' : 'text-slate-300'}`} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[12px] font-extrabold text-slate-900 truncate">{f.filial}</span>
+                        <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wider">
+                          {typeof f.assetCount === 'number' ? `${f.assetCount.toLocaleString('pt-BR')} ativos` : 'Filial do contrato'}
+                          {f.source === 'profile' ? ' · autorizada no perfil' : ''}
+                        </span>
+                      </span>
+                      {isSelected ? <CheckCircle2 size={18} className="text-accent shrink-0" /> : <span className="w-[18px] shrink-0" />}
+                    </button>
+                  );
+                })}
+                {branchLoading && (
+                  <div className="flex items-center justify-center gap-2 py-4 text-accent">
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="text-[9px] font-black uppercase tracking-widest">Carregando filiais...</span>
+                  </div>
+                )}
+                {!branchLoading && tenantFiliais.length === 0 && (
+                  <div className="px-4 py-5 text-center">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nenhuma filial encontrada no banco</p>
+                    <p className="text-[8px] font-semibold text-slate-300 uppercase tracking-wider mt-1">O contrato autenticado define o escopo</p>
+                  </div>
+                )}
+                {!branchLoading && visibleFiliais.length >= tenantFiliais.length && tenantFiliais.length > 0 && (
+                  <div className="px-4 py-2.5 text-center">
+                    <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">
+                      {tenantFiliais.length} {tenantFiliais.length === 1 ? 'filial' : 'filiais'} · rolar para carregar mais
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {downloadingBase && (
+            <div className="space-y-1.5 animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <Loader2 size={12} className="animate-spin text-accent" />
+                  Sincronizando base
+                </span>
+                <span className="text-[10px] font-black text-accent">{downloadProgress}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+                <div className="h-full bg-accent rounded-full transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+              </div>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={downloadingBase || (!pendingIsLocal && !allBranches && selectedBranches.size === 0)}
+            className="w-full bg-accent text-white font-extrabold py-4 rounded-2xl shadow-md hover:shadow-lg hover:brightness-105 active:scale-[0.98] transition-all mt-4 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70 cursor-pointer"
+          >
+            {downloadingBase ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Sincronizando... {downloadProgress}%</span>
+              </>
+            ) : pendingIsLocal ? (
+              <>
+                <Building2 size={16} />
+                <span>Acessar com a filial selecionada</span>
+              </>
+            ) : (
+              <>
+                <DownloadCloud size={16} />
+                <span>Sincronizar e Acessar</span>
+              </>
+            )}
+          </button>
+
+          {!pendingIsLocal && (
+            <button
+              type="button"
+              onClick={handleSkipSync}
+              disabled={downloadingBase}
+              className="w-full bg-transparent border border-slate-300 hover:border-accent hover:bg-slate-50 text-slate-700 hover:text-accent font-bold py-3.5 rounded-2xl shadow-sm active:scale-[0.98] transition-all mt-2 uppercase tracking-[0.1em] text-[11px] flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+            >
+              <CloudOff size={14} />
+              <span>Entrar sem sincronizar agora</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => { setLoginStage('credentials'); setError(null); }}
+            disabled={downloadingBase}
+            className="w-full text-center text-[10px] font-bold text-slate-500 hover:text-accent uppercase tracking-widest transition-colors mt-1 cursor-pointer disabled:opacity-50"
+          >
+            ← Trocar credenciais
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3.5 max-w-sm mx-auto w-full">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
               <AlertCircle size={16} className="mr-3 shrink-0" />
@@ -831,15 +1221,10 @@ const Login: React.FC<LoginProps> = ({
 
         <button 
           type="submit"
-          disabled={isLoading || downloadingBase}
+          disabled={isLoading}
           className="w-full bg-accent text-white font-extrabold py-4 rounded-2xl shadow-md hover:shadow-lg hover:brightness-105 active:scale-[0.98] transition-all mt-6 uppercase tracking-[0.15em] text-xs flex items-center justify-center space-x-2 disabled:opacity-70 cursor-pointer"
         >
-          {downloadingBase ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              <span>Baixando base... {downloadProgress}%</span>
-            </>
-          ) : isLoading ? (
+          {isLoading ? (
             <>
               <Loader2 size={16} className="animate-spin" />
               <span>Autenticando...</span>
@@ -870,7 +1255,8 @@ const Login: React.FC<LoginProps> = ({
             <span>Experimentar Grátis (Modo Demo)</span>
           </button>
         )}
-      </form>
+        </form>
+      )}
 
       <div className="mt-8 text-center space-y-4 max-w-sm mx-auto w-full border-t border-slate-100 pt-5">
         {databaseMode === DatabaseMode.INTERNAL ? (

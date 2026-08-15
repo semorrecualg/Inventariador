@@ -788,9 +788,13 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     ...(userId ? { id: userId } : {})
   };
 
+  // PROTEÇÃO SRE: ignoreDuplicates evita que este caminho de FALLBACK sobrescreva
+  // uma linha existente com tenantid vazio (o perfil real já foi resolvido no
+  // caminho 'found' acima; aqui apenas CRIAMOS quando não existe). Sem isso, um
+  // timeout no fetch + fallbackTenant vazio apagaria a atribuição usuário×contrato.
   const upsertPromise = supabase
     .from('user_permissions')
-    .upsert([insertData], { onConflict: 'email' })
+    .upsert([insertData], { onConflict: 'email', ignoreDuplicates: true })
     .select()
     .single();
 
@@ -1438,6 +1442,36 @@ export const syncUsersToCloud = async (users: User[]) => {
     if (usersToSync.length === 0) {
       logger.warn('[Supabase] syncUsersToCloud: nenhum usuário válido (com e-mail) para sincronizar.');
       return;
+    }
+
+    // PROTEÇÃO SRE (não-destrutiva): um usuário local com tenantid VAZIO nunca
+    // sobrescreve a atribuição usuário×contrato existente na NUVEM. A nuvem é a
+    // fonte da verdade da atribuição; o dispositivo pode ter um cache antigo
+    // (app_users) sem o contrato recém-atribuído — o upsert cego apagaria o
+    // tenantid da nuvem (bug real: semorr@gmail.com perdeu o CICOPAL).
+    const emptyTenantUsers = usersToSync.filter(u => !String(u.tenantid || '').trim());
+    if (emptyTenantUsers.length > 0) {
+      try {
+        const { data: existing } = await supabase
+          .from('user_permissions')
+          .select('email, tenantid')
+          .in('email', emptyTenantUsers.map(u => u.email));
+        const cloudRows = (existing || []) as Array<{ email?: string | null; tenantid?: string | null }>;
+        const cloudByEmail = new Map<string, { email?: string | null; tenantid?: string | null }>(
+          cloudRows.map(r => [String(r.email || '').trim().toLowerCase(), r])
+        );
+        usersToSync.forEach(u => {
+          if (String(u.tenantid || '').trim()) return;
+          const cloud = cloudByEmail.get(String(u.email || '').trim().toLowerCase());
+          if (cloud && String(cloud.tenantid || '').trim()) {
+            u.tenantid = String(cloud.tenantid).trim();
+          }
+        });
+      } catch (err) {
+        // Falha ao consultar a nuvem → preserva o que veio do local (nada é
+        // pior que um sync que trava o login); a proteção segue nos demais runs.
+        logger.warn('[Supabase] syncUsersToCloud: falha ao preservar tenant da nuvem:', err);
+      }
     }
 
     const { error } = await supabase
@@ -3219,4 +3253,164 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     logger.error('Erro ao buscar configs Local-First:', err);
     return [];
   }
+};
+
+// ============================================================================
+// fetchTenantFiliais — Filiais atribuídas a um contrato (tenantid) para a
+// ETAPA 2/2 do login (seleção de filial na tela de login).
+// ----------------------------------------------------------------------------
+// Fonte de verdade: NUVEM (assets agrupados por filial + unit_configs).
+// Fallback LOCAL (base já baixada / offline): local_assets, unit_configs e
+// local_unit_configs (localStorage + espelho Dexie).
+// Units do perfil (profileUnits) SEMPRE são mescladas: garantem que as filiais
+// autorizadas do usuário apareçam mesmo com a base vazia ou sem network.
+// Sentinelas (DEFAULT/NULL/0/UNDEFINED/TODAS) nunca viram opção de filial.
+// ============================================================================
+export interface TenantFilial {
+  /** Nome da filial — UPPER + trim (canônico). */
+  filial: string;
+  tenantid: string;
+  /** Contagem de ativos da filial na nuvem (quando disponível). */
+  assetCount?: number;
+  source: 'cloud' | 'local' | 'profile';
+}
+
+const FILIAL_SENTINELS = new Set(['', 'DEFAULT', 'NULL', '0', 'UNDEFINED', 'TODAS']);
+
+export const fetchTenantFiliais = async (
+  tenantid: string,
+  opts: { profileUnits?: string[]; includeLocal?: boolean } = {},
+): Promise<TenantFilial[]> => {
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) return [];
+
+  const map = new Map<string, TenantFilial>();
+  const add = (raw: unknown, source: TenantFilial['source'], count?: unknown) => {
+    const norm = String(raw ?? '').trim().toUpperCase();
+    if (!norm || FILIAL_SENTINELS.has(norm)) return;
+    const existing = map.get(norm);
+    const parsedCount = Number(count);
+    const hasCount = typeof count === 'number' || (typeof count === 'string' && count.trim() !== '' && !isNaN(parsedCount));
+    if (!existing) {
+      map.set(norm, {
+        filial: norm,
+        tenantid: tenant,
+        source,
+        ...(hasCount ? { assetCount: Math.max(0, parsedCount) } : {}),
+      });
+    } else if (hasCount && existing.assetCount === undefined) {
+      existing.assetCount = Math.max(0, parsedCount);
+    }
+  };
+
+  // 1. Nuvem (só quando online, com credenciais reais e Supabase configurado —
+  // modo INTERNAL/local não tenta rede com placeholders)
+  let cloudOk = false;
+  if (!isInternalMode && supabase && navigator.onLine) {
+    try {
+      // DISTINCT PAGINADO: PostgREST limita cada request a ~1000 linhas — sem
+      // range() um tenant com >1000 ativos mostraria só as filiais das primeiras
+      // linhas (bug real: CICOPAL 12.636 ativos / 5 filiais listava apenas 1).
+      const PAGE = 1000;
+      const filiaisNuvem: string[] = [];
+      for (let start = 0; ; start += PAGE) {
+        const { data, error } = await supabase
+          .from('assets')
+          .select('filial')
+          .eq('tenantid', tenant)
+          .not('filial', 'is', null)
+          .range(start, start + PAGE - 1);
+        if (error) throw error;
+        const rows = data || [];
+        rows.forEach((row: { filial?: string | null }) => {
+          const v = String(row.filial ?? '').trim();
+          if (v) filiaisNuvem.push(v);
+        });
+        if (rows.length < PAGE) break;
+      }
+
+      // Contagem exata por filial (best-effort, em paralelo, com teto para não
+      // pesar o login em contratos com dezenas de filiais).
+      const uniq = Array.from(new Set(filiaisNuvem));
+      const counts = new Map<string, number>();
+      if (uniq.length > 0 && uniq.length <= 60) {
+        const results = await Promise.all(uniq.map(async (f) => {
+          try {
+            const r = await supabase
+              .from('assets')
+              .select('id', { count: 'exact' })
+              .eq('tenantid', tenant)
+              .eq('filial', f);
+            return [f, r.count ?? 0] as const;
+          } catch {
+            return [f, undefined] as const;
+          }
+        }));
+        results.forEach(([f, c]) => {
+          if (typeof c === 'number') counts.set(f, c);
+        });
+      }
+      uniq.forEach((f) => add(f, 'cloud', counts.get(f)));
+      cloudOk = map.size > 0;
+    } catch (err) {
+      logger.warn('[fetchTenantFiliais] Falha ao listar filiais da nuvem:', err);
+    }
+
+    // Filiais configuradas (unit_configs) — cobre filiais sem ativos
+    try {
+      const { data: cfg, error: cfgErr } = await supabase
+        .from('unit_configs')
+        .select('filial')
+        .eq('tenantid', tenant);
+      if (!cfgErr) (cfg || []).forEach((row: { filial?: string | null }) => add(row.filial, 'cloud'));
+    } catch {
+      // silencioso — fallback local cobre
+    }
+  }
+
+  // 2. Local — quando a nuvem não trouxe nada (offline/base vazia) ou includeLocal
+  if (!cloudOk || opts.includeLocal) {
+    try {
+      const rows = await db.local_assets
+        .filter((a) => String(resolveTenantId(a) || '').trim().toUpperCase() === tenant)
+        .toArray();
+      rows.forEach((a) => add(a.filial, 'local'));
+    } catch {
+      // silencioso
+    }
+    try {
+      const rows = await db.unit_configs.toArray();
+      rows.forEach((c) => {
+        const t = String((c as { tenantid?: string }).tenantid || '').trim().toUpperCase();
+        if (!t || t === tenant) add((c as { filial?: string; unit_id?: string; _unitid?: string; nome?: string }).filial || (c as { unit_id?: string }).unit_id || (c as { _unitid?: string })._unitid || (c as { nome?: string }).nome, 'local');
+      });
+    } catch {
+      // silencioso
+    }
+    try {
+      const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+      Object.values(localData).forEach((c) => {
+        const rec = (c || {}) as { tenantid?: string; filial?: string; unit_id?: string; _unitid?: string };
+        const t = String(rec.tenantid || '').trim().toUpperCase();
+        if (!t || t === tenant) add(rec.filial || rec.unit_id || rec._unitid, 'local');
+      });
+    } catch {
+      // silencioso
+    }
+    try {
+      const rows = await localDb.unitConfigs.toArray();
+      rows.forEach((c) => {
+        const rec = (c || {}) as { tenantid?: string; filial?: string; unit_id?: string; _unitid?: string };
+        const t = String(rec.tenantid || '').trim().toUpperCase();
+        if (!t || t === tenant) add(rec.filial || rec.unit_id || rec._unitid, 'local');
+      });
+    } catch {
+      // silencioso
+    }
+  }
+
+  // 3. Perfil — SEMPRE mesclado por último (fonte autoritativa de acesso)
+  (opts.profileUnits || []).forEach((u) => add(u, 'profile'));
+
+  return Array.from(map.values()).sort((a, b) => a.filial.localeCompare(b.filial));
 };
