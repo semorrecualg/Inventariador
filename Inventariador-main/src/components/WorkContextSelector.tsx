@@ -4,7 +4,6 @@ import {
   Factory,
   Landmark,
   Warehouse,
-  ChevronRight,
   LogOut,
   ShieldCheck,
   Briefcase,
@@ -18,7 +17,8 @@ import { AppModule, UserRole } from '../types';
 import {
   WorkContext,
   groupContextsByTenant,
-  normalizeWorkTenant
+  normalizeWorkTenant,
+  normalizeWorkFilial
 } from '../utils/workContextUtils';
 
 interface WorkContextSelectorProps {
@@ -31,14 +31,12 @@ interface WorkContextSelectorProps {
 /**
  * Tela única pós-login (Etapa 3 do FLUXO_ACESSO_INICIAL).
  *
- * Em UM passo visual o usuário resolve o contexto de trabalho completo:
- *   1. Contrato (tenantid) autorizado — badge/botões por contrato;
- *   2. Filial de trabalho — listbox de toque rápido (ou "TODAS AS FILIAIS");
- *   3. Módulo — INVENTARIADOR ou CONTROLE DE ATIVO.
- *
- * Reutiliza a lógica de agrupamento do TenantWorkSelector
- * (groupContextsByTenant) e o estilo dos cards de módulo do ModuleSelector.
- * A escolha define QUAIS dados são carregados (isolamento por contrato/filial).
+ * O contrato (tenantid) e a filial de trabalho já foram resolvidos na ETAPA 2/2
+ * do login — aqui NÃO há mais seleção de contrato nem de filial (itens
+ * eliminados por redundância). A tela mostra o contexto ativo como cartão fixo
+ * e o usuário apenas escolhe o MÓDULO de trabalho (INVENTARIADOR ou
+ * CONTROLE DE ATIVO). A escolha define QUAIS dados são carregados
+ * (isolamento por contrato/filial).
  */
 const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   user,
@@ -47,16 +45,24 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   onLogout
 }) => {
   const groups = groupContextsByTenant(contexts);
-  const multiContract = groups.length > 1;
 
-  const [selectedTenant, setSelectedTenant] = useState<string | null>(
-    groups.length === 1 ? groups[0].tenantid : null
-  );
-  const [selectedFilial, setSelectedFilial] = useState<string | null>(null);
+  // Contexto ativo: o contrato do login (user.tenantid) se estiver autorizado;
+  // senão, o primeiro contexto disponível. A filial é a escolhida no login
+  // (user.filial / user.units[0]) ou a primeira do contrato.
+  const activeGroup =
+    groups.find(g => g.tenantid === normalizeWorkTenant(user.tenantid || '')) ||
+    groups[0] ||
+    null;
+  const activeFilial =
+    normalizeWorkFilial(user.filial || (Array.isArray(user.units) && user.units[0]) || '') ||
+    (activeGroup?.filiais?.[0] || '');
+
+  const selectedTenant = activeGroup?.tenantid || '';
+
   const [selectedModule, setSelectedModule] = useState<AppModule | null>(null);
 
   const isAuditor = user.role === UserRole.AUDITOR || user.role === UserRole.AUXILIARY_AUDITOR;
-  const canProceed = !!selectedTenant && selectedFilial !== null && !!selectedModule;
+  const canProceed = !!selectedTenant && !!selectedModule;
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -75,8 +81,6 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     };
   };
 
-  const activeGroup = groups.find(g => g.tenantid === selectedTenant) || null;
-  const filiais = activeGroup?.filiais?.length ? activeGroup.filiais : [''];
   const roleLabel = (user.role || '').toString();
   const userLabel = user.name || user.username || user.email || '';
 
@@ -94,7 +98,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
               Contrato de Trabalho
             </h2>
             <p className="text-accent text-[8px] font-extrabold uppercase tracking-widest mt-0.5 leading-none select-none">
-              Contrato · Filial · Módulo
+              Escolha o Módulo de Trabalho
             </p>
           </div>
 
@@ -124,172 +128,102 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
 
       {/* Corpo com scroll */}
       <div className="flex-1 overflow-y-auto px-5 pt-4 pb-32 space-y-5">
-        {/* Passo 1 — Contrato (tenantid) */}
-        <div>
-          <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
-            1 · Contrato autorizado
-          </p>
-          {multiContract ? (
-            <div className="space-y-2">
-              {groups.map(group => {
-                const { style, Icon } = getTenantIdentity(group.tenantid);
-                const isActive = selectedTenant === group.tenantid;
-                return (
-                  <button
-                    key={group.tenantid}
-                    type="button"
-                    onClick={() => { setSelectedTenant(group.tenantid); setSelectedFilial(null); }}
-                    className={`w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${isActive ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
-                  >
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${style}`}>
-                        <Icon size={18} strokeWidth={2.5} />
-                      </div>
-                      <div className="min-w-0 text-left">
-                        <p className="text-[12px] font-black uppercase tracking-[0.12em] text-ink truncate">
-                          {group.tenantid}
-                        </p>
-                        <p className="text-[7.5px] font-extrabold uppercase tracking-widest text-ink-muted">
-                          {group.filiais.length} filial(is) · CONTRATO (TENANTID)
-                        </p>
-                      </div>
-                    </div>
-                    {isActive ? (
-                      <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
-                        <Check size={16} />
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-bg-main flex items-center justify-center text-accent flex-shrink-0">
-                        <ChevronRight size={16} />
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
+        {!selectedTenant ? (
+          <div className="flex flex-col items-center justify-center py-14 text-center">
+            <div className="w-14 h-14 bg-amber-50 border border-amber-100 rounded-2xl flex items-center justify-center text-amber-500 mb-4">
+              <Briefcase size={26} />
             </div>
-          ) : (
-            <div className="w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border border-accent/40">
-              <div className="flex items-center space-x-3 min-w-0">
-                <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${getTenantIdentity(selectedTenant || '').style}`}>
-                  {(() => { const { Icon } = getTenantIdentity(selectedTenant || ''); return <Icon size={18} strokeWidth={2.5} />; })()}
-                </div>
-                <div className="min-w-0 text-left">
-                  <p className="text-[12px] font-black uppercase tracking-[0.12em] text-ink truncate">
-                    {normalizeWorkTenant(selectedTenant || '')}
-                  </p>
-                  <p className="text-[7.5px] font-extrabold uppercase tracking-widest text-ink-muted">
-                    CONTRATO (TENANTID) ATIVO
-                  </p>
-                </div>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
-                <Check size={16} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Passo 2 — Filial (listbox de toque rápido) */}
-        <div>
-          <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
-            2 · Filial de trabalho
-          </p>
-          {!selectedTenant ? (
-            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wider text-center py-4">
-              Selecione o contrato primeiro
+            <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-amber-600 mb-2">
+              Nenhum contrato disponível
             </p>
-          ) : (
-            <div className="space-y-2">
-              {filiais.map(filial => {
-                const key = filial || '__TODAS__';
-                const isActive = selectedFilial === filial;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setSelectedFilial(filial)}
-                    className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] min-h-[58px] ${isActive ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
-                  >
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
-                        <Building2 size={17} strokeWidth={2.5} />
-                      </div>
-                      <div className="min-w-0 text-left">
-                        <p className="text-[13px] font-bold text-ink truncate">
-                          {filial || 'TODAS AS FILIAIS'}
-                        </p>
-                        <p className="text-[8px] font-extrabold uppercase tracking-widest text-ink-muted">
-                          {filial ? `FILIAL · ${normalizeWorkTenant(selectedTenant)}` : 'SEM FILTRO DE UNIDADE'}
-                        </p>
-                      </div>
-                    </div>
-                    {isActive && (
-                      <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
-                        <Check size={16} />
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Passo 3 — Módulo */}
-        <div>
-          <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
-            3 · Módulo de trabalho
-          </p>
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => setSelectedModule(AppModule.INVENTORY)}
-              className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${selectedModule === AppModule.INVENTORY ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
-            >
-              <div className="flex items-center space-x-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
-                  <ClipboardCheck size={20} strokeWidth={2.5} />
-                </div>
-                <div className="min-w-0 text-left">
-                  <p className="text-[13px] font-black uppercase tracking-wide text-ink">INVENTARIADOR</p>
-                  <p className="text-[8px] font-bold uppercase tracking-widest text-ink-muted">
-                    Controle físico, etiquetagem e auditoria de campo
-                  </p>
-                </div>
-              </div>
-              {selectedModule === AppModule.INVENTORY && (
-                <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
-                  <Check size={16} />
-                </div>
-              )}
-            </button>
-
-            {!isAuditor && (
-              <button
-                type="button"
-                onClick={() => setSelectedModule(AppModule.ASSET_CONTROL)}
-                className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${selectedModule === AppModule.ASSET_CONTROL ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
-              >
+            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wider max-w-[240px] leading-relaxed">
+              Contate o administrador do sistema para vincular seu contrato.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Contexto de trabalho — resolvido no login (ETAPA 2/2), somente leitura */}
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
+                Contexto de trabalho
+              </p>
+              <div className="w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border border-accent/40">
                 <div className="flex items-center space-x-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0">
-                    <Calculator size={20} strokeWidth={2.5} />
+                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${getTenantIdentity(selectedTenant).style}`}>
+                    <Building2 size={18} strokeWidth={2.5} />
                   </div>
                   <div className="min-w-0 text-left">
-                    <p className="text-[13px] font-black uppercase tracking-wide text-ink">CONTROLE DE ATIVO</p>
-                    <p className="text-[8px] font-bold uppercase tracking-widest text-ink-muted">
-                      Gestão contábil, depreciação e relatórios fiscais
+                    <p className="text-[12px] font-black uppercase tracking-[0.12em] text-ink truncate">
+                      {normalizeWorkTenant(selectedTenant)}
+                    </p>
+                    <p className="text-[7.5px] font-extrabold uppercase tracking-widest text-ink-muted truncate">
+                      {activeFilial ? `FILIAL · ${activeFilial}` : 'TODAS AS FILIAIS'} · CONTRATO (TENANTID)
                     </p>
                   </div>
                 </div>
-                {selectedModule === AppModule.ASSET_CONTROL && (
-                  <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
-                    <Check size={16} />
+                <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
+                  <Check size={16} />
+                </div>
+              </div>
+            </div>
+
+            {/* Módulo de trabalho */}
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
+                Módulo de trabalho
+              </p>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedModule(AppModule.INVENTORY)}
+                  className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${selectedModule === AppModule.INVENTORY ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
+                >
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
+                      <ClipboardCheck size={20} strokeWidth={2.5} />
+                    </div>
+                    <div className="min-w-0 text-left">
+                      <p className="text-[13px] font-black uppercase tracking-wide text-ink">INVENTARIADOR</p>
+                      <p className="text-[8px] font-bold uppercase tracking-widest text-ink-muted">
+                        Controle físico, etiquetagem e auditoria de campo
+                      </p>
+                    </div>
                   </div>
+                  {selectedModule === AppModule.INVENTORY && (
+                    <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
+                      <Check size={16} />
+                    </div>
+                  )}
+                </button>
+
+                {!isAuditor && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedModule(AppModule.ASSET_CONTROL)}
+                    className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${selectedModule === AppModule.ASSET_CONTROL ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
+                  >
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0">
+                        <Calculator size={20} strokeWidth={2.5} />
+                      </div>
+                      <div className="min-w-0 text-left">
+                        <p className="text-[13px] font-black uppercase tracking-wide text-ink">CONTROLE DE ATIVO</p>
+                        <p className="text-[8px] font-bold uppercase tracking-widest text-ink-muted">
+                          Gestão contábil, depreciação e relatórios fiscais
+                        </p>
+                      </div>
+                    </div>
+                    {selectedModule === AppModule.ASSET_CONTROL && (
+                      <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
+                        <Check size={16} />
+                      </div>
+                    )}
+                  </button>
                 )}
-              </button>
-            )}
-          </div>
-        </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Barra inferior: ACESSAR + sair */}
@@ -298,7 +232,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           type="button"
           disabled={!canProceed}
           onClick={() => canProceed && onSelect(
-            { tenantid: selectedTenant as string, filial: selectedFilial as string },
+            { tenantid: selectedTenant, filial: activeFilial },
             selectedModule as AppModule
           )}
           className="w-full py-3.5 rounded-xl bg-accent text-white font-extrabold uppercase text-[10px] tracking-[0.15em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
