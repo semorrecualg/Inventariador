@@ -81,6 +81,7 @@ interface MainMenuProps {
   batterySaver: boolean;
   onUpdateBatterySaver: (val: boolean) => void;
   onSyncCloud?: () => void;
+  onSyncAllCloud?: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   syncError?: string | null;
@@ -136,6 +137,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   batterySaver,
   onUpdateBatterySaver,
   onSyncCloud,
+  onSyncAllCloud,
   isSyncing = false,
   syncError,
   hasSupabase = false,
@@ -1123,7 +1125,23 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </div>
                   <div className="flex-1">
                     <h4 className="text-[13px] font-bold text-emerald-400 uppercase tracking-tight">Sincronizar Nuvem</h4>
-                    <p className="text-[8px] font-bold text-emerald-400/60 uppercase tracking-widest mt-0.5">Baixar Dados do Supabase</p>
+                    <p className="text-[8px] font-bold text-emerald-400/60 uppercase tracking-widest mt-0.5">Baixar Dados do Supabase (delta)</p>
+                  </div>
+                </button>
+              )}
+
+              {databaseMode !== DatabaseMode.INTERNAL && (
+                <button 
+                  onClick={onSyncAllCloud} 
+                  disabled={isSyncing}
+                  className="w-full flex items-center p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl active:scale-[0.98] disabled:opacity-50 transition-all text-left"
+                >
+                  <div className={`w-10 h-10 bg-amber-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-amber-500/20 ${isSyncing ? 'animate-spin' : ''}`}>
+                    <RefreshCw size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-[13px] font-bold text-amber-400 uppercase tracking-tight">Sincronizar Tudo</h4>
+                    <p className="text-[8px] font-bold text-amber-400/60 uppercase tracking-widest mt-0.5">Forçar pull completo da Nuvem (Etapa 5b)</p>
                   </div>
                 </button>
               )}

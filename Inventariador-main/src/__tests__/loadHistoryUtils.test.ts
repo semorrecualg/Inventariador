@@ -4,6 +4,7 @@ import {
   normalizeTenantLabel,
   groupLoadHistory,
   formatLoadTimestamp,
+  isDeltaSyncEntry,
 } from '../utils/loadHistoryUtils';
 
 describe('parseAssetCountFromDetails', () => {
@@ -22,6 +23,32 @@ describe('parseAssetCountFromDetails', () => {
 
   it('não captura números que não precedem "ativos"', () => {
     expect(parseAssetCountFromDetails('Lote 42 concluído.')).toBeNull();
+  });
+
+  it('extrai a contagem real do SYNC_PULL incremental (Etapa 5b)', () => {
+    expect(parseAssetCountFromDetails('Sincronização incremental de 36 ativos da nuvem para o local (delta).')).toBe(36);
+    expect(parseAssetCountFromDetails('Sincronização incremental de 0 ativos da nuvem para o local (delta).')).toBe(0);
+    expect(parseAssetCountFromDetails('Sincronização incremental de 5586 ativos da nuvem para o local (delta).')).toBe(5586);
+  });
+});
+
+describe('isDeltaSyncEntry', () => {
+  it('reconhece o formato da Etapa 5b (incremental + (delta))', () => {
+    expect(isDeltaSyncEntry({ details: 'Sincronização incremental de 36 ativos da nuvem para o local (delta).' })).toBe(true);
+    expect(isDeltaSyncEntry({ details: 'Sincronização incremental de 0 ativos da nuvem para o local (delta).' })).toBe(true);
+  });
+
+  it('reconhece só o marcador (delta) em outros formatos', () => {
+    expect(isDeltaSyncEntry({ details: 'Sincronização de 100 ativos (delta).' })).toBe(true);
+  });
+
+  it('NÃO marca pulls completos / outros eventos', () => {
+    expect(isDeltaSyncEntry({ details: 'Sincronização de 12636 ativos da nuvem para o local.' })).toBe(false);
+    expect(isDeltaSyncEntry({ details: 'Sincronização de 2066 ativos da nuvem para o local (boot loader) (contrato CICOPAL).' })).toBe(false);
+    expect(isDeltaSyncEntry({ details: 'Carga de planilha: 2066 ativos injetados.' })).toBe(false);
+    expect(isDeltaSyncEntry({ details: 'Falha ao sincronizar configuração.' })).toBe(false);
+    expect(isDeltaSyncEntry({ details: null })).toBe(false);
+    expect(isDeltaSyncEntry({ details: '' })).toBe(false);
   });
 });
 

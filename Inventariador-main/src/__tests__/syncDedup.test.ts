@@ -5,7 +5,8 @@ import {
   markPullCompleted,
   wasPullCompleted,
   clearPullDedup,
-  shouldSkipPull
+  shouldSkipPull,
+  hasLocalBaseData
 } from '../utils/syncDedup';
 
 const STORAGE_KEY = 'gbr_sync_pull_done';
@@ -88,6 +89,35 @@ describe('syncDedup — deduplicação do pull do inventário (Etapa 1 FLUXO_ACE
       expect(shouldSkipPull(false, true)).toBe(false);
       expect(shouldSkipPull(true, false)).toBe(false);
       expect(shouldSkipPull(false, false)).toBe(false);
+    });
+  });
+
+  describe('hasLocalBaseData — base local tem dados mesmo antes do boot terminar (fix Etapa 5b)', () => {
+    beforeEach(() => {
+      localStorage.removeItem('isDatabaseLoaded');
+    });
+
+    it('inventário em memória > 0 → true, independente da flag persistida', () => {
+      localStorage.removeItem('isDatabaseLoaded');
+      expect(hasLocalBaseData(12636)).toBe(true);
+    });
+
+    it('memória vazia + flag isDatabaseLoaded=true (sessão anterior) → true', () => {
+      localStorage.setItem('isDatabaseLoaded', 'true');
+      expect(hasLocalBaseData(0)).toBe(true);
+    });
+
+    it('memória vazia + flag ausente (primeira sessão ou higienização) → false', () => {
+      expect(hasLocalBaseData(0)).toBe(false);
+      localStorage.setItem('isDatabaseLoaded', 'false');
+      expect(hasLocalBaseData(0)).toBe(false);
+    });
+
+    it('higienização remove a flag → false mesmo com inventário em memória zerado', () => {
+      localStorage.setItem('isDatabaseLoaded', 'true');
+      expect(hasLocalBaseData(0)).toBe(true);
+      localStorage.removeItem('isDatabaseLoaded');
+      expect(hasLocalBaseData(0)).toBe(false);
     });
   });
 });

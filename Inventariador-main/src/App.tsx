@@ -60,8 +60,15 @@ import { processarRoteamentoPosLoginSaas, resolvePostSelectionScreen, SupabaseUs
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { markPullCompleted, wasPullCompleted, shouldSkipPull } from './utils/syncDedup';
-import { resolveUnitFilter } from './utils/unitContextUtils';
+import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
+import {
+  readSyncCheckpoint,
+  clearSyncCheckpoint,
+  clearAllSyncCheckpoints,
+  resolveDeltaMode,
+  syncCheckpointKey
+} from './utils/syncCheckpoint';
+import { resolveUnitFilter, resolveBootUnitFilter } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -721,6 +728,7 @@ useEffect(() => {
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -889,6 +897,19 @@ useEffect(() => {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
+
+  // ETAPA 5b (FLUXO_ACESSO_INICIAL) — fix do timing do boot: o auto-aplicar
+  // (Etapa 4) pode disparar o sync ANTES de o boot terminar o loadInventory.
+  // Um deferred resolve quando o init conclui, para o sync aguardar e decidir
+  // delta vs full sobre a base REAL em memória (nunca refazer pull completo
+  // por causa de uma corrida de inicialização).
+  const baseLoadResolveRef = useRef<(() => void) | null>(null);
+  const baseLoadReadyRef = useRef<Promise<void> | null>(null);
+  if (!baseLoadReadyRef.current) {
+    baseLoadReadyRef.current = new Promise<void>(resolve => {
+      baseLoadResolveRef.current = resolve;
+    });
+  }
   // Guarda de re-execução do Boot Loader (Etapa 1 do FLUXO_ACESSO_INICIAL):
   // o effect que baixa a base vazia re-roda quando o `user` muda durante o
   // processSession — isso iniciava pulls REPETIDOS do contrato inteiro.
@@ -2329,6 +2350,7 @@ useEffect(() => {
       AppScreen.MODULE_SELECTION,
       AppScreen.ASSET_CONTROL_HOME,
       AppScreen.DATABASE_MANAGER,
+      AppScreen.LOAD_HISTORY,
       AppScreen.BIOMETRIC_REGISTRATION,
       AppScreen.STRESS_TEST,
       AppScreen.CHANGE_PASSWORD,
@@ -2457,9 +2479,10 @@ useEffect(() => {
     });
   }, [isFieldMode]);
 
-  const syncFromCloud = useCallback(async (explicitTenantid?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string) => {
-    if (isSyncing) return;
-    
+  const syncFromCloud = useCallback(async (explicitTenantid?: string | string[], explicitMode?: DatabaseMode, explicitUnitId?: string, explicitForceFull?: boolean) => {
+    if (isSyncing || isSyncingRef.current) return;
+    isSyncingRef.current = true;
+
     const mode = explicitMode || databaseMode;
     const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
 
@@ -2543,12 +2566,61 @@ useEffect(() => {
 
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
       // Passamos o tenantid e o unitid se fornecido
-      const cloudData = await fetchFullInventory(tenantid, explicitUnitId);
+      // ETAPA 5b (FLUXO_ACESSO_INICIAL): delta sync — quando existe checkpoint
+      // do [tenant|filial] E a base local já tem dados, baixa apenas o delta
+      // (updated_at > checkpoint). "Sincronizar tudo" (explicitForceFull)
+      // limpa o checkpoint e refaz o pull completo. Muro SRE: o checkpoint é
+      // sempre chaveado por [tenant|filial], nunca global.
+      const firstTenant = Array.isArray(tenantid) ? tenantid[0] : tenantid;
+      const ckKey = syncCheckpointKey(firstTenant, explicitUnitId);
+      if (explicitForceFull) clearSyncCheckpoint(ckKey);
+      const inMemoryCount = inventoryRef.current?.assets?.length ?? 0;
+      const hasLocalData = hasLocalBaseData(inMemoryCount);
+      // ETAPA 5b (fix do timing): se a persistência diz que há dados mas a base
+      // ainda não carregou em memória (auto-aplicar antes do boot terminar o
+      // loadInventory), aguarda o boot (máx 12s) — a decisão delta/full passa
+      // a operar sobre a base REAL, sem refazer pull completo por corrida.
+      if (hasLocalData && inMemoryCount === 0 && baseLoadReadyRef.current) {
+        logger.info(`>>> [Sync] Base ainda carregando no boot. Aguardando loadInventory para decidir delta (Etapa 5b fix).`);
+        await Promise.race([
+          baseLoadReadyRef.current,
+          new Promise<void>(r => setTimeout(r, 12000))
+        ]);
+      }
+      // ANTI-LOOP DE SYNC_PULL: dedup centralizado no próprio sync — cobre TODOS
+      // os entry points (processSession, onLogin, CloudUpdatePending, auto-aplicar)
+      // que pedem o MESMO [tenant|filial] já puxado nesta sessão. Antes, só o Boot
+      // Loader marcava o pull; cada caller gravava um SYNC_PULL novo no audit_logs
+      // (97 eventos / 713.431 ativos num dia de testes). "Sincronizar tudo"
+      // (explicitForceFull) ignora o dedup de propósito.
+      const settledCount = inventoryRef.current?.assets?.length ?? 0;
+      const settledHasData = hasLocalBaseData(settledCount);
+      if (!explicitForceFull && shouldSkipPull(wasPullCompleted(firstTenant, explicitUnitId), settledHasData)) {
+        logger.info(`>>> [Sync] Pull de ${ckKey} já concluído nesta sessão. Pulando sincronização duplicada (anti-loop SYNC_PULL).`);
+        return;
+      }
+      const { since, incremental } = resolveDeltaMode(
+        hasLocalData ? readSyncCheckpoint(ckKey) : null,
+        !!explicitForceFull
+      );
+      if (incremental) {
+        logger.info(`>>> [Sync] Delta ativo para ${ckKey} (checkpoint ${String(since)}). Baixando apenas o que mudou desde o último pull (Etapa 5b).`);
+      }
+      const cloudData = await fetchFullInventory(tenantid, explicitUnitId, undefined, undefined, {
+        since,
+        trackCheckpoint: true
+      });
       const syncTimestamp = new Date().toISOString();
 
       logger.info(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
 
       if (cloudData) {
+        // Auditoria única por sync — capturada dentro do updater (para casar com
+        // o caminho incremental/full real) e gravada FORA dele, uma única vez.
+        // logAuditEvent dentro de setInventory(prev => …) é side-effect em updater
+        // (anti-padrão React): podia gravar o SYNC_PULL 2× por sync. E pull que
+        // não traz ativos (0) não gera evento — no-op não polui o histórico.
+        let syncAuditDetails: string | null = null;
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
@@ -2577,6 +2649,44 @@ useEffect(() => {
               companies: [],
               status: DatabaseStatus.EMPTY
             };
+          }
+
+          // ETAPA 5b (FLUXO_ACESSO_INICIAL): pull INCREMENTAL (delta) — os ativos
+          // recebidos da nuvem são apenas os atualizados desde o checkpoint;
+          // UPSERT no inventário local (nunca substituir a base pelo delta).
+          // As alterações locais pendentes continuam prevalecendo sobre a nuvem.
+          // Guarda defensiva: delta só faz sentido sobre uma base REAL em memória
+          // (prev.assets > 0). Se a base seguir vazia apesar do checkpoint (caso
+          // raro: base limpa com flag/checkpoint obsoletos), cai no merge completo
+          // abaixo — substituição é segura, jamais perde dados de outro contrato.
+          if (incremental && prev.assets.length > 0) {
+            const byId = new Map(prev.assets.map(a => [String(a.id), a]));
+            cloudAssets.forEach(a => byId.set(String(a.id), a));
+            const mergedAssets = Array.from(byId.values());
+            const dirtyIds = Array.from(dirtyAssetsRef.current);
+            if (dirtyIds.length > 0) {
+              dirtyIds.forEach(id => {
+                const localDirty = prev.assets.find(a => String(a.id) === id);
+                if (!localDirty) return;
+                const index = mergedAssets.findIndex(a => String(a.id) === id);
+                if (index !== -1) mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
+                else mergedAssets.push(localDirty);
+              });
+            }
+            const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
+            const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
+            const newState: InventoryState = {
+              ...prev,
+              assets: mergedAssets.length > 0 ? mergedAssets : prev.assets,
+              companies: finalCompanies.length > 0 ? finalCompanies : prev.companies,
+              status: mergedAssets.length > 0 ? DatabaseStatus.LOADED : prev.status,
+              lastUpdated: syncTimestamp
+            };
+            saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+            if (cloudAssets.length > 0) {
+              syncAuditDetails = `Sincronização incremental de ${cloudAssets.length} ativos da nuvem para o local (delta).`;
+            }
+            return newState;
           }
 
           // MERGE: Preserva alterações locais que ainda não foram sincronizadas
@@ -2632,19 +2742,23 @@ useEffect(() => {
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
-          
-          // Log de Auditoria na Nuvem
-          if (mode === DatabaseMode.SUPABASE) {
-            logAuditEvent({
-              user_email: user?.email || 'unknown',
-              action: 'SYNC_PULL',
-              details: `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`,
-              tenantid: user?.tenantid || readSessionTenantId() || ''
-            });
+          if (cloudAssets.length > 0) {
+            syncAuditDetails = `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`;
           }
 
           return newState;
         });
+        // Grava o SYNC_PULL UMA única vez (fora do updater) e marca o dedup para
+        // os próximos callers da sessão pularem — fecha o ciclo do anti-loop.
+        if (syncAuditDetails && mode === DatabaseMode.SUPABASE) {
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'SYNC_PULL',
+            details: syncAuditDetails,
+            tenantid: user?.tenantid || readSessionTenantId() || ''
+          });
+        }
+        markPullCompleted(firstTenant, explicitUnitId);
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
         if (cloudData.assets && cloudData.assets.length > 0) {
@@ -2713,6 +2827,7 @@ useEffect(() => {
 
       setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
@@ -3112,9 +3227,14 @@ useEffect(() => {
           // ETAPA 2 (FLUXO_ACESSO_INICIAL): quando o perfil define UMA filial
           // (ex.: auditor de campo), o Boot Loader baixa SÓ essa filial em vez
           // do contrato inteiro — menos tráfego e dados sob demanda.
-          const bootFilial = resolveUnitFilter(user?.filial);
+          // ETAPA 5a (FLUXO_ACESSO_INICIAL): quando o perfil NÃO fixa filial
+          // (dono/admin com TODAS), usa a filial da ÚLTIMA ESCOLHA do usuário
+          // (app_last_work_context, Etapa 4) — a carga inicial baixa só a
+          // filial escolhida (ex.: 010201 SNACKS PA = 2.066) em vez do
+          // contrato inteiro (12.636). Muro SRE: só vale para o MESMO contrato.
+          const bootFilial = resolveBootUnitFilter(user?.filial, readLastWorkContext(), user?.tenantid);
           if (bootFilial) {
-            logger.info(`>>> [Boot Loader] Filial definida no perfil (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2).`);
+            logger.info(`>>> [Boot Loader] Filial definida (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2/5a).`);
           }
           const cloudData = await fetchFullInventory(
             user?.tenantid, 
@@ -3128,7 +3248,10 @@ useEffect(() => {
               } catch (e) {
                 logger.warn(">>> [onComplete Fast Path Error] Falha ao persistir a configuração:", e);
               }
-            }
+            },
+            // ETAPA 5b (FLUXO_ACESSO_INICIAL): o pull completo do boot grava o
+            // checkpoint de [tenant|filial] — o próximo login/sync vira delta.
+            { trackCheckpoint: true }
           );
           if (cloudData && cloudData.assets && cloudData.assets.length > 0) {
             logger.info(`>>> [Boot Loader] ${cloudData.assets.length} ativos baixados com sucesso. Salvando no banco de dados físico local...`);
@@ -3147,7 +3270,9 @@ useEffect(() => {
             }
             // ETAPA 1 (FLUXO_ACESSO_INICIAL): registra que o pull completo deste
             // contrato+filial já foi realizado — o sync do auto-login não vai repetir.
-            markPullCompleted(user?.tenantid, resolveUnitFilter(user?.filial));
+            // ETAPA 5a: marca o filtro EFETIVO (perfil ou última escolha) para o
+            // dedup casar exatamente com o que foi baixado.
+            markPullCompleted(user?.tenantid, bootFilial);
             const newState: InventoryState = {
               ...inventoryRef.current,
               ...cloudData.config,
@@ -3170,6 +3295,9 @@ useEffect(() => {
       } catch (e) { 
         logger.error("Data load failed", e); 
       } finally {
+        // ETAPA 5b (fix do timing): libera os syncs que aguardavam o boot
+        // terminar o loadInventory antes de decidir delta vs full.
+        baseLoadResolveRef.current?.();
         logger.info("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
         const checkCount = savedInventory?.assets?.length || 0;
@@ -3958,7 +4086,7 @@ useEffect(() => {
     const unitFilter = resolveUnitFilter(newFilial);
     const bootPulled = shouldSkipPull(
       wasPullCompleted(newTenant, unitFilter),
-      (inventoryRef.current?.assets?.length ?? 0) > 0
+      hasLocalBaseData(inventoryRef.current?.assets?.length ?? 0)
     );
     if (!bootPulled && databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
       syncFromCloud(newTenant, DatabaseMode.SUPABASE, unitFilter).catch(err => {
@@ -4117,10 +4245,12 @@ useEffect(() => {
             // contrato inteiro nesta sessão, o auto-login não repete o pull.
             // ETAPA 2 (FLUXO_ACESSO_INICIAL): o auto-login respeita o filtro de
             // filial do perfil (auditor de filial única baixa só a filial dela).
-            const unitFilter = resolveUnitFilter(resolvedUnitId);
+            // ETAPA 5a: perfil TODAS (dono/admin) → usa a filial da última
+            // escolha para não puxar o contrato inteiro de novo.
+            const unitFilter = resolveBootUnitFilter(resolvedUnitId, readLastWorkContext(), loggedUser.tenantid);
             const bootPulled = shouldSkipPull(
               wasPullCompleted(loggedUser.tenantid, unitFilter),
-              (inventoryRef.current?.assets?.length ?? 0) > 0
+              hasLocalBaseData(inventoryRef.current?.assets?.length ?? 0)
             );
             if (bootPulled) {
               logger.info(`>>> [Sync] Boot Loader já baixou ${String(loggedUser.tenantid || '')}/${String(unitFilter || 'GERAL')} nesta sessão. Pulando pull duplicado do auto-login (Etapa 1).`);
@@ -5590,6 +5720,10 @@ useEffect(() => {
         localStorage.setItem('app_excluded_accounts', '[]');
         sessionStorage.removeItem('isDatabaseLoaded');
         localStorage.removeItem('isDatabaseLoaded');
+        // ETAPA 5b: higienização total zera os checkpoints de delta — a base
+        // local ficou vazia e um pull incremental (updated_at > checkpoint)
+        // nunca poderia reconstruí-la.
+        clearAllSyncCheckpoints();
         setIsDatabaseLoaded(false);
         setInventory(prev => ({ 
           ...prev, 
@@ -5602,6 +5736,9 @@ useEffect(() => {
         setIsDataLoaded(false);
       } else {
         const normalizedSel = selectedUnit.toUpperCase().trim();
+        // ETAPA 5b: limpeza de UMA unidade também invalida o checkpoint daquela
+        // [tenant|filial] — a próxima sincronização da unidade refaz o pull.
+        clearSyncCheckpoint(syncCheckpointKey(user?.tenantid || readSessionTenantId(), normalizedSel));
         const remainingAssets = inventory.assets.filter(a => (a.filial || '').toUpperCase().trim() !== normalizedSel);
         
         setInventory(prev => ({
@@ -6428,10 +6565,12 @@ useEffect(() => {
                 // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
                 // Boot Loader para o mesmo contrato+filial, e o pull respeita o
                 // filtro de filial do perfil (dados sob demanda da filial).
-                const unitFilter = resolveUnitFilter(defaultUnit);
+                // ETAPA 5a: perfil TODAS (dono/admin) → usa a filial da última
+                // escolha (app_last_work_context) para puxar só a filial.
+                const unitFilter = resolveBootUnitFilter(defaultUnit, readLastWorkContext(), defaultTenant);
                 const bootPulled = shouldSkipPull(
                   wasPullCompleted(defaultTenant, unitFilter),
-                  (inventoryRef.current?.assets?.length ?? 0) > 0
+                  hasLocalBaseData(inventoryRef.current?.assets?.length ?? 0)
                 );
                 if (bootPulled) {
                   logger.info(`>>> [Sync] Pull já realizado nesta sessão para ${String(defaultTenant || '')}/${String(unitFilter || 'GERAL')}. Pulando sincronização silenciosa do login (Etapa 1).`);
@@ -6495,6 +6634,7 @@ useEffect(() => {
             mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem || false}
             onUpdateMandatoryPhotoOnNewItem={(val) => updateConfig({ mandatoryPhotoOnNewItem: val })}
             onSyncCloud={syncFromCloud}
+            onSyncAllCloud={() => syncFromCloud(user?.tenantid, DatabaseMode.SUPABASE, undefined, true)}
             isSyncing={isSyncing}
             lastSyncTime={lastSyncTime}
             syncError={syncError}

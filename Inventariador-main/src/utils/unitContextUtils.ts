@@ -58,6 +58,40 @@ export function resolveUnitFilter(filial?: string | null): string | undefined {
 }
 
 /**
+ * Etapa 5a (FLUXO_ACESSO_INICIAL) — resolve o filtro de unidade da CARGA
+ * INICIAL (Boot Loader / auto-login) quando o perfil não fixa uma filial real.
+ *
+ * Prioridade:
+ * 1. Filial real do perfil (auditor de campo) → resolveUnitFilter (Etapa 2).
+ * 2. Perfil TODAS/sem filial (dono/admin): usa a filial da ÚLTIMA ESCOLHA
+ *    (app_last_work_context, Etapa 4) quando ela pertence ao MESMO contrato
+ *    do usuário — a carga inicial baixa SÓ a filial escolhida (ex.: 010201
+ *    SNACKS PA = 2.066 em vez dos 12.636 do contrato inteiro).
+ * 3. Caso contrário → undefined (contrato inteiro, comportamento atual).
+ *
+ * Muro SRE preservado: filial de outro contrato jamais é usada; sentinelas
+ * (vazia/TODAS/NULL/UNDEFINED) caem no passo 3.
+ */
+export function resolveBootUnitFilter(
+  filial?: string | null,
+  lastCtx?: { tenantid?: string; filial?: string } | null,
+  tenantid?: string | null
+): string | undefined {
+  const profile = resolveUnitFilter(filial);
+  if (profile) return profile;
+
+  if (!lastCtx) return undefined;
+  const lastTenant = String(lastCtx.tenantid || '').trim().toUpperCase();
+  const lastFilial = String(lastCtx.filial || '').trim().toUpperCase();
+  if (!lastTenant || !lastFilial) return undefined;
+
+  const userTenant = String(tenantid || '').trim().toUpperCase();
+  if (userTenant && lastTenant !== userTenant) return undefined;
+
+  return resolveUnitFilter(lastFilial);
+}
+
+/**
  * Retorna o conjunto de nomes de filial que aparecem em MAIS DE UM tenant
  * (homônimos entre contratos) — esses devem exibir o badge do contrato na UI.
  */

@@ -4,7 +4,8 @@ import {
   splitUnitContextKey,
   matchTenantUnit,
   findHomonymUnits,
-  resolveUnitFilter
+  resolveUnitFilter,
+  resolveBootUnitFilter
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -24,6 +25,40 @@ describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Eta
     expect(resolveUnitFilter('todas')).toBeUndefined();
     expect(resolveUnitFilter('NULL')).toBeUndefined();
     expect(resolveUnitFilter('undefined')).toBeUndefined();
+  });
+});
+
+describe('resolveBootUnitFilter — carga inicial com última escolha (Etapa 5a)', () => {
+  const lastCtx = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA' };
+
+  it('filial real do perfil VENCE a última escolha (auditor mantém a própria filial)', () => {
+    expect(resolveBootUnitFilter('010301 FEIRA BOA BA', lastCtx, 'CICOPAL')).toBe('010301 FEIRA BOA BA');
+  });
+
+  it('perfil TODAS + última escolha do MESMO contrato → usa a filial escolhida', () => {
+    expect(resolveBootUnitFilter('TODAS', lastCtx, 'CICOPAL')).toBe('010201 SNACKS PA');
+  });
+
+  it('perfil TODAS + última escolha de OUTRO contrato → undefined (muro SRE: contrato inteiro)', () => {
+    expect(resolveBootUnitFilter('TODAS', lastCtx, 'CLIENTETESTE')).toBeUndefined();
+  });
+
+  it('perfil TODAS + sem última escolha → undefined (contrato inteiro, comportamento atual)', () => {
+    expect(resolveBootUnitFilter('TODAS', null, 'CICOPAL')).toBeUndefined();
+    expect(resolveBootUnitFilter('TODAS', undefined, 'CICOPAL')).toBeUndefined();
+  });
+
+  it('perfil TODAS + última escolha sem filial/sentinela → undefined', () => {
+    expect(resolveBootUnitFilter('TODAS', { tenantid: 'CICOPAL', filial: '' }, 'CICOPAL')).toBeUndefined();
+    expect(resolveBootUnitFilter('TODAS', { tenantid: 'CICOPAL', filial: 'TODAS' }, 'CICOPAL')).toBeUndefined();
+  });
+
+  it('normaliza caixa/trim do contrato e da filial da última escolha', () => {
+    expect(resolveBootUnitFilter('todas', { tenantid: '  cicopal ', filial: ' 010201 snacks pa ' }, 'CICOPAL')).toBe('010201 SNACKS PA');
+  });
+
+  it('sem contrato no usuário + última escolha → usa a última escolha (tolerância)', () => {
+    expect(resolveBootUnitFilter('TODAS', lastCtx, '')).toBe('010201 SNACKS PA');
   });
 });
 

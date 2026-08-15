@@ -7,6 +7,8 @@ import {
   groupLoadHistory,
   normalizeTenantLabel,
   formatLoadTimestamp,
+  parseAssetCountFromDetails,
+  isDeltaSyncEntry,
   LoadHistoryEntry,
   LoadHistorySummary,
 } from '../utils/loadHistoryUtils';
@@ -252,6 +254,21 @@ export const LoadHistoryScreen: React.FC<LoadHistoryScreenProps> = ({ onBack, te
                               <span className={`px-2 py-0.5 rounded-md border text-[8px] font-black uppercase tracking-widest shrink-0 ${meta.color}`}>
                                 {meta.label}
                               </span>
+                              {/* ETAPA 5b: marcador explícito do SYNC_PULL incremental (delta) */}
+                              {isDeltaSyncEntry(e) && (
+                                <span className="px-2 py-0.5 rounded-md border text-[8px] font-black uppercase tracking-widest shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                  DELTA (INCREMENTAL)
+                                </span>
+                              )}
+                              {/* Contagem real de ativos do evento (parse do details) */}
+                              {(() => {
+                                const count = parseAssetCountFromDetails(e.details);
+                                return count !== null ? (
+                                  <span className="px-2 py-0.5 rounded-md border text-[8px] font-black uppercase tracking-widest shrink-0 bg-slate-700/40 text-slate-300 border-slate-600/50">
+                                    {count.toLocaleString('pt-BR')} ATIVOS
+                                  </span>
+                                ) : null;
+                              })()}
                               <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300 truncate">
                                 {normalizeTenantLabel(e.tenantid)}
                               </span>

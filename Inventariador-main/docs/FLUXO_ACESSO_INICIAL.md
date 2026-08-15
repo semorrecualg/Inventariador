@@ -181,6 +181,66 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   010201 SNACKS PA/INVENTORY → reload → cai direto no hub (`#/menu`), sem seletor,
   sem nova carga; botão Trocar → seletor com as 5 filiais.*
 
+- **Etapa 5b:** ✅ **IMPLEMENTADA (2026-08-14)** — delta sync com checkpoint de
+  `updated_at` por `[tenantid+filial]`:
+  1. **`src/utils/syncCheckpoint.ts`** (novo): checkpoint persistido em
+     `gbr_sync_checkpoints` por chave `[tenantid|filial]` (mesmo formato do
+     dedup); `advanceSyncCheckpoint` é MONOTÔNICO (nunca retrocede);
+     `computeMaxUpdatedAt`; `resolveDeltaMode(checkpoint, forceFull)` →
+     `{since, incremental}`.
+  2. **`fetchFullInventory`** (`supabaseService.ts`): nova opção `since` →
+     adiciona `updated_at > since` na paginação (baixa SÓ o delta); nova opção
+     `trackCheckpoint` → grava/avança o checkpoint ao fim do pull.
+  3. **`syncFromCloud`** (`App.tsx`): quando há checkpoint E a base local tem
+     dados, baixa o delta e faz **UPSERT no inventário local** (nunca substitui
+     a base pelo delta — a contagem total é preservada, ex.: 12.636 após o
+     merge); o `SYNC_PULL` vira `Sincronização incremental de N ativos ...
+     (delta).` no audit_logs; 4º parâmetro `explicitForceFull` limpa o
+     checkpoint e refaz o pull completo.
+  4. **Botão "Sincronizar Tudo"** (`MainMenu.tsx`): forçar pull completo da
+     Nuvem (limpa o checkpoint da chave e refaz o espelhamento de entrada).
+  *Validação ao vivo no preview: com checkpoint `CICOPAL|` semeado (máx
+  updated_at 08-09T21:45:53), o sync do fluxo pós-login emitiu `updated_at=gt.`
+  em TODAS as chamadas e baixou 5.586 ativos (só os alterados desde o
+  checkpoint) em vez de 12.636; checkpoint avançou monotonicamente para
+  08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
+  incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
+
+- **Fix do timing do delta no boot (2026-08-14):** o auto-aplicar (Etapa 4)
+  disparava o sync ANTES de o boot terminar o `loadInventory` — com
+  `inventoryRef` ainda vazio, `hasLocalData=false` e o pull virava COMPLETO em
+  vez de delta (regressão da 5b). Correção em 3 camadas:
+  1. **`hasLocalBaseData`** (`src/utils/syncDedup.ts`): a base local tem dados
+     quando há inventário em memória OU a flag persistida `isDatabaseLoaded`
+     (sessão anterior; a higienização a remove);
+  2. **Espera do boot** (`App.tsx` `syncFromCloud`): quando a persistência diz
+     que há dados mas a base ainda carrega, aguarda um deferred resolvido no
+     `finally` do init (máx 12s) — a decisão delta/full opera sobre a base REAL;
+  3. **Guarda do merge incremental** (`prev.assets.length > 0`) + higienização
+     limpa os checkpoints (`clearAllSyncCheckpoints` na limpeza total;
+     `clearSyncCheckpoint` por unidade) para nunca rodar delta contra base vazia.
+  *Validação ao vivo: reload com sessão restaurada → log `Delta ativo para
+  CICOPAL| (checkpoint ...)` no auto-aplicar e **36 ativos** baixados (antes:
+  pull completo da filial, 7.061); merge preservou os 12.636; checkpoint
+  avançado. 348/348 testes (4 novos) · TSC limpo.*
+
+- **Etapa 5a:** ✅ **IMPLEMENTADA (2026-08-14)** — carga inicial com a filial da
+  última escolha para perfis TODAS (dono/admin). Novo helper
+  `resolveBootUnitFilter(filial, lastCtx, tenantid)` (`src/utils/unitContextUtils.ts`):
+  prioridade (1) filial REAL do perfil (auditor de campo, Etapa 2); (2) perfil
+  TODAS/sem filial → usa a filial de `app_last_work_context` (Etapa 4) quando ela
+  pertence ao MESMO contrato do usuário; (3) senão → contrato inteiro (comportamento
+  atual). Aplicado nos TRÊS pontos de carga inicial (`App.tsx`): Boot Loader,
+  `processSession` (auto-login) e `onLogin`; o `markPullCompleted` agora registra o
+  filtro EFETIVO para o dedup casar com o que foi baixado. Muro SRE preservado:
+  filial de outro contrato jamais é usada (retorna undefined → contrato inteiro).
+  *Validação ao vivo no preview (dono semorr, perfil TODAS, última escolha
+  CICOPAL/010101 CICOPAL GO): todos os GETs de ativos com `filial=eq.010101 CICOPAL
+  GO`, paginação parando em offset=7000 (7.061 ativos = 36 páginas) — zero chamadas
+  sem filtro; antes baixaria o contrato inteiro (12.636 = 64 páginas). Console:
+  `Processing 7061 assets` e campanhas com `Filtro Unidade: 010101 CICOPAL GO`.
+  328/328 testes (7 novos) · TSC limpo.*
+
 - **Fix do roteamento do boot (2026-08-14):** o `checkDatabaseEmptiness` rodava
   NO MEIO do sync do boot (base vazia momentânea, `isDataLoaded=false`) e, com o
   e-mail do usuário ainda não resolvido na janela do auto-aplicar (`isBypass` falso),
@@ -201,3 +261,47 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
 - Validação ao vivo no preview: contagem de chamadas de rede
   (`preview_logs` → contagem de `GET assets?offset=` deve cair de 64 para ~11 por sessão
   no caso de filial única).
+
+## 5. CORREÇÃO ANTI-LOOP DE SYNC_PULL (2026-08-14)
+
+**Sintoma (reportado):** o `Histórico de Cargas & Sincronizações` do CICOPAL registrou
+**99 eventos (97 SYNC_PULL) e 713.431 ativos movimentados** numa noite de testes — para
+uma base real de 12.636 ativos. O app ficou gravando SYNC_PULL no `audit_logs` da nuvem
+em loop.
+
+**Causas-raiz encontradas no código (`src/App.tsx`, `syncFromCloud`):**
+1. **Dedup só no Boot Loader** — `markPullCompleted` só era chamado quando a base estava
+   vazia. No login normal (base cheia), TODOS os entry points de sincronização
+   (`processSession`, `onLogin`, `CloudUpdatePending`, auto-aplicar da Etapa 4) puxavam e
+   gravavam um SYNC_PULL novo cada — várias entradas por sessão/login.
+2. **`logAuditEvent` DENTRO do updater `setInventory(prev => …)`** — side-effect em
+   updater é anti-padrão React (o updater pode ser invocado mais de uma vez): o mesmo
+   SYNC_PULL podia ser gravado 2× (por isso os pares "mesma contagem, mesmo minuto" no
+   histórico).
+3. **Pull no-op gravava evento** — sync que retornava 0 ativos (nada mudou / falha)
+   gravava "Sincronização de 0 ativos", poluindo o histórico.
+4. **Lock por state, não por ref** — `if (isSyncing) return` usava estado React
+   (assíncrono); chamadas do mesmo tick passavam as duas.
+
+**Correção aplicada (todas em `src/App.tsx`):**
+1. **Dedup centralizado no `syncFromCloud`** — antes do fetch, se `shouldSkipPull`
+   (`wasPullCompleted([tenant|filial])` + base local com dados) e NÃO for `Sincronizar
+   tudo` (`explicitForceFull`), loga "Pulando sincronização duplicada" e retorna. Agora
+   cobre os 4 entry points de uma vez. `markPullCompleted` passou a ser chamado também
+   ao fim do `syncFromCloud` bem-sucedido (não só no Boot Loader).
+2. **Auditoria única fora do updater** — `syncAuditDetails` é capturado dentro do
+   updater (para casar com o caminho incremental/full real) e o `logAuditEvent` roda UMA
+   vez, logo após o `setInventory`. Fim da duplicação por invocação de updater.
+3. **No-op não gera evento** — SYNC_PULL só é gravado quando o pull trouxe ativos
+   (`cloudAssets.length > 0`). Delta vazio / full de 0 não poluem o histórico.
+4. **Lock por ref** — `isSyncingRef` serializa chamadas concorrentes do mesmo tick
+   (setado no início, liberado no `finally`).
+
+**Validação ao vivo (preview):** reload completo com dedup recente → **ZERO `GET /assets`**
+e **ZERO `POST audit_logs`** no boot (antes: múltiplos pulls + múltiplos SYNC_PULL por
+boot); base local de 12.636 carregada do cache sem download. **352/352 testes ✓ · TSC
+limpo.**
+
+**Limpeza do histórico já poluído:** rodar no SQL Editor do Supabase o script de
+sanitização (apagar SYNC_PULL no-op/duplicados do CICOPAL, mantendo as 2 cargas de
+planilha e o pull mais recente por faixa) — ver instrução na conversa.

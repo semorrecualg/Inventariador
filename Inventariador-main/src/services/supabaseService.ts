@@ -11,6 +11,7 @@ import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../util
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
+import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -1611,6 +1612,17 @@ export interface FetchInventoryOptions {
    * Nunca habilitar no boot/sync automático — vazaria dados de outros contratos.
    */
   allowUnscoped?: boolean;
+  /**
+   * Etapa 5b (FLUXO_ACESSO_INICIAL) — delta sync: quando fornecido (ISO de um
+   * checkpoint), baixa APENAS os ativos com updated_at MAIOR que este valor.
+   * Ausente = pull completo (comportamento padrão).
+   */
+  since?: string;
+  /**
+   * Etapa 5b — grava/avança o checkpoint de [tenant|filial] com o updated_at
+   * máximo do pull ao final, para o próximo sync virar delta (monotônico).
+   */
+  trackCheckpoint?: boolean;
 }
 
 /**
@@ -1668,7 +1680,7 @@ export const fetchFullInventory = async (
     return inFlight;
   }
 
-  const promise = fetchFullInventoryImpl(resolvedTenantid, unitid, onProgress, onComplete);
+  const promise = fetchFullInventoryImpl(resolvedTenantid, unitid, onProgress, onComplete, options);
   pendingPulls.set(pullKey, promise);
   void promise
     .finally(() => {
@@ -1686,7 +1698,8 @@ const fetchFullInventoryImpl = async (
   resolvedTenantid: string | string[] | undefined,
   unitid?: string,
   onProgress?: (processed: number, total: number) => void,
-  onComplete?: (config: Partial<InventoryState>) => void
+  onComplete?: (config: Partial<InventoryState>) => void,
+  options?: FetchInventoryOptions
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase) return null;
 
@@ -1715,6 +1728,13 @@ const fetchFullInventoryImpl = async (
       if (unitid && unitid !== '' && unitid.toUpperCase() !== 'TODAS') {
         const cleanUnitId = unitid.toUpperCase().replace(/_/g, ' ').trim();
         q = q.eq('filial', cleanUnitId);
+      }
+
+      // ETAPA 5b (FLUXO_ACESSO_INICIAL): delta sync — quando `since` é
+      // fornecido (checkpoint do último pull), baixa apenas os ativos
+      // atualizados depois dele (updated_at > checkpoint).
+      if (options?.since) {
+        q = q.gt('updated_at', options.since);
       }
 
       const { data: pageData, error: assetsError } = await q;
@@ -1838,6 +1858,15 @@ const fetchFullInventoryImpl = async (
     if (onComplete) {
       logger.info(`>>> [Supabase] Invocando onComplete() de forma atômica no final da paginação.`);
       await onComplete(mappedConfig);
+    }
+
+    // ETAPA 5b: grava/avança o checkpoint de [tenant|filial] com o updated_at
+    // máximo do pull — o próximo sync passa a baixar só o delta. Apenas avança
+    // (monotônico) e usa a MESMA chave de dedup ([tenant|unidade] em UPPER).
+    if (options?.trackCheckpoint && assets.length > 0) {
+      const firstTenant = Array.isArray(resolvedTenantid) ? resolvedTenantid[0] : resolvedTenantid;
+      advanceSyncCheckpoint(pullDedupKey(firstTenant, unitid), computeMaxUpdatedAt(assets));
+      logger.info(`>>> [Supabase] Checkpoint ${pullDedupKey(firstTenant, unitid)} avançado (delta ativo para a próxima sincronização).`);
     }
 
     return {

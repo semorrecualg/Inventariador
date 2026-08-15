@@ -34,6 +34,16 @@ export const parseAssetCountFromDetails = (details?: string | null): number | nu
   return Number.isFinite(count) ? count : null;
 };
 
+/**
+ * Detecta um SYNC_PULL INCREMENTAL (delta) pelo details — o formato gravado
+ * pela Etapa 5b: "Sincronização incremental de N ativos da nuvem para o local
+ * (delta)." — e também o formato antigo "(delta)"/"incremental".
+ */
+export const isDeltaSyncEntry = (e: Pick<LoadHistoryEntry, 'details'>): boolean => {
+  if (!e.details) return false;
+  return /\(delta\)|incremental/i.test(e.details);
+};
+
 /** Normaliza o tenantid para exibição/agrupamento (vazio → SEM CONTRATO). */
 export const normalizeTenantLabel = (tenantid?: string | null): string => {
   const t = String(tenantid || '').trim();

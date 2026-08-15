@@ -90,3 +90,21 @@ export function wasPullCompleted(tenantid?: string | null, unitId?: string | nul
 export function shouldSkipPull(alreadyPulled: boolean, hasLocalData: boolean): boolean {
   return alreadyPulled && hasLocalData;
 }
+
+/**
+ * A base local TEM dados para o sync — em memória (inventory) OU persistidos
+ * de sessão anterior (`isDatabaseLoaded` no localStorage, que a higienização
+ * física remove).
+ *
+ * Sem este fallback, o auto-aplicar (Etapa 4 do FLUXO_ACESSO_INICIAL) que
+ * dispara ANTES de o boot terminar o loadInventory vê `hasLocalData=false` e
+ * refaz um pull COMPLETO em vez do delta (Etapa 5b) — o bug de timing do boot.
+ */
+export function hasLocalBaseData(inMemoryCount: number): boolean {
+  if (inMemoryCount > 0) return true;
+  try {
+    return localStorage.getItem('isDatabaseLoaded') === 'true';
+  } catch {
+    return false;
+  }
+}
