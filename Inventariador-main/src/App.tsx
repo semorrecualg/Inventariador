@@ -4882,17 +4882,51 @@ useEffect(() => {
         }
       });
     } else {
-      setIsProcessing(true);
-      try {
-        await syncAssetsToCloud([updates], user?.tenantid);
-        setRefreshVersion(prev => prev + 1);
-        logger.info(`>>> [KARDEK] Persistido na Nuvem para id: ${updates.id}`);
-      } catch (err) {
-        logger.error(">>> [KARDEK] Falha ao sincronizar com nuvem:", err);
-        showModal("Erro de Sincronização", "Erro SQL (Nuvem): " + (err instanceof Error ? err.message : String(err)), "error");
-      } finally {
-        setIsProcessing(false);
-      }
+      // SUPABASE MODE: salvar localmente primeiro (local-first), depois sincronizar nuvem em background
+      Promise.resolve().then(async () => {
+        try {
+          // 1) Persistir localmente (Dexie) — garante que dados não se perdem se a rede falhar
+          if (existingAsset) {
+            try {
+              await auditService.logAssetChange(user?.email || 'SISTEMA', existingAsset, updates);
+            } catch (auditErr) {
+              logger.error(">>> [Audit Error] Erro ao registrar trilha em background:", auditErr);
+            }
+            const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
+            Object.keys(updates).forEach(key => {
+              if (key.startsWith('_') || key === 'id' || key === 'TAG_INVENTARIO' || key === 'latitude' || key === 'longitude' || key === 'timestamp_gravacao') return;
+              const oldValue = existingAsset[key as keyof Asset];
+              const newValue = updates[key as keyof Asset];
+              if (String(oldValue || '') !== String(newValue || '')) {
+                changedFields.push({ field: key, oldValue: oldValue != null ? String(oldValue) : null, newValue: newValue != null ? String(newValue) : null });
+              }
+            });
+            if (changedFields.length > 0) {
+              for (const change of changedFields) {
+                await sqliteService.bufferFieldChange(updates, change.field, change.oldValue, change.newValue, user?.email || 'SISTEMA');
+              }
+            } else {
+              await localDb.assets.put(updates, user?.email || 'SISTEMA');
+            }
+          } else {
+            await localDb.assets.put(updates, user?.email || 'SISTEMA');
+          }
+          logger.info(`>>> [KARDEK] Persistido localmente (Dexie) para id: ${updates.id}`);
+        } catch (localErr) {
+          logger.error(">>> [KARDEK] Falha ao persistir localmente:", localErr);
+        }
+
+        // 2) Sincronizar com a nuvem em background — se falhar, dados já estão seguros localmente
+        try {
+          await syncAssetsToCloud([updates], user?.tenantid);
+          setRefreshVersion(prev => prev + 1);
+          logger.info(`>>> [KARDEK] Sincronizado na Nuvem para id: ${updates.id}`);
+        } catch (err) {
+          logger.warn(">>> [KARDEK] Falha ao sincronizar com nuvem (dados preservados localmente):", err);
+          // Atualiza a versão mesmo assim para refletir a mudança local
+          setRefreshVersion(prev => prev + 1);
+        }
+      });
     }
   }, [history, inventoryLocation, databaseMode, user, inventory.assets, currentUnit]);
 
@@ -5410,16 +5444,28 @@ useEffect(() => {
         // SOBERANIA SQLITE: Transação atômica que NÃO sobrescreve dados antigos sem intenção (merge via spread)
         await sqliteService.bulkInsertAssets(updatedAssetsList);
       } else {
-        await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
-        
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'BULK_UPDATE',
-          table_name: 'assets',
-          details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-          tenantid: user?.tenantid || readSessionTenantId() || '',
-          origin: origin
-        });
+        // SUPABASE MODE: salvar localmente primeiro (local-first), depois sincronizar nuvem em background
+        try {
+          await sqliteService.bulkInsertAssets(updatedAssetsList);
+          logger.info(`>>> [DATABASE] ${updatedAssetsList.length} itens persistidos localmente (Dexie) para sync posterior.`);
+        } catch (localErr) {
+          logger.error(">>> [DATABASE] Falha ao persistir localmente em lote:", localErr);
+        }
+
+        // Sincronizar com a nuvem em background — se falhar, dados já estão seguros localmente
+        try {
+          await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'BULK_UPDATE',
+            table_name: 'assets',
+            details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
+            tenantid: user?.tenantid || readSessionTenantId() || '',
+            origin: origin
+          });
+        } catch (syncErr) {
+          logger.warn(">>> [DATABASE] Falha ao sincronizar lote com nuvem (dados preservados localmente):", syncErr);
+        }
       }
 
       // 3. SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI

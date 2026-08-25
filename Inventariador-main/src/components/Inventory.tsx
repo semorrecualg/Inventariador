@@ -661,15 +661,9 @@ const Inventory: React.FC<InventoryProps> = ({
           subText: `Etiqueta: ${extractedEtiqueta} | Status: CONFERIDO`
         });
 
-        // Limpa committedSearch se autoConfirmOnScan estiver ativo para limpar input de busca
-        if (autoConfirmOnScanRef.current) {
-          setCommittedSearch('');
-          setDisplayValue('');
-        } else {
-          const statusUpper = String(foundAsset.status || '').toUpperCase();
-          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.databaixa);
-          setScannedAsset({ ...foundAsset, _conferido: true, status: 'CONFERIDO', _is_divergent_baixa: isGoldenRuleDivergent });
-        }
+        // SEMPRE auto-confirma ativos conhecidos — sem modal, agilidade total
+        setCommittedSearch('');
+        setDisplayValue('');
         return;
       }
 
@@ -1062,7 +1056,13 @@ const Inventory: React.FC<InventoryProps> = ({
         const descText = String(a.descricaodoativo || '').toUpperCase();
 
         if (etq === term || etq.includes(term) || descText.includes(searchUpper)) {
-            localMatches.push(a);
+            // Filtro por aba ATIVOS/CONFERIDOS — mesmo durante busca
+            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+            if (activeFilter === 'checked') {
+              if (isConferido) localMatches.push(a);
+            } else {
+              if (!isConferido) localMatches.push(a);
+            }
         }
     }
 
