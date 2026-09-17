@@ -882,7 +882,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const forcedTenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   logger.info(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantid || 'Global'}`);
   
-  const CHUNK_SIZE = 50; // Bloqueio em max 50 para evitar erro 400 (URL Too Long) na Nuvem
+  const CHUNK_SIZE = 500; // Lotes maiores: Supabase aceita ate 1000 rows/upsert. 500 otimiza latencia sem estourar payload.
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
   const failedRows: string[] = []; // Isolamento de registros rejeitados (diagnóstico por id)
@@ -1010,8 +1010,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       onProgress(Math.min(i + CHUNK_SIZE, total), total);
     }
 
-    // Delay visual para a esteira reativa
-    await new Promise(res => setTimeout(res, 40));
+    // Delay minimo para yield ao event loop (UI continua responsiva)
+    await new Promise(res => setTimeout(res, 10));
   }
 
   if (failedRows.length > 0) {

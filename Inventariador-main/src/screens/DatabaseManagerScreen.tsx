@@ -140,14 +140,39 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const [activeTenantid, setActiveTenantid] = useState<string>('');
 
   useEffect(() => {
-    try {
-      const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
-      if (userStr) {
-        const parsed = JSON.parse(userStr);
-        setIsAdmin(isAdminUser(parsed));
-        setActiveTenantid(String(parsed?.tenantid || '').trim().toUpperCase());
-      }
-    } catch { /* ignore */ }
+    const detectTenant = async () => {
+      try {
+        const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+        if (userStr) {
+          const parsed = JSON.parse(userStr);
+          setIsAdmin(isAdminUser(parsed));
+          const userTenant = String(parsed?.tenantid || '').trim().toUpperCase();
+          if (userTenant) {
+            setActiveTenantid(userTenant);
+            return;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Fallback: se o usuario nao tem tenantid, detecta a partir dos dados no Dexie
+      try {
+        const assets = await db.local_assets.toArray();
+        const tenantMap = new Map<string, number>();
+        for (const a of assets) {
+          const tid = String(a.tenantid || '').trim().toUpperCase();
+          if (tid && tid !== 'UNDEFINED' && tid !== 'NULL') {
+            tenantMap.set(tid, (tenantMap.get(tid) || 0) + 1);
+          }
+        }
+        if (tenantMap.size > 0) {
+          // Pega o tenant com mais ativos
+          const dominant = [...tenantMap.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          logger.info(`[DatabaseManager] Tenantid detectado dos dados locais: ${dominant} (${tenantMap.get(dominant)} ativos)`);
+          setActiveTenantid(dominant);
+        }
+      } catch { /* ignore */ }
+    };
+    detectTenant();
   }, []);
 
   const enviarBaseParaNuvem = async () => {
@@ -185,7 +210,22 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         )
       );
       addLog(`[SRE_CLOUD] Contratos detectados na base: ${tenantsDaBase.length ? tenantsDaBase.join(' | ') : '(nenhum — Global)'}`);
-      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes de 50 (Política SRE)...`);
+      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes otimizados...`);
+
+      // BACKUP ANTES DO UPLOAD: salva snapshot local para preservar dados
+      // mesmo que o espelhamento seja interrompido (sandbox reinicia, rede cai, etc.)
+      try {
+        addLog('[SRE_CLOUD] Preservando backup local ANTES do upload (governanca)...');
+        const snapshotSaved = await saveVirtualSnapshot(baseParaEspelhar);
+        if (snapshotSaved) {
+          addLog('[SRE_CLOUD] Backup local pre-upload salvo. Dados seguros offline.');
+        } else {
+          addLog('[SRE_CLOUD] Aviso: backup local pre-upload falhou. Continuando upload...');
+        }
+      } catch (snapPreErr) {
+        addLog('[SRE_CLOUD] Aviso: excecao ao salvar snapshot pre-upload (nao-bloqueante).');
+        logger.warn('[SRE_CLOUD] Snapshot pre-upload falhou:', snapPreErr);
+      }
 
       const syncedIds = await syncAssetsToCloud(
         baseParaEspelhar as unknown as Asset[],
@@ -198,6 +238,21 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
       setMirrorProgress(100);
       addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
+
+      // Backup de governanca: salva snapshot local apos espelhamento bem-sucedido.
+      // Garante que os dados sobrevivam a reinicializacao do sandbox (IndexedDB limpo).
+      try {
+        addLog('[SRE_CLOUD] Salvando backup local de governanca (virtual snapshot)...');
+        const snapshotSaved = await saveVirtualSnapshot(baseParaEspelhar);
+        if (snapshotSaved) {
+          addLog('[SRE_CLOUD] Backup local salvo com sucesso. Dados preservados offline.');
+        } else {
+          addLog('[SRE_CLOUD] Aviso: backup local falhou, mas nuvem esta sincronizada.');
+        }
+      } catch (snapErr) {
+        addLog('[SRE_CLOUD] Aviso: falha ao salvar snapshot local (nuvem OK).');
+        logger.warn('[SRE_CLOUD] Snapshot backup falhou:', snapErr);
+      }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
@@ -643,7 +698,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <div>
               <h3 className="text-xs font-black uppercase text-sky-200 tracking-wider">Espelhamento em Massa — Supabase</h3>
               <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide mt-1">
-                Sobe a base carregada para a tabela <b>assets</b> da Nuvem em lotes de 50, preservando o <b>tenantid de cada ativo</b> exatamente como veio da planilha (tenant 100% da base — zero valor fixo).
+                Sobe a base carregada para a tabela <b>assets</b> da Nuvem em lotes otimizados, preservando o <b>tenantid de cada ativo</b> exatamente como veio da planilha (tenant 100% da base — zero valor fixo).
               </p>
             </div>
           </div>

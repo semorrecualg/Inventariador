@@ -116,9 +116,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     let active = true;
     const fetchSqliteUnits = async () => {
       setLocalTotalAssets(null);
-      setStatsLoading(databaseMode === DatabaseMode.INTERNAL);
+      // Sempre tenta carregar do SQLite — em modo SUPABASE os dados podem ter sido
+      // carregados via DatabaseManagerScreen para Dexie, mas inventory.assets ainda vazio.
+      setStatsLoading(true);
       try {
-        if (databaseMode === DatabaseMode.INTERNAL) {
+        // Sempre tenta carregar do SQLite/Dexie como fonte de verdade local.
+        // Em modo SUPABASE, se o DatabaseManager carregou dados para Dexie,
+        // inventory.assets pode estar vazio mas os ativos existem no banco local.
+        {
           let tenantid: string | undefined;
           try {
             const storedUser = sessionStorage.getItem('app_current_user');
@@ -195,8 +200,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             setLocalTotalAssets(mapped.reduce((acc, m) => acc + m.total, 0));
             setStatsLoading(false);
           }
-        } else if (active) {
-          setStatsLoading(false);
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -393,17 +396,23 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return unitName && unitName.trim() !== '';
   });
 
-  // Se for DatabaseMode.INTERNAL, a fonte de dados das filiais e contagens é o sqliteService.getOperationalUnitsWithStats()
-  const displayUnitsList = databaseMode === DatabaseMode.INTERNAL
+  // Fonte de dados: sempre prioriza sqliteUnits (lido do Dexie) quando disponível.
+  // Em modo SUPABASE, se o DatabaseManager carregou dados para Dexie mas
+  // inventory.assets está vazio, sqliteUnits terá as filiais reais.
+  // Só cai para purifiedUnits (prop) quando sqliteUnits está vazio.
+  const displayUnitsList = sqliteUnits.length > 0
     ? sqliteUnits.map(su => {
         const propUnit = units.find(u => u.filial.toUpperCase().trim() === su.filial.toUpperCase().trim());
+        // Verifica ancora GPS via activeUnitConfigs (Dexie) quando prop nao tem dados
+        const gpsConfig = getUnitConfigForFilial(su.filial);
+        const hasGpsAnchor = !!(gpsConfig && gpsConfig.lat && gpsConfig.lng);
         return {
           filial: su.filial,
           tenantid: su.tenantid,
           hasData: su.total > 0,
           isDownloaded: propUnit?.isDownloaded ?? true,
           hasCampaign: propUnit?.hasCampaign ?? false,
-          hasGps: propUnit?.hasGps ?? false,
+          hasGps: propUnit?.hasGps ?? hasGpsAnchor,
           assetCount: su.total,
           checkedCount: su.checked
         };

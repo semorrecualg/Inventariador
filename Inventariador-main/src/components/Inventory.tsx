@@ -26,7 +26,6 @@ import { AssetListItem } from './AssetListItem';
 import { BufferIndicator } from './BufferIndicator';
 import { assetRepository } from '../services/assetRepository';
 
-import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
 import { 
   MapPin, 
@@ -49,7 +48,8 @@ import {
   Activity,
   WifiOff,
   ArrowLeft,
-  Target
+  Target,
+  Keyboard
 } from 'lucide-react';
 
 import { QRCodeSVG } from 'qrcode.react';
@@ -66,40 +66,6 @@ interface AssetCardProps {
   onToggleSelect: (id: string) => void;
   hasLocalPhoto?: boolean;
   onShowQr: (asset: Asset) => void;
-}
-
-const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
-  
-  return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-1.5 pb-3 grid grid-cols-3 gap-1 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.25rem]">
-      {keys.map((key) => (
-        <button
-          key={key}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (key === 'OK') onClose();
-            else if (key === '⌫') onDelete();
-            else onInput(key);
-          }}
-          className={`h-10 rounded-lg flex items-center justify-center text-base font-bold transition-all active:scale-90 ${
-            key === 'OK' ? 'bg-accent text-white shadow-md' : 
-            key === '⌫' ? 'bg-bg-main text-ink-muted' : 
-            'bg-white border border-border text-ink shadow-sm'
-          }`}
-        >
-          {key === 'OK' ? 'OK' : key}
-        </button>
-      ))}
-    </div>
-  );
-};
-
-// Satisfy ESLint unused check for NumericKeypad
-const isOfflineValidationEnabled = false;
-if (isOfflineValidationEnabled) {
-  const _keypadRef = <NumericKeypad onInput={() => {}} onDelete={() => {}} onClose={() => {}} />;
-  logger.info(_keypadRef);
 }
 
 const normalizeKeyFast = (s: string | null | undefined) => {
@@ -444,8 +410,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
-  const [showNumericKeypad, setShowNumericKeypad] = useState(false);
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
@@ -454,11 +418,9 @@ const Inventory: React.FC<InventoryProps> = ({
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
-  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
-  const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -545,7 +507,6 @@ const Inventory: React.FC<InventoryProps> = ({
     if (inventorySearchValue) {
       setDisplayValue(inventorySearchValue);
       setCommittedSearch(inventorySearchValue);
-      setIsSearchVisible(true);
       setIsScannerOpen(false);
       onUpdateSearchMode(InventorySearchMode.MANUAL);
       clearInventorySearchValue();
@@ -555,9 +516,9 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleScannerClose = useCallback(() => {
     setIsScannerOpen(false);
     onUpdateSearchMode(InventorySearchMode.MANUAL);
-    setIsSearchVisible(true);
     setTimeout(() => searchInputRef.current?.focus(), 100);
   }, [onUpdateSearchMode]);
+
 
   const handleTorchToggle = useCallback(() => {
     setTorch(prev => prev === 'on' ? 'off' : 'on');
@@ -567,11 +528,133 @@ const Inventory: React.FC<InventoryProps> = ({
     onUpdateScannerMode(m);
   }, [onUpdateScannerMode]);
 
+  const [isSearchFieldFocused, setIsSearchFieldFocused] = useState(false);
+
+  // LUPA: habilita o campo e chama o teclado (foco programático abre o teclado nativo no mobile)
+  const handleFocusSearch = useCallback(() => {
+    if (isPersistingScan || isScannerOpen) return;
+    resetActivity();
+    searchInputRef.current?.focus();
+    // Reforço de foco p/ WebViews lentas: segunda tentativa após o layout estabilizar
+    setTimeout(() => searchInputRef.current?.focus(), 120);
+  }, [isPersistingScan, isScannerOpen, resetActivity]);
+
   const handleScannerOpen = useCallback(() => {
     onUpdateSearchMode(InventorySearchMode.SCANNER);
-    setIsSearchVisible(false);
     setIsScannerOpen(true);
   }, [onUpdateSearchMode]);
+
+  // Modal de digitação manual a partir do scanner (consulta ANTES de decidir incluir)
+  const [manualCodeModal, setManualCodeModal] = useState(false);
+  const [manualCodeValue, setManualCodeValue] = useState('');
+
+  // Confirmação de ativo localizado (compartilhada entre leitura por câmera e digitação manual)
+  const confirmFoundAsset = useCallback(async (foundAsset: Asset, etiqueta: string) => {
+    // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
+    // Ativo localizado: update atômico usando o serviço de banco local
+    const id = String(foundAsset.id || foundAsset.primarykey);
+
+    await localDb.assets.update(id, {
+      _conferido: true,
+      status: 'CONFERIDO',
+      _is_synced: 0
+    }, user?.email || 'operador');
+
+    // Adiciona um log de auditoria de conferência
+    await localDb.auditLogs.add({
+      timestamp: new Date().toISOString(),
+      user: user?.email || 'operador',
+      action: 'CONFERENCIA',
+      table_name: 'local_assets',
+      record_id: String(id),
+      details: `Ativo conferido via scanner: ${etiqueta}`,
+      tenantid: user?.tenantid || ''
+    });
+
+    setIsHierarchyLoading(false);
+
+    // Se tiver o callback onUpdateAsset da prop, notificamos o React para atualizar o state global do app
+    const cleanAsset = cleanAndCapitalizeAsset({
+      ...foundAsset,
+      _conferido: true,
+      status: 'CONFERIDO',
+      _is_synced: 0,
+      _localMaster: selectedLocationRef.current || foundAsset.endereco
+    });
+    await onUpdateAssetRef.current(cleanAsset);
+
+    setSreNotification({
+      type: 'success',
+      message: 'Ativo Conferido com Sucesso',
+      subText: `Etiqueta: ${etiqueta} | Status: CONFERIDO`
+    });
+
+    // Limpa committedSearch se autoConfirmOnScan estiver ativo para limpar input de busca
+    if (autoConfirmOnScanRef.current) {
+      setCommittedSearch('');
+      setDisplayValue('');
+    } else {
+      const statusUpper = String(foundAsset.status || '').toUpperCase();
+      const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.databaixa);
+      setScannedAsset({ ...foundAsset, _conferido: true, status: 'CONFERIDO', _is_divergent_baixa: isGoldenRuleDivergent });
+    }
+  }, [user, cleanAndCapitalizeAsset]);
+
+  // Submissão do código digitado manualmente no scanner:
+  // LOCALIZOU → confirma como leitura; NÃO LOCALIZOU → informa e deixa o usuário decidir
+  const handleManualCodeSubmit = useCallback(async () => {
+    const raw = manualCodeValue.trim();
+    if (!raw || isPersistingScan) return;
+
+    const term = normalizeKey(raw);
+    setManualCodeModal(false);
+    setCommittedSearch(raw);
+    setDisplayValue(raw);
+
+    setIsPersistingScan(true);
+    setIsHierarchyLoading(true);
+    try {
+      const currentUnit = selectedUnitRef.current || '';
+      let foundAsset = await localDb.assets.scanAsset(term, currentUnit);
+      if (!foundAsset) {
+        foundAsset = (await assetRepository.findByEtiquetaInUnit(term, currentUnit)) ?? null;
+      }
+
+      if (foundAsset) {
+        await confirmFoundAsset(foundAsset, raw);
+        return;
+      }
+
+      // NÃO LOCALIZADO: registra divergência e abre o modal de decisão do usuário
+      await localDb.auditLogs.add({
+        timestamp: new Date().toISOString(),
+        user: user?.email || 'operador',
+        action: 'DIVERGENCIA',
+        table_name: 'local_assets',
+        record_id: raw,
+        details: `Ativo divergente isolado via digitação manual: ${raw}`,
+        tenantid: user?.tenantid || ''
+      });
+
+      setSreNotification({
+        type: 'warning',
+        message: 'Etiqueta Não Localizada',
+        subText: `A etiqueta ${raw} não existe na base desta unidade.`
+      });
+      setShowGlobalSearchResolution(raw);
+    } catch (err) {
+      logger.error(">>> [Inventory SRE] Erro na consulta manual:", err);
+      setSreNotification({
+        type: 'error',
+        message: 'Falha no Motor Dexie',
+        subText: `Ocorreu uma exceção física: ${err instanceof Error ? err.message : String(err)}`
+      });
+    } finally {
+      setIsHierarchyLoading(false);
+      setIsPersistingScan(false);
+      setManualCodeValue('');
+    }
+  }, [manualCodeValue, isPersistingScan, user, confirmFoundAsset]);
 
   const handleScan = useCallback(async (result: string) => {
     // Se estiver em cooldown térmico, bloqueado ou persistindo uma leitura anterior, ignora
@@ -622,54 +705,7 @@ const Inventory: React.FC<InventoryProps> = ({
       }
 
       if (foundAsset) {
-        // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
-        // Ativo localizado: update atômico usando o serviço de banco local
-        const id = String(foundAsset.id || foundAsset.primarykey);
-        
-        await localDb.assets.update(id, {
-          _conferido: true,
-          status: 'CONFERIDO',
-          _is_synced: 0
-        }, user?.email || 'operador');
-
-        // Adiciona um log de auditoria de conferência
-        await localDb.auditLogs.add({
-          timestamp: new Date().toISOString(),
-          user: user?.email || 'operador',
-          action: 'CONFERENCIA',
-          table_name: 'local_assets',
-          record_id: String(id),
-          details: `Ativo conferido via scanner: ${extractedEtiqueta}`,
-          tenantid: user?.tenantid || ''
-        });
-
-        setIsHierarchyLoading(false);
-
-        // Se tiver o callback onUpdateAsset da prop, notificamos o React para atualizar o state global do app
-        const cleanAsset = cleanAndCapitalizeAsset({
-          ...foundAsset,
-          _conferido: true,
-          status: 'CONFERIDO',
-          _is_synced: 0,
-          _localMaster: selectedLocationRef.current || foundAsset.endereco
-        });
-        await onUpdateAssetRef.current(cleanAsset);
-
-        setSreNotification({
-          type: 'success',
-          message: 'Ativo Conferido com Sucesso',
-          subText: `Etiqueta: ${extractedEtiqueta} | Status: CONFERIDO`
-        });
-
-        // Limpa committedSearch se autoConfirmOnScan estiver ativo para limpar input de busca
-        if (autoConfirmOnScanRef.current) {
-          setCommittedSearch('');
-          setDisplayValue('');
-        } else {
-          const statusUpper = String(foundAsset.status || '').toUpperCase();
-          const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!(foundAsset.databaixa);
-          setScannedAsset({ ...foundAsset, _conferido: true, status: 'CONFERIDO', _is_divergent_baixa: isGoldenRuleDivergent });
-        }
+        await confirmFoundAsset(foundAsset, extractedEtiqueta);
         return;
       }
 
@@ -899,49 +935,6 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const handleSmartOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsOCRProcessing(true);
-    try {
-      // Usar português e inglês padrão local referenciado no diretório de assets estático (/assets/ocr/) para suporte offline-first total
-      const worker = await createWorker('por+eng', 1, {
-        langPath: `${window.location.origin}/assets/ocr`,
-        workerPath: `${window.location.origin}/assets/ocr/tesseract-worker.min.js`,
-        corePath: `${window.location.origin}/assets/ocr/tesseract-core-wasm.js`
-      });
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
-
-      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
-      
-      // Tentar encontrar padrão de plaqueta (6 dígitos)
-      const plaquetaMatch = cleanedText.match(/\b\d{6}\b/);
-      
-      if (plaquetaMatch) {
-        const foundTag = plaquetaMatch[0];
-        setDisplayValue(foundTag);
-        setCommittedSearch(foundTag);
-        setIsSearchVisible(true);
-        setShowNumericKeypad(false);
-      } else {
-        // Se não achar plaqueta, tenta qualquer código alfanumérico relevante
-        const genericMatch = cleanedText.match(/\b[A-Z0-9]{4,}\b/);
-        if (genericMatch) {
-          setDisplayValue(genericMatch[0]);
-          setCommittedSearch(genericMatch[0]);
-          setIsSearchVisible(true);
-        }
-      }
-    } catch (err) {
-      logger.error('Erro no Smart OCR:', err);
-    } finally {
-      setIsOCRProcessing(false);
-      if (ocrInputRef.current) ocrInputRef.current.value = '';
-    }
-  };
-
   const handleReverseGeocoding = async () => {
     if (!navigator.geolocation) {
       alert('Geolocalização não suportada.');
@@ -976,10 +969,6 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const triggerSmartOCR = () => {
-    ocrInputRef.current?.click();
-  };
-
   const handleForceLocation = async () => {
     if (!selectedUnit) return;
     
@@ -992,14 +981,6 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (isSearchVisible) {
-      setShowNumericKeypad(true);
-    } else {
-      setShowNumericKeypad(false);
-    }
-  }, [isSearchVisible]);
-
   // locationStats removido pois não é mais utilizado na UI de telemetria
 
   const filteredAssets = useMemo(() => {
@@ -1011,6 +992,16 @@ const Inventory: React.FC<InventoryProps> = ({
     const term = normalizeKeyFast(committedSearch);
     const searchUpper = committedSearch.toUpperCase().trim();
 
+    // SOBERANIA DE ENDEREÇO FÍSICO: quando um endereço foi selecionado, lista SOMENTE
+    // os ativos pertencentes a ele (mesma normalização alfanumérica da navegação).
+    const locKey = normalizeKeyFast(selectedLocation);
+    const isGeralBucket = locKey === 'GERALNAOESPECIFICADO';
+    const matchesLocation = (asset: Asset): boolean => {
+      if (!locKey) return true; // sem endereço selecionado → sem filtro adicional
+      const assetLoc = normalizeKeyFast(asset._localMaster || asset.endereco || '');
+      return isGeralBucket ? assetLoc === '' : assetLoc === locKey;
+    };
+
     if (!term) {
       const result = [];
       for (let i = 0; i < assets.length; i++) {
@@ -1019,6 +1010,9 @@ const Inventory: React.FC<InventoryProps> = ({
         // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
         const assetFilial = (a.filial || '').trim().toUpperCase();
         if (assetFilial !== activeFilial) continue;
+
+        // Filtro estrito de endereço físico selecionado
+        if (!matchesLocation(a)) continue;
 
         const statusUpper = String(a.status || '').toUpperCase();
         const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
@@ -1057,6 +1051,9 @@ const Inventory: React.FC<InventoryProps> = ({
         // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
         const assetFilial = (a.filial || '').trim().toUpperCase();
         if (assetFilial !== activeFilial) continue;
+
+        // Filtro estrito de endereço físico selecionado (também na busca)
+        if (!matchesLocation(a)) continue;
 
         const etq = normalizeKeyFast(a.etiqueta || '');
         const descText = String(a.descricaodoativo || '').toUpperCase();
@@ -1144,7 +1141,6 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
-    setShowNumericKeypad(false);
     const etq = normalizeKey(asset.etiqueta || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
@@ -1241,25 +1237,6 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsManualEntryOpen(true);
   };
 
-  // Satisfy ESLint unused checks
-  if (isOfflineValidationEnabled) {
-    logger.info({
-      showNumericKeypad,
-      setShowNumericKeypad,
-      showScrollTop,
-      onOpenSignature,
-      handleRangeChanged,
-      handleScannerClose,
-      handleTorchToggle,
-      handleUpdateScannerModeLocal,
-      handleSmartOCR,
-      isSearchResultBatch,
-      handleConfirmSearchBatch,
-      handleBatchConfirm,
-      handleCreateNew
-    });
-  }
-
   const handleVoiceTyping = (field: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1354,6 +1331,64 @@ const Inventory: React.FC<InventoryProps> = ({
       searchInputRef.current?.blur();
     }
   }, [filteredAssets, committedSearch]);
+
+  // TRILHA DE NÃO LOCALIZADO PARA DIGITAÇÃO (mesma do scanner):
+  // termo digitado sem resultado local → consulta a unidade inteira → se não existir,
+  // informa o usuário e abre a decisão (buscar em outras unidades / incluir novo / voltar)
+  const processedSearchTermsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const term = normalizeKey(committedSearch);
+    if (!term) {
+      processedSearchTermsRef.current.clear();
+      return;
+    }
+    if (isScannerOpen || isPersistingScan || isHierarchyLoading || isBatchMode) return;
+    if (showGlobalSearchResolution || manualCodeModal) return;
+    if (filteredAssets.length > 0) return; // resultado local existe → fluxo normal de busca
+    if (processedSearchTermsRef.current.has(term)) return;
+    processedSearchTermsRef.current.add(term);
+
+    let active = true;
+    const consultTypedTerm = async () => {
+      try {
+        const currentUnit = selectedUnitRef.current || '';
+        let found = await localDb.assets.scanAsset(term, currentUnit);
+        if (!found) {
+          found = (await assetRepository.findByEtiquetaInUnit(term, currentUnit)) ?? null;
+        }
+        if (!active) return;
+
+        if (found) {
+          // Existe na unidade (outro endereço ou status) → não é divergência
+          return;
+        }
+
+        // NÃO EXISTE: registra divergência e abre a trilha de decisão (igual ao scanner)
+        await localDb.auditLogs.add({
+          timestamp: new Date().toISOString(),
+          user: user?.email || 'operador',
+          action: 'DIVERGENCIA',
+          table_name: 'local_assets',
+          record_id: committedSearch.trim(),
+          details: `Ativo divergente isolado via digitação na busca: ${committedSearch.trim()}`,
+          tenantid: user?.tenantid || ''
+        });
+
+        setSreNotification({
+          type: 'warning',
+          message: 'Etiqueta Não Localizada',
+          subText: `A etiqueta ${committedSearch.trim()} não existe na base desta unidade.`
+        });
+        setShowGlobalSearchResolution(committedSearch.trim());
+      } catch (err) {
+        logger.error(">>> [Inventory SRE] Erro na consulta de termo digitado:", err);
+      }
+    };
+
+    consultTypedTerm();
+    return () => { active = false; };
+  }, [committedSearch, filteredAssets.length, isScannerOpen, isPersistingScan, isHierarchyLoading, isBatchMode, showGlobalSearchResolution, manualCodeModal, user]);
 
   // Helper para renderizar os modais de confirmação/erro de leitura
   const renderConfirmationModals = () => {
@@ -1924,19 +1959,6 @@ const Inventory: React.FC<InventoryProps> = ({
             </button>
           )}
 
-          <button 
-            onClick={onOpenConsultation}
-            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
-          >
-            <Database size={20} />
-          </button>
-
-          <button 
-            onClick={handleScannerOpen} 
-            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
-          >
-            <Camera size={20} />
-          </button>
         </div>
       </div>
 
@@ -1990,26 +2012,37 @@ const Inventory: React.FC<InventoryProps> = ({
 
             {/* Search Bar */}
             <div className="relative">
-              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                <Search size={16} className="text-[#94A3B8]" />
-              </div>
+              <button
+                type="button"
+                onClick={handleFocusSearch}
+                className={`absolute inset-y-0 left-1 flex items-center justify-center w-11 rounded-l-2xl transition-all ${isSearchFieldFocused ? 'text-accent' : 'text-[#94A3B8] hover:text-accent'} active:scale-90`}
+                title="Digitar patrimônio"
+              >
+                <Search size={18} />
+              </button>
               <input 
                 ref={searchInputRef} 
-                type="text" 
-                readOnly
-                inputMode="none"
+                type="text"
+                inputMode="text"
+                enterKeyHint="search"
+                autoCapitalize="characters"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 disabled={isPersistingScan}
-                onClick={() => !isPersistingScan && setShowNumericKeypad(true)}
+                onFocus={() => { setIsSearchFieldFocused(true); resetActivity(); }}
+                onBlur={() => setIsSearchFieldFocused(false)}
+                onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
                 value={displayValue} 
-                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" 
-                placeholder={isPersistingScan ? "GRAVANDO LEITURA..." : "ESCANEIE OU DIGITE..."} 
+                className={`w-full bg-[#F8FAFC] border pl-14 pr-14 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed ${isSearchFieldFocused ? 'border-accent shadow-sm' : 'border-[#F1F5F9]'}`}
+                placeholder={isPersistingScan ? "GRAVANDO LEITURA..." : "DIGITE OU ESCANEIE..."} 
               />
               <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
                 <button 
                   disabled={isPersistingScan}
-                  onClick={triggerSmartOCR}
-                  className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Busca por Foto (OCR)"
+                  onClick={handleScannerOpen}
+                  className={`p-2 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed ${searchMode === InventorySearchMode.SCANNER && isScannerOpen ? 'bg-accent text-white shadow-md' : 'text-[#64748B] hover:bg-white'}`}
+                  title="Escanear Código de Barras / QR Code"
                 >
                   <Camera size={20} />
                 </button>
@@ -2072,8 +2105,60 @@ const Inventory: React.FC<InventoryProps> = ({
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 
+
+      {/* Modal: digitar código manualmente a partir do scanner */}
+      {manualCodeModal && createPortal(
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center p-6 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden animate-scaleIn">
+            <div className="bg-slate-900 p-8 text-white text-center">
+              <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/20">
+                <Keyboard size={28} className="text-white" />
+              </div>
+              <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none">Digitar Código</h3>
+              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest mt-2">
+                Consulta antes de qualquer inclusão
+              </p>
+            </div>
+            <div className="p-8 space-y-5">
+              <div>
+                <label className="text-[8px] font-black text-ink-muted uppercase tracking-[0.2em] mb-2 block">Etiqueta / Patrimônio</label>
+                <input
+                  type="text"
+                  autoFocus
+                  inputMode="text"
+                  enterKeyHint="search"
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={manualCodeValue}
+                  onChange={(e) => setManualCodeValue(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleManualCodeSubmit(); }}
+                  className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-4 text-ink font-black font-mono text-xl text-center outline-none focus:border-accent transition-all"
+                  placeholder="000000"
+                />
+              </div>
+              <button
+                onClick={handleManualCodeSubmit}
+                disabled={!manualCodeValue.trim() || isPersistingScan}
+                className="w-full py-4 bg-accent disabled:bg-ink-muted/20 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+              >
+                {isPersistingScan ? 'CONSULTANDO...' : 'Consultar Etiqueta'}
+              </button>
+              <button
+                onClick={() => { setManualCodeModal(false); setManualCodeValue(''); }}
+                className="w-full py-3 text-slate-400 font-black uppercase text-[10px] tracking-[0.2em] hover:text-slate-600 transition-colors"
+              >
+                Voltar à Leitura
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* Scanner Full-Screen */}
-      {isScannerOpen && searchMode !== 'SCANNER' && (
+      {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
@@ -2081,7 +2166,6 @@ const Inventory: React.FC<InventoryProps> = ({
           onClose={() => {
             setIsScannerOpen(false);
             onUpdateSearchMode(InventorySearchMode.MANUAL);
-            setIsSearchVisible(true);
             setTimeout(() => searchInputRef.current?.focus(), 100);
           }}
           isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
@@ -2090,20 +2174,9 @@ const Inventory: React.FC<InventoryProps> = ({
           torch={torch}
           onTorchToggle={() => setTorch(torch === 'on' ? 'off' : 'on')}
           onManualInput={() => {
-            setIsScannerOpen(false);
-            setManualAsset({
-              etiqueta: "",
-              filial: selectedUnit || "",
-              status: "ATIVO",
-              dataaqusic: new Date().toLocaleDateString('pt-BR'),
-              AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
-              TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-              qt: 1,
-              descricaodoativo: '',
-              serial: '',
-              endereco: selectedLocation || ""
-            });
-            setIsManualEntryOpen(true);
+            // Mantém o scanner vivo (pausa) e abre a consulta por digitação.
+            // A decisão de incluir novo ativo só acontece DEPOIS da consulta.
+            setManualCodeModal(true);
           }}
         >
           {isThermalBlocked && (
@@ -2147,18 +2220,6 @@ const Inventory: React.FC<InventoryProps> = ({
       {renderConfirmationModals()}
 
       {renderHierarchyResolutionModals()}
-
-      {isOCRProcessing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
-          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
-            <Loader2 size={40} className="text-accent animate-spin" />
-          </div>
-          <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Analisando Imagem</h3>
-          <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
-            Identificando etiquetas e códigos...
-          </p>
-        </div>
-      )}
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (

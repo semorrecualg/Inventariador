@@ -56,12 +56,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [newCampaignDesc, setNewCampaignDesc] = useState('');
   const [newCampaignUnit, setNewCampaignUnit] = useState<string>(initialUnit || '');
 
-  // Sincroniza unidade inicial quando o prop muda (ex: após refresh)
+  // Sincroniza unidade inicial quando o prop muda (ex: após refresh ou troca de filial)
   React.useEffect(() => {
-    if (initialUnit && !newCampaignUnit) {
+    if (initialUnit) {
       setNewCampaignUnit(initialUnit);
     }
-  }, [initialUnit, newCampaignUnit]);
+  }, [initialUnit]);
 
   const [selectedCampaign, setSelectedCampaign] = useState<InventoryCampaign | null>(null);
   const [stats, setStats] = useState<{total: number, inventoried: number, divergences: number} | null>(null);
@@ -69,6 +69,40 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+
+  // Soberania: resolvedTenantid detecta o tenant de forma reativa.
+  // Prioridade: propsTenantid > user.tenantid > deteccao via Dexie (fallback).
+  const [resolvedTenantid, setResolvedTenantid] = useState<string>(() => {
+    const fromProps = (propsTenantid || '').trim();
+    if (fromProps && fromProps !== 'N/A') return fromProps;
+    const fromUser = (user?.tenantid || '').trim();
+    if (fromUser && fromUser !== 'N/A') return fromUser;
+    return '';
+  });
+
+  React.useEffect(() => {
+    if (resolvedTenantid) return;
+    // Fallback: detecta tenant a partir dos dados locais no Dexie
+    const detectTenant = async () => {
+      try {
+        const { db } = await import('../services/sqliteService');
+        const assets = await db.local_assets.toArray();
+        const tenantMap = new Map<string, number>();
+        for (const a of assets) {
+          const tid = String(a.tenantid || '').trim().toUpperCase();
+          if (tid && tid !== 'UNDEFINED' && tid !== 'NULL') {
+            tenantMap.set(tid, (tenantMap.get(tid) || 0) + 1);
+          }
+        }
+        if (tenantMap.size > 0) {
+          const dominant = [...tenantMap.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          logger.info(`[CampaignManager] Tenantid detectado dos dados locais: ${dominant}`);
+          setResolvedTenantid(dominant);
+        }
+      } catch { /* ignore */ }
+    };
+    detectTenant();
+  }, [resolvedTenantid]);
   const [isBatteryAlertOpen, setIsBatteryAlertOpen] = useState(false);
 
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
@@ -94,7 +128,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const fetchLocalCampaignsOnScreen = React.useCallback(async () => {
     setIsRefreshing(true);
     try {
-      let currentTenant = (propsTenantid || user?.tenantid || '').trim();
+      let currentTenant = (resolvedTenantid || propsTenantid || user?.tenantid || '').trim();
       // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
       // tenant real da base é honrado literalmente (nenhum valor fixo).
       if (['NULL', 'UNDEFINED'].includes(currentTenant.trim().toUpperCase())) currentTenant = '';
@@ -195,7 +229,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return;
     }
     
-    let tenantid = (propsTenantid || user?.tenantid || '').trim();
+    let tenantid = (resolvedTenantid || propsTenantid || user?.tenantid || '').trim();
     // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
     // tenant real da base é honrado literalmente (nenhum valor fixo).
     if (['NULL', 'UNDEFINED'].includes(tenantid.trim().toUpperCase())) tenantid = '';
@@ -248,7 +282,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   };
 
   // ATIVAÇÃO OPERACIONAL E SEGURA DO BOTÃO "EXCLUIR CAMPANHA" (Hardware check e SQL)
-  const executeDeleteCampaign = async (campaignId: string) => {
+  const executeDeleteCampaign = async (campaignId: string | null) => {
+    if (!campaignId) return;
+    if (isSaving) return; // Evita duplo-clique
+
     // 4. RESTRANCA DE HARDWARE DE DISCO (Core v2.6):
     let isLowBattery = false;
     try {
@@ -339,6 +376,19 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
         if (onRefresh) await onRefresh();
         await fetchLocalCampaignsOnScreen();
         
+        // SRE: Garantia de persistência no cache do navegador quando status = ACTIVE.
+        // Mesmo que o refresh do App.tsx falhe (rede, tenant vazio), o botão da
+        // Unidade Operacional permanece visualmente ativo graças a esta escrita.
+        if (status === CampaignStatus.ACTIVE) {
+          const campaign = localCampaigns.find(c => c.id === id);
+          const uId = campaign?.filial || campaign?.unit_id || campaign?._unitid || '';
+          if (uId) {
+            const { normalizeKey } = await import('../utils/schema');
+            const norm = normalizeKey(uId);
+            localStorage.setItem(`kardek_campanha_ativa_${norm}`, 'true');
+          }
+        }
+
         logger.info('>>> [Database] Operação confirmada. Atualizando interface...');
         setSuccessMessage('Operação confirmada no banco');
         setTimeout(() => setSuccessMessage(null), 3000);
@@ -768,9 +818,16 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                       className="w-full px-5 py-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 appearance-none transition-all uppercase"
                     >
                       <option value="">Todas as Unidades</option>
-                      {availableUnits.map(unit => (
-                        <option key={unit} value={unit}>{unit}</option>
-                      ))}
+                      {(() => {
+                        // Garante que a unidade selecionada apareca no dropdown
+                        // mesmo que availableUnits esteja vazio (ex: modo SUPABASE)
+                        const unitsSet = new Set(availableUnits);
+                        const extraUnit = initialUnit && !unitsSet.has(initialUnit) ? initialUnit : null;
+                        const allUnits = extraUnit ? [extraUnit, ...availableUnits] : availableUnits;
+                        return allUnits.map(unit => (
+                          <option key={unit} value={unit}>{unit}</option>
+                        ));
+                      })()}
                     </select>
                     <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-slate-500">
                       <ChevronDown size={16} />
@@ -790,7 +847,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   {isSaving ? (
                     <Loader2 className="animate-spin" size={16} />
                   ) : (
-                    <span className="text-white font-black">Gravar Campanha (Disco Físico)</span>
+                    <span className="text-white font-black">Gravar Campanha</span>
                   )}
                 </button>
               </div>

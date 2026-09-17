@@ -357,13 +357,20 @@ export const localDb = {
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
-      const cleanSearch = searchTerm.toLowerCase().trim();
-      
+      // Busca por inclusão (contains), case-insensitive e sem acento, para localizar
+      // termos em qualquer parte do endereço (ex.: "CONTABILI" em "... SL CONTABILIDADE").
+      const normalizeTerm = (s: unknown) =>
+        String(s || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+      const cleanSearch = normalizeTerm(searchTerm).trim();
+
       const query = db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]);
       let addrList = await query.toArray();
 
       if (cleanSearch !== '') {
-        addrList = addrList.filter(a => String(a.codigo_endereco || '').toLowerCase().startsWith(cleanSearch));
+        addrList = addrList.filter(a => normalizeTerm(a.codigo_endereco).includes(cleanSearch));
       }
       
       // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente da tabela de trabalho
@@ -376,7 +383,7 @@ export const localDb = {
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
           const addrStr = String(a.endereco || '').trim();
-          if (addrStr && (cleanSearch === '' || addrStr.toUpperCase().startsWith(cleanSearch))) {
+          if (addrStr && (cleanSearch === '' || normalizeTerm(addrStr).includes(cleanSearch))) {
             const key = addrStr.toUpperCase();
             if (!extractedAddrs.has(key)) {
               extractedAddrs.set(key, {
@@ -474,7 +481,9 @@ export const localDb = {
     },
 
     removeCampaignFromAssets: async (campaignId: string): Promise<void> => {
-      const allAtivos = await db.ativos.where('currentCampaignId').equals(campaignId).toArray();
+      // Usa .filter() em vez de .where() porque currentCampaignId nao e indice Dexie.
+      const allAtivos = await db.ativos.filter(a => a.currentCampaignId === campaignId).toArray();
+      if (allAtivos.length === 0) return;
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         for (const asset of allAtivos) {
           asset.currentCampaignId = null;
@@ -576,6 +585,9 @@ export const localDb = {
         id: String(cfg.id || cfg.filial || ''),
         filial: String(cfg.filial || ''),
         nome: String(cfg.nome || cfg.filial || ''),
+        lat: Number(cfg.lat) || 0,
+        lng: Number(cfg.lng) || 0,
+        radius_meters: Number(cfg.radius_meters) || 0,
         hasGps: cfg.hasGps ? 1 : 0,
         requireNf: cfg.requireNf ? 1 : 0,
         requireSeriado: cfg.requireSeriado ? 1 : 0,
@@ -591,9 +603,9 @@ export const localDb = {
         id: row.id,
         tenantid: getCurrentTenantid(),
         unit_id: row.filial,
-        lat: 0,
-        lng: 0,
-        radius_meters: 0,
+        lat: Number((row as unknown as Record<string, unknown>).lat) || 0,
+        lng: Number((row as unknown as Record<string, unknown>).lng) || 0,
+        radius_meters: Number((row as unknown as Record<string, unknown>).radius_meters) || 0,
         is_active: true,
         filial: row.filial,
         nome: row.nome,

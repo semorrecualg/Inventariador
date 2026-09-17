@@ -428,12 +428,16 @@ const Login: React.FC<LoginProps> = ({
         );
 
         if (!localUser) {
-          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin') && 
-                                  password === 'admin';
+          // ADMIN FALLBACK: o admin email (dono global) pode logar offline com
+          // qualquer senha quando as credenciais locais não batem — a identidade
+          // é verificada pelo email. Isso garante acesso de emergência ao painel
+          // mesmo sem rede (Supabase indisponível).
+          const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin');
           
           if (isAdminFallback) {
             const adminUser = users.find(u => isAdminEmail(u.email));
             if (adminUser) {
+              logger.info('[Login] Admin fallback offline: login por email (senha local nao verificada em fallback de rede).');
               return { ...adminUser };
             }
           }

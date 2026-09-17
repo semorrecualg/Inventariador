@@ -303,6 +303,22 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
             });
           }
 
+          // Click no mapa para posicionar/ajustar o marker (POI)
+          map.on('click', (e: maplibregl.MapMouseEvent) => {
+            const coords = e.lngLat;
+            if (!coords) return;
+            const newLng = Number(coords.lng);
+            const newLat = Number(coords.lat);
+            if (isNaN(newLat) || isNaN(newLng)) return;
+
+            // Atualiza marker
+            if (markerRef.current) {
+              markerRef.current.setLngLat([newLng, newLat]);
+            }
+            // Atualiza estado (coordenadas + geocerca)
+            setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
+          });
+
           mapInstance.current = map;
           setMapReady(true);
           setMapFailed(false);
@@ -362,11 +378,26 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // FIX(CRITICO): em MapLibre, Marker.addTo(map) chama _update() sincronamente e le
     // this._lngLat.lng. Se setLngLat nao for chamado ANTES do addTo, _lngLat e undefined e
     // o motor estoura 'Cannot read properties of undefined (reading lng)' -> ErrorBoundary.
+    // O marker e draggable para permitir ao usuario arrastar e ajustar a posicao exata.
     try {
       if (!markerRef.current) {
-        markerRef.current = new maplibregl.Marker({ color: '#ef4444' })
+        markerRef.current = new maplibregl.Marker({
+          color: '#ef4444',
+          draggable: true
+        })
           .setLngLat([safeLng, safeLat])
           .addTo(map);
+
+        // Ao soltar o marker arrastado, atualiza as coordenadas no estado
+        markerRef.current.on('dragend', () => {
+          if (!markerRef.current) return;
+          const pos = markerRef.current.getLngLat();
+          const newLng = Number(pos.lng);
+          const newLat = Number(pos.lat);
+          if (!isNaN(newLat) && !isNaN(newLng)) {
+            setCurrentConfig(prev => ({ ...prev, lat: newLat, lng: newLng }));
+          }
+        });
       } else {
         markerRef.current.setLngLat([safeLng, safeLat]);
       }

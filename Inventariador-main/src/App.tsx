@@ -112,7 +112,7 @@ import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } 
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 
-import { requestPersistentStorage, localDb } from './services/localDbService';
+import { requestPersistentStorage, localDb, readVirtualSnapshot } from './services/localDbService';
 import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
@@ -592,6 +592,37 @@ useEffect(() => {
               logger.info("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
             } else {
               logger.info("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
+            }
+          }
+
+          // 3. Fallback Virtual Snapshot (localStorage/IndexedDB): restaura dados
+          //    espelhados pelo Supabase que foram salvos como backup local.
+          if (await db.local_assets.count() === 0) {
+            try {
+              const virtualData = await readVirtualSnapshot();
+              if (virtualData && virtualData.length > 0) {
+                logger.info(`[SRE_BOOT] Restaurando ${virtualData.length} ativos do virtual snapshot (backup de governança)...`);
+                await db.transaction('rw', [db.local_assets, db.ativos], async () => {
+                  const dexieRows = virtualData.map(row => ({
+                    primarykey: String(row.primarykey || row.id || ''),
+                    id: String(row.primarykey || row.id || ''),
+                    tenantid: String(row.tenantid || '').trim().toUpperCase(),
+                    filial: String(row.filial || row._unitid || '').trim().toUpperCase(),
+                    etiqueta: String(row.etiqueta || '').trim(),
+                    descricaodoativo: String(row.descricaodoativo || '').trim(),
+                    serial: String(row.serial || '').trim(),
+                    status: String(row.status || 'PENDENTE').trim().toUpperCase(),
+                    _conferido: 0,
+                    _is_synced: 1,
+                    _is_deleted: 0
+                  } as DexieAsset));
+                  await db.local_assets.bulkPut(dexieRows);
+                  await db.ativos.bulkPut(dexieRows);
+                });
+                logger.info('[SRE_BOOT] Restauração via virtual snapshot concluída com sucesso.');
+              }
+            } catch (snapErr) {
+              logger.warn('[SRE_BOOT] Falha ao restaurar virtual snapshot:', snapErr);
             }
           }
         }
@@ -5911,7 +5942,7 @@ useEffect(() => {
     campaigns.forEach(c => {
       // REGRA DE GOVERNANÇA: Apenas campanhas com status exatamente igual a 'ACTIVE' habilitam o botão visual
       if (String(c.status) === 'ACTIVE') {
-        const uId = c._unitid || c.unit_id;
+        const uId = c.filial || c._unitid || c.unit_id;
         if (uId) {
           const norm = normalizeKey(uId);
           unitsWithDirectCampaign.add(norm);
@@ -6561,6 +6592,7 @@ useEffect(() => {
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantid', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
+
               if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
                 // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
                 // Boot Loader para o mesmo contrato+filial, e o pull respeita o
@@ -6582,6 +6614,7 @@ useEffect(() => {
                 }
               } else if (multiContextLogin) {
                 logger.info(">>> [SRE_NAV] Login multi-contrato: sync adiado até a escolha do contrato/filial no seletor.");
+
               }
               try {
                 const bioSupported = await isBiometricSupported();
@@ -7024,6 +7057,9 @@ useEffect(() => {
               selectedUnit={selectedUnit}
               onSelect={(addr) => {
                 setSelectedAddress(addr);
+                // Fluxo direto: ENDERECO FISICO -> INVENTARIO (sem a tela interna "Mapeamento").
+                setInventoryLocation(addr);
+                setIsInventorying(true);
                 pushScreen(AppScreen.INVENTORY);
               }}
               onBack={popScreen}
@@ -7141,15 +7177,23 @@ useEffect(() => {
                 sessionStorage.setItem('activeCampaignStatus', 'ACTIVE');
                 localStorage.setItem('app_current_campaign', id);
 
-                if (selectedUnit && databaseMode === DatabaseMode.INTERNAL) {
+                // SRE: Resolve o nome da unidade de forma reativa.
+                const campaignRecord = campaigns.find(c => c.id === id);
+                const effectiveUnit = selectedUnit
+                  || campaignRecord?.filial
+                  || campaignRecord?.unit_id
+                  || campaignRecord?._unitid
+                  || '';
+
+                if (effectiveUnit && databaseMode === DatabaseMode.INTERNAL) {
                   try {
-                    await sqliteService.salvarCampanhaAtiva(selectedUnit, id);
+                    await sqliteService.salvarCampanhaAtiva(effectiveUnit, id);
                   } catch (err) {
                     logger.error(">>> [App] Erro ao salvar campanha ativa corporativa no sqlite:", err);
                   }
-                } else if (selectedUnit) {
-                  // Fallback para modo nuvem no localStorage para manter consistência rápida
-                  const normUnit = normalizeKey(selectedUnit);
+                }
+                if (effectiveUnit) {
+                  const normUnit = normalizeKey(effectiveUnit);
                   localStorage.setItem(`kardek_campanha_ativa_${normUnit}`, 'true');
                 }
 

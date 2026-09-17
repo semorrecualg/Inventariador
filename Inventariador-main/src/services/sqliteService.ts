@@ -69,9 +69,15 @@ export interface DexieAuditLog {
 export interface DexieCampaign {
   id: string;
   name: string;
+  description?: string;
   status: string;
   tenantid: string;
+  unit_id?: string;
+  filial?: string;
   created_at: string;
+  start_date?: string;
+  end_date?: string | null;
+  created_by?: string;
 }
 
 export interface DexieSystemContext {
@@ -84,6 +90,9 @@ export interface DexieUnitConfig {
   id: string;
   filial: string;
   nome: string;
+  lat?: number;
+  lng?: number;
+  radius_meters?: number;
   hasGps: number;
   requireNf: number;
   requireSeriado: number;
