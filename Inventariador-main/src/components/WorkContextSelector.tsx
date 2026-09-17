@@ -28,6 +28,8 @@ interface WorkContextSelectorProps {
   onLogout: () => void;
 }
 
+type FilialOption = { id: string; label: string };
+
 /**
  * Tela única pós-login (Etapa 3 do FLUXO_ACESSO_INICIAL).
  *
@@ -76,9 +78,21 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   };
 
   const activeGroup = groups.find(g => g.tenantid === selectedTenant) || null;
-  const filiais = activeGroup?.filiais?.length ? activeGroup.filiais : [''];
+  const rawFiliais = activeGroup?.filiais?.length ? activeGroup.filiais : [];
+  const filiais = rawFiliais.length > 0
+    ? rawFiliais.map(f => ({ id: f, label: f }))
+    : [{ id: '', label: 'TODAS AS FILIAIS (SEM FILTRO DE UNIDADE)' }];
   const roleLabel = (user.role || '').toString();
   const userLabel = user.name || user.username || user.email || '';
+
+  // UX: quando o usuário já escolheu uma filial, essa filial deve estar visível
+  // como selecionada. Se a filial vem de contexto (user) mas não está na lista da
+  // base para o grupo ativo, mostramos um aviso discreto mas mantemos a escolha.
+  const missingFilialNotice =
+    selectedFilial &&
+    rawFiliais.length > 0 &&
+    !rawFiliais.includes(selectedFilial && selectedFilial !== '' ? selectedFilial : '');
+
 
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
@@ -200,14 +214,19 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
             </p>
           ) : (
             <div className="space-y-2">
-              {filiais.map(filial => {
-                const key = filial || '__TODAS__';
-                const isActive = selectedFilial === filial;
+              {missingFilialNotice && (
+                <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 bg-amber-50 rounded-xl px-4 py-2.5 border border-amber-100">
+                  A filial selecionada anteriormente ("{selectedFilial}") não consta entre as filiais
+                  disponíveis neste contrato. Escolha uma filial da lista abaixo.
+                </p>
+              )}
+              {filiais.map(option => {
+                const isActive = selectedFilial === option.id;
                 return (
                   <button
-                    key={key}
+                    key={option.id || option.label}
                     type="button"
-                    onClick={() => setSelectedFilial(filial)}
+                    onClick={() => setSelectedFilial(option.id)}
                     className={`w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] min-h-[58px] ${isActive ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'}`}
                   >
                     <div className="flex items-center space-x-3 min-w-0">
@@ -216,10 +235,10 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                       </div>
                       <div className="min-w-0 text-left">
                         <p className="text-[13px] font-bold text-ink truncate">
-                          {filial || 'TODAS AS FILIAIS'}
+                          {option.label}
                         </p>
                         <p className="text-[8px] font-extrabold uppercase tracking-widest text-ink-muted">
-                          {filial ? `FILIAL · ${normalizeWorkTenant(selectedTenant)}` : 'SEM FILTRO DE UNIDADE'}
+                          {option.id ? `FILIAL · ${normalizeWorkTenant(selectedTenant)}` : 'SEM FILTRO DE UNIDADE'}
                         </p>
                       </div>
                     </div>
