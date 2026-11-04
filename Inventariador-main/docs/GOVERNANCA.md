@@ -16,7 +16,7 @@
 |---|---|---|
 | Código | `github.com/semorrecualg/Inventariador` · branch `main` | Nenhuma cópia paralela. O diretório local de trabalho é `E:\Inventariador_11_2026\Inventariador` |
 | Versão | `Inventariador-main/package.json` → `version` | Nenhum outro arquivo chumbra versão. Workflows leem daqui |
-| Runtime | `.nvmrc` (Node 20) + `engines` no `package.json` | CI e dev usam a mesma major |
+| Runtime | `.nvmrc` (Node 22) + `engines` no `package.json` | CI e dev usam a mesma major (Node 20 chegou ao EOL em 2026-04; jsdom 30 + undici do lockfile exigem Node ≥ 22) |
 | Variáveis | `.env.example` (template) / `.env` (local, gitignored) | Ver § 3 |
 | Schema local | `docs/SCHEMA_BASELINE.md` (Dexie v7) | Congelado; `schemaBaseline.test.ts` quebra se mudar |
 | Schema nuvem | `docs/supabase_bootstrap.sql` | Idempotente; é o único DDL autorizado |
@@ -30,7 +30,7 @@
 
 ```
 Inventariador/                  ← raiz do repositório git
-├── .nvmrc                      ← Node 20 (lido pelo CI)
+├── .nvmrc                      ← Node 22 (lido pelo CI)
 ├── .github/workflows/
 │   ├── ci.yml                  ← gate de qualidade (lint · tipos · testes · build)
 │   └── android-build.yml       ← APK debug (Capacitor)
